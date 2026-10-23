@@ -137,6 +137,8 @@ interface AppStrings {
     val crashReport: String
     val crashReportHint: String
     val clearReport: String
+    val updateNotificationsTitle: String
+    val updateNotificationsSubtitle: String
     val playingNow: String
     val removeFromQueue: String
     val unknownArtist: String
@@ -350,6 +352,8 @@ object TurkishStrings : AppStrings {
     override val crashReport: String = "Son çökme raporu"
     override val crashReportHint: String = "Uygulama beklenmedik şekilde kapandı. Raporu geliştiriciyle paylaşabilirsin."
     override val clearReport: String = "Temizle"
+    override val updateNotificationsTitle: String = "Güncelleme bildirimleri"
+    override val updateNotificationsSubtitle: String = "Yeni sürüm çıkınca haber ver."
     override val playingNow: String = "Şu an çalıyor"
     override val removeFromQueue: String = "Sıradan kaldır"
     override val unknownArtist: String = "Bilinmeyen sanatçı"
@@ -571,6 +575,8 @@ object EnglishStrings : AppStrings {
     override val crashReport: String = "Last crash report"
     override val crashReportHint: String = "The app closed unexpectedly. You can share the report with the developer."
     override val clearReport: String = "Clear"
+    override val updateNotificationsTitle: String = "Update notifications"
+    override val updateNotificationsSubtitle: String = "Tell me when a new version is released."
     override val playingNow: String = "Playing now"
     override val removeFromQueue: String = "Remove from queue"
     override val unknownArtist: String = "Unknown artist"

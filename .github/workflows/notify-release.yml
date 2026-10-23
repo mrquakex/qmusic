@@ -1,0 +1,33 @@
+name: Notify users of a new release
+
+# When a release is published, send a push message to every phone that has the app, so it can offer the update.
+# Needs the repository secret FCM_SERVICE_ACCOUNT_JSON (the Firebase service account key, as JSON).
+on:
+  release:
+    types: [published]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FCM_SERVICE_ACCOUNT_JSON }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/firebase.messaging
+
+      - name: Send the push message
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT_JSON }}
+        run: |
+          VERSION="${TAG#v}"
+          PROJECT="$(jq -r .project_id <<< "$SERVICE_ACCOUNT")"
+          BODY="$(jq -n --arg v "$VERSION" '{message: {topic: "releases", data: {type: "update", version: $v}, android: {priority: "HIGH"}}}')"
+          curl --fail-with-body -sS -X POST \
+            "https://fcm.googleapis.com/v1/projects/${PROJECT}/messages:send" \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$BODY"

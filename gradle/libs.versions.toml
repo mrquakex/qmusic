@@ -1,4 +1,6 @@
 [versions]
+google-services = "4.4.2"
+firebase-bom = "33.7.0"
 agp = "8.7.2"
 kotlin = "2.1.0"
 compose-multiplatform = "1.7.1"
@@ -25,6 +27,8 @@ androidx-junit = "1.2.1"
 espresso = "3.6.1"
 
 [libraries]
+firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebase-bom" }
+firebase-messaging = { module = "com.google.firebase:firebase-messaging" }
 org-json = { module = "org.json:json", version.ref = "org-json" }
 pipepipe-extractor = { module = "com.github.maxrave-dev:PipePipeExtractor", version.ref = "pipepipe" }
 # AndroidX Core & UI
@@ -87,6 +91,7 @@ androidx-junit = { module = "androidx.test.ext:junit", version.ref = "androidx-j
 espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "espresso" }
 
 [plugins]
+google-services = { id = "com.google.gms.google-services", version.ref = "google-services" }
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

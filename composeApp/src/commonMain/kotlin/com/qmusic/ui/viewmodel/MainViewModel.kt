@@ -284,6 +284,7 @@ class MainViewModel(
     val wifiOnly: StateFlow<Boolean> = settings.wifiOnly
     val videoByDefault: StateFlow<Boolean> = settings.videoByDefault
     val autoCheckUpdates: StateFlow<Boolean> = settings.autoCheckUpdates
+    val updateNotifications: StateFlow<Boolean> = settings.updateNotifications
     val downloadedBytes: StateFlow<Long> = downloads.downloadedBytes
 
     /** Songs already handed to the downloader by "auto-download", so a failure is not retried in a loop. */
@@ -376,6 +377,10 @@ class MainViewModel(
     fun setVideoByDefault(enabled: Boolean) {
         settings.setVideoByDefault(enabled)
         setVideoPreferred(enabled)
+    }
+
+    fun setUpdateNotifications(enabled: Boolean) {
+        settings.setUpdateNotifications(enabled)
     }
 
     fun setAutoCheckUpdates(enabled: Boolean) {

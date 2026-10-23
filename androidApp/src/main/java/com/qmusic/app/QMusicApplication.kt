@@ -10,5 +10,6 @@ class QMusicApplication : Application() {
         super.onCreate()
         container = AppContainer(this)
         container.crashReports.install(this)
+        UpdatePush.subscribe(this)
     }
 }

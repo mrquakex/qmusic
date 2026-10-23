@@ -1,6 +1,7 @@
 package com.qmusic.app
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -13,6 +14,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.qmusic.ui.QMusicApp
 import com.qmusic.ui.viewmodel.MainViewModel
+import com.qmusic.ui.viewmodel.ScreenTab
 
 class MainActivity : ComponentActivity() {
 
@@ -47,8 +49,29 @@ class MainActivity : ComponentActivity() {
             },
         )[MainViewModel::class.java]
 
+        this.viewModel = viewModel
+        openUpdatesIfAsked(intent)
+
         setContent {
             QMusicApp(viewModel = viewModel)
+        }
+    }
+
+    private var viewModel: MainViewModel? = null
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openUpdatesIfAsked(intent)
+    }
+
+    /** Tapped the "new version" notification: show Settings with the check already done. */
+    private fun openUpdatesIfAsked(intent: Intent?) {
+        if (intent?.getBooleanExtra(UpdatePush.EXTRA_OPEN_UPDATES, false) != true) return
+        intent.removeExtra(UpdatePush.EXTRA_OPEN_UPDATES)
+        viewModel?.apply {
+            selectTab(ScreenTab.SETTINGS)
+            checkForUpdates()
         }
     }
 

@@ -65,3 +65,5 @@ build/
 /output/
 
 /release/
+
+/androidApp/google-services.json

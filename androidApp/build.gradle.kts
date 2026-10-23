@@ -6,6 +6,11 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+// Push notifications for new versions need the Firebase config; without the file the app builds and runs without them.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "com.qmusic.app"
     compileSdk = 36
@@ -80,6 +85,8 @@ dependencies {
     implementation(project(":core:updater"))
 
     implementation(libs.androidx.core.ktx)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
     implementation(libs.ktor.client.core)
     implementation(libs.androidx.activity.compose)
     implementation(libs.koin.android)

@@ -23,6 +23,11 @@ interface AppSettings {
 
     fun setLanguage(code: String)
 
+    /** Show a notification when a new version is released. */
+    val updateNotifications: StateFlow<Boolean>
+
+    fun setUpdateNotifications(enabled: Boolean)
+
     fun setAutoDownloadLiked(enabled: Boolean)
 
     fun setVideoByDefault(enabled: Boolean)
@@ -63,6 +68,13 @@ class InMemoryAppSettings(
 
     override fun setAutoCheckUpdates(enabled: Boolean) {
         _check.value = enabled
+    }
+
+    private val _notify = MutableStateFlow(true)
+    override val updateNotifications: StateFlow<Boolean> = _notify.asStateFlow()
+
+    override fun setUpdateNotifications(enabled: Boolean) {
+        _notify.value = enabled
     }
 
     override fun setAutoDownloadLiked(enabled: Boolean) {

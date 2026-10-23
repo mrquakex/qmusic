@@ -173,6 +173,7 @@ fun QMusicApp(
         val wifiOnly by viewModel.wifiOnly.collectAsState()
         val videoByDefault by viewModel.videoByDefault.collectAsState()
         val autoCheckUpdates by viewModel.autoCheckUpdates.collectAsState()
+        val updateNotifications by viewModel.updateNotifications.collectAsState()
 
         val menuSong by viewModel.menuSong.collectAsState()
         val playlistPickerSong by viewModel.playlistPickerSong.collectAsState()
@@ -409,6 +410,8 @@ fun QMusicApp(
                             downloadedBytes = downloadedBytes,
                             onRemoveAllDownloads = { viewModel.removeAllDownloads() },
                             autoCheckUpdates = autoCheckUpdates,
+                            updateNotifications = updateNotifications,
+                            onUpdateNotificationsChange = { viewModel.setUpdateNotifications(it) },
                             onAutoCheckUpdatesChange = { viewModel.setAutoCheckUpdates(it) },
                             updateProgress = updateProgress,
                             onInstallUpdate = { viewModel.installUpdate() },

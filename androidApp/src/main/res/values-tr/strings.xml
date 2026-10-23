@@ -4,4 +4,7 @@
     <string name="update_no_apk">Bu sürümde indirilecek APK dosyası bulunamadı</string>
     <string name="update_allow_permission">Açılan ayarlardan QMusic için yüklemeye izin verin, ardından Güncelle\'ye tekrar dokunun</string>
     <string name="update_download_failed">İndirme başarısız oldu (HTTP %1$d)</string>
+    <string name="update_channel_name">Uygulama güncellemeleri</string>
+    <string name="update_ready_title">QMusic %1$s hazır</string>
+    <string name="update_ready_text">Güncellemek için dokun</string>
 </resources>

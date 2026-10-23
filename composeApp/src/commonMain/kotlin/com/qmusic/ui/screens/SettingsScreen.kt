@@ -83,6 +83,8 @@ fun SettingsScreen(
     downloadedBytes: Long = 0L,
     onRemoveAllDownloads: () -> Unit = {},
     autoCheckUpdates: Boolean = true,
+    updateNotifications: Boolean = true,
+    onUpdateNotificationsChange: (Boolean) -> Unit = {},
     onAutoCheckUpdatesChange: (Boolean) -> Unit = {},
     language: String = "tr",
     onLanguageChange: (String) -> Unit = {},
@@ -258,6 +260,14 @@ fun SettingsScreen(
                 subtitle = s.checkOnLaunchSubtitle,
                 checked = autoCheckUpdates,
                 onChange = onAutoCheckUpdatesChange,
+            )
+            RowDivider()
+            SwitchRow(
+                icon = null,
+                title = s.updateNotificationsTitle,
+                subtitle = s.updateNotificationsSubtitle,
+                checked = updateNotifications,
+                onChange = onUpdateNotificationsChange,
             )
         }
 

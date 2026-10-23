@@ -4,4 +4,7 @@
     <string name="update_no_apk">This release has no APK to download</string>
     <string name="update_allow_permission">Allow installs from QMusic in the settings that just opened, then tap Update again</string>
     <string name="update_download_failed">Download failed (HTTP %1$d)</string>
+    <string name="update_channel_name">App updates</string>
+    <string name="update_ready_title">QMusic %1$s is ready</string>
+    <string name="update_ready_text">Tap to update</string>
 </resources>
