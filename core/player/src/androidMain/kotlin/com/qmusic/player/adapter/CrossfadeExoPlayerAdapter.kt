@@ -11,6 +11,8 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheWriter
 import kotlinx.coroutines.withContext
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.common.PlaybackException
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
@@ -54,6 +56,8 @@ class CrossfadeExoPlayerAdapter(
     private val videoResolver: (suspend (String) -> VideoSource?)? = null,
     /** How loud YouTube measured a song (dB against its reference); used by volume normalisation. */
     private val loudnessResolver: (suspend (String) -> Float?)? = null,
+    /** Told when a saved stream address no longer plays, so it is not used again. */
+    private val onStaleUrl: ((String) -> Unit)? = null,
 ) : PlayerController {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -165,6 +169,10 @@ class CrossfadeExoPlayerAdapter(
                 _isPlaying.value = playing
             }
 
+            override fun onPlayerError(error: PlaybackException) {
+                recoverFromStaleStream()
+            }
+
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY) {
                     val dur = activePlayer.duration
@@ -206,7 +214,36 @@ class CrossfadeExoPlayerAdapter(
         return ExoPlayer.Builder(context, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
             .setHandleAudioBecomingNoisy(true)
+            // Start as soon as ~0.75 s of sound is in (default 2.5 s): songs begin noticeably sooner, and the
+            // buffer still fills up to its usual size behind the playback.
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(
+                        DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
+                        DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
+                        START_BUFFER_MS,
+                        REBUFFER_MS,
+                    )
+                    .build(),
+            )
             .build()
+    }
+
+    /** The song already retried once with a fresh address; a second failure is reported instead of looping. */
+    private var retriedFor: String? = null
+
+    /**
+     * A saved address can stop working (it ran out, or the connection changed): look the song up again and
+     * continue from where it stopped, once.
+     */
+    private fun recoverFromStaleStream() {
+        val song = _currentTrack.value ?: return
+        if (offline?.isDownloaded(song.id) == true || retriedFor == song.id) return
+        retriedFor = song.id
+        synchronized(urlCache) { urlCache.remove(song.id) }
+        onStaleUrl?.invoke(song.id)
+        val position = activePlayer.currentPosition.coerceAtLeast(0L)
+        playAt(_queueIndex.value, startPositionMs = position)
     }
 
     // --- Stream quality and volume normalisation ---
@@ -534,6 +571,7 @@ class CrossfadeExoPlayerAdapter(
         fadeMs: Long = MANUAL_FADE_MS,
     ) {
         val song = _queue.value.getOrNull(index) ?: return
+        if (song.id != retriedFor) retriedFor = null // a new song gets its own retry
         resolveJob?.cancel()
         advancedFromIndex = -1
         _queueIndex.value = index
@@ -857,7 +895,9 @@ class CrossfadeExoPlayerAdapter(
     }
 
     private companion object {
-        const val URL_CACHE_SIZE = 8
+        const val URL_CACHE_SIZE = 64
+        const val START_BUFFER_MS = 750
+        const val REBUFFER_MS = 1_500
         const val MAX_AUTO_SKIPS = 3
         const val RESTART_THRESHOLD_MS = 3_000L
         const val END_LEAD_MS = 300L

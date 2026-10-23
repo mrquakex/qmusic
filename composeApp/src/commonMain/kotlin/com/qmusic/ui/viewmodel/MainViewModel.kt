@@ -13,6 +13,7 @@ import com.qmusic.engine.models.CollectionPage
 import com.qmusic.engine.models.ExplorePage
 import com.qmusic.engine.models.HomeChip
 import com.qmusic.engine.models.HomeSection
+import com.qmusic.engine.models.SectionStyle
 import com.qmusic.engine.models.Lyrics
 import com.qmusic.engine.models.SearchFilter
 import com.qmusic.engine.models.SearchResultsPage
@@ -997,6 +998,11 @@ class MainViewModel(
                 if (first) {
                     first = false
                     _homeSections.value = page.sections
+                    // What sits at the top of the home page is what gets tapped: get it ready to start at once.
+                    playerController.warmUp(
+                        (speedDial.value.take(WARM_SPEED_DIAL) + page.sections.filter { it.style == SectionStyle.ROWS }
+                            .flatMap { it.songs.take(WARM_QUICK_PICKS) }).distinctBy { it.id },
+                    )
                     if (page.chips.isNotEmpty()) _homeChips.value = page.chips
                     _isLoadingHome.value = false
                     _isLoadingMoreHome.value = true
@@ -1073,7 +1079,10 @@ class MainViewModel(
                 )
                 collectionCache[item.browseId] = complete
                 // Only show the result if the user has not already moved on to another page.
-                if (_routes.value.lastOrNull() == route) _collectionPage.value = complete
+                if (_routes.value.lastOrNull() == route) {
+                    _collectionPage.value = complete
+                    playerController.warmUp(complete.songs.take(WARM_PAGE_SONGS))
+                }
             }.onFailure { throwable ->
                 if (_routes.value.lastOrNull() == route) _collectionError.value = throwable.message ?: strings.couldNotOpenPage
             }
@@ -1237,7 +1246,10 @@ class MainViewModel(
             youTube.artist(route.browseId).onSuccess { page ->
                 val complete = page.copy(name = page.name.ifBlank { route.name })
                 artistCache[route.browseId] = complete
-                if (_routes.value.lastOrNull() == route) _artistPage.value = complete
+                if (_routes.value.lastOrNull() == route) {
+                    _artistPage.value = complete
+                    playerController.warmUp(complete.topSongs.take(WARM_PAGE_SONGS))
+                }
             }.onFailure { throwable ->
                 if (_routes.value.lastOrNull() == route) _artistError.value = throwable.message ?: strings.couldNotOpenArtist
             }
@@ -1358,6 +1370,9 @@ class MainViewModel(
 
     private companion object {
         const val RADIO_REFILL_THRESHOLD = 3
+        const val WARM_SPEED_DIAL = 4
+        const val WARM_QUICK_PICKS = 4
+        const val WARM_PAGE_SONGS = 3
         const val SAMPLE_START = 0.3
         const val MESSAGE_MS = 3_000L
         const val SUGGESTED_SEARCHES = 12

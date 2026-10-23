@@ -3,6 +3,7 @@ package com.qmusic.player
 import android.content.Context
 import com.qmusic.engine.YouTube
 import com.qmusic.engine.models.AudioStream
+import com.qmusic.player.source.StreamUrlStore
 import com.qmusic.player.adapter.CrossfadeExoPlayerAdapter
 import com.qmusic.player.offline.OfflineDownloader
 
@@ -24,8 +25,15 @@ object PlayerHolder {
     private var offlineDownloader: OfflineDownloader? = null
 
     /** Process-wide downloader; the player consults it so downloaded songs play without the network. */
+    @Volatile
+    private var urlStore: StreamUrlStore? = null
+
+    private fun store(context: Context): StreamUrlStore =
+        urlStore ?: synchronized(this) { urlStore ?: StreamUrlStore(context.applicationContext).also { urlStore = it } }
+
     fun downloads(context: Context): OfflineDownloader =
         offlineDownloader ?: synchronized(this) {
+            store(context)
             offlineDownloader ?: OfflineDownloader(
                 context = context.applicationContext,
                 // Saved songs are always the best stream, whatever is chosen for streaming.
@@ -35,13 +43,14 @@ object PlayerHolder {
 
     fun get(context: Context): CrossfadeExoPlayerAdapter =
         instance ?: synchronized(this) {
-            instance ?: CrossfadeExoPlayerAdapter(
+            instance ?: store(context).let { CrossfadeExoPlayerAdapter(
                 context = context.applicationContext,
                 streamUrlResolver = { id -> resolveAudioUrl(id, audioQuality) },
                 loudnessResolver = { id -> youTube.loudnessDb(id).getOrNull() },
+                onStaleUrl = { id -> urlStore?.remove(id) },
                 offline = downloads(context),
                 videoResolver = ::resolveVideo,
-            ).also { instance = it }
+            ) }.also { instance = it }
         }
 
     fun peek(): CrossfadeExoPlayerAdapter? = instance
@@ -56,6 +65,8 @@ object PlayerHolder {
 
     /** Picks the non-DRM audio stream of [videoId] that matches [quality], or null if none could be resolved. */
     private suspend fun resolveAudioUrl(videoId: String, quality: AudioQuality): String? {
+        val key = "${quality.name}:$videoId"
+        urlStore?.get(key)?.let { return it }
         val streams = youTube.resolveStreamUrls(videoId)
             .getOrNull()
             ?.filter { !it.isDrm && it.mimeType.startsWith("audio") }
@@ -65,7 +76,7 @@ object PlayerHolder {
             AudioQuality.LOW -> streams.minByOrNull(AudioStream::bitrate)
             AudioQuality.NORMAL -> streams.minByOrNull { kotlin.math.abs(it.bitrate - NORMAL_BITRATE) }
         }
-        return pick?.url
+        return pick?.url?.also { urlStore?.put(key, it) }
     }
 
     private const val NORMAL_BITRATE = 128_000
