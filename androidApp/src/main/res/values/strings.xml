@@ -7,4 +7,10 @@
     <string name="update_channel_name">App updates</string>
     <string name="update_ready_title">QMusic %1$s is ready</string>
     <string name="update_ready_text">Tap to update</string>
+    <string name="widget_description">What is playing, with play, pause and skip</string>
+    <string name="widget_previous">Previous</string>
+    <string name="widget_play_pause">Play or pause</string>
+    <string name="widget_next">Next</string>
+    <string name="widget_nothing_playing">Nothing is playing</string>
+    <string name="widget_tap_to_open">Tap to open QMusic</string>
 </resources>

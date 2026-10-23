@@ -1,6 +1,9 @@
 package com.qmusic.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -760,6 +763,51 @@ private fun TrackInfo(
     }
 }
 
+/**
+ * The like pill: the heart fills and pops (squeezes, then springs past its size and settles) and the pill lights
+ * up, so a tap is felt and seen at once. Nothing moves when a song is shown that was already liked.
+ */
+@Composable
+private fun LikeChip(isFavorite: Boolean, label: String, onClick: () -> Unit) {
+    val scale = remember { Animatable(1f) }
+    var settled by remember { mutableStateOf(false) }
+    LaunchedEffect(isFavorite) {
+        if (!settled) {
+            settled = true
+            return@LaunchedEffect
+        }
+        scale.snapTo(0.6f)
+        scale.animateTo(1f, spring(dampingRatio = 0.3f, stiffness = 500f))
+    }
+    val background by animateColorAsState(
+        targetValue = Color.White.copy(alpha = if (isFavorite) 0.26f else 0.12f),
+        animationSpec = tween(220),
+        label = "likeBackground",
+    )
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(background)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = if (isFavorite) QMusicIcons.HeartFilled else QMusicIcons.Heart,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier
+                .size(18.dp)
+                .graphicsLayer {
+                    scaleX = scale.value
+                    scaleY = scale.value
+                },
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge, color = Color.White, maxLines = 1)
+    }
+}
+
 /** Pill-shaped quick actions in one scrollable row, as on YouTube Music. */
 @Composable
 private fun ChipsRow(
@@ -784,12 +832,7 @@ private fun ChipsRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ActionChip(
-            icon = if (isFavorite) QMusicIcons.HeartFilled else QMusicIcons.Heart,
-            label = if (isFavorite) s.liked else s.like,
-            active = isFavorite,
-            onClick = onToggleFavorite,
-        )
+        LikeChip(isFavorite = isFavorite, label = if (isFavorite) s.liked else s.like, onClick = onToggleFavorite)
         ActionChip(QMusicIcons.Lyrics, s.lyrics, active = lyricsOpen, onClick = onLyrics)
         ActionChip(QMusicIcons.PlaylistAdd, s.save, active = false, onClick = onAddToPlaylist)
         if (downloadProgress != null) {

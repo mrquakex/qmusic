@@ -20,6 +20,7 @@ import com.qmusic.engine.models.SearchSuggestion
 import com.qmusic.engine.models.SongItem
 import com.qmusic.player.DownloadController
 import com.qmusic.player.NoOpDownloadController
+import com.qmusic.player.AudioQuality
 import com.qmusic.player.PlayerController
 import com.qmusic.player.RepeatMode
 import com.qmusic.network.AlwaysOnline
@@ -59,6 +60,7 @@ import kotlinx.coroutines.launch
 
 enum class ScreenTab {
     HOME,
+    FOR_YOU,
     SEARCH,
     LIBRARY,
     SETTINGS,
@@ -70,7 +72,20 @@ sealed interface Route {
     data class Artist(val browseId: String, val name: String) : Route
     data class LocalPlaylist(val id: Long, val name: String) : Route
     data class Explore(val browseId: String, val params: String?, val title: String) : Route
+    data object Stats : Route
 }
+
+enum class StatsPeriod(val days: Int?) { MONTH(30), YEAR(365), ALL(null) }
+
+/** What was listened to over a period: totals, the most played songs and artists. */
+data class ListeningStats(
+    val period: StatsPeriod,
+    val plays: Int,
+    val songs: Int,
+    val minutes: Int,
+    val topSongs: List<Pair<SongItem, Int>>,
+    val topArtists: List<Pair<String, Int>>,
+)
 
 sealed interface LyricsState {
     data object Idle : LyricsState
@@ -184,7 +199,8 @@ class MainViewModel(
     val favorites: StateFlow<List<SongItem>> = combine(localFavorites, _likedSongs) { local, liked ->
         val localIds = local.mapTo(HashSet()) { it.id }
         local + liked.filter { it.id !in localIds }
-    }.stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
+        // Eagerly: toggleFavorite reads it, so it must be current even when no screen is showing it.
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     /**
      * The "Speed dial" grid at the top of the home page: what was played last, then the liked songs. (YouTube
@@ -355,6 +371,15 @@ class MainViewModel(
     val autoCheckUpdates: StateFlow<Boolean> = settings.autoCheckUpdates
     val updateNotifications: StateFlow<Boolean> = settings.updateNotifications
     val autoUpdate: StateFlow<Boolean> = settings.autoUpdate
+    val audioQualityWifi: StateFlow<String> = settings.audioQualityWifi
+    val audioQualityMobile: StateFlow<String> = settings.audioQualityMobile
+    val normalizeVolume: StateFlow<Boolean> = settings.normalizeVolume
+
+    fun setAudioQualityWifi(quality: String) = settings.setAudioQualityWifi(quality)
+
+    fun setAudioQualityMobile(quality: String) = settings.setAudioQualityMobile(quality)
+
+    fun setNormalizeVolume(enabled: Boolean) = settings.setNormalizeVolume(enabled)
 
     /** Set when the launch check finds a version and "update automatically" is off: the dialog that offers it. */
     private val _offerUpdate = MutableStateFlow(false)
@@ -418,7 +443,10 @@ class MainViewModel(
                 }
             }
             loadHomeContent()
-            if (youTubeAuth.isLoggedIn) loadLikedSongs()
+            if (youTubeAuth.isLoggedIn) {
+                loadLikedSongs()
+                loadYouTubeLibrary()
+            }
             if (settings.autoCheckUpdates.value) checkForUpdates(silent = true)
         }
         // Auto-download: every liked song (device favorites + YouTube Music likes) that is not saved yet
@@ -443,6 +471,13 @@ class MainViewModel(
                 }
             }
         }
+        // Stream quality follows the connection: the Wi-Fi choice on Wi-Fi, the mobile one on mobile data.
+        scope.launch {
+            combine(settings.audioQualityWifi, settings.audioQualityMobile, connectivity.isUnmetered) { wifi, mobile, unmetered ->
+                runCatching { AudioQuality.valueOf(if (unmetered) wifi else mobile) }.getOrDefault(AudioQuality.HIGH)
+            }.collect { playerController.setAudioQuality(it) }
+        }
+        scope.launch { settings.normalizeVolume.collect { playerController.setNormalizeVolume(it) } }
         // History follows what actually plays, so songs reached through next/auto-advance are recorded too.
         scope.launch {
             playerController.currentTrack
@@ -454,6 +489,8 @@ class MainViewModel(
 
     // --- Navigation & Sheet Controls ---
     fun selectTab(tab: ScreenTab) {
+        // Leaving "For you" stops the preview that was playing there, as on YouTube Music.
+        if (_currentTab.value == ScreenTab.FOR_YOU && tab != ScreenTab.FOR_YOU) stopSample()
         _currentTab.value = tab
     }
 
@@ -647,6 +684,52 @@ class MainViewModel(
 
     fun isFavorite(songId: String): Boolean {
         return favorites.value.any { it.id == songId }
+    }
+
+    // --- The YouTube Music library: playlists, saved albums, subscribed artists ---
+    private val _ytPlaylists = MutableStateFlow<List<CollectionItem>>(emptyList())
+    val ytPlaylists: StateFlow<List<CollectionItem>> = _ytPlaylists.asStateFlow()
+
+    private val _ytAlbums = MutableStateFlow<List<CollectionItem>>(emptyList())
+    val ytAlbums: StateFlow<List<CollectionItem>> = _ytAlbums.asStateFlow()
+
+    private val _ytArtists = MutableStateFlow<List<CollectionItem>>(emptyList())
+    val ytArtists: StateFlow<List<CollectionItem>> = _ytArtists.asStateFlow()
+
+    /** Fetches the account's playlists, albums and artists; a no-op while signed out. */
+    fun loadYouTubeLibrary() {
+        if (!youTubeAuth.isLoggedIn) {
+            _ytPlaylists.value = emptyList()
+            _ytAlbums.value = emptyList()
+            _ytArtists.value = emptyList()
+            return
+        }
+        scope.launch { youTube.library("FEmusic_liked_playlists").onSuccess { _ytPlaylists.value = it } }
+        scope.launch { youTube.library("FEmusic_liked_albums").onSuccess { _ytAlbums.value = it } }
+        scope.launch { youTube.library("FEmusic_library_corpus_artists").onSuccess { _ytArtists.value = it } }
+    }
+
+    /** Adds [song] to one of the account's YouTube Music playlists, and says how it went. */
+    fun addSongToYouTubePlaylist(playlist: CollectionItem, song: SongItem) {
+        scope.launch {
+            youTube.addToPlaylist(playlist.browseId, song.id)
+                .onSuccess { showMessage(strings.addedToPlaylist(playlist.title)) }
+                .onFailure { showMessage(strings.couldNotAddToPlaylist) }
+        }
+    }
+
+    // --- Short messages at the bottom of the screen ---
+    private val _message = MutableStateFlow<String?>(null)
+    val message: StateFlow<String?> = _message.asStateFlow()
+    private var messageJob: Job? = null
+
+    fun showMessage(text: String) {
+        _message.value = text
+        messageJob?.cancel()
+        messageJob = scope.launch {
+            delay(MESSAGE_MS)
+            _message.value = null
+        }
     }
 
     /** Fetches the account's "Liked music"; a no-op while signed out. */
@@ -894,7 +977,11 @@ class MainViewModel(
             }
         } else {
             lastHomeTap = null
-            if (tab == ScreenTab.LIBRARY) _libraryStartTab.value = 0
+            if (tab == ScreenTab.LIBRARY) {
+                _libraryStartTab.value = 0
+                // The account's library may have changed on another device since it was last fetched.
+                loadYouTubeLibrary()
+            }
         }
         selectTab(tab)
     }
@@ -962,6 +1049,7 @@ class MainViewModel(
             is Route.Collection -> loadCollection(route)
             is Route.Artist -> loadArtist(route)
             is Route.Explore -> loadExplore(route)
+            is Route.Stats -> loadStats(_statsPeriod.value)
             is Route.LocalPlaylist, null -> Unit
         }
     }
@@ -1009,6 +1097,92 @@ class MainViewModel(
                 if (_artistPage.value?.channelId == channelId) _artistPage.value = page
                 artistCache.entries.firstOrNull { it.value.channelId == channelId }?.let { artistCache[it.key] = page }
             }
+        }
+    }
+
+    // --- "For you": a feed of short previews, one song per screen ---
+    private val _samples = MutableStateFlow<List<SongItem>>(emptyList())
+    val samples: StateFlow<List<SongItem>> = _samples.asStateFlow()
+
+    /** The song being previewed (it starts part-way in); null once it is played in full or stopped. */
+    private var sampleId: String? = null
+    private var sampleJob: Job? = null
+    private var loadingMoreSamples = false
+
+    /** Fills the feed from the home page's songs the first time it is needed. */
+    fun prepareSamples() {
+        if (_samples.value.isNotEmpty()) return
+        _samples.value = _homeSections.value.flatMap { it.songs }.distinctBy { it.id }.shuffled()
+    }
+
+    /** Tops the feed up with songs like the last one when the end comes near. */
+    fun loadMoreSamples() {
+        val last = _samples.value.lastOrNull() ?: return
+        if (loadingMoreSamples) return
+        loadingMoreSamples = true
+        scope.launch {
+            youTube.radio(last.id).onSuccess { more ->
+                val known = _samples.value.mapTo(HashSet()) { it.id }
+                _samples.value = _samples.value + more.filter { it.id !in known }
+            }
+            loadingMoreSamples = false
+        }
+    }
+
+    /** Plays [song] from about a third of the way in: the part that tells what it is like. */
+    fun playSample(song: SongItem) {
+        if (sampleId == song.id) return
+        sampleId = song.id
+        sampleJob?.cancel()
+        playerController.play(song)
+        sampleJob = scope.launch {
+            // Wait until this song is loaded and its length known, then jump into it.
+            while (playerController.currentTrack.value?.id != song.id || playerController.duration.value <= 0L) delay(100)
+            playerController.seekTo((playerController.duration.value * SAMPLE_START).toLong())
+        }
+    }
+
+    /** "Play full song": back to the start, and it keeps playing after leaving the tab. */
+    fun playSampleFully(song: SongItem) {
+        sampleJob?.cancel()
+        sampleId = null
+        if (playerController.currentTrack.value?.id == song.id) playerController.seekTo(0L) else playerController.play(song)
+    }
+
+    private fun stopSample() {
+        val id = sampleId ?: return
+        sampleJob?.cancel()
+        sampleId = null
+        if (playerController.currentTrack.value?.id == id) playerController.pause()
+    }
+
+    // --- Listening statistics ---
+    private val _statsPeriod = MutableStateFlow(StatsPeriod.MONTH)
+    val statsPeriod: StateFlow<StatsPeriod> = _statsPeriod.asStateFlow()
+
+    private val _stats = MutableStateFlow<ListeningStats?>(null)
+    val stats: StateFlow<ListeningStats?> = _stats.asStateFlow()
+
+    fun openStats() = push(Route.Stats)
+
+    fun loadStats(period: StatsPeriod) {
+        _statsPeriod.value = period
+        scope.launch {
+            val counts = repository.playCounts(period.days)
+            val artists = counts.flatMap { (song, plays) -> song.artists.map { it.name to plays } }
+                .filter { it.first.isNotBlank() }
+                .groupBy({ it.first }, { it.second })
+                .mapValues { it.value.sum() }
+                .entries.sortedByDescending { it.value }
+                .map { it.key to it.value }
+            _stats.value = ListeningStats(
+                period = period,
+                plays = counts.sumOf { it.second },
+                songs = counts.size,
+                minutes = counts.sumOf { (song, plays) -> (song.duration ?: 0) * plays } / 60,
+                topSongs = counts.take(10),
+                topArtists = artists.take(5),
+            )
         }
     }
 
@@ -1125,6 +1299,7 @@ class MainViewModel(
             onSessionChanged(cookies)
             loadHomeContent()
             loadLikedSongs()
+            loadYouTubeLibrary()
         }
     }
 
@@ -1134,6 +1309,7 @@ class MainViewModel(
         _isLoggedIn.value = false
         onSessionChanged(null)
         _likedSongs.value = emptyList()
+        loadYouTubeLibrary()
         loadHomeContent()
     }
 
@@ -1182,6 +1358,8 @@ class MainViewModel(
 
     private companion object {
         const val RADIO_REFILL_THRESHOLD = 3
+        const val SAMPLE_START = 0.3
+        const val MESSAGE_MS = 3_000L
         const val SUGGESTED_SEARCHES = 12
         const val LIBRARY_DOWNLOADS_TAB = 2
         const val SPEED_DIAL_SIZE = 17 // two pages of nine, one slot of which is the dice

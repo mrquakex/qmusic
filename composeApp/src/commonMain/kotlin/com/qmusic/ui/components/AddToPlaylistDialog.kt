@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.qmusic.database.entity.PlaylistEntity
+import com.qmusic.engine.models.CollectionItem
 import com.qmusic.engine.models.SongItem
 import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.BgSurface
@@ -39,8 +40,10 @@ fun AddToPlaylistDialog(
     onPick: (PlaylistEntity) -> Unit,
     onCreate: (String) -> Unit,
     onDismiss: () -> Unit,
+    ytPlaylists: List<CollectionItem> = emptyList(),
+    onPickYouTube: (CollectionItem) -> Unit = {},
 ) {
-    var creating by remember { mutableStateOf(playlists.isEmpty()) }
+    var creating by remember { mutableStateOf(playlists.isEmpty() && ytPlaylists.isEmpty()) }
     var name by remember { mutableStateOf("") }
     val s = LocalStrings.current
 
@@ -78,6 +81,41 @@ fun AddToPlaylistDialog(
                                 Icon(QMusicIcons.Add, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
                                 Spacer(Modifier.width(14.dp))
                                 Text(s.newPlaylist, color = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                        // The account's own playlists ("Liked music" is not one you add to by hand).
+                        val editable = ytPlaylists.filter { it.browseId != "VLLM" }
+                        if (editable.isNotEmpty()) {
+                            item {
+                                Text(
+                                    text = s.youtubeMusicPlaylists,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                                )
+                            }
+                            items(editable, key = { "yt:${it.browseId}" }) { playlist ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onPickYouTube(playlist) }
+                                        .padding(vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(QMusicIcons.PlaylistAdd, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(Modifier.width(14.dp))
+                                    Text(playlist.title, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+                                }
+                            }
+                            if (playlists.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = s.devicePlaylists,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                                    )
+                                }
                             }
                         }
                         items(playlists, key = { it.id }) { playlist ->

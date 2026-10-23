@@ -76,7 +76,7 @@ class DownloadService : Service() {
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
             .setContentTitle(title)
             .setContentText(content)
             .setProgress(100, (averageProgress * 100).toInt(), remaining == 0)

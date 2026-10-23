@@ -56,6 +56,16 @@ data class SearchSuggestionsBody(
 )
 
 @Serializable
+data class EditPlaylistBody(
+    val context: InnertubeContext,
+    val playlistId: String,
+    val actions: List<Action>,
+) {
+    @Serializable
+    data class Action(val action: String, val addedVideoId: String)
+}
+
+@Serializable
 data class SubscribeBody(
     val context: InnertubeContext,
     val channelIds: List<String>,

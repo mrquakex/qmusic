@@ -28,7 +28,8 @@ object PlayerHolder {
         offlineDownloader ?: synchronized(this) {
             offlineDownloader ?: OfflineDownloader(
                 context = context.applicationContext,
-                resolveUrl = ::resolveBestAudioUrl,
+                // Saved songs are always the best stream, whatever is chosen for streaming.
+                resolveUrl = { id -> resolveAudioUrl(id, AudioQuality.HIGH) },
             ).also { offlineDownloader = it }
         }
 
@@ -36,7 +37,8 @@ object PlayerHolder {
         instance ?: synchronized(this) {
             instance ?: CrossfadeExoPlayerAdapter(
                 context = context.applicationContext,
-                streamUrlResolver = ::resolveBestAudioUrl,
+                streamUrlResolver = { id -> resolveAudioUrl(id, audioQuality) },
+                loudnessResolver = { id -> youTube.loudnessDb(id).getOrNull() },
                 offline = downloads(context),
                 videoResolver = ::resolveVideo,
             ).also { instance = it }
@@ -48,12 +50,23 @@ object PlayerHolder {
     private suspend fun resolveVideo(videoId: String) =
         youTube.resolveVideoSource(videoId).getOrNull()
 
-    /** Picks the highest bitrate non-DRM audio stream for [videoId], or null if none could be resolved. */
-    private suspend fun resolveBestAudioUrl(videoId: String): String? =
-        youTube.resolveStreamUrls(videoId)
+    /** The quality streamed right now; set from the settings and the kind of connection. */
+    @Volatile
+    var audioQuality: AudioQuality = AudioQuality.HIGH
+
+    /** Picks the non-DRM audio stream of [videoId] that matches [quality], or null if none could be resolved. */
+    private suspend fun resolveAudioUrl(videoId: String, quality: AudioQuality): String? {
+        val streams = youTube.resolveStreamUrls(videoId)
             .getOrNull()
-            ?.asSequence()
             ?.filter { !it.isDrm && it.mimeType.startsWith("audio") }
-            ?.maxByOrNull(AudioStream::bitrate)
-            ?.url
+            .orEmpty()
+        val pick = when (quality) {
+            AudioQuality.HIGH -> streams.maxByOrNull(AudioStream::bitrate)
+            AudioQuality.LOW -> streams.minByOrNull(AudioStream::bitrate)
+            AudioQuality.NORMAL -> streams.minByOrNull { kotlin.math.abs(it.bitrate - NORMAL_BITRATE) }
+        }
+        return pick?.url
+    }
+
+    private const val NORMAL_BITRATE = 128_000
 }

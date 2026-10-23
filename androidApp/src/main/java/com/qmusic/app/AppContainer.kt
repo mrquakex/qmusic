@@ -44,7 +44,7 @@ class AppContainer(private val application: Application) {
     val updateInstaller: UpdateInstaller by lazy { ApkUpdateInstaller(application) }
     val downloads: DownloadController get() = PlayerHolder.downloads(application)
     val playerController: PlayerController by lazy {
-        ServicePlayerController(application, PlayerHolder.get(application))
+        ServicePlayerController(application, PlayerHolder.get(application).also { WidgetUpdater.start(application, it) })
     }
 }
 

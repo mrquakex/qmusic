@@ -109,6 +109,15 @@ class MusicRepositoryImpl(
         )
     }
 
+    override suspend fun playCounts(withinDays: Int?): List<Pair<SongItem, Int>> {
+        val since = withinDays?.let { Clock.System.now().toEpochMilliseconds() - it * 86_400_000L } ?: 0L
+        val counts = historyDao.historySince(since).groupingBy { it.songId }.eachCount()
+        if (counts.isEmpty()) return emptyList()
+        val songs = counts.keys.chunked(SQL_IN_LIMIT).flatMap { songDao.getSongsByIds(it) }.associateBy { it.id }
+        return counts.mapNotNull { (id, plays) -> songs[id]?.let { it.toSongItem() to plays } }
+            .sortedByDescending { it.second }
+    }
+
     private fun SongEntity.toSongItem(): SongItem {
         val artistList = if (artists.isBlank()) {
             emptyList()
@@ -158,3 +167,6 @@ class MusicRepositoryImpl(
 
     override suspend fun clearSearchHistory(): Unit = searchHistoryDao.clear()
 }
+
+/** SQLite allows up to 999 bound values in one statement. */
+private const val SQL_IN_LIMIT = 900

@@ -65,7 +65,7 @@ object UpdatePush {
         manager.notify(
             NOTIFICATION_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
                 .setContentTitle(context.getString(R.string.update_ready_title, version))
                 .setContentText(context.getString(R.string.update_ready_text))
                 .setAutoCancel(true)

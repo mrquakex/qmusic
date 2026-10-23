@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.qmusic.database.entity.PlaylistEntity
 import com.qmusic.engine.models.SongItem
+import com.qmusic.engine.models.CollectionItem
 import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.BgRoot
 import com.qmusic.ui.theme.DarkSurface
@@ -84,6 +85,11 @@ fun LibraryScreen(
     onCreatePlaylist: (String) -> Unit,
     modifier: Modifier = Modifier,
     startTab: Int = 0,
+    ytPlaylists: List<CollectionItem> = emptyList(),
+    ytAlbums: List<CollectionItem> = emptyList(),
+    ytArtists: List<CollectionItem> = emptyList(),
+    onOpenCollection: (CollectionItem) -> Unit = {},
+    onOpenStats: () -> Unit = {},
 ) {
     val s = LocalStrings.current
     var selectedTabIndex by remember(startTab) { mutableIntStateOf(startTab) }
@@ -96,6 +102,8 @@ fun LibraryScreen(
         s.tabPlaylists to playlists.size,
         s.tabDownloads to downloads.size,
         s.tabHistory to history.size,
+        s.tabAlbums to ytAlbums.size,
+        s.tabArtists to ytArtists.size,
     )
 
     Column(
@@ -115,6 +123,14 @@ fun LibraryScreen(
                 style = MaterialTheme.typography.headlineLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onOpenStats) {
+                Icon(
+                    imageVector = QMusicIcons.Stats,
+                    contentDescription = s.statsTitle,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
             if (selectedTabIndex == 1) {
                 IconButton(onClick = { showCreatePlaylistDialog = true }) {
                     Icon(
@@ -178,7 +194,16 @@ fun LibraryScreen(
                 },
             )
 
-            1 -> PlaylistsTab(playlists = playlists, onOpenPlaylist = onOpenPlaylist)
+            1 -> PlaylistsTab(
+                playlists = playlists,
+                onOpenPlaylist = onOpenPlaylist,
+                ytPlaylists = ytPlaylists,
+                onOpenCollection = onOpenCollection,
+            )
+
+            4 -> CollectionsTab(ytAlbums, s.albumsEmpty, round = false, onOpen = onOpenCollection)
+
+            5 -> CollectionsTab(ytArtists, s.artistsEmpty, round = true, onOpen = onOpenCollection)
 
             2 -> SongsTab(
                 songs = downloads,
@@ -487,9 +512,14 @@ private fun DownloadsSummary(
 }
 
 @Composable
-private fun PlaylistsTab(playlists: List<PlaylistEntity>, onOpenPlaylist: (PlaylistEntity) -> Unit) {
+private fun PlaylistsTab(
+    playlists: List<PlaylistEntity>,
+    onOpenPlaylist: (PlaylistEntity) -> Unit,
+    ytPlaylists: List<CollectionItem>,
+    onOpenCollection: (CollectionItem) -> Unit,
+) {
     val s = LocalStrings.current
-    if (playlists.isEmpty()) {
+    if (playlists.isEmpty() && ytPlaylists.isEmpty()) {
         EmptyLibraryPlaceholder(message = s.playlistsEmpty)
         return
     }
@@ -498,6 +528,13 @@ private fun PlaylistsTab(playlists: List<PlaylistEntity>, onOpenPlaylist: (Playl
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(bottom = 120.dp),
     ) {
+        if (ytPlaylists.isNotEmpty()) {
+            item { LibraryGroupTitle(s.youtubeMusicPlaylists) }
+            items(ytPlaylists, key = { "yt:${it.browseId}" }) { playlist ->
+                CollectionRow(playlist, round = false) { onOpenCollection(playlist) }
+            }
+            if (playlists.isNotEmpty()) item { LibraryGroupTitle(s.devicePlaylists) }
+        }
         items(playlists) { playlist ->
             Card(
                 modifier = Modifier
@@ -518,6 +555,74 @@ private fun PlaylistsTab(playlists: List<PlaylistEntity>, onOpenPlaylist: (Playl
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+        }
+    }
+}
+
+/** Saved albums or subscribed artists of the YouTube Music account. */
+@Composable
+private fun CollectionsTab(items: List<CollectionItem>, empty: String, round: Boolean, onOpen: (CollectionItem) -> Unit) {
+    if (items.isEmpty()) {
+        EmptyLibraryPlaceholder(message = empty)
+        return
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        contentPadding = PaddingValues(bottom = 120.dp),
+    ) {
+        items(items, key = { it.browseId }) { item -> CollectionRow(item, round) { onOpen(item) } }
+    }
+}
+
+@Composable
+private fun LibraryGroupTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 6.dp),
+    )
+}
+
+/** A playlist, album or artist: picture (round for artists), title and what YouTube Music says under it. */
+@Composable
+private fun CollectionRow(item: CollectionItem, round: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        coil3.compose.AsyncImage(
+            model = item.thumbnail,
+            contentDescription = item.title,
+            modifier = Modifier
+                .size(56.dp)
+                .clip(if (round) androidx.compose.foundation.shape.CircleShape else RoundedCornerShape(6.dp))
+                .background(DarkSurfaceVariant),
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            item.subtitle?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
             }
         }
     }

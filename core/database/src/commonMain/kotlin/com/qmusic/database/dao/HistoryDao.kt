@@ -27,6 +27,10 @@ interface HistoryDao {
     """)
     fun getRecentHistorySongs(): Flow<List<SongEntity>>
 
+    /** Every play since [since] (epoch milliseconds): one row per play, for counting. */
+    @Query("SELECT * FROM history WHERE playedAt >= :since")
+    suspend fun historySince(since: Long): List<HistoryEntity>
+
     @Query("DELETE FROM history")
     suspend fun clearHistory(): Int
 }

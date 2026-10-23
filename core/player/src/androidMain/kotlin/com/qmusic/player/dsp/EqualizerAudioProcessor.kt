@@ -22,6 +22,10 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
     private val bandGains = FloatArray(BAND_COUNT) { 0f }
     var isEnabled: Boolean = true
 
+    /** Volume normalisation for the song in this player, in dB (negative turns a loud master down). */
+    @Volatile
+    var normalizationGainDb: Float = 0f
+
     // Multi-channel filters: channelIndex -> Array of 10 BiquadFilters
     private var channelFilters: Array<Array<BiquadFilter>> = emptyArray()
 
@@ -41,7 +45,8 @@ class EqualizerAudioProcessor : BaseAudioProcessor() {
     @Synchronized
     fun getPreampGainDb(): Float {
         val maxGain = bandGains.maxOrNull() ?: 0f
-        return if (maxGain > 0f) -maxGain else 0f
+        // Boosting bands is paid for by lowering everything first, so the boost cannot clip; then the song's own gain.
+        return (if (maxGain > 0f) -maxGain else 0f) + normalizationGainDb
     }
 
     @Synchronized

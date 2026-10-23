@@ -21,6 +21,7 @@ import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.qmusic.engine.models.SongItem
 import com.qmusic.engine.models.VideoSource
+import com.qmusic.player.AudioQuality
 import com.qmusic.player.PlayerController
 import com.qmusic.player.RepeatMode
 import com.qmusic.player.SleepTimerState
@@ -51,6 +52,8 @@ class CrossfadeExoPlayerAdapter(
     private val streamUrlResolver: (suspend (String) -> String?)? = null,
     private val offline: OfflineDownloader? = null,
     private val videoResolver: (suspend (String) -> VideoSource?)? = null,
+    /** How loud YouTube measured a song (dB against its reference); used by volume normalisation. */
+    private val loudnessResolver: (suspend (String) -> Float?)? = null,
 ) : PlayerController {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -206,10 +209,47 @@ class CrossfadeExoPlayerAdapter(
             .build()
     }
 
+    // --- Stream quality and volume normalisation ---
+    @Volatile
+    private var normalize = false
+
+    /** Loudness per song id; a song missing here has not been measured (yet). */
+    private val loudness = java.util.concurrent.ConcurrentHashMap<String, Float>()
+
+    override fun setAudioQuality(quality: AudioQuality) {
+        if (com.qmusic.player.PlayerHolder.audioQuality == quality) return
+        com.qmusic.player.PlayerHolder.audioQuality = quality
+        // Addresses already looked up are for the old quality; the songs to come resolve again.
+        synchronized(urlCache) { urlCache.clear() }
+    }
+
+    override fun setNormalizeVolume(enabled: Boolean) {
+        normalize = enabled
+        applyLoudness()
+        if (enabled) _currentTrack.value?.let { measure(it.id) }
+    }
+
+    private fun measure(songId: String) {
+        if (!normalize || loudnessResolver == null || loudness.containsKey(songId)) return
+        scope.launch {
+            loudnessResolver.invoke(songId)?.let { loudness[songId] = it }
+            applyLoudness()
+        }
+    }
+
+    /** Each player gets the gain of the song it holds, so a crossfade blends two songs each at its right level. */
+    private fun applyLoudness() {
+        listOf(playerA to equalizerProcessorA, playerB to equalizerProcessorB).forEach { (player, eq) ->
+            val db = player.currentMediaItem?.mediaId?.let { loudness[it] }
+            eq.normalizationGainDb = if (normalize && db != null) (-db).coerceIn(-MAX_CUT_DB, MAX_BOOST_DB) else 0f
+        }
+    }
+
     private fun startProgressTicker() {
         tickerJob?.cancel()
         tickerJob = scope.launch {
             while (isActive) {
+                applyLoudness()
                 if (activePlayer.playbackState == Player.STATE_READY || activePlayer.isPlaying) {
                     _playbackPosition.value = activePlayer.currentPosition
                     _buffered.value = activePlayer.bufferedPosition
@@ -502,6 +542,7 @@ class CrossfadeExoPlayerAdapter(
         _playbackPosition.value = startPositionMs
         _buffered.value = startPositionMs
         _duration.value = (song.duration?.toLong() ?: 0L) * 1000L
+        measure(song.id)
 
         val manual = fadeMs == MANUAL_FADE_MS
         resolveJob = scope.launch {
@@ -829,6 +870,8 @@ class CrossfadeExoPlayerAdapter(
         const val HANDOFF_BLEND_STEP_MS = 10L
         const val HANDOFF_TOLERANCE_MS = 40L
         const val MANUAL_FADE_MS = 250L
+        const val MAX_CUT_DB = 12f
+        const val MAX_BOOST_DB = 6f
         const val SKIP_SETTLE_MS = 180L
         const val SKIP_RAPID_MS = 700L
         const val PREFETCH_AHEAD = 2

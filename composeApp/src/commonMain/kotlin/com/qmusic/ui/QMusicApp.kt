@@ -64,6 +64,8 @@ import com.qmusic.ui.components.SpotifyImportDialog
 import com.qmusic.ui.screens.ArtistScreen
 import com.qmusic.ui.screens.CollectionScreen
 import com.qmusic.ui.screens.ExploreScreen
+import com.qmusic.ui.screens.ForYouScreen
+import com.qmusic.ui.screens.StatsScreen
 import com.qmusic.ui.screens.HomeScreen
 import com.qmusic.ui.screens.LibraryScreen
 import com.qmusic.ui.screens.LocalPlaylistScreen
@@ -113,6 +115,7 @@ fun QMusicApp(
             val navTabs = remember(strings) {
                 listOf(
                     NavigationTabItem(ScreenTab.HOME, strings.tabHome, QMusicIcons.Home),
+                    NavigationTabItem(ScreenTab.FOR_YOU, strings.tabForYou, QMusicIcons.Samples),
                     NavigationTabItem(ScreenTab.SEARCH, strings.tabSearch, QMusicIcons.Search),
                     NavigationTabItem(ScreenTab.LIBRARY, strings.tabLibrary, QMusicIcons.Library),
                     NavigationTabItem(ScreenTab.SETTINGS, strings.tabSettings, QMusicIcons.Settings),
@@ -126,6 +129,13 @@ fun QMusicApp(
         val playbackPositionState = viewModel.playbackPosition.collectAsState()
         val bufferedPositionState = viewModel.bufferedPosition.collectAsState()
         val share = rememberShare()
+        val samples by viewModel.samples.collectAsState()
+        val listeningStats by viewModel.stats.collectAsState()
+        val statsPeriod by viewModel.statsPeriod.collectAsState()
+        val ytPlaylists by viewModel.ytPlaylists.collectAsState()
+        val ytAlbums by viewModel.ytAlbums.collectAsState()
+        val ytArtists by viewModel.ytArtists.collectAsState()
+        val message by viewModel.message.collectAsState()
         val voiceSearch = rememberVoiceSearch { spoken -> viewModel.performSearch(spoken) }
         val songRecognition = rememberSongRecognition()
         val suggestedSearches by viewModel.suggestedSearches.collectAsState()
@@ -193,6 +203,9 @@ fun QMusicApp(
         val autoCheckUpdates by viewModel.autoCheckUpdates.collectAsState()
         val updateNotifications by viewModel.updateNotifications.collectAsState()
         val autoUpdate by viewModel.autoUpdate.collectAsState()
+        val audioQualityWifi by viewModel.audioQualityWifi.collectAsState()
+        val audioQualityMobile by viewModel.audioQualityMobile.collectAsState()
+        val normalizeVolume by viewModel.normalizeVolume.collectAsState()
         val offerUpdate by viewModel.offerUpdate.collectAsState()
 
         val menuSong by viewModel.menuSong.collectAsState()
@@ -209,7 +222,9 @@ fun QMusicApp(
         val updateMessage by viewModel.updateMessage.collectAsState()
 
         val topRoute = routes.lastOrNull()
-        val isCurrentTrackFavorite = currentTrack?.let { viewModel.isFavorite(it.id) } ?: false
+        // Read from the collected list (not the view model's snapshot), so every heart redraws the moment it changes.
+        val favoriteIds = remember(favorites) { favorites.mapTo(HashSet()) { it.id } }
+        val isCurrentTrackFavorite = currentTrack?.let { it.id in favoriteIds } ?: false
 
         // System Back: close the player first, then the topmost page.
         PlatformBackHandler(enabled = isPlayerExpanded) { viewModel.setPlayerExpanded(false) }
@@ -277,7 +292,7 @@ fun QMusicApp(
                 topBar = {
                     // Pages bring their own header (and sit under the status bar), so the logo bar steps aside;
                     // Home draws its own, over its tinted top.
-                    if (topRoute == null && currentTab != ScreenTab.HOME && currentTab != ScreenTab.SEARCH) {
+                    if (topRoute == null && currentTab != ScreenTab.HOME && currentTab != ScreenTab.SEARCH && currentTab != ScreenTab.FOR_YOU) {
                         Column(modifier = Modifier.fillMaxWidth().background(DarkBackground.copy(alpha = 0.92f))) {
                             Row(
                                 modifier = Modifier
@@ -295,6 +310,17 @@ fun QMusicApp(
                     Column(
                         modifier = Modifier.graphicsLayer { translationY = sheetProgress.value * size.height },
                     ) {
+                        message?.let { text ->
+                            Text(
+                                text = text,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(BgSurface)
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                        }
                         playbackError?.let { message ->
                             Text(
                                 text = message,
@@ -344,7 +370,7 @@ fun QMusicApp(
                         // Pages (artist, album, playlist) start at the very top: their pictures go under the
                         // status bar and their own headers keep clear of it.
                         .padding(
-                            if (topRoute == null && currentTab != ScreenTab.HOME && currentTab != ScreenTab.SEARCH) {
+                            if (topRoute == null && currentTab != ScreenTab.HOME && currentTab != ScreenTab.SEARCH && currentTab != ScreenTab.FOR_YOU) {
                                 innerPadding
                             } else {
                                 PaddingValues(bottom = innerPadding.calculateBottomPadding())
@@ -377,6 +403,20 @@ fun QMusicApp(
                             onRefresh = { viewModel.loadHomeContent() },
                         )
 
+                        ScreenTab.FOR_YOU -> ForYouScreen(
+                            samples = samples,
+                            isFavorite = { it in favoriteIds },
+                            onShown = { viewModel.prepareSamples() },
+                            onSettle = { viewModel.playSample(it) },
+                            onNearEnd = { viewModel.loadMoreSamples() },
+                            onToggleFavorite = { viewModel.toggleFavorite(it) },
+                            onAddToPlaylist = { viewModel.showPlaylistPicker(it) },
+                            onShare = { song ->
+                                share("${song.title} - ${song.artists.joinToString { it.name }}\nhttps://music.youtube.com/watch?v=${song.id}")
+                            },
+                            onPlayFull = { viewModel.playSampleFully(it) },
+                        )
+
                         ScreenTab.SEARCH -> SearchScreen(
                             query = searchQuery,
                             filter = selectedFilter,
@@ -405,7 +445,7 @@ fun QMusicApp(
                             onCollectionClick = { viewModel.openCollection(it) },
                             onArtistClick = { viewModel.openArtist(it.browseId, it.name) },
                             onToggleFavorite = { viewModel.toggleFavorite(it) },
-                            isFavoritePredicate = { viewModel.isFavorite(it) },
+                            isFavoritePredicate = { it in favoriteIds },
                         )
 
                         ScreenTab.LIBRARY -> LibraryScreen(
@@ -429,9 +469,14 @@ fun QMusicApp(
                             onOpenPlaylist = { viewModel.openLocalPlaylist(it.id, it.name) },
                             onSongClick = { song, context -> viewModel.play(song, context) },
                             onToggleFavorite = { viewModel.toggleFavorite(it) },
-                            isFavoritePredicate = { viewModel.isFavorite(it) },
+                            isFavoritePredicate = { it in favoriteIds },
                             onCreatePlaylist = { viewModel.createPlaylist(it) },
                             startTab = libraryStartTab,
+                            ytPlaylists = ytPlaylists,
+                            ytAlbums = ytAlbums,
+                            ytArtists = ytArtists,
+                            onOpenCollection = { viewModel.openCollection(it) },
+                            onOpenStats = { viewModel.openStats() },
                         )
 
                         ScreenTab.SETTINGS -> SettingsScreen(
@@ -460,6 +505,12 @@ fun QMusicApp(
                             autoCheckUpdates = autoCheckUpdates,
                             updateNotifications = updateNotifications,
                             autoUpdate = autoUpdate,
+                            audioQualityWifi = audioQualityWifi,
+                            onAudioQualityWifiChange = { viewModel.setAudioQualityWifi(it) },
+                            audioQualityMobile = audioQualityMobile,
+                            onAudioQualityMobileChange = { viewModel.setAudioQualityMobile(it) },
+                            normalizeVolume = normalizeVolume,
+                            onNormalizeVolumeChange = { viewModel.setNormalizeVolume(it) },
                             onAutoUpdateChange = { viewModel.setAutoUpdate(it) },
                             onUpdateNotificationsChange = { viewModel.setUpdateNotifications(it) },
                             onAutoCheckUpdatesChange = { viewModel.setAutoCheckUpdates(it) },
@@ -485,7 +536,7 @@ fun QMusicApp(
                             onSongMore = { viewModel.showSongMenu(it) },
                             downloadedIds = downloadedIds,
                             onToggleFavorite = { viewModel.toggleFavorite(it) },
-                            isFavoritePredicate = { viewModel.isFavorite(it) },
+                            isFavoritePredicate = { it in favoriteIds },
                         )
 
                         is Route.Artist -> ArtistScreen(
@@ -501,12 +552,21 @@ fun QMusicApp(
                             onSongMore = { viewModel.showSongMenu(it) },
                             onCollectionClick = { viewModel.openCollection(it) },
                             onToggleFavorite = { viewModel.toggleFavorite(it) },
-                            isFavoritePredicate = { viewModel.isFavorite(it) },
+                            isFavoritePredicate = { it in favoriteIds },
                             onToggleSubscribe = { viewModel.toggleArtistSubscription() },
                             onStartRadio = { viewModel.startRadio(it) },
                             onShare = { page ->
                                 share("${page.name}\nhttps://music.youtube.com/channel/${page.channelId ?: route.browseId}")
                             },
+                        )
+
+                        Route.Stats -> StatsScreen(
+                            stats = listeningStats,
+                            period = statsPeriod,
+                            onPeriodChange = { viewModel.loadStats(it) },
+                            onBack = { viewModel.popRoute() },
+                            onShare = share,
+                            onSongClick = { song, context -> viewModel.play(song, context) },
                         )
 
                         is Route.Explore -> ExploreScreen(
@@ -538,7 +598,7 @@ fun QMusicApp(
                                 onRename = { viewModel.renamePlaylist(route.id, it) },
                                 onDelete = { viewModel.deletePlaylist(route.id) },
                                 onToggleFavorite = { viewModel.toggleFavorite(it) },
-                                isFavoritePredicate = { viewModel.isFavorite(it) },
+                                isFavoritePredicate = { it in favoriteIds },
                             )
                         }
 
@@ -625,7 +685,7 @@ fun QMusicApp(
             menuSong?.let { song ->
                 SongActionsSheet(
                     song = song,
-                    isFavorite = viewModel.isFavorite(song.id),
+                    isFavorite = song.id in favoriteIds,
                     isDownloaded = song.id in downloadedIds,
                     onDismiss = { viewModel.dismissSongMenu() },
                     onPlayNext = {
@@ -676,6 +736,11 @@ fun QMusicApp(
                         viewModel.dismissPlaylistPicker()
                     },
                     onDismiss = { viewModel.dismissPlaylistPicker() },
+                    ytPlaylists = ytPlaylists,
+                    onPickYouTube = {
+                        viewModel.addSongToYouTubePlaylist(it, song)
+                        viewModel.dismissPlaylistPicker()
+                    },
                 )
             }
 

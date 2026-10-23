@@ -28,6 +28,19 @@ interface AppSettings {
 
     fun setUpdateNotifications(enabled: Boolean)
 
+    /** Stream quality on Wi-Fi and on mobile data: "HIGH", "NORMAL" or "LOW". */
+    val audioQualityWifi: StateFlow<String>
+    val audioQualityMobile: StateFlow<String>
+
+    /** Every song at the same loudness. */
+    val normalizeVolume: StateFlow<Boolean>
+
+    fun setAudioQualityWifi(quality: String)
+
+    fun setAudioQualityMobile(quality: String)
+
+    fun setNormalizeVolume(enabled: Boolean)
+
     /** A new version is downloaded and installed without asking first (Android may still show its own sheet). */
     val autoUpdate: StateFlow<Boolean>
 
@@ -73,6 +86,27 @@ class InMemoryAppSettings(
 
     override fun setAutoCheckUpdates(enabled: Boolean) {
         _check.value = enabled
+    }
+
+    private val _qualityWifi = MutableStateFlow("HIGH")
+    override val audioQualityWifi: StateFlow<String> = _qualityWifi.asStateFlow()
+
+    private val _qualityMobile = MutableStateFlow("NORMAL")
+    override val audioQualityMobile: StateFlow<String> = _qualityMobile.asStateFlow()
+
+    private val _normalize = MutableStateFlow(true)
+    override val normalizeVolume: StateFlow<Boolean> = _normalize.asStateFlow()
+
+    override fun setAudioQualityWifi(quality: String) {
+        _qualityWifi.value = quality
+    }
+
+    override fun setAudioQualityMobile(quality: String) {
+        _qualityMobile.value = quality
+    }
+
+    override fun setNormalizeVolume(enabled: Boolean) {
+        _normalize.value = enabled
     }
 
     private val _autoUpdate = MutableStateFlow(true)

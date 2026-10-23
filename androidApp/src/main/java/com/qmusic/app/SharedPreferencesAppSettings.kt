@@ -40,6 +40,30 @@ class SharedPreferencesAppSettings(context: Context) : AppSettings {
         _check.value = enabled
     }
 
+    private val _qualityWifi = MutableStateFlow(prefs.getString(KEY_QUALITY_WIFI, null) ?: "HIGH")
+    override val audioQualityWifi: StateFlow<String> = _qualityWifi.asStateFlow()
+
+    private val _qualityMobile = MutableStateFlow(prefs.getString(KEY_QUALITY_MOBILE, null) ?: "NORMAL")
+    override val audioQualityMobile: StateFlow<String> = _qualityMobile.asStateFlow()
+
+    private val _normalize = MutableStateFlow(prefs.getBoolean(KEY_NORMALIZE, true))
+    override val normalizeVolume: StateFlow<Boolean> = _normalize.asStateFlow()
+
+    override fun setAudioQualityWifi(quality: String) {
+        prefs.edit().putString(KEY_QUALITY_WIFI, quality).apply()
+        _qualityWifi.value = quality
+    }
+
+    override fun setAudioQualityMobile(quality: String) {
+        prefs.edit().putString(KEY_QUALITY_MOBILE, quality).apply()
+        _qualityMobile.value = quality
+    }
+
+    override fun setNormalizeVolume(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_NORMALIZE, enabled).apply()
+        _normalize.value = enabled
+    }
+
     private val _autoUpdate = MutableStateFlow(prefs.getBoolean(KEY_AUTO_UPDATE, true))
     override val autoUpdate: StateFlow<Boolean> = _autoUpdate.asStateFlow()
 
@@ -72,6 +96,9 @@ class SharedPreferencesAppSettings(context: Context) : AppSettings {
         const val KEY_WIFI_ONLY = "wifi_only"
         const val KEY_UPDATE_NOTIFICATIONS = "update_notifications"
         const val KEY_AUTO_UPDATE = "auto_update"
+        const val KEY_QUALITY_WIFI = "audio_quality_wifi"
+        const val KEY_QUALITY_MOBILE = "audio_quality_mobile"
+        const val KEY_NORMALIZE = "normalize_volume"
         const val KEY_VIDEO = "video_by_default"
         const val KEY_CHECK_UPDATES = "check_updates_on_launch"
     }

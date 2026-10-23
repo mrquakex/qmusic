@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -110,6 +111,9 @@ fun HomeScreen(
     }
 
     val tint = rememberDominantColor(speedDial.firstOrNull()?.let { it.thumbnail ?: it.thumbnails.firstOrNull()?.url })
+    // Heights of the rows seen so far: the logo row is short, so "how far the page has moved" has to add up the
+    // rows above the first visible one, not only that row's own offset (which made the colour vanish at once).
+    val itemSizes = remember { HashMap<Int, Int>() }
     val animatedTint by animateColorAsState(tint ?: Color.Transparent, animationSpec = tween(700), label = "homeTint")
 
     PullToRefreshBox(
@@ -125,7 +129,7 @@ fun HomeScreen(
                     // The colour stays where it is and fades out as the page scrolls down, a little slower than the
                     // content moves (it drifts up at a third of the speed), so it melts away instead of sliding off.
                     // Only read while drawing: scrolling never recomposes the page.
-                    val scrolled = if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset.toFloat() else size.height
+                    val scrolled = scrolledPx(listState, itemSizes)
                     val progress = (scrolled / (size.height * TINT_FADE_PORTION)).coerceIn(0f, 1f)
                     alpha = 1f - FastOutSlowInEasing.transform(progress)
                     translationY = -scrolled / 3f
@@ -534,6 +538,20 @@ private fun OfflineBanner(downloadCount: Int, onOpenDownloads: () -> Unit) {
 
 /** How far down the colour of the first speed-dial picture reaches. */
 private val TINT_HEIGHT = 460.dp
+
+/** How far the list has scrolled from its very top, in pixels; rows above the screen count with their measured heights. */
+private fun scrolledPx(state: LazyListState, sizes: MutableMap<Int, Int>): Float {
+    val info = state.layoutInfo
+    val visible = info.visibleItemsInfo
+    if (visible.isEmpty()) return 0f
+    visible.forEach { sizes[it.index] = it.size }
+    val first = visible.first()
+    var above = 0
+    for (index in 0 until first.index) {
+        above += (sizes[index] ?: return Float.MAX_VALUE) + info.mainAxisItemSpacing
+    }
+    return (above - first.offset).toFloat()
+}
 
 /** The colour is gone once the page has scrolled this share of its height. */
 private const val TINT_FADE_PORTION = 0.75f

@@ -7,4 +7,10 @@
     <string name="update_channel_name">Uygulama güncellemeleri</string>
     <string name="update_ready_title">QMusic %1$s hazır</string>
     <string name="update_ready_text">Güncellemek için dokun</string>
+    <string name="widget_description">Çalan şarkı; oynat, duraklat ve geç</string>
+    <string name="widget_previous">Önceki</string>
+    <string name="widget_play_pause">Oynat veya duraklat</string>
+    <string name="widget_next">Sonraki</string>
+    <string name="widget_nothing_playing">Bir şey çalmıyor</string>
+    <string name="widget_tap_to_open">QMusic\'i açmak için dokun</string>
 </resources>

@@ -18,11 +18,15 @@ class AndroidConnectivityMonitor(context: Context) : ConnectivityMonitor {
     private val _online = MutableStateFlow(currentlyOnline())
     override val isOnline: StateFlow<Boolean> = _online.asStateFlow()
 
+    private val _unmetered = MutableStateFlow(currentlyUnmetered())
+    override val isUnmetered: StateFlow<Boolean> = _unmetered.asStateFlow()
+
     init {
         runCatching {
             manager.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
                 override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
                     _online.value = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                    _unmetered.value = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
                 }
 
                 override fun onLost(network: Network) {
@@ -30,6 +34,11 @@ class AndroidConnectivityMonitor(context: Context) : ConnectivityMonitor {
                 }
             })
         }
+    }
+
+    private fun currentlyUnmetered(): Boolean {
+        val capabilities = manager.getNetworkCapabilities(manager.activeNetwork) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
     }
 
     private fun currentlyOnline(): Boolean {

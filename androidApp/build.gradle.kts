@@ -85,6 +85,7 @@ dependencies {
     implementation(project(":core:updater"))
 
     implementation(libs.androidx.core.ktx)
+    implementation(libs.coil.compose) // the widget loads the cover itself
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
     implementation(libs.ktor.client.core)

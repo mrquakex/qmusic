@@ -82,6 +82,12 @@ interface PlayerController {
 
     /** A hint that these songs are likely to be played next: their streams can be looked up and started early. */
     fun warmUp(songs: List<SongItem>) = Unit
+
+    /** The stream quality for what is resolved from now on (Wi-Fi and mobile data are chosen by the caller). */
+    fun setAudioQuality(quality: AudioQuality) = Unit
+
+    /** Plays every song at the same perceived loudness, using the loudness YouTube measured for it. */
+    fun setNormalizeVolume(enabled: Boolean) = Unit
     fun setEqualizerBand(bandIndex: Int, gainDb: Float)
     fun setCrossfadeDuration(seconds: Int)
 }

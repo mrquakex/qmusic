@@ -6,10 +6,21 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Binder
+import android.os.Bundle
 import android.os.Build
 import android.os.IBinder
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
+import com.qmusic.player.R
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import com.qmusic.player.PlayerController
@@ -33,6 +44,7 @@ class SimpleMediaService : MediaLibraryService() {
     }
 
     private var mediaLibrarySession: MediaLibrarySession? = null
+    private val scope = MainScope()
     private lateinit var playerAdapter: CrossfadeExoPlayerAdapter
     private val binder = LocalBinder()
 
@@ -58,7 +70,25 @@ class SimpleMediaService : MediaLibraryService() {
             )
         }
 
-        val callback = object : MediaLibrarySession.Callback {}
+        val likeCommand = SessionCommand(MediaActions.LIKE, Bundle.EMPTY)
+        val callback = object : MediaLibrarySession.Callback {
+            override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
+                MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                    .setAvailableSessionCommands(
+                        MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon().add(likeCommand).build(),
+                    )
+                    .build()
+
+            override fun onCustomCommand(
+                session: MediaSession,
+                controller: MediaSession.ControllerInfo,
+                customCommand: SessionCommand,
+                args: Bundle,
+            ): ListenableFuture<SessionResult> {
+                if (customCommand.customAction == MediaActions.LIKE) MediaActions.onToggleLike?.invoke()
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+        }
 
         val builder = MediaLibrarySession.Builder(this, playerAdapter.forwardingPlayer, callback)
             .setId("QMusicMediaLibrarySession")
@@ -77,8 +107,24 @@ class SimpleMediaService : MediaLibraryService() {
             .setChannelId(NOTIFICATION_CHANNEL_ID)
             .setNotificationId(NOTIFICATION_ID)
             .build()
+            .apply { setSmallIcon(R.drawable.ic_qmusic_notification) }
 
         setMediaNotificationProvider(notificationProvider)
+
+        // The heart next to the playback buttons follows whether the playing song is liked.
+        scope.launch {
+            MediaActions.liked.collect { liked ->
+                session.setCustomLayout(
+                    ImmutableList.of(
+                        CommandButton.Builder()
+                            .setDisplayName(if (liked) "Unlike" else "Like")
+                            .setIconResId(if (liked) R.drawable.ic_notification_heart_filled else R.drawable.ic_notification_heart)
+                            .setSessionCommand(likeCommand)
+                            .build(),
+                    ),
+                )
+            }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
@@ -102,6 +148,7 @@ class SimpleMediaService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        scope.cancel()
         currentController = null
         // Only the session is released: the shared player (PlayerHolder) outlives the service
         // so in-app playback state survives a service stop.

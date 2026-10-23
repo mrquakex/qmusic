@@ -22,4 +22,7 @@ interface MusicRepository {
     suspend fun recordSearch(query: String): Unit
     suspend fun deleteSearch(query: String): Unit
     suspend fun clearSearchHistory(): Unit
+
+    /** How many times each song was played in the last [withinDays] days (all time when null), most played first. */
+    suspend fun playCounts(withinDays: Int?): List<Pair<SongItem, Int>> = emptyList()
 }

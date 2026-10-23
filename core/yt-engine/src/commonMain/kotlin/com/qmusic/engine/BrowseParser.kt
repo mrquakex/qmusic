@@ -142,6 +142,55 @@ internal object BrowseParser {
         )
     }
 
+    /**
+     * Everything that can be opened on a library page (the account's playlists, albums or artists), wherever it
+     * sits in the page: grids of covers or lists of rows.
+     */
+    fun libraryItems(root: JsonObject): List<CollectionItem> {
+        val found = LinkedHashMap<String, CollectionItem>()
+        fun visit(element: JsonElement?) {
+            when (element) {
+                is JsonObject -> {
+                    val card = element["musicTwoRowItemRenderer"].obj()
+                    val row = element["musicResponsiveListItemRenderer"].obj()
+                    when {
+                        card != null -> twoRowCollection(card)?.let { found.putIfAbsent(it.browseId, it) }
+                        row != null -> libraryRow(row)?.let { found.putIfAbsent(it.browseId, it) }
+                        else -> element.values.forEach(::visit)
+                    }
+                }
+                is JsonArray -> element.forEach(::visit)
+                else -> {}
+            }
+        }
+        visit(root["contents"])
+        return found.values.toList()
+    }
+
+    private fun libraryRow(renderer: JsonObject): CollectionItem? {
+        val endpoint = renderer.path("navigationEndpoint", "browseEndpoint").obj() ?: return null
+        val browseId = endpoint["browseId"].str() ?: return null
+        val pageType = endpoint.path("browseEndpointContextSupportedConfigs", "browseEndpointContextMusicConfig", "pageType").str()
+        val kind = when (pageType) {
+            "MUSIC_PAGE_TYPE_ARTIST", "MUSIC_PAGE_TYPE_LIBRARY_ARTIST" -> CollectionKind.ARTIST
+            "MUSIC_PAGE_TYPE_ALBUM" -> CollectionKind.ALBUM
+            "MUSIC_PAGE_TYPE_PLAYLIST" -> CollectionKind.PLAYLIST
+            else -> return null
+        }
+        val flex = renderer["flexColumns"].arr().orEmpty()
+        fun column(index: Int) = flex.getOrNull(index).path("musicResponsiveListItemFlexColumnRenderer", "text").text()
+        val title = column(0).ifBlank { return null }
+        // A library artist page ("MPLAUC...") stands for the channel itself.
+        val id = if (browseId.startsWith("MPLA")) browseId.removePrefix("MPLA") else browseId
+        return CollectionItem(
+            browseId = id,
+            title = title,
+            subtitle = column(1).takeIf { it.isNotBlank() },
+            thumbnail = thumbnails(renderer.path("thumbnail", "musicThumbnailRenderer", "thumbnail", "thumbnails")).lastOrNull()?.url,
+            kind = kind,
+        )
+    }
+
     /** An Explore page: shelves like the home page, grids of covers, or the coloured tiles of moods and genres. */
     fun explorePage(root: JsonObject): ExplorePage {
         val title = root.path("header", "musicHeaderRenderer", "title").text()

@@ -8,6 +8,7 @@ import com.qmusic.engine.models.Album
 import com.qmusic.engine.models.Artist
 import com.qmusic.engine.models.AudioStream
 import com.qmusic.engine.models.ArtistPage
+import com.qmusic.engine.models.CollectionItem
 import com.qmusic.engine.models.CollectionPage
 import com.qmusic.engine.models.Lyrics
 import com.qmusic.engine.models.SearchResultsPage
@@ -203,11 +204,41 @@ class YouTube(
             if (page.channelId == null && browseId.startsWith("UC")) page.copy(channelId = browseId) else page
         }
 
+    /**
+     * How loud YouTube measured the song, in dB against its reference (positive = louder): what normalisation
+     * corrects. Null when the answer has no measurement.
+     */
+    suspend fun loudnessDb(videoId: String): Result<Float?> =
+        runCatching {
+            val root = json.parseToJsonElement(ytmusic.player(videoId).bodyAsText()).jsonObject
+            root["playerConfig"]?.jsonObject?.get("audioConfig")?.jsonObject?.get("loudnessDb")
+                ?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+        }
+
     /** An Explore page: "FEmusic_new_releases", "FEmusic_charts", "FEmusic_moods_and_genres", or one mood with [params]. */
     suspend fun explore(browseId: String, params: String? = null): Result<ExplorePage> =
         runCatching {
             if (ytmusic.auth?.isLoggedIn != true) ytmusic.ensureVisitorData()
             BrowseParser.explorePage(json.parseToJsonElement(ytmusic.browse(browseId, params = params).bodyAsText()).jsonObject)
+        }
+
+    /**
+     * The signed-in account's library page [browseId]: "FEmusic_liked_playlists", "FEmusic_liked_albums" or
+     * "FEmusic_library_corpus_artists" (subscriptions). Empty while signed out.
+     */
+    suspend fun library(browseId: String): Result<List<CollectionItem>> =
+        runCatching {
+            if (ytmusic.auth?.isLoggedIn != true) return@runCatching emptyList()
+            BrowseParser.libraryItems(json.parseToJsonElement(ytmusic.browse(browseId).bodyAsText()).jsonObject)
+        }
+
+    /** Adds a song to one of the account's playlists ([playlistBrowseId] as listed, "VL..."). */
+    suspend fun addToPlaylist(playlistBrowseId: String, videoId: String): Result<Unit> =
+        runCatching {
+            check(ytmusic.auth?.isLoggedIn == true) { "Not signed in" }
+            val response = ytmusic.addToPlaylist(playlistBrowseId.removePrefix("VL"), videoId)
+            check(response.status.value in 200..299) { "YouTube Music answered ${response.status.value}" }
+            check("STATUS_SUCCEEDED" in response.bodyAsText()) { "YouTube Music did not add it" }
         }
 
     /** Subscribes the signed-in account to an artist's channel, or ends the subscription. */

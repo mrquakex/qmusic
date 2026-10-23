@@ -8,6 +8,7 @@ import com.qmusic.engine.models.NextBody
 import com.qmusic.engine.models.PlayerBody
 import com.qmusic.engine.models.SearchBody
 import com.qmusic.engine.models.SearchSuggestionsBody
+import com.qmusic.engine.models.EditPlaylistBody
 import com.qmusic.engine.models.SubscribeBody
 import com.qmusic.engine.models.YouTubeClient
 import com.qmusic.engine.models.YouTubeLocale
@@ -164,6 +165,22 @@ class Ytmusic(
                 LikeBody(
                     context = client.toContext(locale, visitorData),
                     target = LikeBody.Target(videoId),
+                ),
+            )
+        }
+
+    suspend fun addToPlaylist(
+        playlistId: String,
+        videoId: String,
+        client: YouTubeClient = YouTubeClient.WEB_REMIX,
+    ): HttpResponse =
+        httpClient.post("${BASE_URL}browse/edit_playlist") {
+            applyInnertubeHeaders(client, setLogin = true)
+            setBody(
+                EditPlaylistBody(
+                    context = client.toContext(locale, visitorData),
+                    playlistId = playlistId,
+                    actions = listOf(EditPlaylistBody.Action("ACTION_ADD_VIDEO", videoId)),
                 ),
             )
         }

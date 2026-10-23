@@ -85,6 +85,12 @@ fun SettingsScreen(
     autoCheckUpdates: Boolean = true,
     updateNotifications: Boolean = true,
     autoUpdate: Boolean = true,
+    audioQualityWifi: String = "HIGH",
+    onAudioQualityWifiChange: (String) -> Unit = {},
+    audioQualityMobile: String = "NORMAL",
+    onAudioQualityMobileChange: (String) -> Unit = {},
+    normalizeVolume: Boolean = true,
+    onNormalizeVolumeChange: (Boolean) -> Unit = {},
     onAutoUpdateChange: (Boolean) -> Unit = {},
     onUpdateNotificationsChange: (Boolean) -> Unit = {},
     onAutoCheckUpdatesChange: (Boolean) -> Unit = {},
@@ -163,6 +169,18 @@ fun SettingsScreen(
                 title = s.equalizerTitle,
                 subtitle = s.equalizerSubtitle,
                 onClick = onOpenEqualizerClick,
+            )
+            RowDivider()
+            QualityRow(s.audioQualityTitle + " · " + s.audioQualityWifi, audioQualityWifi, onAudioQualityWifiChange)
+            RowDivider()
+            QualityRow(s.audioQualityTitle + " · " + s.audioQualityMobile, audioQualityMobile, onAudioQualityMobileChange)
+            RowDivider()
+            SwitchRow(
+                icon = null,
+                title = s.normalizeTitle,
+                subtitle = s.normalizeSubtitle,
+                checked = normalizeVolume,
+                onChange = onNormalizeVolumeChange,
             )
             RowDivider()
             SwitchRow(
@@ -369,6 +387,37 @@ fun SettingsScreen(
             },
             dismissButton = { TextButton(onClick = { confirmRemoveDownloads = false }) { Text(s.cancel) } },
         )
+    }
+}
+
+/** A setting with three choices of stream quality, as pills. */
+@Composable
+private fun QualityRow(title: String, value: String, onChange: (String) -> Unit) {
+    val s = LocalStrings.current
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RowIcon(null)
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier.padding(start = 40.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf("HIGH" to s.qualityHigh, "NORMAL" to s.qualityNormal, "LOW" to s.qualityLow).forEach { (key, label) ->
+                val selected = key == value
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (selected) Color.Black else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(if (selected) Color.White else DarkSurfaceVariant)
+                        .clickable { onChange(key) }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
+        }
     }
 }
 

@@ -59,6 +59,18 @@
         </provider>
 
         <receiver
+            android:name=".QMusicWidget"
+            android:exported="false"
+            android:label="QMusic">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/qmusic_widget_info" />
+        </receiver>
+
+        <receiver
             android:name=".InstallResultReceiver"
             android:exported="false" />
 

@@ -1,5 +1,13 @@
 package com.qmusic.ui.components
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.layout.onSizeChanged
+import kotlin.math.abs
+import kotlinx.coroutines.launch
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
@@ -80,7 +88,11 @@ fun MiniPlayerBar(
     val progress = if (durationMs > 0) (position.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
 
     val haptics = LocalHapticFeedback.current
-    var sideways by remember { mutableFloatStateOf(0f) }
+    // Cover and title follow the finger sideways; past the threshold they slide out, the song changes and the new
+    // one slides in from the other side, as on YouTube Music.
+    val scope = rememberCoroutineScope()
+    val slide = remember { Animatable(0f) }
+    var barWidth by remember { mutableFloatStateOf(1f) }
 
     Box(
         modifier = modifier
@@ -91,25 +103,38 @@ fun MiniPlayerBar(
                 orientation = Orientation.Vertical,
                 onDragStopped = { velocity -> onDragStopped(velocity) },
             )
-            .pointerInput(currentTrack.id) {
+            .onSizeChanged { barWidth = it.width.toFloat().coerceAtLeast(1f) }
+            .pointerInput(Unit) {
                 detectHorizontalDragGestures(
-                    onDragStart = { sideways = 0f },
                     onDragEnd = {
-                        when {
-                            sideways < -SWIPE_SKIP_PX -> {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onNext()
-                            }
+                        val travelled = slide.value
+                        scope.launch {
+                            when {
+                                travelled < -SWIPE_SKIP_PX -> {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    slide.animateTo(-barWidth, tween(SLIDE_OUT_MS))
+                                    onNext()
+                                    slide.snapTo(barWidth * 0.6f)
+                                    slide.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 420f))
+                                }
 
-                            sideways > SWIPE_SKIP_PX -> {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onPrevious()
+                                travelled > SWIPE_SKIP_PX -> {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    slide.animateTo(barWidth, tween(SLIDE_OUT_MS))
+                                    onPrevious()
+                                    slide.snapTo(-barWidth * 0.6f)
+                                    slide.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 420f))
+                                }
+
+                                else -> slide.animateTo(0f, spring(dampingRatio = 0.7f, stiffness = 500f))
                             }
                         }
-                        sideways = 0f
                     },
-                    onDragCancel = { sideways = 0f },
-                ) { _, delta -> sideways += delta }
+                    onDragCancel = { scope.launch { slide.animateTo(0f) } },
+                ) { change, delta ->
+                    change.consume()
+                    scope.launch { slide.snapTo(slide.value + delta) }
+                }
             }
             .clickable(onClick = onClick),
     ) {
@@ -123,7 +148,10 @@ fun MiniPlayerBar(
                 modifier = Modifier
                     .size(48.dp)
                     .onGloballyPositioned { onCoverPositioned(it.boundsInRoot()) }
-                    .graphicsLayer { alpha = coverAlpha() }
+                    .graphicsLayer {
+                        alpha = coverAlpha() * (1f - (abs(slide.value) / barWidth).coerceIn(0f, 1f))
+                        translationX = slide.value
+                    }
                     .clip(RoundedCornerShape(4.dp))
                     .background(DarkSurfaceVariant),
                 contentAlignment = Alignment.Center,
@@ -150,7 +178,14 @@ fun MiniPlayerBar(
                     .graphicsLayer { alpha = contentAlpha() },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .graphicsLayer {
+                        translationX = slide.value
+                        alpha = 1f - (abs(slide.value) / barWidth).coerceIn(0f, 1f)
+                    },
+            ) {
                 Text(
                     text = currentTrack.title,
                     style = MaterialTheme.typography.titleMedium,
@@ -198,3 +233,4 @@ fun MiniPlayerBar(
 }
 
 private const val SWIPE_SKIP_PX = 140f
+private const val SLIDE_OUT_MS = 160

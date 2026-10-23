@@ -6,6 +6,10 @@ import com.qmusic.ui.viewmodel.EqualizerPreset
 interface AppStrings {
     // Navigation
     val tabHome: String
+    val tabForYou: String
+    val playFullSong: String
+    val preview: String
+    val forYouEmpty: String
     val tabSearch: String
     val tabLibrary: String
     val tabSettings: String
@@ -51,6 +55,26 @@ interface AppStrings {
     val exploreCharts: String
     val exploreMoods: String
     val moreYouMayLike: String
+    val tabAlbums: String
+    val statsTitle: String
+    val statsLast30: String
+    val statsLastYear: String
+    val statsAllTime: String
+    val statsMinutes: String
+    val statsPlays: String
+    val statsSongs: String
+    val statsTopSongs: String
+    val statsTopArtists: String
+    fun statsTimes(count: Int): String
+    val statsEmpty: String
+    fun statsShare(period: String, minutes: Int, topSong: String?, topArtist: String?): String
+    val tabArtists: String
+    val youtubeMusicPlaylists: String
+    val devicePlaylists: String
+    fun addedToPlaylist(name: String): String
+    val couldNotAddToPlaylist: String
+    val albumsEmpty: String
+    val artistsEmpty: String
     val voiceSearch: String
     val recognizeSong: String
     val clearAll: String
@@ -155,6 +179,14 @@ interface AppStrings {
     val crashReportHint: String
     val clearReport: String
     val autoUpdateTitle: String
+    val audioQualityTitle: String
+    val audioQualityWifi: String
+    val audioQualityMobile: String
+    val qualityHigh: String
+    val qualityNormal: String
+    val qualityLow: String
+    val normalizeTitle: String
+    val normalizeSubtitle: String
     val autoUpdateSubtitle: String
     fun updateDialogTitle(version: String): String
     val updateDialogBody: String
@@ -238,6 +270,10 @@ interface AppStrings {
 
 object TurkishStrings : AppStrings {
     override val tabHome: String = "Ana sayfa"
+    override val tabForYou: String = "Sana Özel"
+    override val playFullSong: String = "Tamamını dinle"
+    override val preview: String = "Önizleme"
+    override val forYouEmpty: String = "Öneriler ana sayfadan hazırlanıyor. Biraz bekle ya da ana sayfayı aç."
     override val tabSearch: String = "Ara"
     override val tabLibrary: String = "Kitaplık"
     override val tabSettings: String = "Ayarlar"
@@ -281,6 +317,30 @@ object TurkishStrings : AppStrings {
     override val exploreCharts: String = "Listeler"
     override val exploreMoods: String = "Ruh halleri ve türler"
     override val moreYouMayLike: String = "Beğenebileceğiniz diğer içerikler"
+    override val tabAlbums: String = "Albümler"
+    override val statsTitle: String = "Dinleme istatistiklerin"
+    override val statsLast30: String = "Son 30 gün"
+    override val statsLastYear: String = "Son 1 yıl"
+    override val statsAllTime: String = "Tüm zamanlar"
+    override val statsMinutes: String = "dakika dinledin"
+    override val statsPlays: String = "çalma"
+    override val statsSongs: String = "farklı şarkı"
+    override val statsTopSongs: String = "En çok dinlediğin şarkılar"
+    override val statsTopArtists: String = "En çok dinlediğin sanatçılar"
+    override fun statsTimes(count: Int): String = "$count kez"
+    override val statsEmpty: String = "Henüz yeterince dinleme yok. Biraz müzik dinle, burası dolsun."
+    override fun statsShare(period: String, minutes: Int, topSong: String?, topArtist: String?): String = buildString {
+        append("QMusic ile ").append(period.lowercase()).append(" içinde ").append(minutes).append(" dakika müzik dinledim.")
+        topArtist?.let { append(" En çok dinlediğim sanatçı: ").append(it).append('.') }
+        topSong?.let { append(" En çok dinlediğim şarkı: ").append(it).append('.') }
+    }
+    override val tabArtists: String = "Sanatçılar"
+    override val youtubeMusicPlaylists: String = "YouTube Music listelerin"
+    override val devicePlaylists: String = "Cihazdaki listeler"
+    override fun addedToPlaylist(name: String): String = "\"$name\" listesine eklendi"
+    override val couldNotAddToPlaylist: String = "Listeye eklenemedi (bu liste senin olmayabilir)"
+    override val albumsEmpty: String = "YouTube Music'te kaydettiğin albümler burada görünür."
+    override val artistsEmpty: String = "Abone olduğun sanatçılar burada görünür."
     override val voiceSearch: String = "Sesle ara"
     override val recognizeSong: String = "Çalan şarkıyı tanı"
     override val clearAll: String = "Tümünü temizle"
@@ -395,6 +455,14 @@ object TurkishStrings : AppStrings {
     override val crashReportHint: String = "Uygulama beklenmedik şekilde kapandı. Raporu geliştiriciyle paylaşabilirsin."
     override val clearReport: String = "Temizle"
     override val autoUpdateTitle: String = "Otomatik güncelle"
+    override val audioQualityTitle: String = "Ses kalitesi"
+    override val audioQualityWifi: String = "Wi-Fi'da"
+    override val audioQualityMobile: String = "Mobil veride"
+    override val qualityHigh: String = "Yüksek"
+    override val qualityNormal: String = "Normal"
+    override val qualityLow: String = "Veri tasarrufu"
+    override val normalizeTitle: String = "Ses seviyesini eşitle"
+    override val normalizeSubtitle: String = "Her şarkı aynı yükseklikte çalar; biri bağırıp diğeri fısıldamaz."
     override val autoUpdateSubtitle: String = "Yeni sürümü sormadan indirip kur."
     override fun updateDialogTitle(version: String): String = "QMusic $version hazır"
     override val updateDialogBody: String = "Yeni sürümde iyileştirmeler ve yeni özellikler var."
@@ -485,6 +553,10 @@ object TurkishStrings : AppStrings {
 
 object EnglishStrings : AppStrings {
     override val tabHome: String = "Home"
+    override val tabForYou: String = "For you"
+    override val playFullSong: String = "Play full song"
+    override val preview: String = "Preview"
+    override val forYouEmpty: String = "Picks come from your home page. Give it a moment, or open Home."
     override val tabSearch: String = "Search"
     override val tabLibrary: String = "Library"
     override val tabSettings: String = "Settings"
@@ -529,6 +601,30 @@ object EnglishStrings : AppStrings {
     override val exploreCharts: String = "Charts"
     override val exploreMoods: String = "Moods & genres"
     override val moreYouMayLike: String = "More you may like"
+    override val tabAlbums: String = "Albums"
+    override val statsTitle: String = "Your listening"
+    override val statsLast30: String = "Last 30 days"
+    override val statsLastYear: String = "Last year"
+    override val statsAllTime: String = "All time"
+    override val statsMinutes: String = "minutes listened"
+    override val statsPlays: String = "plays"
+    override val statsSongs: String = "different songs"
+    override val statsTopSongs: String = "Your top songs"
+    override val statsTopArtists: String = "Your top artists"
+    override fun statsTimes(count: Int): String = if (count == 1) "1 play" else "$count plays"
+    override val statsEmpty: String = "Not much listening yet. Play some music and this fills up."
+    override fun statsShare(period: String, minutes: Int, topSong: String?, topArtist: String?): String = buildString {
+        append("I listened to ").append(minutes).append(" minutes of music on QMusic (").append(period.lowercase()).append(").")
+        topArtist?.let { append(" Top artist: ").append(it).append('.') }
+        topSong?.let { append(" Top song: ").append(it).append('.') }
+    }
+    override val tabArtists: String = "Artists"
+    override val youtubeMusicPlaylists: String = "Your YouTube Music playlists"
+    override val devicePlaylists: String = "On this device"
+    override fun addedToPlaylist(name: String): String = "Added to \"$name\""
+    override val couldNotAddToPlaylist: String = "Could not add it (the playlist may not be yours)"
+    override val albumsEmpty: String = "Albums you saved on YouTube Music show up here."
+    override val artistsEmpty: String = "Artists you subscribe to show up here."
     override val voiceSearch: String = "Search by voice"
     override val recognizeSong: String = "Identify a song"
     override val clearAll: String = "Clear all"
@@ -644,6 +740,14 @@ object EnglishStrings : AppStrings {
     override val crashReportHint: String = "The app closed unexpectedly. You can share the report with the developer."
     override val clearReport: String = "Clear"
     override val autoUpdateTitle: String = "Update automatically"
+    override val audioQualityTitle: String = "Audio quality"
+    override val audioQualityWifi: String = "On Wi-Fi"
+    override val audioQualityMobile: String = "On mobile data"
+    override val qualityHigh: String = "High"
+    override val qualityNormal: String = "Normal"
+    override val qualityLow: String = "Data saver"
+    override val normalizeTitle: String = "Normalize volume"
+    override val normalizeSubtitle: String = "Every song plays at the same loudness."
     override val autoUpdateSubtitle: String = "Download and install new versions without asking."
     override fun updateDialogTitle(version: String): String = "QMusic $version is ready"
     override val updateDialogBody: String = "The new version has improvements and new features."
