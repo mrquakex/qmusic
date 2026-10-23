@@ -45,6 +45,14 @@ interface AppStrings {
     val sectionPlaylists: String
     val searchHistoryEmpty: String
     val recentSearches: String
+    val recentlyPlayed: String
+    val exploreTitle: String
+    val exploreNewReleases: String
+    val exploreCharts: String
+    val exploreMoods: String
+    val moreYouMayLike: String
+    val voiceSearch: String
+    val recognizeSong: String
     val clearAll: String
     val removeFromHistory: String
     val useThisSuggestion: String
@@ -267,6 +275,14 @@ object TurkishStrings : AppStrings {
     override val sectionPlaylists: String = "Çalma listeleri"
     override val searchHistoryEmpty: String = "YouTube Music'te aramak için bir şeyler yaz"
     override val recentSearches: String = "Son aramalar"
+    override val recentlyPlayed: String = "Son dinlenenler"
+    override val exploreTitle: String = "Keşfet"
+    override val exploreNewReleases: String = "Yeni çıkanlar"
+    override val exploreCharts: String = "Listeler"
+    override val exploreMoods: String = "Ruh halleri ve türler"
+    override val moreYouMayLike: String = "Beğenebileceğiniz diğer içerikler"
+    override val voiceSearch: String = "Sesle ara"
+    override val recognizeSong: String = "Çalan şarkıyı tanı"
     override val clearAll: String = "Tümünü temizle"
     override val removeFromHistory: String = "Geçmişten kaldır"
     override val useThisSuggestion: String = "Bu öneriyi kullan"
@@ -507,6 +523,14 @@ object EnglishStrings : AppStrings {
     override val sectionPlaylists: String = "Playlists"
     override val searchHistoryEmpty: String = "Type something to search YouTube Music"
     override val recentSearches: String = "Recent searches"
+    override val recentlyPlayed: String = "Recently played"
+    override val exploreTitle: String = "Explore"
+    override val exploreNewReleases: String = "New releases"
+    override val exploreCharts: String = "Charts"
+    override val exploreMoods: String = "Moods & genres"
+    override val moreYouMayLike: String = "More you may like"
+    override val voiceSearch: String = "Search by voice"
+    override val recognizeSong: String = "Identify a song"
     override val clearAll: String = "Clear all"
     override val removeFromHistory: String = "Remove from history"
     override val useThisSuggestion: String = "Use this suggestion"

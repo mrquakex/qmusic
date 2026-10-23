@@ -1,6 +1,15 @@
 package com.qmusic.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -75,6 +84,12 @@ fun SearchScreen(
     history: List<String>,
     downloadedIds: Set<String>,
     onQueryChange: (String) -> Unit,
+    onBack: () -> Unit,
+    recentSongs: List<SongItem>,
+    suggestedSearches: List<String>,
+    onOpenExplore: (browseId: String, title: String) -> Unit,
+    onVoiceSearch: (() -> Unit)?,
+    onRecognizeSong: (() -> Unit)?,
     onFilterChange: (SearchFilter?) -> Unit,
     onSearch: () -> Unit,
     onSuggestionClick: (SearchSuggestion) -> Unit,
@@ -97,20 +112,36 @@ fun SearchScreen(
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        Spacer(modifier = Modifier.height(16.dp))
-
+        Row(
+            modifier = Modifier
+                .statusBarsPadding()
+                .padding(top = 8.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
         TextField(
             value = query,
             onValueChange = onQueryChange,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
+            modifier = Modifier
+                .weight(1f)
+                .height(56.dp),
             shape = RoundedCornerShape(50),
             placeholder = { Text(s.searchFieldPlaceholder) },
             leadingIcon = {
-                Icon(
-                    imageVector = QMusicIcons.Search,
-                    contentDescription = s.search,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (query.isNotEmpty() || showResults) {
+                    IconButton(onClick = {
+                        keyboardController?.hide()
+                        onBack()
+                    }) {
+                        Icon(imageVector = QMusicIcons.Back, contentDescription = s.back, tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                } else {
+                    Icon(
+                        imageVector = QMusicIcons.Search,
+                        contentDescription = s.search,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             },
             trailingIcon = {
                 if (query.isNotEmpty()) {
@@ -121,6 +152,14 @@ fun SearchScreen(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                } else if (onVoiceSearch != null) {
+                    IconButton(onClick = onVoiceSearch) {
+                        Icon(
+                            imageVector = QMusicIcons.Mic,
+                            contentDescription = s.voiceSearch,
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
                 }
             },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -129,6 +168,7 @@ fun SearchScreen(
                 onSearch()
             }),
             singleLine = true,
+            textStyle = MaterialTheme.typography.titleMedium,
             colors = TextFieldDefaults.colors(
                 focusedContainerColor = DarkSurfaceVariant,
                 unfocusedContainerColor = DarkSurfaceVariant,
@@ -140,6 +180,19 @@ fun SearchScreen(
                 cursorColor = MaterialTheme.colorScheme.onSurface,
             ),
         )
+        if (onRecognizeSong != null) {
+            Spacer(Modifier.width(8.dp))
+            IconButton(
+                onClick = onRecognizeSong,
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(DarkSurfaceVariant),
+            ) {
+                Icon(imageVector = QMusicIcons.Waveform, contentDescription = s.recognizeSong, tint = MaterialTheme.colorScheme.onSurface)
+            }
+        }
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -162,15 +215,22 @@ fun SearchScreen(
         } else if (query.isBlank()) {
             SearchHistory(
                 history = history,
+                recentSongs = recentSongs,
+                suggestedSearches = suggestedSearches,
+                onOpenExplore = onOpenExplore,
+                onSongClick = onSongClick,
+                onFill = onQueryChange,
                 onHistoryClick = onHistoryClick,
                 onHistoryDelete = onHistoryDelete,
                 onClearHistory = onClearHistory,
             )
         } else {
             SuggestionList(
+                query = query,
                 suggestions = suggestions,
                 onSuggestionClick = onSuggestionClick,
                 onFill = { onQueryChange(it.text) },
+                onSongMore = onSongMore,
             )
         }
     }
@@ -408,119 +468,256 @@ private fun ResultRow(
     }
 }
 
+/**
+ * The empty box, as on YouTube Music: what was played lately as wide cards, then the past searches. Tapping a
+ * search runs it, the arrow puts it in the box to edit, and a long press removes it.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SearchHistory(
     history: List<String>,
+    recentSongs: List<SongItem>,
+    suggestedSearches: List<String>,
+    onOpenExplore: (browseId: String, title: String) -> Unit,
+    onSongClick: (SongItem, List<SongItem>) -> Unit,
+    onFill: (String) -> Unit,
     onHistoryClick: (String) -> Unit,
     onHistoryDelete: (String) -> Unit,
     onClearHistory: () -> Unit,
 ) {
     val s = LocalStrings.current
-    if (history.isEmpty()) {
-        CenteredBox {
-            Text(
-                text = s.searchHistoryEmpty,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        return
-    }
-
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 120.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 120.dp),
     ) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+        if (recentSongs.isNotEmpty()) {
+            item {
                 Text(
-                    text = s.recentSearches,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    text = s.recentlyPlayed,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onClick = onClearHistory) { Text(s.clearAll) }
+                Spacer(Modifier.height(12.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(recentSongs.take(12), key = { it.id }) { song ->
+                        Column(
+                            modifier = Modifier
+                                .width(170.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onSongClick(song, listOf(song)) },
+                        ) {
+                            AsyncImage(
+                                model = song.thumbnail ?: song.thumbnails.firstOrNull()?.url,
+                                contentDescription = song.title,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(16f / 9f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(DarkSurfaceVariant),
+                                contentScale = ContentScale.Crop,
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = song.title,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
             }
         }
-        items(history, key = { it }) { entry ->
-            SuggestionRow(
-                text = entry,
-                leading = QMusicIcons.History,
-                onClick = { onHistoryClick(entry) },
-                trailing = QMusicIcons.Close,
-                trailingDescription = s.removeFromHistory,
-                onTrailingClick = { onHistoryDelete(entry) },
-            )
+        if (history.isNotEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = s.recentSearches,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = onClearHistory) { Text(s.clearAll) }
+                }
+            }
+            items(history, key = { it }) { entry ->
+                SuggestionRow(
+                    text = entry,
+                    query = "",
+                    leading = QMusicIcons.History,
+                    onClick = { onHistoryClick(entry) },
+                    onLongClick = { onHistoryDelete(entry) },
+                    onFill = { onFill(entry) },
+                )
+            }
+        }
+        item {
+            Spacer(Modifier.height(20.dp))
+            ExploreTiles(onOpenExplore)
+            Spacer(Modifier.height(12.dp))
+        }
+        if (suggestedSearches.isNotEmpty()) {
+            item {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = s.moreYouMayLike,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            items(suggestedSearches, key = { "more:$it" }) { entry ->
+                SuggestionRow(
+                    text = entry,
+                    query = "",
+                    leading = QMusicIcons.Search,
+                    onClick = { onHistoryClick(entry) },
+                    onFill = { onFill(entry) },
+                )
+            }
         }
     }
 }
 
+/**
+ * While typing: the first word suggestions, then the songs, albums and artists YouTube Music suggests, then the
+ * rest of the words, the way YouTube Music orders them.
+ */
 @Composable
 private fun SuggestionList(
+    query: String,
     suggestions: List<SearchSuggestion>,
     onSuggestionClick: (SearchSuggestion) -> Unit,
     onFill: (SearchSuggestion) -> Unit,
+    onSongMore: (SongItem) -> Unit,
 ) {
-    val s = LocalStrings.current
+    val words = suggestions.filterNot { it.isRich }
+    val rich = suggestions.filter { it.isRich }
+    val ordered = words.take(2) + rich + words.drop(2)
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 120.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp),
     ) {
-        items(suggestions, key = { "${it.isHistory}:${it.text}" }) { suggestion ->
-            SuggestionRow(
-                text = suggestion.text,
-                leading = if (suggestion.isHistory) QMusicIcons.History else QMusicIcons.Search,
-                onClick = { onSuggestionClick(suggestion) },
-                trailing = QMusicIcons.FillQuery,
-                trailingDescription = s.useThisSuggestion,
-                onTrailingClick = { onFill(suggestion) },
-            )
+        items(ordered, key = { "${it.isHistory}:${it.isRich}:${it.text}:${it.song?.id ?: it.artist?.browseId ?: it.collection?.browseId}" }) { suggestion ->
+            if (suggestion.isRich) {
+                RichSuggestionRow(suggestion, onClick = { onSuggestionClick(suggestion) }, onSongMore = onSongMore)
+            } else {
+                SuggestionRow(
+                    text = suggestion.text,
+                    query = query,
+                    leading = if (suggestion.isHistory) QMusicIcons.History else QMusicIcons.Search,
+                    onClick = { onSuggestionClick(suggestion) },
+                    onFill = { onFill(suggestion) },
+                )
+            }
         }
     }
 }
 
+/** A word: icon, the text with what was typed in bold, and the arrow that puts it in the box. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SuggestionRow(
     text: String,
+    query: String,
     leading: ImageVector,
     onClick: () -> Unit,
-    trailing: ImageVector,
-    trailingDescription: String,
-    onTrailingClick: () -> Unit,
+    onFill: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
+    val s = LocalStrings.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 2.dp),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             imageVector = leading,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 12.dp).size(20.dp),
+            tint = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 8.dp, end = 24.dp).size(24.dp),
         )
+        val typed = query.trim()
+        val label = if (typed.isNotEmpty() && text.startsWith(typed, ignoreCase = true)) {
+            buildAnnotatedString {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(text.substring(0, typed.length)) }
+                append(text.substring(typed.length))
+            }
+        } else {
+            AnnotatedString(text)
+        }
         Text(
-            text = text,
+            text = label,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        IconButton(onClick = onTrailingClick) {
+        IconButton(onClick = onFill) {
             Icon(
-                imageVector = trailing,
-                contentDescription = trailingDescription,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
+                imageVector = QMusicIcons.FillQuery,
+                contentDescription = s.useThisSuggestion,
+                tint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(22.dp),
             )
         }
-        Spacer(modifier = Modifier.width(4.dp))
+    }
+}
+
+/** A suggested song, album, playlist or artist: picture (round for artists), title, what it is, and "more". */
+@Composable
+private fun RichSuggestionRow(suggestion: SearchSuggestion, onClick: () -> Unit, onSongMore: (SongItem) -> Unit) {
+    val picture = suggestion.song?.let { it.thumbnail ?: it.thumbnails.firstOrNull()?.url }
+        ?: suggestion.artist?.thumbnail
+        ?: suggestion.collection?.thumbnail
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            model = picture,
+            contentDescription = suggestion.text,
+            modifier = Modifier
+                .size(56.dp)
+                .clip(if (suggestion.artist != null) CircleShape else RoundedCornerShape(6.dp))
+                .background(DarkSurfaceVariant),
+            contentScale = ContentScale.Crop,
+        )
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = suggestion.text,
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            suggestion.subtitle?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        suggestion.song?.let { song ->
+            IconButton(onClick = { onSongMore(song) }) {
+                Icon(imageVector = QMusicIcons.More, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface)
+            }
+        }
     }
 }
 

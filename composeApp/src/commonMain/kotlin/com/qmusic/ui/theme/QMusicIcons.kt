@@ -170,6 +170,28 @@ object QMusicIcons {
 
     val Lyrics: ImageVector = stroked("Lyrics", "M4 5h16M4 10h11M4 15h16M4 20h9")
 
+    val Mic: ImageVector = stroked(
+        "Mic",
+        "M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z",
+        "M5 11a7 7 0 0 0 14 0M12 18v3",
+    )
+
+    val Waveform: ImageVector = stroked("Waveform", "M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4")
+
+    val NewReleases: ImageVector = stroked(
+        "NewReleases",
+        "M12 2l2.4 2.2 3.2-.4.7 3.1 2.9 1.6-1.3 3 1.3 3-2.9 1.6-.7 3.1-3.2-.4L12 22l-2.4-2.2-3.2.4-.7-3.1-2.9-1.6 1.3-3-1.3-3 2.9-1.6.7-3.1 3.2.4z",
+        "M11 15.5a1.5 1.5 0 1 1-1.5-1.5H11V8l3 1",
+    )
+
+    val Trending: ImageVector = stroked("Trending", "M3 17l6-6 4 4 8-8M15 7h6v6")
+
+    val Mood: ImageVector = stroked(
+        "Mood",
+        "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z",
+        "M8 14s1.5 2.5 4 2.5 4-2.5 4-2.5M9 9.5h.01M15 9.5h.01",
+    )
+
     val CloudOff: ImageVector = stroked(
         "CloudOff",
         "M6.5 19A4.5 4.5 0 0 1 6 10a6 6 0 0 1 11.3-1.5A4 4 0 0 1 18 19z",

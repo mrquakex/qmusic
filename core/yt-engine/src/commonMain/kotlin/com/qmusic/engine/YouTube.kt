@@ -11,6 +11,7 @@ import com.qmusic.engine.models.ArtistPage
 import com.qmusic.engine.models.CollectionPage
 import com.qmusic.engine.models.Lyrics
 import com.qmusic.engine.models.SearchResultsPage
+import com.qmusic.engine.models.ExplorePage
 import com.qmusic.engine.models.HomePage
 import com.qmusic.engine.models.HomeSection
 import com.qmusic.engine.models.SearchSuggestion
@@ -200,6 +201,13 @@ class YouTube(
             if (ytmusic.auth?.isLoggedIn != true) ytmusic.ensureVisitorData()
             val page = BrowseParser.artistPage(json.parseToJsonElement(ytmusic.browse(browseId).bodyAsText()).jsonObject)
             if (page.channelId == null && browseId.startsWith("UC")) page.copy(channelId = browseId) else page
+        }
+
+    /** An Explore page: "FEmusic_new_releases", "FEmusic_charts", "FEmusic_moods_and_genres", or one mood with [params]. */
+    suspend fun explore(browseId: String, params: String? = null): Result<ExplorePage> =
+        runCatching {
+            if (ytmusic.auth?.isLoggedIn != true) ytmusic.ensureVisitorData()
+            BrowseParser.explorePage(json.parseToJsonElement(ytmusic.browse(browseId, params = params).bodyAsText()).jsonObject)
         }
 
     /** Subscribes the signed-in account to an artist's channel, or ends the subscription. */

@@ -11,6 +11,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <queries>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+        <intent>
+            <action android:name="com.google.android.googlequicksearchbox.MUSIC_SEARCH" />
+        </intent>
+        <intent>
+            <action android:name="com.shazam.android.intent.actions.START_TAGGING" />
+        </intent>
+    </queries>
+
     <application
         android:name=".QMusicApplication"
         android:allowBackup="true"

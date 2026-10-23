@@ -2,6 +2,7 @@ package com.qmusic.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.getValue
@@ -95,6 +96,7 @@ fun HomeScreen(
     onPlayAll: (List<SongItem>) -> Unit,
     onCollectionClick: (CollectionItem) -> Unit,
     onChipClick: (HomeChip) -> Unit,
+    onOpenExplore: (browseId: String, title: String) -> Unit,
     onSearchClick: () -> Unit,
     onSignIn: () -> Unit,
     onRefresh: () -> Unit,
@@ -120,8 +122,13 @@ fun HomeScreen(
                 .fillMaxWidth()
                 .height(TINT_HEIGHT)
                 .graphicsLayer {
+                    // The colour stays where it is and fades out as the page scrolls down, a little slower than the
+                    // content moves (it drifts up at a third of the speed), so it melts away instead of sliding off.
+                    // Only read while drawing: scrolling never recomposes the page.
                     val scrolled = if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset.toFloat() else size.height
-                    translationY = -scrolled
+                    val progress = (scrolled / (size.height * TINT_FADE_PORTION)).coerceIn(0f, 1f)
+                    alpha = 1f - FastOutSlowInEasing.transform(progress)
+                    translationY = -scrolled / 3f
                 }
                 .background(
                     Brush.verticalGradient(
@@ -293,50 +300,20 @@ fun HomeScreen(
             }
 
             items(ordered) { section ->
-                Column {
-                    SectionHeader(section, onPlayAll)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    when (section.style) {
-                        SectionStyle.ROWS -> SongColumns(section, onSongClick, onSongMore)
-                        SectionStyle.VIDEOS -> LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        ) {
-                            items(section.songs) { song ->
-                                VideoCard(song) { onSongClick(song, section.songs) }
-                            }
-                        }
+                HomeShelf(section, onSongClick, onSongMore, onPlayAll, onCollectionClick)
+            }
 
-                        SectionStyle.CARDS -> LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        ) {
-                            items(section.songs) { song ->
-                                ShelfCard(
-                                    title = song.title,
-                                    subtitle = song.artists.joinToString { it.name }.ifEmpty { "YouTube Music" },
-                                    thumbnail = song.thumbnail ?: song.thumbnails.firstOrNull()?.url,
-                                    onClick = { onSongClick(song, section.songs) },
-                                )
-                            }
-                            items(section.collections) { collection ->
-                                if (collection.kind == CollectionKind.ARTIST) {
-                                    ArtistCircleCard(
-                                        name = collection.title,
-                                        subtitle = collection.subtitle,
-                                        thumbnail = collection.thumbnail,
-                                        onClick = { onCollectionClick(collection) },
-                                    )
-                                } else {
-                                    ShelfCard(
-                                        title = collection.title,
-                                        subtitle = collection.subtitle ?: "",
-                                        thumbnail = collection.thumbnail,
-                                        onClick = { onCollectionClick(collection) },
-                                    )
-                                }
-                            }
-                        }
+            if (isOnline && !isLoadingMore && sections.isNotEmpty()) {
+                item {
+                    Column {
+                        Text(
+                            text = s.exploreTitle,
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        ExploreTiles(onOpenExplore, modifier = Modifier.padding(horizontal = 16.dp))
                     }
                 }
             }
@@ -557,6 +534,100 @@ private fun OfflineBanner(downloadCount: Int, onOpenDownloads: () -> Unit) {
 
 /** How far down the colour of the first speed-dial picture reaches. */
 private val TINT_HEIGHT = 460.dp
+
+/** The colour is gone once the page has scrolled this share of its height. */
+private const val TINT_FADE_PORTION = 0.75f
+
+/** One shelf: its header, then covers, wide clips or song columns, as its style says. */
+@Composable
+fun HomeShelf(
+    section: HomeSection,
+    onSongClick: (SongItem, List<SongItem>) -> Unit,
+    onSongMore: (SongItem) -> Unit,
+    onPlayAll: (List<SongItem>) -> Unit,
+    onCollectionClick: (CollectionItem) -> Unit,
+) {
+    Column {
+        SectionHeader(section, onPlayAll)
+        Spacer(modifier = Modifier.height(12.dp))
+        when (section.style) {
+            SectionStyle.ROWS -> SongColumns(section, onSongClick, onSongMore)
+            SectionStyle.VIDEOS -> LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                items(section.songs) { song ->
+                    VideoCard(song) { onSongClick(song, section.songs) }
+                }
+            }
+
+            SectionStyle.CARDS -> LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                items(section.songs) { song ->
+                    ShelfCard(
+                        title = song.title,
+                        subtitle = song.artists.joinToString { it.name }.ifEmpty { "YouTube Music" },
+                        thumbnail = song.thumbnail ?: song.thumbnails.firstOrNull()?.url,
+                        onClick = { onSongClick(song, section.songs) },
+                    )
+                }
+                items(section.collections) { collection ->
+                    if (collection.kind == CollectionKind.ARTIST) {
+                        ArtistCircleCard(
+                            name = collection.title,
+                            subtitle = collection.subtitle,
+                            thumbnail = collection.thumbnail,
+                            onClick = { onCollectionClick(collection) },
+                        )
+                    } else {
+                        ShelfCard(
+                            title = collection.title,
+                            subtitle = collection.subtitle ?: "",
+                            thumbnail = collection.thumbnail,
+                            onClick = { onCollectionClick(collection) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** YouTube Music's three Explore tiles: new releases, charts, moods & genres. */
+@Composable
+fun ExploreTiles(onOpenExplore: (browseId: String, title: String) -> Unit, modifier: Modifier = Modifier) {
+    val s = LocalStrings.current
+    val tiles = listOf(
+        Triple(QMusicIcons.NewReleases, s.exploreNewReleases, "FEmusic_new_releases"),
+        Triple(QMusicIcons.Trending, s.exploreCharts, "FEmusic_charts"),
+        Triple(QMusicIcons.Mood, s.exploreMoods, "FEmusic_moods_and_genres"),
+    )
+    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        tiles.forEach { (icon, label, browseId) ->
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .aspectRatio(1.05f)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(DarkSurfaceVariant)
+                    .clickable { onOpenExplore(browseId, label) }
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Icon(imageVector = icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp))
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
 
 /** The shelf title with the small line above it, the round picture beside it and "Play all" at the end. */
 @Composable

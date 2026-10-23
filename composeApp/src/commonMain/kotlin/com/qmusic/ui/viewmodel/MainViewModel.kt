@@ -10,6 +10,7 @@ import com.qmusic.engine.models.ArtistPage
 import com.qmusic.engine.models.CollectionItem
 import com.qmusic.engine.models.CollectionKind
 import com.qmusic.engine.models.CollectionPage
+import com.qmusic.engine.models.ExplorePage
 import com.qmusic.engine.models.HomeChip
 import com.qmusic.engine.models.HomeSection
 import com.qmusic.engine.models.Lyrics
@@ -68,6 +69,7 @@ sealed interface Route {
     data class Collection(val item: CollectionItem) : Route
     data class Artist(val browseId: String, val name: String) : Route
     data class LocalPlaylist(val id: Long, val name: String) : Route
+    data class Explore(val browseId: String, val params: String?, val title: String) : Route
 }
 
 sealed interface LyricsState {
@@ -190,6 +192,20 @@ class MainViewModel(
      */
     val isOnline: StateFlow<Boolean> = connectivity.isOnline
 
+    /**
+     * "More you may like" under the past searches: the artists of what was played and liked, not searched for yet.
+     */
+    val suggestedSearches: StateFlow<List<String>> by lazy {
+        combine(history, favorites, searchHistory) { recent, liked, searched ->
+            val done = searched.map { it.lowercase() }.toSet()
+            (recent + liked).flatMap { it.artists }
+                .map { it.name.trim() }
+                .filter { it.isNotBlank() && it.lowercase() !in done }
+                .distinctBy { it.lowercase() }
+                .take(SUGGESTED_SEARCHES)
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    }
+
     /** Which Library tab to open with: 0 favorites ... 2 downloads. Set by "Go to downloads" on the home page. */
     private val _libraryStartTab = MutableStateFlow(0)
     val libraryStartTab: StateFlow<Int> = _libraryStartTab.asStateFlow()
@@ -258,7 +274,9 @@ class MainViewModel(
                     .filter { it.contains(needle, ignoreCase = true) && !it.equals(needle, ignoreCase = true) }
                     .take(3)
                     .map { SearchSuggestion(it, isHistory = true) }
-                (local + remote).distinctBy { it.text.lowercase() }.take(10)
+                // Words are kept apart from the song / artist rows, which may share a title with a word.
+                val words = (local + remote.filterNot { it.isRich }).distinctBy { it.text.lowercase() }.take(10)
+                words + remote.filter { it.isRich }
             }
         }.stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -377,7 +395,7 @@ class MainViewModel(
 
     // Update Checker State
     // Keep equal to versionName in androidApp/build.gradle.kts, or the update check compares against the wrong number.
-    val currentAppVersion: String = "1.0.10"
+    val currentAppVersion: String = "1.0.11"
     private val _isCheckingUpdate = MutableStateFlow(false)
     val isCheckingUpdate: StateFlow<Boolean> = _isCheckingUpdate.asStateFlow()
 
@@ -793,6 +811,10 @@ class MainViewModel(
     }
 
     fun selectSuggestion(suggestion: SearchSuggestion) {
+        // A suggested song plays, a suggested artist or album opens; words are searched for.
+        suggestion.song?.let { play(it); return }
+        suggestion.artist?.let { openArtist(it.browseId, it.name); return }
+        suggestion.collection?.let { openCollection(it); return }
         _searchQuery.value = suggestion.text
         performSearch(suggestion.text)
     }
@@ -803,6 +825,16 @@ class MainViewModel(
 
     fun clearSearchHistory() {
         scope.launch { repository.clearSearchHistory() }
+    }
+
+    /** The back arrow of the search box: leaves the results and the typed words. */
+    fun clearSearch() {
+        suggestionJob?.cancel()
+        _searchQuery.value = ""
+        _remoteSuggestions.value = emptyList()
+        _showSearchResults.value = false
+        _searchPage.value = null
+        _searchError.value = null
     }
 
     fun performSearch(query: String = _searchQuery.value, filter: SearchFilter? = _selectedFilter.value) {
@@ -929,6 +961,7 @@ class MainViewModel(
         when (val route = _routes.value.lastOrNull()) {
             is Route.Collection -> loadCollection(route)
             is Route.Artist -> loadArtist(route)
+            is Route.Explore -> loadExplore(route)
             is Route.LocalPlaylist, null -> Unit
         }
     }
@@ -976,6 +1009,43 @@ class MainViewModel(
                 if (_artistPage.value?.channelId == channelId) _artistPage.value = page
                 artistCache.entries.firstOrNull { it.value.channelId == channelId }?.let { artistCache[it.key] = page }
             }
+        }
+    }
+
+    // --- Explore: new releases, charts, moods & genres ---
+    private val _explorePage = MutableStateFlow<ExplorePage?>(null)
+    val explorePage: StateFlow<ExplorePage?> = _explorePage.asStateFlow()
+
+    private val _isLoadingExplore = MutableStateFlow(false)
+    val isLoadingExplore: StateFlow<Boolean> = _isLoadingExplore.asStateFlow()
+
+    private val _exploreError = MutableStateFlow<String?>(null)
+    val exploreError: StateFlow<String?> = _exploreError.asStateFlow()
+
+    private val exploreCache = mutableMapOf<String, ExplorePage>()
+
+    fun openExplore(browseId: String, params: String?, title: String) = push(Route.Explore(browseId, params, title))
+
+    private fun loadExplore(route: Route.Explore) {
+        val key = "${route.browseId}|${route.params}"
+        exploreCache[key]?.let {
+            _explorePage.value = it
+            _exploreError.value = null
+            _isLoadingExplore.value = false
+            return
+        }
+        _explorePage.value = null
+        _exploreError.value = null
+        _isLoadingExplore.value = true
+        scope.launch {
+            youTube.explore(route.browseId, route.params).onSuccess { page ->
+                val complete = page.copy(title = page.title.ifBlank { route.title })
+                exploreCache[key] = complete
+                if (_routes.value.lastOrNull() == route) _explorePage.value = complete
+            }.onFailure { throwable ->
+                if (_routes.value.lastOrNull() == route) _exploreError.value = throwable.message ?: strings.couldNotOpenPage
+            }
+            if (_routes.value.lastOrNull() == route) _isLoadingExplore.value = false
         }
     }
 
@@ -1112,6 +1182,7 @@ class MainViewModel(
 
     private companion object {
         const val RADIO_REFILL_THRESHOLD = 3
+        const val SUGGESTED_SEARCHES = 12
         const val LIBRARY_DOWNLOADS_TAB = 2
         const val SPEED_DIAL_SIZE = 17 // two pages of nine, one slot of which is the dice
         val DOUBLE_TAP_WINDOW = 500.milliseconds

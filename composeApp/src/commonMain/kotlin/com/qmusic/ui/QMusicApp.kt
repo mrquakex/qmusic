@@ -63,6 +63,7 @@ import com.qmusic.ui.components.SongActionsSheet
 import com.qmusic.ui.components.SpotifyImportDialog
 import com.qmusic.ui.screens.ArtistScreen
 import com.qmusic.ui.screens.CollectionScreen
+import com.qmusic.ui.screens.ExploreScreen
 import com.qmusic.ui.screens.HomeScreen
 import com.qmusic.ui.screens.LibraryScreen
 import com.qmusic.ui.screens.LocalPlaylistScreen
@@ -125,6 +126,12 @@ fun QMusicApp(
         val playbackPositionState = viewModel.playbackPosition.collectAsState()
         val bufferedPositionState = viewModel.bufferedPosition.collectAsState()
         val share = rememberShare()
+        val voiceSearch = rememberVoiceSearch { spoken -> viewModel.performSearch(spoken) }
+        val songRecognition = rememberSongRecognition()
+        val suggestedSearches by viewModel.suggestedSearches.collectAsState()
+        val explorePage by viewModel.explorePage.collectAsState()
+        val isLoadingExplore by viewModel.isLoadingExplore.collectAsState()
+        val exploreError by viewModel.exploreError.collectAsState()
         val homeChips by viewModel.homeChips.collectAsState()
         val speedDial by viewModel.speedDial.collectAsState()
         val isOnline by viewModel.isOnline.collectAsState()
@@ -270,7 +277,7 @@ fun QMusicApp(
                 topBar = {
                     // Pages bring their own header (and sit under the status bar), so the logo bar steps aside;
                     // Home draws its own, over its tinted top.
-                    if (topRoute == null && currentTab != ScreenTab.HOME) {
+                    if (topRoute == null && currentTab != ScreenTab.HOME && currentTab != ScreenTab.SEARCH) {
                         Column(modifier = Modifier.fillMaxWidth().background(DarkBackground.copy(alpha = 0.92f))) {
                             Row(
                                 modifier = Modifier
@@ -337,7 +344,7 @@ fun QMusicApp(
                         // Pages (artist, album, playlist) start at the very top: their pictures go under the
                         // status bar and their own headers keep clear of it.
                         .padding(
-                            if (topRoute == null && currentTab != ScreenTab.HOME) {
+                            if (topRoute == null && currentTab != ScreenTab.HOME && currentTab != ScreenTab.SEARCH) {
                                 innerPadding
                             } else {
                                 PaddingValues(bottom = innerPadding.calculateBottomPadding())
@@ -363,6 +370,7 @@ fun QMusicApp(
                             onSongMore = { viewModel.showSongMenu(it) },
                             onPlayAll = { viewModel.playAll(it) },
                             onChipClick = { viewModel.selectHomeChip(it) },
+                            onOpenExplore = { id, title -> viewModel.openExplore(id, null, title) },
                             onCollectionClick = { viewModel.openCollection(it) },
                             onSearchClick = { viewModel.selectTab(ScreenTab.SEARCH) },
                             onSignIn = { viewModel.setShowYouTubeLoginDialog(true) },
@@ -380,6 +388,12 @@ fun QMusicApp(
                             history = searchHistory,
                             downloadedIds = downloadedIds,
                             onQueryChange = { viewModel.setSearchQuery(it) },
+                            onBack = { viewModel.clearSearch() },
+                            recentSongs = history,
+                            suggestedSearches = suggestedSearches,
+                            onOpenExplore = { id, title -> viewModel.openExplore(id, null, title) },
+                            onVoiceSearch = voiceSearch,
+                            onRecognizeSong = songRecognition,
                             onFilterChange = { viewModel.setSearchFilter(it) },
                             onSearch = { viewModel.performSearch() },
                             onSuggestionClick = { viewModel.selectSuggestion(it) },
@@ -493,6 +507,19 @@ fun QMusicApp(
                             onShare = { page ->
                                 share("${page.name}\nhttps://music.youtube.com/channel/${page.channelId ?: route.browseId}")
                             },
+                        )
+
+                        is Route.Explore -> ExploreScreen(
+                            title = route.title,
+                            page = explorePage,
+                            isLoading = isLoadingExplore,
+                            error = exploreError,
+                            onBack = { viewModel.popRoute() },
+                            onSongClick = { song, context -> viewModel.play(song, context) },
+                            onSongMore = { viewModel.showSongMenu(it) },
+                            onPlayAll = { viewModel.playAll(it) },
+                            onCollectionClick = { viewModel.openCollection(it) },
+                            onMoodClick = { viewModel.openExplore(it.browseId, it.params, it.text) },
                         )
 
                         is Route.LocalPlaylist -> {

@@ -8,7 +8,10 @@ import com.qmusic.engine.models.SearchResultsPage
 import com.qmusic.engine.models.CollectionItem
 import com.qmusic.engine.models.CollectionKind
 import com.qmusic.engine.models.CollectionPage
+import com.qmusic.engine.models.ExplorePage
 import com.qmusic.engine.models.HomeChip
+import com.qmusic.engine.models.MoodButton
+import com.qmusic.engine.models.MoodGroup
 import com.qmusic.engine.models.HomeSection
 import com.qmusic.engine.models.SectionStyle
 import com.qmusic.engine.models.SearchSuggestion
@@ -20,6 +23,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 
 /**
  * Parsers for the YouTube Music `browse` and `get_search_suggestions` responses.
@@ -135,6 +139,52 @@ internal object BrowseParser {
             avatar = thumbnails(header.path("thumbnail", "musicThumbnailRenderer", "thumbnail", "thumbnails")).lastOrNull()?.url,
             style = style,
             canPlayAll = header.path("moreContentButton", "buttonRenderer", "navigationEndpoint", "watchEndpoint") != null,
+        )
+    }
+
+    /** An Explore page: shelves like the home page, grids of covers, or the coloured tiles of moods and genres. */
+    fun explorePage(root: JsonObject): ExplorePage {
+        val title = root.path("header", "musicHeaderRenderer", "title").text()
+        val contents = root.path("contents", "singleColumnBrowseResultsRenderer", "tabs").arr()?.firstOrNull()
+            .path("tabRenderer", "content", "sectionListRenderer", "contents").arr().orEmpty()
+        val sections = mutableListOf<HomeSection>()
+        val moods = mutableListOf<MoodGroup>()
+        contents.forEach { element ->
+            element.path("musicCarouselShelfRenderer").obj()?.let { shelf -> carouselSection(shelf)?.let(sections::add) }
+            element.path("musicShelfRenderer").obj()?.let { shelf -> listSection(shelf)?.let(sections::add) }
+            element.path("gridRenderer").obj()?.let { grid ->
+                val gridTitle = grid.path("header", "gridHeaderRenderer", "title").text()
+                val items = grid["items"].arr().orEmpty()
+                val buttons = items.mapNotNull { it.path("musicNavigationButtonRenderer").obj()?.let(::moodButton) }
+                if (buttons.isNotEmpty()) {
+                    moods += MoodGroup(gridTitle, buttons)
+                } else {
+                    val songs = mutableListOf<SongItem>()
+                    val collections = mutableListOf<CollectionItem>()
+                    items.forEach { item ->
+                        item.path("musicTwoRowItemRenderer").obj()?.let { renderer ->
+                            twoRowSong(renderer)?.let(songs::add) ?: twoRowCollection(renderer)?.let(collections::add)
+                        }
+                    }
+                    if (songs.isNotEmpty() || collections.isNotEmpty()) {
+                        sections += HomeSection(title = gridTitle.ifBlank { title }, songs = songs, collections = collections)
+                    }
+                }
+            }
+        }
+        return ExplorePage(title, sections, moods)
+    }
+
+    private fun moodButton(renderer: JsonObject): MoodButton? {
+        val endpoint = renderer.path("clickCommand", "browseEndpoint").obj() ?: return null
+        val browseId = endpoint["browseId"].str() ?: return null
+        val text = renderer["buttonText"].text()
+        if (text.isBlank()) return null
+        return MoodButton(
+            text = text,
+            browseId = browseId,
+            params = endpoint["params"].str(),
+            color = (renderer.path("solid", "leftStripeColor") as? JsonPrimitive)?.longOrNull,
         )
     }
 
@@ -438,6 +488,7 @@ internal object BrowseParser {
     fun searchSuggestions(root: JsonObject): List<SearchSuggestion> =
         root["contents"].arr().orEmpty().flatMap { section ->
             section.path("searchSuggestionsSectionRenderer", "contents").arr().orEmpty().mapNotNull { entry ->
+                entry.path("musicResponsiveListItemRenderer").obj()?.let { return@mapNotNull richSuggestion(it) }
                 val history = entry.path("historySuggestionRenderer").obj()
                 val renderer = history ?: entry.path("searchSuggestionRenderer").obj() ?: return@mapNotNull null
                 val text = renderer.path("navigationEndpoint", "searchEndpoint", "query").str()
@@ -445,6 +496,26 @@ internal object BrowseParser {
                 text.takeIf { it.isNotBlank() }?.let { SearchSuggestion(it, isHistory = history != null) }
             }
         }
+
+    /** A song, album, playlist or artist row among the suggestions. */
+    private fun richSuggestion(renderer: JsonObject): SearchSuggestion? {
+        val flex = renderer["flexColumns"].arr().orEmpty()
+        fun column(index: Int) = flex.getOrNull(index).path("musicResponsiveListItemFlexColumnRenderer", "text").text()
+        val title = column(0)
+        if (title.isBlank()) return null
+        val subtitle = column(1).takeIf { it.isNotBlank() }
+        track(renderer)?.let { return SearchSuggestion(title, song = it, subtitle = subtitle) }
+        val endpoint = renderer.path("navigationEndpoint", "browseEndpoint").obj() ?: return null
+        val browseId = endpoint["browseId"].str() ?: return null
+        val pageType = endpoint.path("browseEndpointContextSupportedConfigs", "browseEndpointContextMusicConfig", "pageType").str()
+        val thumb = thumbnails(renderer.path("thumbnail", "musicThumbnailRenderer", "thumbnail", "thumbnails")).lastOrNull()?.url
+        return when (pageType) {
+            "MUSIC_PAGE_TYPE_ARTIST" -> SearchSuggestion(title, artist = ArtistItem(browseId, title, subtitle, thumb), subtitle = subtitle)
+            "MUSIC_PAGE_TYPE_ALBUM" -> SearchSuggestion(title, collection = CollectionItem(browseId, title, subtitle, thumb, CollectionKind.ALBUM), subtitle = subtitle)
+            "MUSIC_PAGE_TYPE_PLAYLIST" -> SearchSuggestion(title, collection = CollectionItem(browseId, title, subtitle, thumb, CollectionKind.PLAYLIST), subtitle = subtitle)
+            else -> null
+        }
+    }
 
     // ---- Shared --------------------------------------------------------------------------------
 

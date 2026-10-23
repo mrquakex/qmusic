@@ -7,7 +7,15 @@ data class SearchSuggestion(
     val text: String,
     /** True when the suggestion comes from the signed-in account's own search history. */
     val isHistory: Boolean = false,
-)
+    /** Set for the songs, albums, playlists and artists YouTube Music suggests among the words. */
+    val song: SongItem? = null,
+    val collection: CollectionItem? = null,
+    val artist: ArtistItem? = null,
+    /** "Song • Narkoz Ex • 55M plays" under a song/album/artist suggestion. */
+    val subtitle: String? = null,
+) {
+    val isRich: Boolean get() = song != null || collection != null || artist != null
+}
 
 @Serializable
 enum class CollectionKind { PLAYLIST, ALBUM, ARTIST }
@@ -38,6 +46,30 @@ data class HomeSection(
     val style: SectionStyle = SectionStyle.CARDS,
     /** The shelf offers "Play all". */
     val canPlayAll: Boolean = false,
+)
+
+/** A tile of "Moods & genres" ("Chill", "Rock", ...), opening its own page. */
+@Serializable
+data class MoodButton(
+    val text: String,
+    val browseId: String,
+    val params: String?,
+    /** The colour of its left edge, as 0xAARRGGBB. */
+    val color: Long? = null,
+)
+
+@Serializable
+data class MoodGroup(
+    val title: String,
+    val buttons: List<MoodButton>,
+)
+
+/** A page of Explore: new releases, charts, moods & genres, or one mood / genre. */
+@Serializable
+data class ExplorePage(
+    val title: String,
+    val sections: List<HomeSection> = emptyList(),
+    val moods: List<MoodGroup> = emptyList(),
 )
 
 /** A mood filter at the top of the home page ("Energize", "Relax", ...). */
