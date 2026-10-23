@@ -16,6 +16,22 @@ class SharedPreferencesAppSettings(context: Context) : AppSettings {
     private val _wifi = MutableStateFlow(prefs.getBoolean(KEY_WIFI_ONLY, true))
     override val wifiOnly: StateFlow<Boolean> = _wifi.asStateFlow()
 
+    private val _video = MutableStateFlow(prefs.getBoolean(KEY_VIDEO, false))
+    override val videoByDefault: StateFlow<Boolean> = _video.asStateFlow()
+
+    private val _check = MutableStateFlow(prefs.getBoolean(KEY_CHECK_UPDATES, true))
+    override val autoCheckUpdates: StateFlow<Boolean> = _check.asStateFlow()
+
+    override fun setVideoByDefault(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_VIDEO, enabled).apply()
+        _video.value = enabled
+    }
+
+    override fun setAutoCheckUpdates(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_CHECK_UPDATES, enabled).apply()
+        _check.value = enabled
+    }
+
     override fun setAutoDownloadLiked(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_AUTO_DOWNLOAD, enabled).apply()
         _auto.value = enabled
@@ -29,5 +45,7 @@ class SharedPreferencesAppSettings(context: Context) : AppSettings {
     private companion object {
         const val KEY_AUTO_DOWNLOAD = "auto_download_liked"
         const val KEY_WIFI_ONLY = "wifi_only"
+        const val KEY_VIDEO = "video_by_default"
+        const val KEY_CHECK_UPDATES = "check_updates_on_launch"
     }
 }

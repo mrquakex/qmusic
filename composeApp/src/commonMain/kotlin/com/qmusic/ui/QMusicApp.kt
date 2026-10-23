@@ -159,6 +159,8 @@ fun QMusicApp(
         val downloadedBytes by viewModel.downloadedBytes.collectAsState()
         val autoDownload by viewModel.autoDownloadLiked.collectAsState()
         val wifiOnly by viewModel.wifiOnly.collectAsState()
+        val videoByDefault by viewModel.videoByDefault.collectAsState()
+        val autoCheckUpdates by viewModel.autoCheckUpdates.collectAsState()
 
         val menuSong by viewModel.menuSong.collectAsState()
         val playlistPickerSong by viewModel.playlistPickerSong.collectAsState()
@@ -383,6 +385,16 @@ fun QMusicApp(
                             onCrossfadeChange = { viewModel.setCrossfadeDuration(it) },
                             onOpenEqualizerClick = { viewModel.setShowEqualizerDialog(true) },
                             onCheckUpdateClick = { viewModel.checkForUpdates() },
+                            videoByDefault = videoByDefault,
+                            onVideoByDefaultChange = { viewModel.setVideoByDefault(it) },
+                            autoDownload = autoDownload,
+                            onAutoDownloadChange = { viewModel.setAutoDownloadLiked(it) },
+                            wifiOnly = wifiOnly,
+                            onWifiOnlyChange = { viewModel.setWifiOnly(it) },
+                            downloadedBytes = downloadedBytes,
+                            onRemoveAllDownloads = { viewModel.removeAllDownloads() },
+                            autoCheckUpdates = autoCheckUpdates,
+                            onAutoCheckUpdatesChange = { viewModel.setAutoCheckUpdates(it) },
                             updateProgress = updateProgress,
                             onInstallUpdate = { viewModel.installUpdate() },
                             onOpenSpotifyImport = { viewModel.setShowSpotifyImportDialog(true) },

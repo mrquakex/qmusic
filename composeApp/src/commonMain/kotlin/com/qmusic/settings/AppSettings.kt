@@ -12,7 +12,17 @@ interface AppSettings {
     /** Automatic downloads wait for an unmetered connection (Wi-Fi) instead of using mobile data. */
     val wifiOnly: StateFlow<Boolean>
 
+    /** The player opens on the music video (when a song has one) instead of the cover. */
+    val videoByDefault: StateFlow<Boolean>
+
+    /** Look for a new version each time the app opens. */
+    val autoCheckUpdates: StateFlow<Boolean>
+
     fun setAutoDownloadLiked(enabled: Boolean)
+
+    fun setVideoByDefault(enabled: Boolean)
+
+    fun setAutoCheckUpdates(enabled: Boolean)
 
     fun setWifiOnly(enabled: Boolean)
 }
@@ -27,6 +37,20 @@ class InMemoryAppSettings(
 
     private val _wifi = MutableStateFlow(wifiOnly)
     override val wifiOnly: StateFlow<Boolean> = _wifi.asStateFlow()
+
+    private val _video = MutableStateFlow(false)
+    override val videoByDefault: StateFlow<Boolean> = _video.asStateFlow()
+
+    private val _check = MutableStateFlow(true)
+    override val autoCheckUpdates: StateFlow<Boolean> = _check.asStateFlow()
+
+    override fun setVideoByDefault(enabled: Boolean) {
+        _video.value = enabled
+    }
+
+    override fun setAutoCheckUpdates(enabled: Boolean) {
+        _check.value = enabled
+    }
 
     override fun setAutoDownloadLiked(enabled: Boolean) {
         _auto.value = enabled

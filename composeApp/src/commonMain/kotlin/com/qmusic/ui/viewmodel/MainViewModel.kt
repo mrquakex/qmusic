@@ -127,7 +127,7 @@ class MainViewModel(
     val videoMode: StateFlow<Boolean> = playerController.videoMode
 
     /** Whether the Song/Video switch is on "Video"; the clip only plays while the full player is open. */
-    private val _videoPreferred = MutableStateFlow(false)
+    private val _videoPreferred = MutableStateFlow(settings.videoByDefault.value)
     val videoPreferred: StateFlow<Boolean> = _videoPreferred.asStateFlow()
 
     // Crossfade Duration (0-12s, default 3s)
@@ -265,6 +265,8 @@ class MainViewModel(
 
     val autoDownloadLiked: StateFlow<Boolean> = settings.autoDownloadLiked
     val wifiOnly: StateFlow<Boolean> = settings.wifiOnly
+    val videoByDefault: StateFlow<Boolean> = settings.videoByDefault
+    val autoCheckUpdates: StateFlow<Boolean> = settings.autoCheckUpdates
     val downloadedBytes: StateFlow<Long> = downloads.downloadedBytes
 
     /** Songs already handed to the downloader by "auto-download", so a failure is not retried in a loop. */
@@ -293,7 +295,7 @@ class MainViewModel(
 
     // Update Checker State
     // Keep equal to versionName in androidApp/build.gradle.kts, or the update check compares against the wrong number.
-    val currentAppVersion: String = "1.0.4"
+    val currentAppVersion: String = "1.0.5"
     private val _isCheckingUpdate = MutableStateFlow(false)
     val isCheckingUpdate: StateFlow<Boolean> = _isCheckingUpdate.asStateFlow()
 
@@ -308,6 +310,7 @@ class MainViewModel(
         if (autoLoadHome) {
             loadHomeContent()
             if (youTubeAuth.isLoggedIn) loadLikedSongs()
+            if (settings.autoCheckUpdates.value) checkForUpdates(silent = true)
         }
         // Auto-download: every liked song (device favorites + YouTube Music likes) that is not saved yet
         scope.launch {
@@ -349,6 +352,16 @@ class MainViewModel(
         _isPlayerExpanded.value = expanded
         // A clip is only fetched and drawn while the full player is open (saves data and battery otherwise).
         playerController.setVideoMode(expanded && _videoPreferred.value)
+    }
+
+    /** The Settings switch: what the player opens on from now on (and right now, if it is open). */
+    fun setVideoByDefault(enabled: Boolean) {
+        settings.setVideoByDefault(enabled)
+        setVideoPreferred(enabled)
+    }
+
+    fun setAutoCheckUpdates(enabled: Boolean) {
+        settings.setAutoCheckUpdates(enabled)
     }
 
     fun setVideoPreferred(preferred: Boolean) {
@@ -899,7 +912,8 @@ class MainViewModel(
         }
     }
 
-    fun checkForUpdates() {
+    /** [silent]: the automatic check at launch only says something when there is a new version. */
+    fun checkForUpdates(silent: Boolean = false) {
         _isCheckingUpdate.value = true
         _updateMessage.value = null
         _updateInfo.value = null
@@ -911,12 +925,12 @@ class MainViewModel(
                 if (info != null) {
                     _updateInfo.value = info
                     _updateMessage.value = "Update available: v${info.versionName}"
-                } else {
-                    _updateMessage.value = "You are using the latest version (v$currentAppVersion)"
+                } else if (!silent) {
+                    _updateMessage.value = "You are using the latest version"
                 }
             }.onFailure { error ->
                 _isCheckingUpdate.value = false
-                _updateMessage.value = "Check update failed: ${error.message}"
+                if (!silent) _updateMessage.value = "Check update failed: ${error.message}"
             }
         }
     }
