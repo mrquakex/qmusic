@@ -1,10 +1,12 @@
 package com.qmusic.app
 
 import android.content.Context
+import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.PackageInstaller
+import android.os.Build
 import android.net.Uri
 import android.provider.Settings
-import androidx.core.content.FileProvider
 import com.qmusic.updater.UpdateInstaller
 import com.qmusic.updater.model.UpdateInfo
 import kotlinx.coroutines.Dispatchers
@@ -36,14 +38,38 @@ class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
             )
             error(getString(R.string.update_allow_permission))
         }
-        val file = download(info.downloadUrl)
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.updates", file)
-        context.startActivity(
-            Intent(Intent.ACTION_VIEW)
-                .setDataAndType(uri, "application/vnd.android.package-archive")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
+        commit(download(info.downloadUrl))
     }.also { _progress.value = null }
+
+    /**
+     * Hands the APK to Android through an install session. On Android 12+ the session asks for no confirmation
+     * when QMusic itself installed the version being replaced, so from the second update on it installs by itself
+     * (when the app is not on screen); otherwise the system confirmation sheet appears, via [InstallResultReceiver].
+     */
+    private fun commit(file: File) {
+        val installer = context.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+            }
+        }
+        val sessionId = installer.createSession(params)
+        installer.openSession(sessionId).use { session ->
+            file.inputStream().use { input ->
+                session.openWrite("qmusic.apk", 0, file.length()).use { out ->
+                    input.copyTo(out)
+                    session.fsync(out)
+                }
+            }
+            val result = PendingIntent.getBroadcast(
+                context,
+                sessionId,
+                Intent(context, InstallResultReceiver::class.java).setPackage(context.packageName),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+            )
+            session.commit(result.intentSender)
+        }
+    }
 
     private suspend fun download(url: String): File = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }

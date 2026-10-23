@@ -285,6 +285,19 @@ class MainViewModel(
     val videoByDefault: StateFlow<Boolean> = settings.videoByDefault
     val autoCheckUpdates: StateFlow<Boolean> = settings.autoCheckUpdates
     val updateNotifications: StateFlow<Boolean> = settings.updateNotifications
+    val autoUpdate: StateFlow<Boolean> = settings.autoUpdate
+
+    /** Set when the launch check finds a version and "update automatically" is off: the dialog that offers it. */
+    private val _offerUpdate = MutableStateFlow(false)
+    val offerUpdate: StateFlow<Boolean> = _offerUpdate.asStateFlow()
+
+    fun dismissUpdateOffer() {
+        _offerUpdate.value = false
+    }
+
+    fun setAutoUpdate(enabled: Boolean) {
+        settings.setAutoUpdate(enabled)
+    }
     val downloadedBytes: StateFlow<Long> = downloads.downloadedBytes
 
     /** Songs already handed to the downloader by "auto-download", so a failure is not retried in a loop. */
@@ -313,7 +326,7 @@ class MainViewModel(
 
     // Update Checker State
     // Keep equal to versionName in androidApp/build.gradle.kts, or the update check compares against the wrong number.
-    val currentAppVersion: String = "1.0.7"
+    val currentAppVersion: String = "1.0.8"
     private val _isCheckingUpdate = MutableStateFlow(false)
     val isCheckingUpdate: StateFlow<Boolean> = _isCheckingUpdate.asStateFlow()
 
@@ -941,6 +954,7 @@ class MainViewModel(
 
     fun installUpdate() {
         val info = _updateInfo.value ?: return
+        _offerUpdate.value = false
         if (updateProgress.value != null) return
         _updateMessage.value = strings.downloadingUpdate(info.versionName)
         scope.launch {
@@ -963,6 +977,10 @@ class MainViewModel(
                 if (info != null) {
                     _updateInfo.value = info
                     _updateMessage.value = strings.updateAvailable(info.versionName)
+                    // Found when the app opened: install it straight away, or offer it, as the person chose.
+                    if (silent) {
+                        if (settings.autoUpdate.value) installUpdate() else _offerUpdate.value = true
+                    }
                 } else if (!silent) {
                     _updateMessage.value = strings.latestVersion
                 }

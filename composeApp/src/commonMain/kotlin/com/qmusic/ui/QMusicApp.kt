@@ -14,7 +14,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -174,6 +178,8 @@ fun QMusicApp(
         val videoByDefault by viewModel.videoByDefault.collectAsState()
         val autoCheckUpdates by viewModel.autoCheckUpdates.collectAsState()
         val updateNotifications by viewModel.updateNotifications.collectAsState()
+        val autoUpdate by viewModel.autoUpdate.collectAsState()
+        val offerUpdate by viewModel.offerUpdate.collectAsState()
 
         val menuSong by viewModel.menuSong.collectAsState()
         val playlistPickerSong by viewModel.playlistPickerSong.collectAsState()
@@ -411,6 +417,8 @@ fun QMusicApp(
                             onRemoveAllDownloads = { viewModel.removeAllDownloads() },
                             autoCheckUpdates = autoCheckUpdates,
                             updateNotifications = updateNotifications,
+                            autoUpdate = autoUpdate,
+                            onAutoUpdateChange = { viewModel.setAutoUpdate(it) },
                             onUpdateNotificationsChange = { viewModel.setUpdateNotifications(it) },
                             onAutoCheckUpdatesChange = { viewModel.setAutoCheckUpdates(it) },
                             updateProgress = updateProgress,
@@ -623,6 +631,32 @@ fun QMusicApp(
             }
 
             // Spotify Import Dialog
+            // A new version: offered when "update automatically" is off, and a progress box while it downloads.
+            val newVersion = updateInfo
+            if (offerUpdate && newVersion != null && updateProgress == null) {
+                AlertDialog(
+                    onDismissRequest = { viewModel.dismissUpdateOffer() },
+                    title = { Text(strings.updateDialogTitle(newVersion.versionName)) },
+                    text = { Text(strings.updateDialogBody) },
+                    confirmButton = { TextButton(onClick = { viewModel.installUpdate() }) { Text(strings.updateNow) } },
+                    dismissButton = { TextButton(onClick = { viewModel.dismissUpdateOffer() }) { Text(strings.updateLater) } },
+                )
+            }
+            updateProgress?.let { progress ->
+                AlertDialog(
+                    onDismissRequest = {},
+                    title = { Text(strings.updatingTitle) },
+                    text = {
+                        Column {
+                            Text(strings.updatingBody)
+                            Spacer(Modifier.height(16.dp))
+                            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                        }
+                    },
+                    confirmButton = {},
+                )
+            }
+
             if (showSpotifyImportDialog) {
                 SpotifyImportDialog(
                     isImporting = isImportingSpotify,

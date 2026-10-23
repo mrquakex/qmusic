@@ -137,6 +137,14 @@ interface AppStrings {
     val crashReport: String
     val crashReportHint: String
     val clearReport: String
+    val autoUpdateTitle: String
+    val autoUpdateSubtitle: String
+    fun updateDialogTitle(version: String): String
+    val updateDialogBody: String
+    val updateNow: String
+    val updateLater: String
+    val updatingTitle: String
+    val updatingBody: String
     val updateNotificationsTitle: String
     val updateNotificationsSubtitle: String
     val playingNow: String
@@ -352,6 +360,14 @@ object TurkishStrings : AppStrings {
     override val crashReport: String = "Son çökme raporu"
     override val crashReportHint: String = "Uygulama beklenmedik şekilde kapandı. Raporu geliştiriciyle paylaşabilirsin."
     override val clearReport: String = "Temizle"
+    override val autoUpdateTitle: String = "Otomatik güncelle"
+    override val autoUpdateSubtitle: String = "Yeni sürümü sormadan indirip kur."
+    override fun updateDialogTitle(version: String): String = "QMusic $version hazır"
+    override val updateDialogBody: String = "Yeni sürümde iyileştirmeler ve yeni özellikler var."
+    override val updateNow: String = "Güncelle"
+    override val updateLater: String = "Sonra"
+    override val updatingTitle: String = "Güncelleniyor"
+    override val updatingBody: String = "Yeni sürüm indiriliyor. Bitince kurulum başlayacak."
     override val updateNotificationsTitle: String = "Güncelleme bildirimleri"
     override val updateNotificationsSubtitle: String = "Yeni sürüm çıkınca haber ver."
     override val playingNow: String = "Şu an çalıyor"
@@ -575,6 +591,14 @@ object EnglishStrings : AppStrings {
     override val crashReport: String = "Last crash report"
     override val crashReportHint: String = "The app closed unexpectedly. You can share the report with the developer."
     override val clearReport: String = "Clear"
+    override val autoUpdateTitle: String = "Update automatically"
+    override val autoUpdateSubtitle: String = "Download and install new versions without asking."
+    override fun updateDialogTitle(version: String): String = "QMusic $version is ready"
+    override val updateDialogBody: String = "The new version has improvements and new features."
+    override val updateNow: String = "Update"
+    override val updateLater: String = "Later"
+    override val updatingTitle: String = "Updating"
+    override val updatingBody: String = "Downloading the new version. Installing starts when it finishes."
     override val updateNotificationsTitle: String = "Update notifications"
     override val updateNotificationsSubtitle: String = "Tell me when a new version is released."
     override val playingNow: String = "Playing now"

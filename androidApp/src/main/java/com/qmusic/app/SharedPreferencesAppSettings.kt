@@ -40,6 +40,14 @@ class SharedPreferencesAppSettings(context: Context) : AppSettings {
         _check.value = enabled
     }
 
+    private val _autoUpdate = MutableStateFlow(prefs.getBoolean(KEY_AUTO_UPDATE, true))
+    override val autoUpdate: StateFlow<Boolean> = _autoUpdate.asStateFlow()
+
+    override fun setAutoUpdate(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_UPDATE, enabled).apply()
+        _autoUpdate.value = enabled
+    }
+
     private val _notify = MutableStateFlow(prefs.getBoolean(KEY_UPDATE_NOTIFICATIONS, true))
     override val updateNotifications: StateFlow<Boolean> = _notify.asStateFlow()
 
@@ -63,6 +71,7 @@ class SharedPreferencesAppSettings(context: Context) : AppSettings {
         const val KEY_AUTO_DOWNLOAD = "auto_download_liked"
         const val KEY_WIFI_ONLY = "wifi_only"
         const val KEY_UPDATE_NOTIFICATIONS = "update_notifications"
+        const val KEY_AUTO_UPDATE = "auto_update"
         const val KEY_VIDEO = "video_by_default"
         const val KEY_CHECK_UPDATES = "check_updates_on_launch"
     }

@@ -28,6 +28,11 @@ interface AppSettings {
 
     fun setUpdateNotifications(enabled: Boolean)
 
+    /** A new version is downloaded and installed without asking first (Android may still show its own sheet). */
+    val autoUpdate: StateFlow<Boolean>
+
+    fun setAutoUpdate(enabled: Boolean)
+
     fun setAutoDownloadLiked(enabled: Boolean)
 
     fun setVideoByDefault(enabled: Boolean)
@@ -68,6 +73,13 @@ class InMemoryAppSettings(
 
     override fun setAutoCheckUpdates(enabled: Boolean) {
         _check.value = enabled
+    }
+
+    private val _autoUpdate = MutableStateFlow(true)
+    override val autoUpdate: StateFlow<Boolean> = _autoUpdate.asStateFlow()
+
+    override fun setAutoUpdate(enabled: Boolean) {
+        _autoUpdate.value = enabled
     }
 
     private val _notify = MutableStateFlow(true)

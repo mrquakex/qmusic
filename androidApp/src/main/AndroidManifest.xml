@@ -46,6 +46,10 @@
                 android:resource="@xml/update_paths" />
         </provider>
 
+        <receiver
+            android:name=".InstallResultReceiver"
+            android:exported="false" />
+
         <service
             android:name=".UpdateMessagingService"
             android:exported="false">
