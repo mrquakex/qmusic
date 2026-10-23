@@ -31,10 +31,10 @@ fun MorphingCover(
 ) {
     if (model == null) return
     Box(modifier = modifier.fillMaxSize()) {
-        AsyncImage(
-            model = model,
+        SharpCover(
+            url = model,
+            px = 800,
             contentDescription = null,
-            contentScale = ContentScale.Crop,
             modifier = Modifier
                 .layout { measurable, _ ->
                     val start = from()

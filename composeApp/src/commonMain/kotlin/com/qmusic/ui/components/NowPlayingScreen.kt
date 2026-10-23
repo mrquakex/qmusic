@@ -182,14 +182,14 @@ fun NowPlayingScreen(
         ) {
         // Backdrop: a small copy of the cover, blown up and blurred, so every song brings its own colors.
         if (artwork != null) {
-            AsyncImage(
-                model = artwork.upscaleThumbnail(256),
+            SharpCover(
+                url = artwork,
+                px = 256,
                 contentDescription = null,
                 modifier = Modifier
                     .fillMaxSize()
                     .blur(60.dp)
                     .alpha(0.55f),
-                contentScale = ContentScale.Crop,
             )
         }
         Box(
@@ -468,12 +468,7 @@ private fun MediaPage(
             contentAlignment = Alignment.Center,
         ) {
             if (artwork != null) {
-                AsyncImage(
-                    model = artwork.upscaleThumbnail(800),
-                    contentDescription = title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
+                SharpCover(url = artwork, px = 800, contentDescription = title, modifier = Modifier.fillMaxSize())
             } else {
                 QMusicLogo(size = 96.dp, tint = Color.White.copy(alpha = 0.8f))
             }

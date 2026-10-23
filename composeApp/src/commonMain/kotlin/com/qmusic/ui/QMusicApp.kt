@@ -54,6 +54,9 @@ import com.qmusic.ui.components.AddToPlaylistDialog
 import com.qmusic.ui.components.EqualizerDialog
 import com.qmusic.ui.components.MorphingCover
 import com.qmusic.ui.components.upscaleThumbnail
+import coil3.SingletonImageLoader
+import coil3.compose.LocalPlatformContext
+import coil3.request.ImageRequest
 import com.qmusic.ui.components.MiniPlayerBar
 import com.qmusic.ui.components.NavBarItem
 import com.qmusic.ui.components.QMusicNavigationBar
@@ -129,6 +132,24 @@ fun QMusicApp(
         val playbackPositionState = viewModel.playbackPosition.collectAsState()
         val bufferedPositionState = viewModel.bufferedPosition.collectAsState()
         val share = rememberShare()
+        // Downloaded songs keep their large covers too: fetched once while online, they show in the full player
+        // without a connection (the small cover is cached anyway by the lists that show it).
+        val platformContext = LocalPlatformContext.current
+        val prefetchedCovers = remember { HashSet<String>() }
+        val songsWithCovers by viewModel.downloadedSongs.collectAsState()
+        val onlineForCovers by viewModel.isOnline.collectAsState()
+        LaunchedEffect(songsWithCovers, onlineForCovers) {
+            if (!onlineForCovers) return@LaunchedEffect
+            val loader = SingletonImageLoader.get(platformContext)
+            songsWithCovers.forEach { song ->
+                val url = song.thumbnail ?: song.thumbnails.lastOrNull()?.url ?: return@forEach
+                if (prefetchedCovers.add(song.id)) {
+                    listOf(800, 256).forEach { px ->
+                        loader.enqueue(ImageRequest.Builder(platformContext).data(url.upscaleThumbnail(px)).build())
+                    }
+                }
+            }
+        }
         val samples by viewModel.samples.collectAsState()
         val listeningStats by viewModel.stats.collectAsState()
         val statsPeriod by viewModel.statsPeriod.collectAsState()
@@ -674,7 +695,7 @@ fun QMusicApp(
                 }
 
                 MorphingCover(
-                    model = currentTrack?.let { it.thumbnail ?: it.thumbnails.lastOrNull()?.url }?.upscaleThumbnail(800),
+                    model = currentTrack?.let { it.thumbnail ?: it.thumbnails.lastOrNull()?.url },
                     from = { miniCover },
                     to = { fullCover },
                     progress = { sheetProgress.value },

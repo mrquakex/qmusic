@@ -33,6 +33,29 @@ import com.qmusic.ui.theme.DarkSurfaceVariant
 fun String.upscaleThumbnail(px: Int): String =
     replace(Regex("=w\\d+-h\\d+"), "=w$px-h$px").replace(Regex("=s\\d+"), "=s$px")
 
+/**
+ * A cover drawn sharp ([px] wide) without ever going blank: the address the small cover already used (in Coil's
+ * cache, so it shows offline too) is drawn first, the large rendition over it once it loads. Offline, a song whose
+ * large cover was never fetched still shows its small one instead of nothing.
+ */
+@Composable
+fun SharpCover(
+    url: String?,
+    px: Int,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop,
+) {
+    if (url == null) return
+    Box(modifier = modifier) {
+        AsyncImage(model = url, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = contentScale)
+        val sharp = url.upscaleThumbnail(px)
+        if (sharp != url) {
+            AsyncImage(model = sharp, contentDescription = contentDescription, modifier = Modifier.fillMaxSize(), contentScale = contentScale)
+        }
+    }
+}
+
 /** Square card used by every horizontal shelf (songs, albums, playlists). */
 @Composable
 fun ShelfCard(
