@@ -65,6 +65,7 @@ import com.qmusic.ui.components.QMusicSplash
 import com.qmusic.ui.components.SongActionsSheet
 import com.qmusic.ui.components.SpotifyImportDialog
 import com.qmusic.ui.screens.ArtistScreen
+import com.qmusic.engine.models.CollectionKind
 import com.qmusic.ui.screens.CollectionScreen
 import com.qmusic.ui.screens.ExploreScreen
 import com.qmusic.ui.screens.ForYouScreen
@@ -132,6 +133,12 @@ fun QMusicApp(
         val playbackPositionState = viewModel.playbackPosition.collectAsState()
         val bufferedPositionState = viewModel.bufferedPosition.collectAsState()
         val share = rememberShare()
+        val related by viewModel.related.collectAsState()
+        val backupFiles = rememberBackupFiles(
+            content = { viewModel.exportBackup() },
+            onSaved = { viewModel.onBackupSaved(it) },
+            onOpened = { viewModel.importBackup(it) },
+        )
         // Downloaded songs keep their large covers too: fetched once while online, they show in the full player
         // without a connection (the small cover is cached anyway by the lists that show it).
         val platformContext = LocalPlatformContext.current
@@ -513,6 +520,8 @@ fun QMusicApp(
                             onOpenEqualizerClick = { viewModel.setShowEqualizerDialog(true) },
                             onCheckUpdateClick = { viewModel.checkForUpdates() },
                             crashReport = crashReport,
+                            onBackupExport = backupFiles?.save,
+                            onBackupImport = backupFiles?.open,
                             onShareCrashReport = { crashReport?.let(share) },
                             onClearCrashReport = { viewModel.clearCrashReport() },
                             videoByDefault = videoByDefault,
@@ -551,13 +560,19 @@ fun QMusicApp(
                             isLoading = isLoadingCollection,
                             error = collectionError,
                             onBack = { viewModel.popRoute() },
-                            onSongClick = { song, context -> viewModel.play(song, context) },
-                            onPlayAll = { viewModel.playAll(it) },
+                            onSongClick = { song, context -> viewModel.play(song, context, gapless = route.item.kind == CollectionKind.ALBUM) },
+                            onPlayAll = { viewModel.playAll(it, gapless = route.item.kind == CollectionKind.ALBUM) },
                             onShuffle = { viewModel.shuffleAll(it) },
                             onSongMore = { viewModel.showSongMenu(it) },
                             downloadedIds = downloadedIds,
                             onToggleFavorite = { viewModel.toggleFavorite(it) },
                             isFavoritePredicate = { it in favoriteIds },
+                            onDownloadAll = { viewModel.downloadAll(it) },
+                            onShare = {
+                                share("${collectionPage?.title ?: route.item.title}\nhttps://music.youtube.com/browse/${route.item.browseId}")
+                            },
+                            onMove = { from, to -> viewModel.moveInYouTubePlaylist(route.item, from, to) },
+                            onDeletePlaylist = { viewModel.deleteYouTubePlaylist(route.item) },
                         )
 
                         is Route.Artist -> ArtistScreen(
@@ -683,6 +698,15 @@ fun QMusicApp(
                             onQueueItemRemove = { viewModel.removeFromQueue(it) },
                             onQueueItemMove = { from, to -> viewModel.moveInQueue(from, to) },
                             onLoadLyrics = { viewModel.loadLyrics() },
+                            related = related,
+                            onLoadRelated = { viewModel.loadRelated() },
+                            onRelatedSongClick = { song, context -> viewModel.play(song, context) },
+                            onRelatedCollectionClick = {
+                                viewModel.setPlayerExpanded(false)
+                                viewModel.openCollection(it)
+                            },
+                            onSaveQueue = { viewModel.saveQueueAsPlaylist(it) },
+                            onClearQueue = { viewModel.clearQueue() },
                             contentAlpha = { ((sheetProgress.value - 0.55f) / 0.45f).coerceIn(0f, 1f) },
                             coverAlpha = { if (coverSettled()) 1f else 0f },
                             backdropAlpha = { (sheetProgress.value * 4f).coerceIn(0f, 1f) },
@@ -722,6 +746,14 @@ fun QMusicApp(
                         viewModel.startRadio(song)
                         viewModel.dismissSongMenu()
                     },
+                    onRemoveFromPlaylist = (topRoute as? Route.Collection)?.takeIf {
+                        collectionPage?.editable == true && collectionPage?.setVideoIds?.containsKey(song.id) == true
+                    }?.let { route ->
+                        {
+                            viewModel.removeFromYouTubePlaylist(route.item, song)
+                            viewModel.dismissSongMenu()
+                        }
+                    },
                     onShare = {
                         share("${song.title} - ${song.artists.joinToString { it.name }}\nhttps://music.youtube.com/watch?v=${song.id}")
                         viewModel.dismissSongMenu()
@@ -758,6 +790,11 @@ fun QMusicApp(
                     },
                     onDismiss = { viewModel.dismissPlaylistPicker() },
                     ytPlaylists = ytPlaylists,
+                    canSaveToYouTube = isLoggedInYouTube,
+                    onCreateOnYouTube = {
+                        viewModel.createPlaylistAndAdd(it, song, onYouTube = true)
+                        viewModel.dismissPlaylistPicker()
+                    },
                     onPickYouTube = {
                         viewModel.addSongToYouTubePlaylist(it, song)
                         viewModel.dismissPlaylistPicker()

@@ -18,7 +18,7 @@ data class SearchSuggestion(
 }
 
 @Serializable
-enum class CollectionKind { PLAYLIST, ALBUM, ARTIST }
+enum class CollectionKind { PLAYLIST, ALBUM, ARTIST, PODCAST }
 
 /** A tappable shelf entry that opens a track list (playlist or album) instead of playing directly. */
 @Serializable
@@ -91,6 +91,15 @@ data class CollectionPage(
     val subtitle: String? = null,
     val thumbnail: String? = null,
     val songs: List<SongItem> = emptyList(),
+    /** "Album • 2005" / "Playlist • 2025": what it is and when. */
+    val kindLine: String? = null,
+    /** "12 songs • 48 minutes". */
+    val countLine: String? = null,
+    val description: String? = null,
+    /** The account owns this playlist: songs can be removed and moved, the playlist deleted. */
+    val editable: Boolean = false,
+    /** Each song's place in the playlist (videoId -> setVideoId), needed to remove or move it. */
+    val setVideoIds: Map<String, String> = emptyMap(),
 )
 
 @Serializable

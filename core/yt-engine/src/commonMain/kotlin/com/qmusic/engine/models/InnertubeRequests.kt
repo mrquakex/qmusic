@@ -55,15 +55,27 @@ data class SearchSuggestionsBody(
     val input: String,
 )
 
+/** One change to a playlist; actions differ in their fields, so each is written out as plain JSON. */
 @Serializable
 data class EditPlaylistBody(
     val context: InnertubeContext,
     val playlistId: String,
-    val actions: List<Action>,
-) {
-    @Serializable
-    data class Action(val action: String, val addedVideoId: String)
-}
+    val actions: List<kotlinx.serialization.json.JsonObject>,
+)
+
+@Serializable
+data class CreatePlaylistBody(
+    val context: InnertubeContext,
+    val title: String,
+    val privacyStatus: String = "PRIVATE",
+    val videoIds: List<String> = emptyList(),
+)
+
+@Serializable
+data class DeletePlaylistBody(
+    val context: InnertubeContext,
+    val playlistId: String,
+)
 
 @Serializable
 data class SubscribeBody(

@@ -53,6 +53,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 import kotlinx.coroutines.flow.stateIn
@@ -75,6 +76,19 @@ sealed interface Route {
     data class Explore(val browseId: String, val params: String?, val title: String) : Route
     data object Stats : Route
 }
+
+/** The backup file: what lives only on this device. */
+@kotlinx.serialization.Serializable
+data class Backup(
+    val version: Int,
+    val favorites: List<SongItem> = emptyList(),
+    val playlists: List<BackupPlaylist> = emptyList(),
+    val history: List<SongItem> = emptyList(),
+    val searches: List<String> = emptyList(),
+)
+
+@kotlinx.serialization.Serializable
+data class BackupPlaylist(val name: String, val songs: List<SongItem>)
 
 enum class StatsPeriod(val days: Int?) { MONTH(30), YEAR(365), ALL(null) }
 
@@ -537,7 +551,8 @@ class MainViewModel(
      * Plays [song]. With a [context] list (the shelf, search results or playlist it was tapped in) the whole
      * list becomes the queue; alone, YouTube Music's radio for the song fills the queue instead.
      */
-    fun play(song: SongItem, context: List<SongItem> = emptyList()) {
+    fun play(song: SongItem, context: List<SongItem> = emptyList(), gapless: Boolean = false) {
+        applyGapless(gapless)
         val index = context.indexOfFirst { it.id == song.id }
         if (index >= 0 && context.size > 1) {
             playerController.playQueue(context, index)
@@ -550,13 +565,24 @@ class MainViewModel(
     /** Plays a list in random order, starting from a random song. */
     fun shuffleAll(songs: List<SongItem>) {
         if (songs.isEmpty()) return
+        applyGapless(false)
         if (!shuffleEnabled.value) playerController.setShuffle(true)
         playerController.playQueue(songs, kotlin.random.Random.nextInt(songs.size))
     }
 
     /** Plays a whole list from its first song (playlist / album "Play"). */
-    fun playAll(songs: List<SongItem>) {
-        if (songs.isNotEmpty()) playerController.playQueue(songs, 0)
+    fun playAll(songs: List<SongItem>, gapless: Boolean = false) {
+        if (songs.isEmpty()) return
+        applyGapless(gapless)
+        playerController.playQueue(songs, 0)
+    }
+
+    /**
+     * Albums play gapless: live records and songs that run into each other are not blended. Any other list gets
+     * the crossfade chosen in Settings back.
+     */
+    private fun applyGapless(gapless: Boolean) {
+        playerController.setCrossfadeDuration(if (gapless) 0 else _crossfadeDuration.value)
     }
 
     fun next() {
@@ -781,12 +807,72 @@ class MainViewModel(
         _playlistPickerSong.value = null
     }
 
-    fun createPlaylistAndAdd(name: String, song: SongItem) {
+    fun createPlaylistAndAdd(name: String, song: SongItem, onYouTube: Boolean = false) {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return
         scope.launch {
-            val id = repository.createPlaylist(trimmed)
-            repository.addSongToPlaylist(id, song)
+            if (onYouTube && youTubeAuth.isLoggedIn) {
+                youTube.createPlaylist(trimmed, listOf(song.id))
+                    .onSuccess {
+                        showMessage(strings.addedToPlaylist(trimmed))
+                        loadYouTubeLibrary()
+                    }
+                    .onFailure { showMessage(strings.couldNotAddToPlaylist) }
+            } else {
+                val id = repository.createPlaylist(trimmed)
+                repository.addSongToPlaylist(id, song)
+            }
+        }
+    }
+
+    // --- Owned YouTube Music playlists: remove, move, delete ---
+    private fun updateCollection(browseId: String, change: (CollectionPage) -> CollectionPage) {
+        val page = collectionCache[browseId] ?: _collectionPage.value ?: return
+        val updated = change(page)
+        collectionCache[browseId] = updated
+        val top = _routes.value.lastOrNull()
+        if (top is Route.Collection && top.item.browseId == browseId) _collectionPage.value = updated
+    }
+
+    fun removeFromYouTubePlaylist(item: CollectionItem, song: SongItem) {
+        val page = collectionCache[item.browseId] ?: return
+        val setVideoId = page.setVideoIds[song.id] ?: return
+        updateCollection(item.browseId) { it.copy(songs = it.songs.filterNot { s -> s.id == song.id }) }
+        scope.launch {
+            youTube.removeFromPlaylist(item.browseId, song.id, setVideoId)
+                .onSuccess { showMessage(strings.removedFromPlaylist) }
+                .onFailure {
+                    updateCollection(item.browseId) { page }
+                    showMessage(strings.couldNotChangePlaylist)
+                }
+        }
+    }
+
+    fun moveInYouTubePlaylist(item: CollectionItem, from: Int, to: Int) {
+        val page = collectionCache[item.browseId] ?: return
+        if (from !in page.songs.indices || to !in page.songs.indices || from == to) return
+        val moved = page.songs.toMutableList().apply { add(to, removeAt(from)) }
+        val setVideoId = page.setVideoIds[moved[to].id] ?: return
+        val successor = moved.getOrNull(to + 1)?.let { page.setVideoIds[it.id] }
+        updateCollection(item.browseId) { it.copy(songs = moved) }
+        scope.launch {
+            youTube.movePlaylistItem(item.browseId, setVideoId, successor).onFailure {
+                updateCollection(item.browseId) { page }
+                showMessage(strings.couldNotChangePlaylist)
+            }
+        }
+    }
+
+    fun deleteYouTubePlaylist(item: CollectionItem) {
+        scope.launch {
+            youTube.deletePlaylist(item.browseId)
+                .onSuccess {
+                    collectionCache.remove(item.browseId)
+                    popRoute()
+                    loadYouTubeLibrary()
+                    showMessage(strings.playlistDeleted)
+                }
+                .onFailure { showMessage(strings.couldNotChangePlaylist) }
         }
     }
 
@@ -841,6 +927,85 @@ class MainViewModel(
         downloads.remove(song.id)
         scope.launch { repository.setDownloaded(song, false) }
     }
+
+    // --- Related (the player's "Related" tab) ---
+    private val _related = MutableStateFlow<List<HomeSection>?>(null)
+    /** Null while loading; empty when YouTube Music has nothing related. */
+    val related: StateFlow<List<HomeSection>?> = _related.asStateFlow()
+    private val relatedCache = HashMap<String, List<HomeSection>>()
+    private var relatedJob: Job? = null
+
+    fun loadRelated() {
+        val song = currentTrack.value ?: return
+        relatedCache[song.id]?.let {
+            _related.value = it
+            return
+        }
+        _related.value = null
+        relatedJob?.cancel()
+        relatedJob = scope.launch {
+            val sections = youTube.related(song.id).getOrDefault(emptyList())
+            relatedCache[song.id] = sections
+            if (currentTrack.value?.id == song.id) _related.value = sections
+        }
+    }
+
+    // --- Queue ---
+    fun clearQueue() = playerController.clearQueue()
+
+    /** Saves what is queued as a playlist on the device (and on YouTube Music when signed in). */
+    fun saveQueueAsPlaylist(name: String) {
+        val trimmed = name.trim()
+        val songs = queue.value
+        if (trimmed.isEmpty() || songs.isEmpty()) return
+        scope.launch {
+            val id = repository.createPlaylist(trimmed)
+            songs.forEach { repository.addSongToPlaylist(id, it) }
+            if (youTubeAuth.isLoggedIn) {
+                youTube.createPlaylist(trimmed, songs.map { it.id }).onSuccess { loadYouTubeLibrary() }
+            }
+            showMessage(strings.queueSaved(trimmed))
+        }
+    }
+
+    // --- Backup: favorites, playlists and history in one file ---
+    /** Everything worth keeping that lives only on this device, as JSON. */
+    suspend fun exportBackup(): String {
+        val playlists = repository.getPlaylists().first().map { playlist ->
+            BackupPlaylist(playlist.name, repository.getPlaylistSongs(playlist.id).first())
+        }
+        val backup = Backup(
+            version = 1,
+            favorites = repository.getFavorites().first(),
+            playlists = playlists,
+            history = repository.getHistory().first().take(BACKUP_HISTORY),
+            searches = repository.getSearchHistory(BACKUP_SEARCHES).first(),
+        )
+        return backupJson.encodeToString(Backup.serializer(), backup)
+    }
+
+    /** Adds what a backup holds to this device (nothing already here is removed). */
+    fun importBackup(text: String) {
+        scope.launch {
+            val backup = runCatching { backupJson.decodeFromString(Backup.serializer(), text) }.getOrNull()
+            if (backup == null) {
+                showMessage(strings.backupInvalid)
+                return@launch
+            }
+            val liked = localFavorites.value.mapTo(HashSet()) { it.id }
+            backup.favorites.filter { it.id !in liked }.forEach { repository.toggleFavorite(it) }
+            val existing = playlists.value.map { it.name }.toSet()
+            backup.playlists.filter { it.name !in existing }.forEach { playlist ->
+                val id = repository.createPlaylist(playlist.name)
+                playlist.songs.forEach { repository.addSongToPlaylist(id, it) }
+            }
+            backup.history.asReversed().forEach { repository.recordHistory(it) }
+            backup.searches.asReversed().forEach { repository.recordSearch(it) }
+            showMessage(strings.backupRestored(backup.favorites.size, backup.playlists.size))
+        }
+    }
+
+    fun onBackupSaved(ok: Boolean) = showMessage(if (ok) strings.backupSaved else strings.backupFailed)
 
     // --- Lyrics ---
     /** Loads the lyrics of the playing song (cached per song). Called when the lyrics page is shown. */
@@ -1370,6 +1535,9 @@ class MainViewModel(
 
     private companion object {
         const val RADIO_REFILL_THRESHOLD = 3
+        const val BACKUP_HISTORY = 500
+        const val BACKUP_SEARCHES = 50
+        val backupJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; prettyPrint = true }
         const val WARM_SPEED_DIAL = 4
         const val WARM_QUICK_PICKS = 4
         const val WARM_PAGE_SONGS = 3

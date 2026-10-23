@@ -272,7 +272,8 @@ internal object BrowseParser {
             "MUSIC_PAGE_TYPE_PLAYLIST" -> CollectionKind.PLAYLIST
             "MUSIC_PAGE_TYPE_ALBUM" -> CollectionKind.ALBUM
             "MUSIC_PAGE_TYPE_ARTIST" -> CollectionKind.ARTIST
-            else -> return null // channels and podcasts have no page in the app yet
+            "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE" -> CollectionKind.PODCAST
+            else -> return null // channels have no page in the app yet
         }
         val thumbs = thumbnails(renderer.path("thumbnailRenderer", "musicThumbnailRenderer", "thumbnail", "thumbnails"))
         return CollectionItem(
@@ -294,14 +295,54 @@ internal object BrowseParser {
         val thumb = thumbnails(micro.path("thumbnail", "thumbnails")).lastOrNull()?.url
 
         val sectionContents = root.path("contents", "twoColumnBrowseResultsRenderer", "secondaryContents", "sectionListRenderer", "contents").arr()
+        val setVideoIds = LinkedHashMap<String, String>()
         val songs = sectionContents.orEmpty().flatMap { section ->
             val shelf = section.path("musicPlaylistShelfRenderer").obj() ?: section.path("musicShelfRenderer").obj()
             shelf?.get("contents").arr().orEmpty().mapNotNull { item ->
-                item.path("musicResponsiveListItemRenderer").obj()?.let { track(it, owner?.let { name -> listOf(Artist(name)) }, thumb) }
+                item.path("musicResponsiveListItemRenderer").obj()?.let { row ->
+                    track(row, owner?.let { name -> listOf(Artist(name)) }, thumb)?.also { song ->
+                        row.path("playlistItemData", "playlistSetVideoId").str()?.let { setVideoIds[song.id] = it }
+                    }
+                } ?: item.path("musicMultiRowListItemRenderer").obj()?.let { episode(it, title) }
             }
         }
-        return CollectionPage(title = title, subtitle = owner, thumbnail = thumb, songs = songs)
+        // The header above the list: what it is, the year, how long, the description; owned playlists are editable.
+        val headerHolder = root.path("contents", "twoColumnBrowseResultsRenderer", "tabs").arr()?.firstOrNull()
+            .path("tabRenderer", "content", "sectionListRenderer", "contents").arr()?.firstOrNull()
+        val editableHeader = headerHolder.path("musicEditablePlaylistDetailHeaderRenderer").obj()
+        val header = editableHeader?.path("header", "musicResponsiveHeaderRenderer") ?: headerHolder.path("musicResponsiveHeaderRenderer")
+        return CollectionPage(
+            title = title.ifBlank { header.path("title").text() },
+            subtitle = header.path("straplineTextOne").text().takeIf { it.isNotBlank() } ?: owner,
+            thumbnail = thumb,
+            songs = songs,
+            kindLine = header.path("subtitle").text().takeIf { it.isNotBlank() },
+            countLine = header.path("secondSubtitle").text().takeIf { it.isNotBlank() },
+            description = header.path("description", "musicDescriptionShelfRenderer", "description").text().takeIf { it.isNotBlank() },
+            editable = editableHeader != null,
+            setVideoIds = setVideoIds,
+        )
     }
+
+    /** A podcast episode row: it plays like a song, with the show as its "artist". */
+    private fun episode(renderer: JsonObject, show: String): SongItem? {
+        val videoId = renderer.path("onTap", "watchEndpoint", "videoId").str() ?: return null
+        val thumbs = thumbnails(renderer.path("thumbnail", "musicThumbnailRenderer", "thumbnail", "thumbnails"))
+        return SongItem(
+            id = videoId,
+            title = renderer["title"].text(),
+            artists = listOf(Artist(show)),
+            thumbnail = thumbs.lastOrNull()?.url,
+            thumbnails = thumbs,
+        )
+    }
+
+    /** The "Related" shelves of a song (songs, albums, artists like it). */
+    fun relatedSections(root: JsonObject): List<HomeSection> =
+        sections(root.path("contents", "sectionListRenderer", "contents").arr())
+
+    /** The browse id of the "Related" tab of a `next` response. */
+    fun relatedBrowseId(nextRoot: JsonObject): String? = watchTabBrowseId(nextRoot, "MPTR")
 
     fun collectionContinuationTracks(root: JsonObject): List<SongItem> =
         root.path("continuationContents", "musicPlaylistShelfContinuation", "contents").arr().orEmpty().mapNotNull { item ->
@@ -485,13 +526,18 @@ internal object BrowseParser {
     // ---- Lyrics --------------------------------------------------------------------------------
 
     /** The browse id of the "Lyrics" tab of a `next` response, or null when the song has none. */
-    fun lyricsBrowseId(nextRoot: JsonObject): String? =
+    fun lyricsBrowseId(nextRoot: JsonObject): String? = watchTabBrowseId(nextRoot, "MPLY")
+
+    /**
+     * A tab of the player page found by its browse id ("MPLY..." lyrics, "MPTR..." related), not by its title:
+     * titles follow the interface language ("Lyrics", "Sözler", ...).
+     */
+    private fun watchTabBrowseId(nextRoot: JsonObject, prefix: String): String? =
         nextRoot.path(
             "contents", "singleColumnMusicWatchNextResultsRenderer", "tabbedRenderer",
             "watchNextTabbedResultsRenderer", "tabs",
         ).arr().orEmpty().firstNotNullOfOrNull { tab ->
-            val renderer = tab.path("tabRenderer").obj() ?: return@firstNotNullOfOrNull null
-            if (renderer["title"].str() == "Lyrics") renderer.path("endpoint", "browseEndpoint", "browseId").str() else null
+            tab.path("tabRenderer", "endpoint", "browseEndpoint", "browseId").str()?.takeIf { it.startsWith(prefix) }
         }
 
     fun lyrics(root: JsonObject): Lyrics? {

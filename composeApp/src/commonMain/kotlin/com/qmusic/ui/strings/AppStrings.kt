@@ -56,6 +56,28 @@ interface AppStrings {
     val exploreMoods: String
     val moreYouMayLike: String
     val tabAlbums: String
+    fun queueSaved(name: String): String
+    val saveQueue: String
+    val clearQueue: String
+    val backupSection: String
+    val backupExport: String
+    val backupExportSubtitle: String
+    val backupImport: String
+    val backupImportSubtitle: String
+    val backupSaved: String
+    val backupFailed: String
+    val backupInvalid: String
+    fun backupRestored(favorites: Int, playlists: Int): String
+    val removedFromPlaylist: String
+    val couldNotChangePlaylist: String
+    val playlistDeleted: String
+    val removeFromThisPlaylist: String
+    val deleteYouTubePlaylistTitle: String
+    val deleteYouTubePlaylistMessage: String
+    val saveToYouTube: String
+    val downloadAll: String
+    val related: String
+    val relatedEmpty: String
     val statsTitle: String
     val statsLast30: String
     val statsLastYear: String
@@ -318,6 +340,28 @@ object TurkishStrings : AppStrings {
     override val exploreMoods: String = "Ruh halleri ve türler"
     override val moreYouMayLike: String = "Beğenebileceğiniz diğer içerikler"
     override val tabAlbums: String = "Albümler"
+    override fun queueSaved(name: String): String = "Sıra \"$name\" olarak kaydedildi"
+    override val saveQueue: String = "Sırayı kaydet"
+    override val clearQueue: String = "Temizle"
+    override val backupSection: String = "Yedekleme"
+    override val backupExport: String = "Yedek al"
+    override val backupExportSubtitle: String = "Favoriler, listeler ve geçmiş tek bir dosyaya."
+    override val backupImport: String = "Yedekten geri yükle"
+    override val backupImportSubtitle: String = "Bir yedek dosyasındakileri bu cihaza ekle."
+    override val backupSaved: String = "Yedek kaydedildi"
+    override val backupFailed: String = "Yedek kaydedilemedi"
+    override val backupInvalid: String = "Bu dosya bir QMusic yedeği değil"
+    override fun backupRestored(favorites: Int, playlists: Int): String = "Geri yüklendi: $favorites favori, $playlists liste"
+    override val removedFromPlaylist: String = "Listeden çıkarıldı"
+    override val couldNotChangePlaylist: String = "Liste değiştirilemedi"
+    override val playlistDeleted: String = "Liste silindi"
+    override val removeFromThisPlaylist: String = "Bu listeden çıkar"
+    override val deleteYouTubePlaylistTitle: String = "Liste silinsin mi?"
+    override val deleteYouTubePlaylistMessage: String = "Liste YouTube Music hesabından da silinir."
+    override val saveToYouTube: String = "YouTube Music'e de kaydet"
+    override val downloadAll: String = "Hepsini indir"
+    override val related: String = "İlgili"
+    override val relatedEmpty: String = "Bu şarkı için öneri bulunamadı"
     override val statsTitle: String = "Dinleme istatistiklerin"
     override val statsLast30: String = "Son 30 gün"
     override val statsLastYear: String = "Son 1 yıl"
@@ -602,6 +646,28 @@ object EnglishStrings : AppStrings {
     override val exploreMoods: String = "Moods & genres"
     override val moreYouMayLike: String = "More you may like"
     override val tabAlbums: String = "Albums"
+    override fun queueSaved(name: String): String = "Queue saved as \"$name\""
+    override val saveQueue: String = "Save queue"
+    override val clearQueue: String = "Clear"
+    override val backupSection: String = "Backup"
+    override val backupExport: String = "Back up"
+    override val backupExportSubtitle: String = "Favorites, playlists and history in one file."
+    override val backupImport: String = "Restore from a backup"
+    override val backupImportSubtitle: String = "Add what a backup file holds to this device."
+    override val backupSaved: String = "Backup saved"
+    override val backupFailed: String = "Could not save the backup"
+    override val backupInvalid: String = "This file is not a QMusic backup"
+    override fun backupRestored(favorites: Int, playlists: Int): String = "Restored $favorites favorites and $playlists playlists"
+    override val removedFromPlaylist: String = "Removed from the playlist"
+    override val couldNotChangePlaylist: String = "Could not change the playlist"
+    override val playlistDeleted: String = "Playlist deleted"
+    override val removeFromThisPlaylist: String = "Remove from this playlist"
+    override val deleteYouTubePlaylistTitle: String = "Delete the playlist?"
+    override val deleteYouTubePlaylistMessage: String = "It is deleted from your YouTube Music account too."
+    override val saveToYouTube: String = "Save on YouTube Music too"
+    override val downloadAll: String = "Download all"
+    override val related: String = "Related"
+    override val relatedEmpty: String = "Nothing related was found for this song"
     override val statsTitle: String = "Your listening"
     override val statsLast30: String = "Last 30 days"
     override val statsLastYear: String = "Last year"

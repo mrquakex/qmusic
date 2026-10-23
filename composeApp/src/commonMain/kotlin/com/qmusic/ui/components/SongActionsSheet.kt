@@ -52,6 +52,7 @@ fun SongActionsSheet(
     onGoToArtist: (() -> Unit)?,
     modifier: Modifier = Modifier,
     onStartRadio: () -> Unit = {},
+    onRemoveFromPlaylist: (() -> Unit)? = null,
     onShare: () -> Unit = {},
 ) {
     ModalBottomSheet(
@@ -108,6 +109,7 @@ fun SongActionsSheet(
             ActionRow(QMusicIcons.Next, s.playNext, onPlayNext)
             ActionRow(QMusicIcons.Queue, s.addToQueue, onAddToQueue)
             ActionRow(QMusicIcons.PlaylistAdd, s.addToPlaylist, onAddToPlaylist)
+            if (onRemoveFromPlaylist != null) ActionRow(QMusicIcons.Trash, s.removeFromThisPlaylist, onRemoveFromPlaylist)
             ActionRow(
                 icon = if (isFavorite) QMusicIcons.HeartFilled else QMusicIcons.Heart,
                 label = if (isFavorite) s.removeFromFavorites else s.addToFavorites,

@@ -35,7 +35,9 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
 
 /**
  * High-level YouTube Music facade providing search, song metadata, and stream URL resolution.
@@ -234,11 +236,57 @@ class YouTube(
 
     /** Adds a song to one of the account's playlists ([playlistBrowseId] as listed, "VL..."). */
     suspend fun addToPlaylist(playlistBrowseId: String, videoId: String): Result<Unit> =
+        editPlaylist(playlistBrowseId, buildJsonObject { put("action", "ACTION_ADD_VIDEO"); put("addedVideoId", videoId) })
+
+    /** Takes a song out of an owned playlist; [setVideoId] is its place in the list (from the playlist page). */
+    suspend fun removeFromPlaylist(playlistBrowseId: String, videoId: String, setVideoId: String): Result<Unit> =
+        editPlaylist(
+            playlistBrowseId,
+            buildJsonObject { put("action", "ACTION_REMOVE_VIDEO"); put("removedVideoId", videoId); put("setVideoId", setVideoId) },
+        )
+
+    /** Moves a song of an owned playlist to just before [beforeSetVideoId] (to the end when null). */
+    suspend fun movePlaylistItem(playlistBrowseId: String, setVideoId: String, beforeSetVideoId: String?): Result<Unit> =
+        editPlaylist(
+            playlistBrowseId,
+            buildJsonObject {
+                put("action", "ACTION_MOVE_VIDEO_BEFORE")
+                put("setVideoId", setVideoId)
+                beforeSetVideoId?.let { put("movedSetVideoIdSuccessor", it) }
+            },
+        )
+
+    private suspend fun editPlaylist(playlistBrowseId: String, action: JsonObject): Result<Unit> =
         runCatching {
             check(ytmusic.auth?.isLoggedIn == true) { "Not signed in" }
-            val response = ytmusic.addToPlaylist(playlistBrowseId.removePrefix("VL"), videoId)
+            val response = ytmusic.editPlaylist(playlistBrowseId.removePrefix("VL"), listOf(action))
             check(response.status.value in 200..299) { "YouTube Music answered ${response.status.value}" }
-            check("STATUS_SUCCEEDED" in response.bodyAsText()) { "YouTube Music did not add it" }
+            check("STATUS_SUCCEEDED" in response.bodyAsText()) { "YouTube Music did not change it" }
+        }
+
+    /** Creates a private playlist on the account; returns its browse id ("VL..."). */
+    suspend fun createPlaylist(title: String, videoIds: List<String> = emptyList()): Result<String> =
+        runCatching {
+            check(ytmusic.auth?.isLoggedIn == true) { "Not signed in" }
+            val root = json.parseToJsonElement(ytmusic.createPlaylist(title, videoIds).bodyAsText()).jsonObject
+            val id = root["playlistId"]?.jsonPrimitive?.contentOrNull ?: error("YouTube Music did not create it")
+            "VL$id"
+        }
+
+    suspend fun deletePlaylist(playlistBrowseId: String): Result<Unit> =
+        runCatching {
+            check(ytmusic.auth?.isLoggedIn == true) { "Not signed in" }
+            val response = ytmusic.deletePlaylist(playlistBrowseId.removePrefix("VL"))
+            check(response.status.value in 200..299) { "YouTube Music answered ${response.status.value}" }
+        }
+
+    /** Songs, albums and artists like [videoId] (the player's "Related" tab). */
+    suspend fun related(videoId: String): Result<List<HomeSection>> =
+        runCatching {
+            if (ytmusic.auth?.isLoggedIn != true) ytmusic.ensureVisitorData()
+            val next = json.parseToJsonElement(ytmusic.next(videoId = videoId, client = YouTubeClient.WEB_REMIX).bodyAsText()).jsonObject
+            val browseId = BrowseParser.relatedBrowseId(next) ?: return@runCatching emptyList()
+            BrowseParser.relatedSections(json.parseToJsonElement(ytmusic.browse(browseId).bodyAsText()).jsonObject)
         }
 
     /** Subscribes the signed-in account to an artist's channel, or ends the subscription. */

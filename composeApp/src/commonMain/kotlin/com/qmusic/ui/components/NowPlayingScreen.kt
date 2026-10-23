@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -151,6 +152,12 @@ fun NowPlayingScreen(
     onQueueItemRemove: (Int) -> Unit,
     onQueueItemMove: (Int, Int) -> Unit,
     onLoadLyrics: () -> Unit,
+    related: List<com.qmusic.engine.models.HomeSection>? = null,
+    onLoadRelated: () -> Unit = {},
+    onRelatedSongClick: (SongItem, List<SongItem>) -> Unit = { _, _ -> },
+    onRelatedCollectionClick: (com.qmusic.engine.models.CollectionItem) -> Unit = {},
+    onSaveQueue: (String) -> Unit = {},
+    onClearQueue: () -> Unit = {},
     modifier: Modifier = Modifier,
     /** Controls fade in over the last part of the drag, like YouTube Music's. */
     contentAlpha: () -> Float = { 1f },
@@ -160,7 +167,7 @@ fun NowPlayingScreen(
     /** The sheet's backdrop fades in over the first part of the drag so the mini player shows through. */
     backdropAlpha: () -> Float = { 1f },
 ) {
-    val pagerState = rememberPagerState(pageCount = { 3 })
+    val pagerState = rememberPagerState(pageCount = { 4 })
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     var showSleepDialog by remember { mutableStateOf(false) }
@@ -169,6 +176,7 @@ fun NowPlayingScreen(
 
     LaunchedEffect(pagerState.currentPage, track.id) {
         if (pagerState.currentPage == 1) onLoadLyrics()
+        if (pagerState.currentPage == 3) onLoadRelated()
     }
 
     val dragState = rememberDraggableState(onSheetDrag)
@@ -249,7 +257,7 @@ fun NowPlayingScreen(
                     )
 
                     1 -> LyricsPage(lyrics, positionMs, onSeekTo)
-                    else -> QueuePage(
+                    2 -> QueuePage(
                         queue = queue,
                         queueIndex = queueIndex,
                         isPlaying = isPlaying,
@@ -257,7 +265,11 @@ fun NowPlayingScreen(
                         onClick = onQueueItemClick,
                         onRemove = onQueueItemRemove,
                         onMove = onQueueItemMove,
+                        onSave = onSaveQueue,
+                        onClear = onClearQueue,
                     )
+
+                    else -> RelatedPage(related, onRelatedSongClick, onRelatedCollectionClick)
                 }
             }
 
@@ -289,6 +301,10 @@ fun NowPlayingScreen(
                     onDownload = onToggleDownload,
                     onSleep = { showSleepDialog = true },
                     onEqualizer = onOpenEqualizer,
+                    relatedOpen = pagerState.currentPage == 3,
+                    onRelated = {
+                        scope.launch { pagerState.animateScrollToPage(if (pagerState.currentPage == 3) 0 else 3) }
+                    },
                 )
     
                 SeekBar(
@@ -521,6 +537,41 @@ private fun LyricsPage(state: LyricsState, positionMs: () -> Long, onSeekTo: (Lo
     }
 }
 
+/** Songs, albums and artists like the one playing, as YouTube Music shows them under "Related". */
+@Composable
+private fun RelatedPage(
+    sections: List<com.qmusic.engine.models.HomeSection>?,
+    onSongClick: (SongItem, List<SongItem>) -> Unit,
+    onCollectionClick: (com.qmusic.engine.models.CollectionItem) -> Unit,
+) {
+    val s = LocalStrings.current
+    when {
+        sections == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = Color.White)
+        }
+
+        sections.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(s.relatedEmpty, color = Color.White.copy(alpha = 0.6f))
+        }
+
+        else -> LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+            contentPadding = PaddingValues(vertical = 8.dp),
+        ) {
+            items(sections.size) { index ->
+                com.qmusic.ui.screens.HomeShelf(
+                    section = sections[index],
+                    onSongClick = onSongClick,
+                    onSongMore = {},
+                    onPlayAll = { songs -> songs.firstOrNull()?.let { onSongClick(it, songs) } },
+                    onCollectionClick = onCollectionClick,
+                )
+            }
+        }
+    }
+}
+
 /** Lines that follow the song: the one being sung is bright, the rest dim, and tapping a line jumps to it. */
 @Composable
 private fun SyncedLyrics(lyrics: Lyrics, positionMs: () -> Long, onSeekTo: (Long) -> Unit) {
@@ -585,9 +636,35 @@ private fun QueuePage(
     onClick: (Int) -> Unit,
     onRemove: (Int) -> Unit,
     onMove: (Int, Int) -> Unit,
+    onSave: (String) -> Unit = {},
+    onClear: () -> Unit = {},
 ) {
     val s = LocalStrings.current
     val listState = rememberLazyListState()
+    var naming by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf("") }
+    if (naming) {
+        AlertDialog(
+            onDismissRequest = { naming = false },
+            title = { Text(s.saveQueue) },
+            text = {
+                androidx.compose.material3.OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    label = { Text(s.playlistNameLabel) },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onSave(name)
+                    naming = false
+                    name = ""
+                }, enabled = name.isNotBlank()) { Text(s.save) }
+            },
+            dismissButton = { TextButton(onClick = { naming = false }) { Text(s.cancel) } },
+        )
+    }
     var draggingKey by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     val rowHeightPx = with(LocalDensity.current) { QUEUE_ROW_HEIGHT.toPx() }
@@ -616,6 +693,12 @@ private fun QueuePage(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
+        item(key = "queue-actions") {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { naming = true }) { Text(s.saveQueue, color = Color.White) }
+                if (queue.size > 1) TextButton(onClick = onClear) { Text(s.clearQueue, color = Color.White.copy(alpha = 0.75f)) }
+            }
+        }
         itemsIndexed(queue, key = { index, _ -> keys[index] }) { index, song ->
             val current = index == queueIndex
             val key = keys[index]
@@ -818,6 +901,8 @@ private fun ChipsRow(
     onDownload: () -> Unit,
     onSleep: () -> Unit,
     onEqualizer: () -> Unit,
+    relatedOpen: Boolean = false,
+    onRelated: () -> Unit = {},
 ) {
     val s = LocalStrings.current
     Row(
@@ -829,6 +914,7 @@ private fun ChipsRow(
     ) {
         LikeChip(isFavorite = isFavorite, label = if (isFavorite) s.liked else s.like, onClick = onToggleFavorite)
         ActionChip(QMusicIcons.Lyrics, s.lyrics, active = lyricsOpen, onClick = onLyrics)
+        ActionChip(QMusicIcons.Samples, s.related, active = relatedOpen, onClick = onRelated)
         ActionChip(QMusicIcons.PlaylistAdd, s.save, active = false, onClick = onAddToPlaylist)
         if (downloadProgress != null) {
             Row(

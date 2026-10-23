@@ -8,6 +8,8 @@ import com.qmusic.engine.models.NextBody
 import com.qmusic.engine.models.PlayerBody
 import com.qmusic.engine.models.SearchBody
 import com.qmusic.engine.models.SearchSuggestionsBody
+import com.qmusic.engine.models.CreatePlaylistBody
+import com.qmusic.engine.models.DeletePlaylistBody
 import com.qmusic.engine.models.EditPlaylistBody
 import com.qmusic.engine.models.SubscribeBody
 import com.qmusic.engine.models.YouTubeClient
@@ -169,20 +171,26 @@ class Ytmusic(
             )
         }
 
-    suspend fun addToPlaylist(
+    suspend fun editPlaylist(
         playlistId: String,
-        videoId: String,
+        actions: List<kotlinx.serialization.json.JsonObject>,
         client: YouTubeClient = YouTubeClient.WEB_REMIX,
     ): HttpResponse =
         httpClient.post("${BASE_URL}browse/edit_playlist") {
             applyInnertubeHeaders(client, setLogin = true)
-            setBody(
-                EditPlaylistBody(
-                    context = client.toContext(locale, visitorData),
-                    playlistId = playlistId,
-                    actions = listOf(EditPlaylistBody.Action("ACTION_ADD_VIDEO", videoId)),
-                ),
-            )
+            setBody(EditPlaylistBody(context = client.toContext(locale, visitorData), playlistId = playlistId, actions = actions))
+        }
+
+    suspend fun createPlaylist(title: String, videoIds: List<String>, client: YouTubeClient = YouTubeClient.WEB_REMIX): HttpResponse =
+        httpClient.post("${BASE_URL}playlist/create") {
+            applyInnertubeHeaders(client, setLogin = true)
+            setBody(CreatePlaylistBody(context = client.toContext(locale, visitorData), title = title, videoIds = videoIds))
+        }
+
+    suspend fun deletePlaylist(playlistId: String, client: YouTubeClient = YouTubeClient.WEB_REMIX): HttpResponse =
+        httpClient.post("${BASE_URL}playlist/delete") {
+            applyInnertubeHeaders(client, setLogin = true)
+            setBody(DeletePlaylistBody(context = client.toContext(locale, visitorData), playlistId = playlistId))
         }
 
     suspend fun subscribe(

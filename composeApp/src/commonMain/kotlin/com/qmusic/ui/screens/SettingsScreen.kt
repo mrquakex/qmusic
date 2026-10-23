@@ -70,6 +70,8 @@ fun SettingsScreen(
     onOpenSpotifyImport: () -> Unit,
     modifier: Modifier = Modifier,
     crashReport: String? = null,
+    onBackupExport: (() -> Unit)? = null,
+    onBackupImport: (() -> Unit)? = null,
     onShareCrashReport: () -> Unit = {},
     onClearCrashReport: () -> Unit = {},
     updateProgress: Float? = null,
@@ -333,6 +335,14 @@ fun SettingsScreen(
                 } else null,
                 onClick = { onLanguageChange("en") },
             )
+        }
+
+        if (onBackupExport != null && onBackupImport != null) {
+            Section(s.backupSection) {
+                ActionRow(icon = QMusicIcons.Download, title = s.backupExport, subtitle = s.backupExportSubtitle, onClick = onBackupExport)
+                RowDivider()
+                ActionRow(icon = QMusicIcons.History, title = s.backupImport, subtitle = s.backupImportSubtitle, onClick = onBackupImport)
+            }
         }
 
         Section(s.sectionAbout) {

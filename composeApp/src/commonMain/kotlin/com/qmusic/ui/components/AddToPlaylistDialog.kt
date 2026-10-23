@@ -42,7 +42,10 @@ fun AddToPlaylistDialog(
     onDismiss: () -> Unit,
     ytPlaylists: List<CollectionItem> = emptyList(),
     onPickYouTube: (CollectionItem) -> Unit = {},
+    canSaveToYouTube: Boolean = false,
+    onCreateOnYouTube: (String) -> Unit = {},
 ) {
+    var onYouTube by remember { mutableStateOf(canSaveToYouTube) }
     var creating by remember { mutableStateOf(playlists.isEmpty() && ytPlaylists.isEmpty()) }
     var name by remember { mutableStateOf("") }
     val s = LocalStrings.current
@@ -68,6 +71,18 @@ fun AddToPlaylistDialog(
                         label = { Text(s.playlistNameLabel) },
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    if (canSaveToYouTube) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onYouTube = !onYouTube }
+                                .padding(top = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            androidx.compose.material3.Checkbox(checked = onYouTube, onCheckedChange = { onYouTube = it })
+                            Text(s.saveToYouTube, color = MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
                 } else {
                     LazyColumn(modifier = Modifier.heightIn(max = 280.dp)) {
                         item {
@@ -137,7 +152,10 @@ fun AddToPlaylistDialog(
         },
         confirmButton = {
             if (creating) {
-                TextButton(onClick = { onCreate(name) }, enabled = name.isNotBlank()) { Text(s.create) }
+                TextButton(
+                    onClick = { if (canSaveToYouTube && onYouTube) onCreateOnYouTube(name) else onCreate(name) },
+                    enabled = name.isNotBlank(),
+                ) { Text(s.create) }
             }
         },
         dismissButton = {
