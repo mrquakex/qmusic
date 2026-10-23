@@ -22,12 +22,35 @@ data class CollectionItem(
     val kind: CollectionKind = CollectionKind.PLAYLIST,
 )
 
+/** How a home shelf is drawn: square cards, wide video cards, or rows of songs in columns of four. */
+enum class SectionStyle { CARDS, VIDEOS, ROWS }
+
 /** One shelf of the YouTube Music home page ("Quick picks", "Listen again", ...). */
 @Serializable
 data class HomeSection(
     val title: String,
     val songs: List<SongItem> = emptyList(),
     val collections: List<CollectionItem> = emptyList(),
+    /** The small line above the title ("ORVIX", "BECAUSE YOU LISTENED TO"). */
+    val strapline: String? = null,
+    /** The round picture next to the title (the account, or the artist the shelf is about). */
+    val avatar: String? = null,
+    val style: SectionStyle = SectionStyle.CARDS,
+    /** The shelf offers "Play all". */
+    val canPlayAll: Boolean = false,
+)
+
+/** A mood filter at the top of the home page ("Energize", "Relax", ...). */
+@Serializable
+data class HomeChip(
+    val text: String,
+    val params: String,
+)
+
+/** One page of the home feed: the filter chips come with the first page only. */
+data class HomePage(
+    val chips: List<HomeChip>,
+    val sections: List<HomeSection>,
 )
 
 @Serializable

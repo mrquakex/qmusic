@@ -42,19 +42,18 @@ fun ShelfCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(
+    Column(
         modifier = modifier
-            .width(140.dp)
+            .width(150.dp)
+            .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
+        run {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(10.dp))
                     .background(DarkSurfaceVariant),
                 contentAlignment = Alignment.Center,
             ) {

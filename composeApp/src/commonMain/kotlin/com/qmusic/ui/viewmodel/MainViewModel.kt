@@ -10,6 +10,7 @@ import com.qmusic.engine.models.ArtistPage
 import com.qmusic.engine.models.CollectionItem
 import com.qmusic.engine.models.CollectionKind
 import com.qmusic.engine.models.CollectionPage
+import com.qmusic.engine.models.HomeChip
 import com.qmusic.engine.models.HomeSection
 import com.qmusic.engine.models.Lyrics
 import com.qmusic.engine.models.SearchFilter
@@ -37,13 +38,18 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.filterNotNull
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.TimeSource
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
@@ -231,6 +237,20 @@ class MainViewModel(
     // Home Screen State
     private val _homeSections = MutableStateFlow<List<HomeSection>>(emptyList())
     val homeSections: StateFlow<List<HomeSection>> = _homeSections.asStateFlow()
+
+    private val _homeChips = MutableStateFlow<List<HomeChip>>(emptyList())
+    val homeChips: StateFlow<List<HomeChip>> = _homeChips.asStateFlow()
+
+    private val _selectedHomeChip = MutableStateFlow<String?>(null)
+    val selectedHomeChip: StateFlow<String?> = _selectedHomeChip.asStateFlow()
+
+    private val _isLoadingMoreHome = MutableStateFlow(false)
+    val isLoadingMoreHome: StateFlow<Boolean> = _isLoadingMoreHome.asStateFlow()
+
+    private val _homeScrollToTop = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val homeScrollToTop: SharedFlow<Unit> = _homeScrollToTop.asSharedFlow()
+
+    private var lastHomeTap: TimeSource.Monotonic.ValueTimeMark? = null
 
     private val _isLoadingHome = MutableStateFlow(false)
     val isLoadingHome: StateFlow<Boolean> = _isLoadingHome.asStateFlow()
@@ -780,17 +800,57 @@ class MainViewModel(
     // --- Home Screen Content ---
     /** Loads the YouTube Music home page; personalised once the user has signed in. */
     fun loadHomeContent() {
+        loadHome(_selectedHomeChip.value)
+    }
+
+    /** Applies a mood chip to the home feed; tapping the chosen chip again goes back to the plain feed. */
+    fun selectHomeChip(chip: HomeChip) {
+        val params = if (_selectedHomeChip.value == chip.params) null else chip.params
+        _selectedHomeChip.value = params
+        loadHome(params)
+    }
+
+    /** What a tap on a bottom tab does: Home pressed while shown scrolls to the top, and twice in a row refreshes. */
+    fun onTabClicked(tab: ScreenTab) {
+        if (tab == ScreenTab.HOME && _currentTab.value == ScreenTab.HOME) {
+            val last = lastHomeTap
+            if (last != null && last.elapsedNow() < DOUBLE_TAP_WINDOW) {
+                lastHomeTap = null
+                loadHomeContent()
+            } else {
+                lastHomeTap = TimeSource.Monotonic.markNow()
+                _homeScrollToTop.tryEmit(Unit)
+            }
+        } else {
+            lastHomeTap = null
+        }
+        selectTab(tab)
+    }
+
+    private fun loadHome(params: String?) {
         homeJob?.cancel()
         _isLoadingHome.value = true
+        _isLoadingMoreHome.value = false
         _homeError.value = null
         homeJob = scope.launch {
-            youTube.home().onSuccess { sections ->
-                _homeSections.value = sections
-                if (sections.isEmpty()) _homeError.value = strings.youtubeReturnedNothing
+            var first = true
+            youTube.home(params) { page ->
+                if (first) {
+                    first = false
+                    _homeSections.value = page.sections
+                    if (page.chips.isNotEmpty()) _homeChips.value = page.chips
+                    _isLoadingHome.value = false
+                    _isLoadingMoreHome.value = true
+                } else {
+                    _homeSections.value = _homeSections.value + page.sections
+                }
+            }.onSuccess {
+                if (_homeSections.value.isEmpty()) _homeError.value = strings.youtubeReturnedNothing
             }.onFailure { throwable ->
                 _homeError.value = throwable.message ?: strings.couldNotLoadYouTube
             }
             _isLoadingHome.value = false
+            _isLoadingMoreHome.value = false
         }
     }
 
@@ -993,6 +1053,7 @@ class MainViewModel(
 
     private companion object {
         const val RADIO_REFILL_THRESHOLD = 3
+        val DOUBLE_TAP_WINDOW = 500.milliseconds
         const val SUGGESTION_DEBOUNCE_MS = 250L
     }
 }

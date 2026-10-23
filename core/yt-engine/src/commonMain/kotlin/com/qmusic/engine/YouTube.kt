@@ -11,6 +11,7 @@ import com.qmusic.engine.models.ArtistPage
 import com.qmusic.engine.models.CollectionPage
 import com.qmusic.engine.models.Lyrics
 import com.qmusic.engine.models.SearchResultsPage
+import com.qmusic.engine.models.HomePage
 import com.qmusic.engine.models.HomeSection
 import com.qmusic.engine.models.SearchSuggestion
 import com.qmusic.engine.models.ITAG
@@ -44,6 +45,9 @@ class YouTube(
     private companion object {
         /** 100 songs per page: 30 pages covers libraries of up to ~3000 liked songs. */
         const val LIKED_MAX_PAGES = 30
+
+        /** The home feed ends after about six pages; this is only a safety stop. */
+        const val HOME_MAX_PAGES = 10
 
         val STREAM_CLIENTS = listOf(
             YouTubeClient.ANDROID_VR,
@@ -130,20 +134,27 @@ class YouTube(
      * The YouTube Music home page: personalised when an account is set via [setAuth], the generic
      * charts-style shelves otherwise. Follows up to [maxContinuations] extra pages of shelves.
      */
-    suspend fun home(maxContinuations: Int = 2): Result<List<HomeSection>> =
+    /**
+     * The home feed, handed over page by page so the first shelves can be shown while the rest still load.
+     * [params] is the mood chip being applied ("Energize"); null is the plain feed.
+     */
+    suspend fun home(
+        params: String? = null,
+        maxContinuations: Int = HOME_MAX_PAGES,
+        onPage: suspend (HomePage) -> Unit,
+    ): Result<Unit> =
         runCatching {
             if (ytmusic.auth?.isLoggedIn != true) ytmusic.ensureVisitorData()
-            val first = json.parseToJsonElement(ytmusic.browse("FEmusic_home").bodyAsText()).jsonObject
-            val sections = BrowseParser.homeSections(first).toMutableList()
+            val first = json.parseToJsonElement(ytmusic.browse("FEmusic_home", params = params).bodyAsText()).jsonObject
+            onPage(HomePage(BrowseParser.homeChips(first), BrowseParser.homeSections(first)))
             var token = BrowseParser.homeContinuation(first)
             var pages = 0
             while (token != null && pages < maxContinuations) {
                 val next = json.parseToJsonElement(ytmusic.browse(continuation = token).bodyAsText()).jsonObject
-                sections += BrowseParser.homeSectionsFromContinuation(next)
+                onPage(HomePage(emptyList(), BrowseParser.homeSectionsFromContinuation(next)))
                 token = BrowseParser.homeContinuationToken(next)
                 pages++
             }
-            sections
         }
 
     /** Autocomplete for the search box; for a signed-in account this includes its own past searches. */

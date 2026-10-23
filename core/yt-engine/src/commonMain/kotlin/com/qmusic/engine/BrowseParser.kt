@@ -8,7 +8,9 @@ import com.qmusic.engine.models.SearchResultsPage
 import com.qmusic.engine.models.CollectionItem
 import com.qmusic.engine.models.CollectionKind
 import com.qmusic.engine.models.CollectionPage
+import com.qmusic.engine.models.HomeChip
 import com.qmusic.engine.models.HomeSection
+import com.qmusic.engine.models.SectionStyle
 import com.qmusic.engine.models.SearchSuggestion
 import com.qmusic.engine.models.SongItem
 import com.qmusic.engine.models.Thumbnail
@@ -69,25 +71,81 @@ internal object BrowseParser {
         container.path("continuations").arr()?.firstOrNull()
             .path("nextContinuationData", "continuation").str()
 
+    /** The mood filters above the first shelf ("Energize", "Relax", ...). */
+    fun homeChips(root: JsonObject): List<HomeChip> {
+        val list = root.path("contents", "singleColumnBrowseResultsRenderer", "tabs")
+            .arr()?.firstOrNull()
+            .path("tabRenderer", "content", "sectionListRenderer")
+        return list.path("header", "chipCloudRenderer", "chips").arr().orEmpty().mapNotNull { chip ->
+            val renderer = chip.path("chipCloudChipRenderer")
+            val text = renderer.path("text").text()
+            val params = renderer.path("navigationEndpoint", "browseEndpoint", "params").str()
+            if (text.isBlank() || params == null) null else HomeChip(text, params)
+        }
+    }
+
     private fun sections(contents: JsonArray?): List<HomeSection> =
         contents.orEmpty().mapNotNull { element ->
-            val shelf = element.path("musicCarouselShelfRenderer").obj() ?: return@mapNotNull null
-            val title = shelf.path("header", "musicCarouselShelfBasicHeaderRenderer", "title").text()
-            if (title.isBlank()) return@mapNotNull null
+            element.path("musicCarouselShelfRenderer").obj()?.let(::carouselSection)
+                ?: element.path("musicShelfRenderer").obj()?.let(::listSection)
+        }
 
-            val songs = mutableListOf<SongItem>()
-            val collections = mutableListOf<CollectionItem>()
-            shelf["contents"].arr().orEmpty().forEach { item ->
-                item.path("musicResponsiveListItemRenderer").obj()?.let { renderer ->
-                    track(renderer)?.let(songs::add)
-                }
-                item.path("musicTwoRowItemRenderer").obj()?.let { renderer ->
-                    twoRowSong(renderer)?.let(songs::add)
-                        ?: twoRowCollection(renderer)?.let(collections::add)
+    /** A horizontal shelf: cards, videos or (for "Quick picks") song rows. */
+    private fun carouselSection(shelf: JsonObject): HomeSection? {
+        val header = shelf.path("header", "musicCarouselShelfBasicHeaderRenderer")
+        val title = header.path("title").text()
+        if (title.isBlank()) return null
+
+        val songs = mutableListOf<SongItem>()
+        val collections = mutableListOf<CollectionItem>()
+        var rows = 0
+        var wide = 0
+        shelf["contents"].arr().orEmpty().forEach { item ->
+            item.path("musicResponsiveListItemRenderer").obj()?.let { renderer ->
+                track(renderer)?.let {
+                    songs.add(it)
+                    rows++
                 }
             }
-            if (songs.isEmpty() && collections.isEmpty()) null else HomeSection(title, songs, collections)
+            item.path("musicTwoRowItemRenderer").obj()?.let { renderer ->
+                val song = twoRowSong(renderer)
+                if (song != null) {
+                    songs.add(song)
+                    if (renderer["aspectRatio"].str()?.endsWith("RECTANGLE_16_9") == true) wide++
+                } else {
+                    twoRowCollection(renderer)?.let(collections::add)
+                }
+            }
         }
+        if (songs.isEmpty() && collections.isEmpty()) return null
+
+        val strapline = header.path("strapline").text().takeIf { it.isNotBlank() }
+        val total = songs.size + collections.size
+        val style = when {
+            rows > 0 && collections.isEmpty() -> SectionStyle.ROWS
+            // Shelves made of clips ("Music videos for you") are drawn wide; "Listen again" keeps square covers.
+            wide > 0 && wide * 5 >= total * 4 && strapline == null -> SectionStyle.VIDEOS
+            else -> SectionStyle.CARDS
+        }
+        return HomeSection(
+            title = title,
+            songs = songs,
+            collections = collections,
+            strapline = strapline,
+            avatar = thumbnails(header.path("thumbnail", "musicThumbnailRenderer", "thumbnail", "thumbnails")).lastOrNull()?.url,
+            style = style,
+            canPlayAll = header.path("moreContentButton", "buttonRenderer", "navigationEndpoint", "watchEndpoint") != null,
+        )
+    }
+
+    /** A vertical list shelf ("Long tracks"): drawn as song rows. */
+    private fun listSection(shelf: JsonObject): HomeSection? {
+        val title = shelf["title"].text()
+        if (title.isBlank()) return null
+        val songs = shelf["contents"].arr().orEmpty().mapNotNull { it.path("musicResponsiveListItemRenderer").obj()?.let(::track) }
+        if (songs.isEmpty()) return null
+        return HomeSection(title = title, songs = songs, style = SectionStyle.ROWS)
+    }
 
     private fun twoRowSong(renderer: JsonObject): SongItem? {
         val videoId = renderer.path("navigationEndpoint", "watchEndpoint", "videoId").str() ?: return null

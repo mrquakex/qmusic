@@ -124,6 +124,9 @@ fun QMusicApp(
         val playbackPositionState = viewModel.playbackPosition.collectAsState()
         val bufferedPositionState = viewModel.bufferedPosition.collectAsState()
         val share = rememberShare()
+        val homeChips by viewModel.homeChips.collectAsState()
+        val selectedHomeChip by viewModel.selectedHomeChip.collectAsState()
+        val isLoadingMoreHome by viewModel.isLoadingMoreHome.collectAsState()
         val crashReport by viewModel.crashReport.collectAsState()
         val duration by viewModel.duration.collectAsState()
         val crossfadeDuration by viewModel.crossfadeDuration.collectAsState()
@@ -318,7 +321,7 @@ fun QMusicApp(
                             onSelect = { index ->
                                 // Tapping a tab leaves any open page, as in every music app.
                                 viewModel.clearRoutes()
-                                viewModel.selectTab(navTabs[index].tab)
+                                viewModel.onTabClicked(navTabs[index].tab)
                             },
                         )
                     }
@@ -332,10 +335,17 @@ fun QMusicApp(
                     when (currentTab) {
                         ScreenTab.HOME -> HomeScreen(
                             sections = homeSections,
+                            chips = homeChips,
+                            selectedChip = selectedHomeChip,
                             isLoading = isLoadingHome,
+                            isLoadingMore = isLoadingMoreHome,
                             error = homeError,
                             isLoggedIn = isLoggedInYouTube,
+                            scrollToTop = viewModel.homeScrollToTop,
                             onSongClick = { song, context -> viewModel.play(song, context) },
+                            onSongMore = { viewModel.showSongMenu(it) },
+                            onPlayAll = { viewModel.playAll(it) },
+                            onChipClick = { viewModel.selectHomeChip(it) },
                             onCollectionClick = { viewModel.openCollection(it) },
                             onSearchClick = { viewModel.selectTab(ScreenTab.SEARCH) },
                             onSignIn = { viewModel.setShowYouTubeLoginDialog(true) },

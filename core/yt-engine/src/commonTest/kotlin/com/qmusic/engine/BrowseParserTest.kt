@@ -318,4 +318,36 @@ class BrowseParserTest {
         // No type information at all means audio only.
         assertTrue(!com.qmusic.engine.models.SongItem(id = "x", title = "x").hasVideo)
     }
+
+    @Test
+    fun homeChipsStraplineAndShelfStylesAreRead() {
+        val wide = """{"musicTwoRowItemRenderer":{"aspectRatio":"MUSIC_TWO_ROW_ITEM_THUMBNAIL_ASPECT_RATIO_RECTANGLE_16_9",
+          "title":{"runs":[{"text":"Clip"}]},"subtitle":{"runs":[{"text":"Artist"}]},
+          "navigationEndpoint":{"watchEndpoint":{"videoId":"vid00000001"}}}}"""
+        val root = parse(
+            """{"contents":{"singleColumnBrowseResultsRenderer":{"tabs":[{"tabRenderer":{"content":{"sectionListRenderer":{
+              "header":{"chipCloudRenderer":{"chips":[
+                {"chipCloudChipRenderer":{"text":{"runs":[{"text":"Energize"}]},"navigationEndpoint":{"browseEndpoint":{"browseId":"FEmusic_home","params":"P1"}}}},
+                {"chipCloudChipRenderer":{"text":{"runs":[{"text":"Relax"}]},"navigationEndpoint":{"browseEndpoint":{"browseId":"FEmusic_home","params":"P2"}}}}]}},
+              "contents":[
+                {"musicCarouselShelfRenderer":{"header":{"musicCarouselShelfBasicHeaderRenderer":{
+                  "title":{"runs":[{"text":"Music videos for you"}]},
+                  "moreContentButton":{"buttonRenderer":{"navigationEndpoint":{"watchEndpoint":{"videoId":"vid00000001"}}}}}},
+                  "contents":[$wide,$wide]}},
+                {"musicCarouselShelfRenderer":{"header":{"musicCarouselShelfBasicHeaderRenderer":{
+                  "title":{"runs":[{"text":"Listen again"}]},"strapline":{"runs":[{"text":"SOMEONE"}]}}},
+                  "contents":[$wide]}}
+              ]}}}}]}}}""",
+        )
+        val chips = BrowseParser.homeChips(root)
+        assertEquals(listOf("Energize", "Relax"), chips.map { it.text })
+        assertEquals("P2", chips[1].params)
+
+        val sections = BrowseParser.homeSections(root)
+        assertEquals(com.qmusic.engine.models.SectionStyle.VIDEOS, sections[0].style)
+        assertTrue(sections[0].canPlayAll)
+        // A shelf with a strapline keeps square covers even when its items are clips.
+        assertEquals(com.qmusic.engine.models.SectionStyle.CARDS, sections[1].style)
+        assertEquals("SOMEONE", sections[1].strapline)
+    }
 }
