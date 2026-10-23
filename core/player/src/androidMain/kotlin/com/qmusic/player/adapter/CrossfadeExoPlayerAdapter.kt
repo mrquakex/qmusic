@@ -268,6 +268,14 @@ class CrossfadeExoPlayerAdapter(
         if (index in _queue.value.indices) playAt(index)
     }
 
+    override fun moveInQueue(from: Int, to: Int) {
+        val queue = _queue.value
+        if (from !in queue.indices || to !in queue.indices || from == to) return
+        _queue.value = queue.toMutableList().apply { add(to, removeAt(from)) }
+        _queueIndex.value = com.qmusic.player.movedIndex(_queueIndex.value, from, to)
+        prefetchNext()
+    }
+
     override fun removeFromQueue(index: Int) {
         val queue = _queue.value
         if (index !in queue.indices) return

@@ -22,6 +22,7 @@ import com.qmusic.engine.models.VideoSource
 import com.qmusic.engine.models.Thumbnail
 import com.qmusic.engine.models.YouTubeClient
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.encodeURLParameter
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -198,6 +199,25 @@ class YouTube(
             ).jsonObject
             val browseId = BrowseParser.lyricsBrowseId(next) ?: return@runCatching null
             BrowseParser.lyrics(json.parseToJsonElement(ytmusic.browse(browseId).bodyAsText()).jsonObject)
+        }
+
+    /**
+     * Lyrics that move with the song (from the open LRCLIB service), or null when there are none for it.
+     * They are matched on title, artist and length, so a different recording is not picked up by mistake.
+     */
+    suspend fun syncedLyrics(title: String, artist: String, durationSeconds: Int?): Result<Lyrics?> =
+        runCatching {
+            val query = buildString {
+                append("https://lrclib.net/api/get?track_name=").append(title.encodeURLParameter())
+                append("&artist_name=").append(artist.encodeURLParameter())
+                if (durationSeconds != null && durationSeconds > 0) append("&duration=").append(durationSeconds)
+            }
+            val body = ytmusic.fetchText(query) ?: return@runCatching null
+            val root = json.parseToJsonElement(body).jsonObject
+            val synced = root["syncedLyrics"]?.jsonPrimitive?.contentOrNull ?: return@runCatching null
+            val lines = LrcParser.parse(synced)
+            if (lines.isEmpty()) return@runCatching null
+            Lyrics(text = lines.joinToString("\n") { it.text }, source = "LRCLIB", lines = lines)
         }
 
     /** The signed-in account's "Liked music" playlist (empty when nobody is signed in). */

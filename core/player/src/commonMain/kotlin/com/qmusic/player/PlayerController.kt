@@ -54,6 +54,9 @@ interface PlayerController {
 
     fun removeFromQueue(index: Int)
 
+    /** Moves the song at [from] to position [to] of the queue; the song that is playing keeps playing. */
+    fun moveInQueue(from: Int, to: Int)
+
     fun next()
 
     /** Restarts the current song when more than a few seconds in, otherwise goes to the previous one. */

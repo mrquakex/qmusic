@@ -78,6 +78,14 @@ class NoOpPlayerController : PlayerController {
         if (index in _queue.value.indices) start(index)
     }
 
+    override fun moveInQueue(from: Int, to: Int) {
+        val queue = _queue.value
+        if (from !in queue.indices || to !in queue.indices || from == to) return
+        val moved = queue.toMutableList().apply { add(to, removeAt(from)) }
+        _queue.value = moved
+        _queueIndex.value = movedIndex(_queueIndex.value, from, to)
+    }
+
     override fun removeFromQueue(index: Int) {
         if (index !in _queue.value.indices) return
         val current = _queueIndex.value

@@ -131,6 +131,12 @@ interface AppStrings {
     val lyrics: String
     val lyricsUnavailable: String
     val queueEmpty: String
+    val share: String
+    val startRadio: String
+    val reorderQueue: String
+    val crashReport: String
+    val crashReportHint: String
+    val clearReport: String
     val playingNow: String
     val removeFromQueue: String
     val unknownArtist: String
@@ -338,6 +344,12 @@ object TurkishStrings : AppStrings {
     override val lyrics: String = "Şarkı sözleri"
     override val lyricsUnavailable: String = "Bu şarkı için şarkı sözü bulunamadı"
     override val queueEmpty: String = "Sıra boş"
+    override val share: String = "Paylaş"
+    override val startRadio: String = "Radyo başlat"
+    override val reorderQueue: String = "Sırayı değiştir"
+    override val crashReport: String = "Son çökme raporu"
+    override val crashReportHint: String = "Uygulama beklenmedik şekilde kapandı. Raporu geliştiriciyle paylaşabilirsin."
+    override val clearReport: String = "Temizle"
     override val playingNow: String = "Şu an çalıyor"
     override val removeFromQueue: String = "Sıradan kaldır"
     override val unknownArtist: String = "Bilinmeyen sanatçı"
@@ -553,6 +565,12 @@ object EnglishStrings : AppStrings {
     override val lyrics: String = "Lyrics"
     override val lyricsUnavailable: String = "No lyrics for this song"
     override val queueEmpty: String = "The queue is empty"
+    override val share: String = "Share"
+    override val startRadio: String = "Start radio"
+    override val reorderQueue: String = "Reorder"
+    override val crashReport: String = "Last crash report"
+    override val crashReportHint: String = "The app closed unexpectedly. You can share the report with the developer."
+    override val clearReport: String = "Clear"
     override val playingNow: String = "Playing now"
     override val removeFromQueue: String = "Remove from queue"
     override val unknownArtist: String = "Unknown artist"

@@ -15,6 +15,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.horizontalScroll
@@ -56,6 +57,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +68,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.zIndex
+import com.qmusic.engine.models.Lyrics
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -140,6 +146,7 @@ fun NowPlayingScreen(
     onSleepAtEndOfTrack: () -> Unit,
     onQueueItemClick: (Int) -> Unit,
     onQueueItemRemove: (Int) -> Unit,
+    onQueueItemMove: (Int, Int) -> Unit,
     onLoadLyrics: () -> Unit,
     modifier: Modifier = Modifier,
     /** Controls fade in over the last part of the drag, like YouTube Music's. */
@@ -238,7 +245,7 @@ fun NowPlayingScreen(
                         modifier = Modifier.draggable(dragState, Orientation.Vertical, onDragStopped = { onSheetDragStopped(it) }),
                     )
 
-                    1 -> LyricsPage(lyrics)
+                    1 -> LyricsPage(lyrics, positionMs, onSeekTo)
                     else -> QueuePage(
                         queue = queue,
                         queueIndex = queueIndex,
@@ -246,6 +253,7 @@ fun NowPlayingScreen(
                         visible = pagerState.currentPage == 2,
                         onClick = onQueueItemClick,
                         onRemove = onQueueItemRemove,
+                        onMove = onQueueItemMove,
                     )
                 }
             }
@@ -474,7 +482,7 @@ private fun MediaPage(
 }
 
 @Composable
-private fun LyricsPage(state: LyricsState) {
+private fun LyricsPage(state: LyricsState, positionMs: () -> Long, onSeekTo: (Long) -> Unit) {
     val s = LocalStrings.current
     Box(
         modifier = Modifier
@@ -491,7 +499,7 @@ private fun LyricsPage(state: LyricsState) {
                 color = Color.White.copy(alpha = 0.6f),
             )
 
-            is LyricsState.Available -> Column(
+            is LyricsState.Available -> if (state.lyrics.isSynced) SyncedLyrics(state.lyrics, positionMs, onSeekTo) else Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState()),
@@ -515,6 +523,61 @@ private fun LyricsPage(state: LyricsState) {
     }
 }
 
+/** Lines that follow the song: the one being sung is bright, the rest dim, and tapping a line jumps to it. */
+@Composable
+private fun SyncedLyrics(lyrics: Lyrics, positionMs: () -> Long, onSeekTo: (Long) -> Unit) {
+    val lines = lyrics.lines
+    val listState = rememberLazyListState()
+    // Read inside derivedStateOf: the position ticks 4 times a second, but this only changes when a new line starts.
+    val active by remember(lines) {
+        derivedStateOf { lines.indexOfLast { it.timeMs <= positionMs() + LYRIC_LEAD_MS } }
+    }
+    LaunchedEffect(active) {
+        if (active >= 0) listState.animateScrollToItem(maxOf(active - 1, 0))
+    }
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 160.dp),
+    ) {
+        itemsIndexed(lines) { index, line ->
+            val alpha by animateFloatAsState(
+                targetValue = when {
+                    index == active -> 1f
+                    index < active -> 0.35f
+                    else -> 0.55f
+                },
+                label = "lyricAlpha",
+            )
+            Text(
+                text = line.text.ifBlank { "\u266A" },
+                style = MaterialTheme.typography.titleLarge.copy(lineHeight = 32.sp, fontWeight = FontWeight.Bold),
+                color = Color.White.copy(alpha = alpha),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onSeekTo(line.timeMs) }
+                    .padding(vertical = 8.dp),
+            )
+        }
+        lyrics.source?.let { source ->
+            item {
+                Text(
+                    text = source,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(top = 16.dp),
+                )
+            }
+        }
+    }
+}
+
+/** The line is shown this much before its time, since reading is quicker than the ear. */
+private const val LYRIC_LEAD_MS = 250L
+
+private val QUEUE_ROW_HEIGHT = 60.dp
+
 @Composable
 private fun QueuePage(
     queue: List<SongItem>,
@@ -523,11 +586,24 @@ private fun QueuePage(
     visible: Boolean,
     onClick: (Int) -> Unit,
     onRemove: (Int) -> Unit,
+    onMove: (Int, Int) -> Unit,
 ) {
     val s = LocalStrings.current
     val listState = rememberLazyListState()
+    var draggingKey by remember { mutableStateOf<String?>(null) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    val rowHeightPx = with(LocalDensity.current) { QUEUE_ROW_HEIGHT.toPx() }
+    // A stable identity per entry (the same song may be queued twice), so a row keeps its drag while it moves.
+    val keys = remember(queue) {
+        val seen = HashMap<String, Int>()
+        queue.map { song ->
+            val n = seen[song.id] ?: 0
+            seen[song.id] = n + 1
+            "${song.id}#$n"
+        }
+    }
     LaunchedEffect(visible, queueIndex) {
-        if (visible && queueIndex in queue.indices) listState.animateScrollToItem((queueIndex - 1).coerceAtLeast(0))
+        if (visible && draggingKey == null && queueIndex in queue.indices) listState.animateScrollToItem((queueIndex - 1).coerceAtLeast(0))
     }
 
     if (queue.isEmpty()) {
@@ -542,11 +618,22 @@ private fun QueuePage(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
-        itemsIndexed(queue, key = { index, song -> "$index:${song.id}" }) { index, song ->
+        itemsIndexed(queue, key = { index, _ -> keys[index] }) { index, song ->
             val current = index == queueIndex
+            val key = keys[index]
+            val dragged = draggingKey == key
+            val latestIndex by rememberUpdatedState(index)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .height(QUEUE_ROW_HEIGHT)
+                    .then(
+                        if (dragged) {
+                            Modifier.zIndex(1f).graphicsLayer { translationY = dragOffset; shadowElevation = 24f }
+                        } else {
+                            Modifier.animateItem()
+                        },
+                    )
                     .clip(RoundedCornerShape(12.dp))
                     .background(if (current) Color.White.copy(alpha = 0.10f) else Color.Transparent)
                     .clickable { onClick(index) }
@@ -603,6 +690,45 @@ private fun QueuePage(
                         )
                     }
                 }
+                Icon(
+                    imageVector = QMusicIcons.DragHandle,
+                    contentDescription = s.reorderQueue,
+                    tint = Color.White.copy(alpha = 0.5f),
+                    modifier = Modifier
+                        .size(40.dp)
+                        .padding(10.dp)
+                        .pointerInput(key) {
+                            var live = 0
+                            detectDragGestures(
+                                onDragStart = {
+                                    live = latestIndex
+                                    draggingKey = key
+                                    dragOffset = 0f
+                                },
+                                onDragEnd = {
+                                    draggingKey = null
+                                    dragOffset = 0f
+                                },
+                                onDragCancel = {
+                                    draggingKey = null
+                                    dragOffset = 0f
+                                },
+                            ) { change, amount ->
+                                change.consume()
+                                dragOffset += amount.y
+                                // One row passed: swap places and keep the finger on the row.
+                                if (dragOffset > rowHeightPx && live < queue.lastIndex) {
+                                    onMove(live, live + 1)
+                                    live += 1
+                                    dragOffset -= rowHeightPx
+                                } else if (dragOffset < -rowHeightPx && live > 0) {
+                                    onMove(live, live - 1)
+                                    live -= 1
+                                    dragOffset += rowHeightPx
+                                }
+                            }
+                        },
+                )
             }
         }
     }

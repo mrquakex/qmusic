@@ -119,6 +119,8 @@ fun QMusicApp(
         // Only the players read this: it ticks every 250 ms and must not recompose the whole app.
         val playbackPositionState = viewModel.playbackPosition.collectAsState()
         val bufferedPositionState = viewModel.bufferedPosition.collectAsState()
+        val share = rememberShare()
+        val crashReport by viewModel.crashReport.collectAsState()
         val duration by viewModel.duration.collectAsState()
         val crossfadeDuration by viewModel.crossfadeDuration.collectAsState()
         val isPlayerExpanded by viewModel.isPlayerExpanded.collectAsState()
@@ -395,6 +397,9 @@ fun QMusicApp(
                             onCrossfadeChange = { viewModel.setCrossfadeDuration(it) },
                             onOpenEqualizerClick = { viewModel.setShowEqualizerDialog(true) },
                             onCheckUpdateClick = { viewModel.checkForUpdates() },
+                            crashReport = crashReport,
+                            onShareCrashReport = { crashReport?.let(share) },
+                            onClearCrashReport = { viewModel.clearCrashReport() },
                             videoByDefault = videoByDefault,
                             onVideoByDefaultChange = { viewModel.setVideoByDefault(it) },
                             autoDownload = autoDownload,
@@ -524,6 +529,7 @@ fun QMusicApp(
                             onSleepAtEndOfTrack = { viewModel.setSleepAtEndOfTrack() },
                             onQueueItemClick = { viewModel.skipToQueueIndex(it) },
                             onQueueItemRemove = { viewModel.removeFromQueue(it) },
+                            onQueueItemMove = { from, to -> viewModel.moveInQueue(from, to) },
                             onLoadLyrics = { viewModel.loadLyrics() },
                             contentAlpha = { ((sheetProgress.value - 0.55f) / 0.45f).coerceIn(0f, 1f) },
                             coverAlpha = { if (coverSettled()) 1f else 0f },
@@ -560,6 +566,14 @@ fun QMusicApp(
                         viewModel.dismissSongMenu()
                     },
                     onAddToPlaylist = { viewModel.showPlaylistPicker(song) },
+                    onStartRadio = {
+                        viewModel.startRadio(song)
+                        viewModel.dismissSongMenu()
+                    },
+                    onShare = {
+                        share("${song.title} - ${song.artists.joinToString { it.name }}\nhttps://music.youtube.com/watch?v=${song.id}")
+                        viewModel.dismissSongMenu()
+                    },
                     onToggleFavorite = {
                         viewModel.toggleFavorite(song)
                         viewModel.dismissSongMenu()

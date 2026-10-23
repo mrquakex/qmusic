@@ -69,6 +69,9 @@ fun SettingsScreen(
     onCheckUpdateClick: () -> Unit,
     onOpenSpotifyImport: () -> Unit,
     modifier: Modifier = Modifier,
+    crashReport: String? = null,
+    onShareCrashReport: () -> Unit = {},
+    onClearCrashReport: () -> Unit = {},
     updateProgress: Float? = null,
     onInstallUpdate: () -> Unit = {},
     videoByDefault: Boolean = false,
@@ -307,6 +310,20 @@ fun SettingsScreen(
                 subtitle = "github.com/mrquakex/qmusic",
                 onClick = { runCatching { uriHandler.openUri(REPOSITORY_URL) } },
             )
+            if (crashReport != null) {
+                RowDivider()
+                ActionRow(
+                    icon = null,
+                    title = s.crashReport,
+                    subtitle = s.crashReportHint,
+                    action = {
+                        Column {
+                            TextButton(onClick = onShareCrashReport) { Text(s.share) }
+                            TextButton(onClick = onClearCrashReport) { Text(s.clearReport) }
+                        }
+                    },
+                )
+            }
             RowDivider()
             Text(
                 text = s.aboutLicense,

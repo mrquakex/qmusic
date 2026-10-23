@@ -13,6 +13,7 @@ import com.qmusic.engine.models.YouTubeLocale
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.get
 import io.ktor.client.request.headers
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
@@ -53,6 +54,12 @@ class Ytmusic(
                     )
                 }
             }
+    }
+
+    /** A plain GET (used for the lyrics service); null when the server does not answer with success. */
+    suspend fun fetchText(url: String): String? {
+        val response = httpClient.get(url) { userAgent("QMusic (https://github.com/mrquakex/qmusic)") }
+        return if (response.status.value in 200..299) response.bodyAsText() else null
     }
 
     private fun HttpRequestBuilder.applyInnertubeHeaders(

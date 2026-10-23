@@ -73,4 +73,14 @@ data class ArtistPage(
 data class Lyrics(
     val text: String,
     val source: String? = null,
+    /** Lines with the moment each one starts; empty when the lyrics are plain text only. */
+    val lines: List<LyricLine> = emptyList(),
+) {
+    val isSynced: Boolean get() = lines.isNotEmpty()
+}
+
+@Serializable
+data class LyricLine(
+    val timeMs: Long,
+    val text: String,
 )

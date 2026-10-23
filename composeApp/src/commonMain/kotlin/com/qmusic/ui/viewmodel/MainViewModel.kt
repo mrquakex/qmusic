@@ -21,6 +21,8 @@ import com.qmusic.player.NoOpDownloadController
 import com.qmusic.player.PlayerController
 import com.qmusic.player.RepeatMode
 import com.qmusic.settings.AppSettings
+import com.qmusic.settings.CrashReports
+import com.qmusic.settings.NoCrashReports
 import com.qmusic.settings.InMemoryAppSettings
 import com.qmusic.spotify.SpotifyImporter
 import com.qmusic.updater.GithubReleaseUpdateChecker
@@ -43,6 +45,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
 enum class ScreenTab {
@@ -89,6 +92,7 @@ class MainViewModel(
     autoLoadHome: Boolean = true,
     val downloads: DownloadController = NoOpDownloadController(),
     val settings: AppSettings = InMemoryAppSettings(),
+    val crashReports: CrashReports = NoCrashReports(),
     /** Whether the connection is unmetered (Wi-Fi); automatic downloads wait for it when "Wi-Fi only" is on. */
     private val isUnmetered: () -> Boolean = { true },
     /** Keeps the queue topped up with YouTube Music's radio as the end approaches (off in unit tests: it uses the network). */
@@ -446,6 +450,21 @@ class MainViewModel(
         playerController.removeFromQueue(index)
     }
 
+    fun moveInQueue(from: Int, to: Int) {
+        playerController.moveInQueue(from, to)
+    }
+
+    /** Plays [song] alone; the queue then fills itself with songs like it (YouTube Music's radio). */
+    fun startRadio(song: SongItem) {
+        playerController.play(song)
+    }
+
+    val crashReport: StateFlow<String?> = crashReports.lastReport
+
+    fun clearCrashReport() {
+        crashReports.clear()
+    }
+
     fun toggleShuffle() {
         playerController.setShuffle(!shuffleEnabled.value)
     }
@@ -655,13 +674,13 @@ class MainViewModel(
         }
         _lyricsState.value = LyricsState.Loading
         lyricsJob = scope.launch {
-            youTube.lyrics(song.id).onSuccess { lyrics ->
-                lyricsCache[song.id] = lyrics
-                if (currentTrack.value?.id == song.id) {
-                    _lyricsState.value = lyrics?.let(LyricsState::Available) ?: LyricsState.Unavailable
-                }
-            }.onFailure {
-                if (currentTrack.value?.id == song.id) _lyricsState.value = LyricsState.Unavailable
+            // Lines that move with the song are preferred; YouTube Music's plain text is the fallback.
+            val synced = async { youTube.syncedLyrics(song.title, song.artists.joinToString(", ") { it.name }, song.duration).getOrNull() }
+            val plain = youTube.lyrics(song.id).getOrNull()
+            val lyrics = synced.await() ?: plain
+            lyricsCache[song.id] = lyrics
+            if (currentTrack.value?.id == song.id) {
+                _lyricsState.value = lyrics?.let(LyricsState::Available) ?: LyricsState.Unavailable
             }
         }
     }

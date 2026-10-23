@@ -51,6 +51,8 @@ fun SongActionsSheet(
     onToggleDownload: () -> Unit,
     onGoToArtist: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    onStartRadio: () -> Unit = {},
+    onShare: () -> Unit = {},
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -102,6 +104,7 @@ fun SongActionsSheet(
             val s = LocalStrings.current
             HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
 
+            ActionRow(QMusicIcons.Radio, s.startRadio, onStartRadio)
             ActionRow(QMusicIcons.Next, s.playNext, onPlayNext)
             ActionRow(QMusicIcons.Queue, s.addToQueue, onAddToQueue)
             ActionRow(QMusicIcons.PlaylistAdd, s.addToPlaylist, onAddToPlaylist)
@@ -115,6 +118,7 @@ fun SongActionsSheet(
                 label = if (isDownloaded) s.removeDownload else s.download,
                 onClick = onToggleDownload,
             )
+            ActionRow(QMusicIcons.Share, s.share, onShare)
             if (onGoToArtist != null) {
                 ActionRow(QMusicIcons.Account, s.goToArtist, onGoToArtist)
             }
