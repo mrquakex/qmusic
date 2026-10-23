@@ -21,6 +21,8 @@ import com.qmusic.player.DownloadController
 import com.qmusic.player.NoOpDownloadController
 import com.qmusic.player.PlayerController
 import com.qmusic.player.RepeatMode
+import com.qmusic.network.AlwaysOnline
+import com.qmusic.network.ConnectivityMonitor
 import com.qmusic.settings.AppSettings
 import com.qmusic.settings.CrashReports
 import com.qmusic.settings.NoCrashReports
@@ -99,6 +101,7 @@ class MainViewModel(
     val downloads: DownloadController = NoOpDownloadController(),
     val settings: AppSettings = InMemoryAppSettings(),
     val crashReports: CrashReports = NoCrashReports(),
+    val connectivity: ConnectivityMonitor = AlwaysOnline(),
     /** Whether the connection is unmetered (Wi-Fi); automatic downloads wait for it when "Wi-Fi only" is on. */
     private val isUnmetered: () -> Boolean = { true },
     /** Keeps the queue topped up with YouTube Music's radio as the end approaches (off in unit tests: it uses the network). */
@@ -185,6 +188,17 @@ class MainViewModel(
      * The "Speed dial" grid at the top of the home page: what was played last, then the liked songs. (YouTube
      * Music builds this on its servers; here it comes from this device's history and likes.)
      */
+    val isOnline: StateFlow<Boolean> = connectivity.isOnline
+
+    /** Which Library tab to open with: 0 favorites ... 2 downloads. Set by "Go to downloads" on the home page. */
+    private val _libraryStartTab = MutableStateFlow(0)
+    val libraryStartTab: StateFlow<Int> = _libraryStartTab.asStateFlow()
+
+    fun openDownloads() {
+        _libraryStartTab.value = LIBRARY_DOWNLOADS_TAB
+        selectTab(ScreenTab.LIBRARY)
+    }
+
     val speedDial: StateFlow<List<SongItem>> by lazy {
         combine(history, favorites) { recent, liked ->
             (recent + liked).distinctBy { it.id }.take(SPEED_DIAL_SIZE)
@@ -363,7 +377,7 @@ class MainViewModel(
 
     // Update Checker State
     // Keep equal to versionName in androidApp/build.gradle.kts, or the update check compares against the wrong number.
-    val currentAppVersion: String = "1.0.9"
+    val currentAppVersion: String = "1.0.10"
     private val _isCheckingUpdate = MutableStateFlow(false)
     val isCheckingUpdate: StateFlow<Boolean> = _isCheckingUpdate.asStateFlow()
 
@@ -377,6 +391,14 @@ class MainViewModel(
         youTube.setAuth(youTubeAuth)
         youTube.setLanguage(settings.language.value)
         if (autoLoadHome) {
+            // Back online: a home page that failed or never loaded fills itself in.
+            scope.launch {
+                connectivity.isOnline.collect { online ->
+                    if (online && (_homeSections.value.isEmpty() || _homeError.value != null) && !_isLoadingHome.value) {
+                        loadHomeContent()
+                    }
+                }
+            }
             loadHomeContent()
             if (youTubeAuth.isLoggedIn) loadLikedSongs()
             if (settings.autoCheckUpdates.value) checkForUpdates(silent = true)
@@ -840,6 +862,7 @@ class MainViewModel(
             }
         } else {
             lastHomeTap = null
+            if (tab == ScreenTab.LIBRARY) _libraryStartTab.value = 0
         }
         selectTab(tab)
     }
@@ -934,6 +957,25 @@ class MainViewModel(
                 if (_routes.value.lastOrNull() == route) _collectionError.value = throwable.message ?: strings.couldNotOpenPage
             }
             if (_routes.value.lastOrNull() == route) _isLoadingCollection.value = false
+        }
+    }
+
+    /** Subscribe / unsubscribe on the open artist page; shown at once, undone if YouTube Music refuses. */
+    fun toggleArtistSubscription() {
+        val page = _artistPage.value ?: return
+        val channelId = page.channelId ?: return
+        if (!youTubeAuth.isLoggedIn) {
+            setShowYouTubeLoginDialog(true)
+            return
+        }
+        val updated = page.copy(subscribed = !page.subscribed)
+        _artistPage.value = updated
+        artistCache.entries.firstOrNull { it.value.channelId == channelId }?.let { artistCache[it.key] = updated }
+        scope.launch {
+            youTube.setSubscribed(channelId, updated.subscribed).onFailure {
+                if (_artistPage.value?.channelId == channelId) _artistPage.value = page
+                artistCache.entries.firstOrNull { it.value.channelId == channelId }?.let { artistCache[it.key] = page }
+            }
         }
     }
 
@@ -1070,6 +1112,7 @@ class MainViewModel(
 
     private companion object {
         const val RADIO_REFILL_THRESHOLD = 3
+        const val LIBRARY_DOWNLOADS_TAB = 2
         const val SPEED_DIAL_SIZE = 17 // two pages of nine, one slot of which is the dice
         val DOUBLE_TAP_WINDOW = 500.milliseconds
         const val SUGGESTION_DEBOUNCE_MS = 250L

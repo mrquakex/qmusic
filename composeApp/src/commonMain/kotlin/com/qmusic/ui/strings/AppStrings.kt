@@ -15,6 +15,10 @@ interface AppStrings {
     val refreshHome: String
     val playAllShelf: String
     val speedDial: String
+    val offlineTitle: String
+    fun offlineWithDownloads(count: Int): String
+    val offlineWithoutDownloads: String
+    val goToDownloads: String
     val randomSong: String
     val searchPlaceholder: String
     val signInYouTubeMusic: String
@@ -116,6 +120,8 @@ interface AppStrings {
 
     // Artist / Collection / Local Playlist
     val sectionTopSongs: String
+    val subscribe: String
+    val subscribedLabel: String
     val back: String
     fun songsCount(n: Int): String
     val renamePlaylist: String
@@ -232,6 +238,10 @@ object TurkishStrings : AppStrings {
     override val refreshHome: String = "Ana sayfayı yenile"
     override val playAllShelf: String = "Tümünü oynat"
     override val speedDial: String = "Hızlı arama"
+    override val offlineTitle: String = "İnternet bağlantısı yok"
+    override fun offlineWithDownloads(count: Int): String = "İndirdiğin $count şarkıyı çevrimdışı dinleyebilirsin."
+    override val offlineWithoutDownloads: String = "Bağlandığında ana sayfa kendiliğinden yenilenecek."
+    override val goToDownloads: String = "İndirilenlere git"
     override val randomSong: String = "Rastgele şarkı çal"
     override val searchPlaceholder: String = "Şarkı, sanatçı veya albüm ara..."
     override val signInYouTubeMusic: String = "YouTube Music'e giriş yap"
@@ -342,7 +352,9 @@ object TurkishStrings : AppStrings {
     override val sourceCodeTitle: String = "Kaynak kodu"
     override val aboutLicense: String = "GNU GPL v3 kapsamında açık kaynaklıdır. Ses akışları açık kaynaklı PipePipe ayıklayıcısı ile çözülür."
 
-    override val sectionTopSongs: String = "Popüler şarkılar"
+    override val sectionTopSongs: String = "En çok dinlenen şarkılar"
+    override val subscribe: String = "Abone ol"
+    override val subscribedLabel: String = "Abone olundu"
     override val back: String = "Geri"
     override fun songsCount(n: Int): String = "$n şarkı"
     override val renamePlaylist: String = "Çalma listesini yeniden adlandır"
@@ -465,6 +477,11 @@ object EnglishStrings : AppStrings {
     override val refreshHome: String = "Refresh Home"
     override val playAllShelf: String = "Play all"
     override val speedDial: String = "Speed dial"
+    override val offlineTitle: String = "No internet connection"
+    override fun offlineWithDownloads(count: Int): String =
+        "You can listen to your $count downloaded ${if (count == 1) "song" else "songs"} offline."
+    override val offlineWithoutDownloads: String = "Home will refresh by itself once you are back online."
+    override val goToDownloads: String = "Go to downloads"
     override val randomSong: String = "Play a random song"
     override val searchPlaceholder: String = "Search tracks, artists, albums..."
     override val signInYouTubeMusic: String = "Sign in to YouTube Music"
@@ -577,6 +594,8 @@ object EnglishStrings : AppStrings {
     override val aboutLicense: String = "Open source under the GNU GPL v3. Streams are resolved with the open-source PipePipe extractor."
 
     override val sectionTopSongs: String = "Top songs"
+    override val subscribe: String = "Subscribe"
+    override val subscribedLabel: String = "Subscribed"
     override val back: String = "Back"
     override fun songsCount(n: Int): String = if (n == 1) "1 song" else "$n songs"
     override val renamePlaylist: String = "Rename playlist"

@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -126,6 +127,8 @@ fun QMusicApp(
         val share = rememberShare()
         val homeChips by viewModel.homeChips.collectAsState()
         val speedDial by viewModel.speedDial.collectAsState()
+        val isOnline by viewModel.isOnline.collectAsState()
+        val libraryStartTab by viewModel.libraryStartTab.collectAsState()
         val selectedHomeChip by viewModel.selectedHomeChip.collectAsState()
         val isLoadingMoreHome by viewModel.isLoadingMoreHome.collectAsState()
         val crashReport by viewModel.crashReport.collectAsState()
@@ -265,8 +268,9 @@ fun QMusicApp(
                 modifier = Modifier.fillMaxSize(),
                 containerColor = DarkBackground,
                 topBar = {
-                    // Pages bring their own header (and sit under the status bar), so the logo bar steps aside.
-                    if (topRoute == null) {
+                    // Pages bring their own header (and sit under the status bar), so the logo bar steps aside;
+                    // Home draws its own, over its tinted top.
+                    if (topRoute == null && currentTab != ScreenTab.HOME) {
                         Column(modifier = Modifier.fillMaxWidth().background(DarkBackground.copy(alpha = 0.92f))) {
                             Row(
                                 modifier = Modifier
@@ -277,7 +281,6 @@ fun QMusicApp(
                             ) {
                                 QMusicHeaderLogo(modifier = Modifier.weight(1f))
                             }
-                            HorizontalDivider(color = BorderSubtle)
                         }
                     }
                 },
@@ -331,11 +334,22 @@ fun QMusicApp(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(innerPadding),
+                        // Pages (artist, album, playlist) start at the very top: their pictures go under the
+                        // status bar and their own headers keep clear of it.
+                        .padding(
+                            if (topRoute == null && currentTab != ScreenTab.HOME) {
+                                innerPadding
+                            } else {
+                                PaddingValues(bottom = innerPadding.calculateBottomPadding())
+                            },
+                        ),
                 ) {
                     when (currentTab) {
                         ScreenTab.HOME -> HomeScreen(
                             sections = homeSections,
+                            isOnline = isOnline,
+                            downloads = downloadedSongs,
+                            onOpenDownloads = { viewModel.openDownloads() },
                             speedDial = speedDial,
                             onRandomSong = { viewModel.playRandomSong() },
                             chips = homeChips,
@@ -403,6 +417,7 @@ fun QMusicApp(
                             onToggleFavorite = { viewModel.toggleFavorite(it) },
                             isFavoritePredicate = { viewModel.isFavorite(it) },
                             onCreatePlaylist = { viewModel.createPlaylist(it) },
+                            startTab = libraryStartTab,
                         )
 
                         ScreenTab.SETTINGS -> SettingsScreen(
@@ -473,6 +488,11 @@ fun QMusicApp(
                             onCollectionClick = { viewModel.openCollection(it) },
                             onToggleFavorite = { viewModel.toggleFavorite(it) },
                             isFavoritePredicate = { viewModel.isFavorite(it) },
+                            onToggleSubscribe = { viewModel.toggleArtistSubscription() },
+                            onStartRadio = { viewModel.startRadio(it) },
+                            onShare = { page ->
+                                share("${page.name}\nhttps://music.youtube.com/channel/${page.channelId ?: route.browseId}")
+                            },
                         )
 
                         is Route.LocalPlaylist -> {

@@ -368,7 +368,13 @@ internal object BrowseParser {
                 row.path("musicResponsiveListItemRenderer").obj()?.let { track(it) }
             }
         }
+        val subscribe = header.path("subscriptionButton", "subscribeButtonRenderer")
         return ArtistPage(
+            audience = header.path("monthlyListenerCount").text().takeIf { it.isNotBlank() },
+            channelId = subscribe.path("channelId").str(),
+            subscribed = (subscribe.path("subscribed") as? JsonPrimitive)?.contentOrNull == "true",
+            subscriberCount = subscribe.path("shortSubscriberCountText").text().ifBlank { subscribe.path("subscriberCountText").text() }
+                .takeIf { it.isNotBlank() },
             name = header.path("title").text(),
             thumbnail = thumbnails(header.path("thumbnail", "musicThumbnailRenderer", "thumbnail", "thumbnails")).lastOrNull()?.url,
             description = header.path("description").text().takeIf { it.isNotBlank() },

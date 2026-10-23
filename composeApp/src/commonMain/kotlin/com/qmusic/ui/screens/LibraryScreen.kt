@@ -83,9 +83,10 @@ fun LibraryScreen(
     isFavoritePredicate: (String) -> Boolean,
     onCreatePlaylist: (String) -> Unit,
     modifier: Modifier = Modifier,
+    startTab: Int = 0,
 ) {
     val s = LocalStrings.current
-    var selectedTabIndex by remember { mutableIntStateOf(0) }
+    var selectedTabIndex by remember(startTab) { mutableIntStateOf(startTab) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
     var confirmRemoveAll by remember { mutableStateOf(false) }

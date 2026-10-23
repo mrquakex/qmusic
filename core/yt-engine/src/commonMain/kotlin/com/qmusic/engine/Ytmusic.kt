@@ -8,6 +8,7 @@ import com.qmusic.engine.models.NextBody
 import com.qmusic.engine.models.PlayerBody
 import com.qmusic.engine.models.SearchBody
 import com.qmusic.engine.models.SearchSuggestionsBody
+import com.qmusic.engine.models.SubscribeBody
 import com.qmusic.engine.models.YouTubeClient
 import com.qmusic.engine.models.YouTubeLocale
 import io.ktor.client.HttpClient
@@ -165,6 +166,16 @@ class Ytmusic(
                     target = LikeBody.Target(videoId),
                 ),
             )
+        }
+
+    suspend fun subscribe(
+        channelId: String,
+        subscribed: Boolean,
+        client: YouTubeClient = YouTubeClient.WEB_REMIX,
+    ): HttpResponse =
+        httpClient.post("${BASE_URL}subscription/${if (subscribed) "subscribe" else "unsubscribe"}") {
+            applyInnertubeHeaders(client, setLogin = true)
+            setBody(SubscribeBody(context = client.toContext(locale, visitorData), channelIds = listOf(channelId)))
         }
 
     suspend fun player(

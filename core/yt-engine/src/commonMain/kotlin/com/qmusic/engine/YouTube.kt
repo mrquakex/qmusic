@@ -198,7 +198,16 @@ class YouTube(
     suspend fun artist(browseId: String): Result<ArtistPage> =
         runCatching {
             if (ytmusic.auth?.isLoggedIn != true) ytmusic.ensureVisitorData()
-            BrowseParser.artistPage(json.parseToJsonElement(ytmusic.browse(browseId).bodyAsText()).jsonObject)
+            val page = BrowseParser.artistPage(json.parseToJsonElement(ytmusic.browse(browseId).bodyAsText()).jsonObject)
+            if (page.channelId == null && browseId.startsWith("UC")) page.copy(channelId = browseId) else page
+        }
+
+    /** Subscribes the signed-in account to an artist's channel, or ends the subscription. */
+    suspend fun setSubscribed(channelId: String, subscribed: Boolean): Result<Unit> =
+        runCatching {
+            check(ytmusic.auth?.isLoggedIn == true) { "Not signed in" }
+            val response = ytmusic.subscribe(channelId, subscribed)
+            check(response.status.value in 200..299) { "YouTube Music answered ${response.status.value}" }
         }
 
     /** Unsynchronised lyrics, or null when YouTube Music has none for this song. */

@@ -43,6 +43,7 @@ class MainActivity : ComponentActivity() {
                         onSessionChanged = container.sessionStore::save,
                         downloads = container.downloads,
                         settings = container.settings,
+                        connectivity = container.connectivity,
                         crashReports = container.crashReports,
                         isUnmetered = container::isUnmetered,
                     ) as T

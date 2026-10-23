@@ -1,5 +1,6 @@
 package com.qmusic.player.adapter
 
+import androidx.media3.common.FlagSet
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Metadata
@@ -49,6 +50,7 @@ class DelegatingForwardingPlayer(initialPlayer: Player) : ForwardingPlayer(initi
         }
     }
 
+    @Synchronized
     override fun addListener(listener: Player.Listener) {
         val wrappedListener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -60,7 +62,8 @@ class DelegatingForwardingPlayer(initialPlayer: Player) : ForwardingPlayer(initi
             }
 
             override fun onEvents(player: Player, events: Player.Events) {
-                listener.onEvents(player, events)
+                // The listener (the media session) must see this forwarding player, never the swapped-in one.
+                listener.onEvents(this@DelegatingForwardingPlayer, events)
             }
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
@@ -163,14 +166,17 @@ class DelegatingForwardingPlayer(initialPlayer: Player) : ForwardingPlayer(initi
         synchronized(listeners) {
             listeners[listener] = wrappedListener
         }
-        super.addListener(wrappedListener)
+        // Registered straight on the delegate (not through ForwardingPlayer, which hides its own wrapper object):
+        // this very instance can later be taken off the old player when the delegate is swapped.
+        currentDelegate.addListener(wrappedListener)
     }
 
+    @Synchronized
     override fun removeListener(listener: Player.Listener) {
         val wrappedListener = synchronized(listeners) {
             listeners.remove(listener)
-        } ?: listener
-        super.removeListener(wrappedListener)
+        } ?: return
+        currentDelegate.removeListener(wrappedListener)
     }
 
     /**
@@ -183,7 +189,8 @@ class DelegatingForwardingPlayer(initialPlayer: Player) : ForwardingPlayer(initi
 
         val oldPlayer = currentDelegate
 
-        // Remove wrapped listeners from old player
+        // Take the wrapped listeners off the old player, so what it does while being shut down (stop, no items)
+        // never reaches the media session and its notification.
         synchronized(listeners) {
             for (wrapped in listeners.values) {
                 try {
@@ -203,8 +210,43 @@ class DelegatingForwardingPlayer(initialPlayer: Player) : ForwardingPlayer(initi
         synchronized(listeners) {
             for (wrapped in listeners.values) {
                 try {
-                    super.addListener(wrapped)
+                    newPlayer.addListener(wrapped)
                 } catch (_: Exception) {}
+            }
+        }
+        announceSwap()
+    }
+
+    /**
+     * Tells every listener that everything may have changed: the session and its notification read the new player's
+     * song, state and position again, instead of keeping what the old player last said.
+     */
+    private fun announceSwap() {
+        val snapshot = synchronized(listeners) { listeners.keys.toList() }
+        val changed = Player.Events(
+            FlagSet.Builder()
+                .addAll(
+                    Player.EVENT_TIMELINE_CHANGED,
+                    Player.EVENT_MEDIA_ITEM_TRANSITION,
+                    Player.EVENT_MEDIA_METADATA_CHANGED,
+                    Player.EVENT_PLAY_WHEN_READY_CHANGED,
+                    Player.EVENT_PLAYBACK_STATE_CHANGED,
+                    Player.EVENT_IS_PLAYING_CHANGED,
+                    Player.EVENT_AVAILABLE_COMMANDS_CHANGED,
+                )
+                .build(),
+        )
+        for (listener in snapshot) {
+            try {
+                listener.onTimelineChanged(currentTimeline, Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED)
+                listener.onMediaItemTransition(currentMediaItem, Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED)
+                listener.onMediaMetadataChanged(mediaMetadata)
+                listener.onPlayWhenReadyChanged(playWhenReady, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
+                listener.onPlaybackStateChanged(playbackState)
+                listener.onIsPlayingChanged(isPlaying)
+                listener.onAvailableCommandsChanged(availableCommands)
+                listener.onEvents(this, changed)
+            } catch (_: Exception) {
             }
         }
     }

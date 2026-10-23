@@ -90,6 +90,13 @@ data class ArtistPage(
     val topSongs: List<SongItem> = emptyList(),
     /** Albums, singles, playlists, "Fans might also like" ... */
     val sections: List<HomeSection> = emptyList(),
+    /** "11.2M monthly audience", as YouTube Music words it. */
+    val audience: String? = null,
+    /** The channel to subscribe to. */
+    val channelId: String? = null,
+    val subscribed: Boolean = false,
+    /** "232K", shown on the subscribe button. */
+    val subscriberCount: String? = null,
 )
 
 @Serializable

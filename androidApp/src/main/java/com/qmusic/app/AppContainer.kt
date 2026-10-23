@@ -28,6 +28,7 @@ class AppContainer(private val application: Application) {
     }
     val sessionStore: YouTubeSessionStore by lazy { YouTubeSessionStore(application) }
     val settings: AppSettings by lazy { SharedPreferencesAppSettings(application) }
+    val connectivity: AndroidConnectivityMonitor by lazy { AndroidConnectivityMonitor(application) }
     val crashReports: FileCrashReports by lazy { FileCrashReports(application) }
 
     /** True on Wi-Fi / ethernet (an unmetered connection), where big automatic downloads are fine. */

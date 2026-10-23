@@ -56,6 +56,12 @@ data class SearchSuggestionsBody(
 )
 
 @Serializable
+data class SubscribeBody(
+    val context: InnertubeContext,
+    val channelIds: List<String>,
+)
+
+@Serializable
 data class LikeBody(
     val context: InnertubeContext,
     val target: Target,

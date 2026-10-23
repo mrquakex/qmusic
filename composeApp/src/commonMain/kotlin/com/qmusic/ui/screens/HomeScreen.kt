@@ -1,6 +1,12 @@
 package com.qmusic.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.runtime.getValue
+import com.qmusic.ui.rememberDominantColor
+import com.qmusic.ui.theme.QMusicHeaderLogo
 import androidx.compose.foundation.border
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Brush
@@ -72,6 +78,9 @@ import com.qmusic.ui.theme.DarkSurfaceVariant
 @Composable
 fun HomeScreen(
     sections: List<HomeSection>,
+    isOnline: Boolean,
+    downloads: List<SongItem>,
+    onOpenDownloads: () -> Unit,
     speedDial: List<SongItem>,
     onRandomSong: () -> Unit,
     chips: List<HomeChip>,
@@ -98,72 +107,78 @@ fun HomeScreen(
         scrollToTop.collect { listState.animateScrollToItem(0) }
     }
 
+    val tint = rememberDominantColor(speedDial.firstOrNull()?.let { it.thumbnail ?: it.thumbnails.firstOrNull()?.url })
+    val animatedTint by animateColorAsState(tint ?: Color.Transparent, animationSpec = tween(700), label = "homeTint")
+
     PullToRefreshBox(
         isRefreshing = isLoading,
         onRefresh = onRefresh,
         modifier = modifier.fillMaxSize(),
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(TINT_HEIGHT)
+                .graphicsLayer {
+                    val scrolled = if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset.toFloat() else size.height
+                    translationY = -scrolled
+                }
+                .background(
+                    Brush.verticalGradient(
+                        0f to animatedTint.copy(alpha = animatedTint.alpha * 0.95f),
+                        0.55f to animatedTint.copy(alpha = animatedTint.alpha * 0.45f),
+                        1f to Color.Transparent,
+                    ),
+                ),
+        )
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(22.dp),
             contentPadding = PaddingValues(top = 16.dp, bottom = 120.dp),
         ) {
-            // Header: fades out and drifts up as the page scrolls away from it
+            // The logo, as YouTube Music has it: on the tinted top, scrolling away with the page
             item {
-                Column(
+                Row(
                     modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .graphicsLayer {
-                            val scrolled = if (listState.firstVisibleItemIndex == 0) {
-                                listState.firstVisibleItemScrollOffset.toFloat()
-                            } else {
-                                HEADER_FADE_PX
-                            }
-                            alpha = (1f - scrolled / HEADER_FADE_PX).coerceIn(0f, 1f)
-                            translationY = -scrolled * 0.35f
-                        },
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = "QMusic",
-                        style = MaterialTheme.typography.headlineLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = s.homeSubtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.secondary,
-                    )
+                    QMusicHeaderLogo(modifier = Modifier.weight(1f))
                 }
             }
 
-            // Search bar trigger
-            item {
-                Card(
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .fillMaxWidth()
-                        .clickable(onClick = onSearchClick),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = QMusicIcons.Search,
-                            contentDescription = s.search,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = s.searchPlaceholder,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+            // No connection: say so, and lead to what still plays
+            if (!isOnline) {
+                item {
+                    OfflineBanner(downloads.size, onOpenDownloads)
+                }
+                if (downloads.isNotEmpty()) {
+                    item {
+                        Column {
+                            Text(
+                                text = s.tabDownloads,
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                items(downloads) { song ->
+                                    ShelfCard(
+                                        title = song.title,
+                                        subtitle = song.artists.joinToString { it.name }.ifEmpty { "YouTube Music" },
+                                        thumbnail = song.thumbnail ?: song.thumbnails.firstOrNull()?.url,
+                                        onClick = { onSongClick(song, downloads) },
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -213,7 +228,7 @@ fun HomeScreen(
                 }
             }
 
-            if (chips.isNotEmpty()) {
+            if (isOnline && chips.isNotEmpty()) {
                 item {
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 16.dp),
@@ -242,12 +257,12 @@ fun HomeScreen(
 
             if (speedDial.isNotEmpty()) {
                 item {
+                    // The account's picture and name ride on "Listen again"; they head the speed dial instead.
+                    val identity = sections.firstOrNull { it.avatar != null && it.strapline != null }
                     Column {
-                        Text(
-                            text = s.speedDial,
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(horizontal = 16.dp),
+                        SectionHeader(
+                            HomeSection(title = s.speedDial, strapline = identity?.strapline, avatar = identity?.avatar),
+                            onPlayAll = {},
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         SpeedDial(speedDial, onSongClick, onRandomSong)
@@ -263,7 +278,7 @@ fun HomeScreen(
                 }
             }
 
-            if (error != null && sections.isEmpty() && !isLoading) {
+            if (isOnline && error != null && sections.isEmpty() && !isLoading) {
                 item {
                     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
@@ -481,6 +496,67 @@ private fun DiceTile(description: String, onClick: () -> Unit) {
         )
     }
 }
+
+/** Shown while there is no internet: what happened, and the way to the songs saved on the device. */
+@Composable
+private fun OfflineBanner(downloadCount: Int, onOpenDownloads: () -> Unit) {
+    val s = LocalStrings.current
+    Card(
+        modifier = Modifier
+            .padding(horizontal = 16.dp)
+            .fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(DarkSurfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = QMusicIcons.CloudOff,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = s.offlineTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = if (downloadCount > 0) s.offlineWithDownloads(downloadCount) else s.offlineWithoutDownloads,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (downloadCount > 0) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = onOpenDownloads,
+                        shape = RoundedCornerShape(50),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+                    ) {
+                        Text(s.goToDownloads, style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** How far down the colour of the first speed-dial picture reaches. */
+private val TINT_HEIGHT = 460.dp
 
 /** The shelf title with the small line above it, the round picture beside it and "Play all" at the end. */
 @Composable
