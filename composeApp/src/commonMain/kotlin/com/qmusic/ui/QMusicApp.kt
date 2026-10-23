@@ -125,6 +125,7 @@ fun QMusicApp(
         val bufferedPositionState = viewModel.bufferedPosition.collectAsState()
         val share = rememberShare()
         val homeChips by viewModel.homeChips.collectAsState()
+        val speedDial by viewModel.speedDial.collectAsState()
         val selectedHomeChip by viewModel.selectedHomeChip.collectAsState()
         val isLoadingMoreHome by viewModel.isLoadingMoreHome.collectAsState()
         val crashReport by viewModel.crashReport.collectAsState()
@@ -335,6 +336,8 @@ fun QMusicApp(
                     when (currentTab) {
                         ScreenTab.HOME -> HomeScreen(
                             sections = homeSections,
+                            speedDial = speedDial,
+                            onRandomSong = { viewModel.playRandomSong() },
                             chips = homeChips,
                             selectedChip = selectedHomeChip,
                             isLoading = isLoadingHome,

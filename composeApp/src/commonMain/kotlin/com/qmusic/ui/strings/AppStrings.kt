@@ -14,6 +14,8 @@ interface AppStrings {
     val homeSubtitle: String
     val refreshHome: String
     val playAllShelf: String
+    val speedDial: String
+    val randomSong: String
     val searchPlaceholder: String
     val signInYouTubeMusic: String
     val signInPromptSubtitle: String
@@ -229,6 +231,8 @@ object TurkishStrings : AppStrings {
     override val homeSubtitle: String = "Mrquake'den sana özel"
     override val refreshHome: String = "Ana sayfayı yenile"
     override val playAllShelf: String = "Tümünü oynat"
+    override val speedDial: String = "Hızlı arama"
+    override val randomSong: String = "Rastgele şarkı çal"
     override val searchPlaceholder: String = "Şarkı, sanatçı veya albüm ara..."
     override val signInYouTubeMusic: String = "YouTube Music'e giriş yap"
     override val signInPromptSubtitle: String = "Kişisel mikslerini, önerilerini ve dinleme geçmişini al."
@@ -460,6 +464,8 @@ object EnglishStrings : AppStrings {
     override val homeSubtitle: String = "Made for you by Mrquake"
     override val refreshHome: String = "Refresh Home"
     override val playAllShelf: String = "Play all"
+    override val speedDial: String = "Speed dial"
+    override val randomSong: String = "Play a random song"
     override val searchPlaceholder: String = "Search tracks, artists, albums..."
     override val signInYouTubeMusic: String = "Sign in to YouTube Music"
     override val signInPromptSubtitle: String = "Get your own mixes, recommendations and listening history."

@@ -181,6 +181,23 @@ class MainViewModel(
         local + liked.filter { it.id !in localIds }
     }.stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /**
+     * The "Speed dial" grid at the top of the home page: what was played last, then the liked songs. (YouTube
+     * Music builds this on its servers; here it comes from this device's history and likes.)
+     */
+    val speedDial: StateFlow<List<SongItem>> by lazy {
+        combine(history, favorites) { recent, liked ->
+            (recent + liked).distinctBy { it.id }.take(SPEED_DIAL_SIZE)
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    }
+
+    /** The dice tile: plays a song picked at random from what the person listens to. */
+    fun playRandomSong() {
+        val pool = (history.value + favorites.value).distinctBy { it.id }
+            .ifEmpty { _homeSections.value.flatMap { it.songs }.distinctBy { it.id } }
+        pool.randomOrNull()?.let { playerController.play(it) }
+    }
+
     val history: StateFlow<List<SongItem>> = repository.getHistory()
         .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -1053,6 +1070,7 @@ class MainViewModel(
 
     private companion object {
         const val RADIO_REFILL_THRESHOLD = 3
+        const val SPEED_DIAL_SIZE = 17 // two pages of nine, one slot of which is the dice
         val DOUBLE_TAP_WINDOW = 500.milliseconds
         const val SUGGESTION_DEBOUNCE_MS = 250L
     }

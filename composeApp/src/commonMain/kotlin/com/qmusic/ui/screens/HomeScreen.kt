@@ -1,6 +1,9 @@
 package com.qmusic.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.shape.CircleShape
@@ -69,6 +72,8 @@ import com.qmusic.ui.theme.DarkSurfaceVariant
 @Composable
 fun HomeScreen(
     sections: List<HomeSection>,
+    speedDial: List<SongItem>,
+    onRandomSong: () -> Unit,
     chips: List<HomeChip>,
     selectedChip: String?,
     isLoading: Boolean,
@@ -88,6 +93,7 @@ fun HomeScreen(
 ) {
     val s = LocalStrings.current
     val listState = rememberLazyListState()
+    val ordered = remember(sections) { sections.sortedBy(::shelfRank) }
     LaunchedEffect(scrollToTop) {
         scrollToTop.collect { listState.animateScrollToItem(0) }
     }
@@ -234,6 +240,21 @@ fun HomeScreen(
                 }
             }
 
+            if (speedDial.isNotEmpty()) {
+                item {
+                    Column {
+                        Text(
+                            text = s.speedDial,
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        SpeedDial(speedDial, onSongClick, onRandomSong)
+                    }
+                }
+            }
+
             if (isLoading && sections.isEmpty()) {
                 item {
                     Box(modifier = Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) {
@@ -256,7 +277,7 @@ fun HomeScreen(
                 }
             }
 
-            items(sections) { section ->
+            items(ordered) { section ->
                 Column {
                     SectionHeader(section, onPlayAll)
                     Spacer(modifier = Modifier.height(12.dp))
@@ -313,6 +334,151 @@ fun HomeScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * YouTube Music's own order for the shelves it hands to everyone: quick picks first, then new discoveries, clips,
+ * covers and remixes, and the feed's long tail. Anything not listed keeps the order the feed gave it, after these.
+ */
+private fun shelfRank(section: HomeSection): Int {
+    val title = section.title.lowercase()
+    val order = listOf(
+        listOf("hızlı seçimler", "quick picks"),
+        listOf("yeni keşifler", "new discoveries"),
+        listOf("müzik videoları", "music videos"),
+        listOf("cover", "remix", "remiks"),
+        listOf("yeniden dinleyin", "listen again"),
+    )
+    order.forEachIndexed { rank, keys -> if (keys.any { it in title }) return rank }
+    val tail = listOf(
+        listOf("uzun parçalar", "long listens"),
+        listOf("dinlemeye devam", "keep listening"),
+        listOf("unutulan favoriler", "forgotten favorites"),
+        listOf("derlenenler", "mixed for you"),
+        listOf("yeni çıkanlar", "new releases"),
+        listOf("topluluktan", "from the community"),
+        listOf("günlük keşif", "daily discover"),
+    )
+    tail.forEachIndexed { rank, keys -> if (keys.any { it in title }) return 100 + rank }
+    return 50
+}
+
+/**
+ * "Speed dial": nine tiles to a page in three rows, the ninth being the dice that plays something at random.
+ * The first tile is the song heard last and wears a white frame.
+ */
+@Composable
+private fun SpeedDial(
+    songs: List<SongItem>,
+    onSongClick: (SongItem, List<SongItem>) -> Unit,
+    onRandomSong: () -> Unit,
+) {
+    val s = LocalStrings.current
+    // Eight songs, then the dice as the ninth tile of the first page; further songs fill the next pages.
+    val tiles: List<SongItem?> = songs.take(8) + listOf(null) + songs.drop(8)
+    val pages = tiles.chunked(9)
+    val listState = rememberLazyListState()
+    LazyRow(
+        state = listState,
+        flingBehavior = rememberSnapFlingBehavior(listState),
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
+    ) {
+        items(pages.size) { index ->
+            Column(
+                modifier = Modifier
+                    .fillParentMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                pages[index].chunked(3).forEachIndexed { rowIndex, row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEachIndexed { column, song ->
+                            Box(modifier = Modifier.weight(1f).aspectRatio(1f)) {
+                                if (song == null) {
+                                    DiceTile(s.randomSong, onRandomSong)
+                                } else {
+                                    SpeedDialTile(song, framed = index == 0 && rowIndex == 0 && column == 0) {
+                                        onSongClick(song, songs)
+                                    }
+                                }
+                            }
+                        }
+                        repeat(3 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
+    }
+    if (pages.size > 1) {
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            repeat(pages.size) { dot ->
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 3.dp)
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = if (dot == listState.firstVisibleItemIndex) 0.95f else 0.3f)),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpeedDialTile(song: SongItem, framed: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(12.dp))
+            .background(DarkSurfaceVariant)
+            .then(if (framed) Modifier.border(3.dp, Color.White, RoundedCornerShape(12.dp)) else Modifier)
+            .clickable(onClick = onClick),
+    ) {
+        AsyncImage(
+            model = song.thumbnail ?: song.thumbnails.firstOrNull()?.url,
+            contentDescription = song.title,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))))
+                .padding(start = 10.dp, end = 10.dp, top = 18.dp, bottom = 8.dp),
+        ) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.labelLarge,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DiceTile(description: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Brush.linearGradient(listOf(Color(0xFF2B2140), Color(0xFF14101F))))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = QMusicIcons.Dice,
+            contentDescription = description,
+            tint = Color.White.copy(alpha = 0.85f),
+            modifier = Modifier.size(44.dp),
+        )
     }
 }
 
