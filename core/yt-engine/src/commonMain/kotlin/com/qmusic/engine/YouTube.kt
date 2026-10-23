@@ -116,6 +116,16 @@ class YouTube(
     }
 
     /**
+     * Sets the Innertube request language and country context (e.g. "tr" -> hl=tr, gl=TR; "en" -> hl=en, gl=US).
+     */
+    fun setLanguage(code: String) {
+        ytmusic.locale = when (code) {
+            "en" -> com.qmusic.engine.models.YouTubeLocale(gl = "US", hl = "en")
+            else -> com.qmusic.engine.models.YouTubeLocale(gl = "TR", hl = "tr")
+        }
+    }
+
+    /**
      * The YouTube Music home page: personalised when an account is set via [setAuth], the generic
      * charts-style shelves otherwise. Follows up to [maxContinuations] extra pages of shelves.
      */

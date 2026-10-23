@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">QMusic</string>
+    <string name="update_no_apk">Bu sürümde indirilecek APK dosyası bulunamadı</string>
+    <string name="update_allow_permission">Açılan ayarlardan QMusic için yüklemeye izin verin, ardından Güncelle\'ye tekrar dokunun</string>
+    <string name="update_download_failed">İndirme başarısız oldu (HTTP %1$d)</string>
+</resources>

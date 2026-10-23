@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.asStateFlow
 class SharedPreferencesAppSettings(context: Context) : AppSettings {
     private val prefs = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE)
 
+    private val _language = MutableStateFlow(prefs.getString(KEY_LANGUAGE, "tr") ?: "tr")
+    override val language: StateFlow<String> = _language.asStateFlow()
+
     private val _auto = MutableStateFlow(prefs.getBoolean(KEY_AUTO_DOWNLOAD, false))
     override val autoDownloadLiked: StateFlow<Boolean> = _auto.asStateFlow()
 
@@ -21,6 +24,11 @@ class SharedPreferencesAppSettings(context: Context) : AppSettings {
 
     private val _check = MutableStateFlow(prefs.getBoolean(KEY_CHECK_UPDATES, true))
     override val autoCheckUpdates: StateFlow<Boolean> = _check.asStateFlow()
+
+    override fun setLanguage(code: String) {
+        prefs.edit().putString(KEY_LANGUAGE, code).apply()
+        _language.value = code
+    }
 
     override fun setVideoByDefault(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_VIDEO, enabled).apply()
@@ -43,6 +51,7 @@ class SharedPreferencesAppSettings(context: Context) : AppSettings {
     }
 
     private companion object {
+        const val KEY_LANGUAGE = "language"
         const val KEY_AUTO_DOWNLOAD = "auto_download_liked"
         const val KEY_WIFI_ONLY = "wifi_only"
         const val KEY_VIDEO = "video_by_default"

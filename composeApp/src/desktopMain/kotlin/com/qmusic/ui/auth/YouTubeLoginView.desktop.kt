@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.qmusic.engine.auth.YouTubeAuth
+import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.DarkBackground
 import com.qmusic.ui.theme.DarkSurface
 import com.qmusic.ui.theme.DarkSurfaceVariant
@@ -43,6 +44,7 @@ actual fun YouTubeLoginView(
 ) {
     var cookieInput by remember { mutableStateOf("") }
     var errorText by remember { mutableStateOf<String?>(null) }
+    val s = LocalStrings.current
 
     Box(
         modifier = modifier
@@ -68,14 +70,14 @@ actual fun YouTubeLoginView(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "Sign in to YouTube Music",
+                        text = s.signInYouTubeMusic,
                         style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     IconButton(onClick = onDismiss) {
                         Icon(
                             imageVector = QMusicIcons.Close,
-                            contentDescription = "Close",
+                            contentDescription = s.close,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -84,7 +86,7 @@ actual fun YouTubeLoginView(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "Paste your browser cookies containing SAPISID or __Secure-3PAPISID to authenticate your YouTube Music account.",
+                    text = s.desktopAuthDescription,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -100,7 +102,7 @@ actual fun YouTubeLoginView(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(120.dp),
-                    label = { Text("Cookie String (e.g. SAPISID=...; SID=...)") },
+                    label = { Text(s.desktopAuthCookieLabel) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = DarkSurfaceVariant,
                         unfocusedContainerColor = DarkSurfaceVariant,
@@ -132,7 +134,7 @@ actual fun YouTubeLoginView(
                             contentColor = MaterialTheme.colorScheme.onSurface,
                         ),
                     ) {
-                        Text("Cancel")
+                        Text(s.cancel)
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Button(
@@ -141,14 +143,14 @@ actual fun YouTubeLoginView(
                             if (sapisid != null) {
                                 onCookiesCaptured(cookieInput)
                             } else {
-                                errorText = "No valid SAPISID or __Secure-3PAPISID cookie found."
+                                errorText = s.desktopAuthError
                             }
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                         ),
                     ) {
-                        Text("Save Cookies")
+                        Text(s.desktopAuthSave)
                     }
                 }
             }

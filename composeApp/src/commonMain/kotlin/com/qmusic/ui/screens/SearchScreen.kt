@@ -54,6 +54,7 @@ import com.qmusic.engine.models.SongItem
 import com.qmusic.ui.components.ArtistCircleCard
 import com.qmusic.ui.components.SectionTitle
 import com.qmusic.ui.components.ShelfCard
+import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.DarkSurface
 import com.qmusic.ui.theme.DarkSurfaceVariant
 import com.qmusic.ui.theme.QMusicIcons
@@ -88,6 +89,7 @@ fun SearchScreen(
     isFavoritePredicate: (String) -> Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val s = LocalStrings.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
     Column(
@@ -102,11 +104,11 @@ fun SearchScreen(
             onValueChange = onQueryChange,
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = RoundedCornerShape(50),
-            placeholder = { Text("Search songs, albums, artists") },
+            placeholder = { Text(s.searchFieldPlaceholder) },
             leadingIcon = {
                 Icon(
                     imageVector = QMusicIcons.Search,
-                    contentDescription = "Search Icon",
+                    contentDescription = s.search,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             },
@@ -115,7 +117,7 @@ fun SearchScreen(
                     IconButton(onClick = { onQueryChange("") }) {
                         Icon(
                             imageVector = QMusicIcons.Close,
-                            contentDescription = "Clear search",
+                            contentDescription = s.clearSearch,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -180,13 +182,14 @@ private fun FilterRow(
     onFilterChange: (SearchFilter?) -> Unit,
     onSearch: () -> Unit,
 ) {
+    val s = LocalStrings.current
     val options = listOf<Pair<String, SearchFilter?>>(
-        "All" to null,
-        "Songs" to SearchFilter.SONGS,
-        "Albums" to SearchFilter.ALBUMS,
-        "Artists" to SearchFilter.ARTISTS,
-        "Playlists" to SearchFilter.COMMUNITY_PLAYLISTS,
-        "Videos" to SearchFilter.VIDEOS,
+        s.filterAll to null,
+        s.filterSongs to SearchFilter.SONGS,
+        s.filterAlbums to SearchFilter.ALBUMS,
+        s.filterArtists to SearchFilter.ARTISTS,
+        s.filterPlaylists to SearchFilter.COMMUNITY_PLAYLISTS,
+        s.filterVideos to SearchFilter.VIDEOS,
     )
     Row(
         modifier = Modifier
@@ -229,6 +232,7 @@ private fun SearchResults(
     onToggleFavorite: (SongItem) -> Unit,
     isFavoritePredicate: (String) -> Boolean,
 ) {
+    val s = LocalStrings.current
     when {
         isSearching -> CenteredBox {
             CircularProgressIndicator(color = MaterialTheme.colorScheme.secondary)
@@ -244,7 +248,7 @@ private fun SearchResults(
 
         page == null || page.isEmpty -> CenteredBox {
             Text(
-                text = "No results found",
+                text = s.noResultsFound,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -261,7 +265,7 @@ private fun SearchResults(
             ) {
                 if (!single) {
                     page.top?.let { top ->
-                        item { SectionTitle("Top result") }
+                        item { SectionTitle(s.sectionTopResult) }
                         item {
                             ResultRow(
                                 title = top.name,
@@ -275,7 +279,7 @@ private fun SearchResults(
                 }
 
                 if (page.songs.isNotEmpty()) {
-                    if (!single) item { SectionTitle("Songs") }
+                    if (!single) item { SectionTitle(s.sectionSongs) }
                     items(page.songs) { song ->
                         SongListItem(
                             song = song,
@@ -295,7 +299,7 @@ private fun SearchResults(
                             ResultRow(album.title, album.subtitle, album.thumbnail, round = false, onClick = { onCollectionClick(album) })
                         }
                     } else {
-                        item { SectionTitle("Albums") }
+                        item { SectionTitle(s.sectionAlbums) }
                         item { CollectionShelf(page.albums, onCollectionClick) }
                     }
                 }
@@ -306,7 +310,7 @@ private fun SearchResults(
                             ResultRow(artist.name, artist.subtitle, artist.thumbnail, round = true, onClick = { onArtistClick(artist) })
                         }
                     } else {
-                        item { SectionTitle("Artists") }
+                        item { SectionTitle(s.sectionArtists) }
                         item {
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 items(page.artists) { artist ->
@@ -328,7 +332,7 @@ private fun SearchResults(
                             ResultRow(playlist.title, playlist.subtitle, playlist.thumbnail, round = false, onClick = { onCollectionClick(playlist) })
                         }
                     } else {
-                        item { SectionTitle("Playlists") }
+                        item { SectionTitle(s.sectionPlaylists) }
                         item { CollectionShelf(page.playlists, onCollectionClick) }
                     }
                 }
@@ -411,10 +415,11 @@ private fun SearchHistory(
     onHistoryDelete: (String) -> Unit,
     onClearHistory: () -> Unit,
 ) {
+    val s = LocalStrings.current
     if (history.isEmpty()) {
         CenteredBox {
             Text(
-                text = "Type something to search YouTube Music",
+                text = s.searchHistoryEmpty,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -433,11 +438,11 @@ private fun SearchHistory(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Recent searches",
+                    text = s.recentSearches,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                TextButton(onClick = onClearHistory) { Text("Clear all") }
+                TextButton(onClick = onClearHistory) { Text(s.clearAll) }
             }
         }
         items(history, key = { it }) { entry ->
@@ -446,7 +451,7 @@ private fun SearchHistory(
                 leading = QMusicIcons.History,
                 onClick = { onHistoryClick(entry) },
                 trailing = QMusicIcons.Close,
-                trailingDescription = "Remove from history",
+                trailingDescription = s.removeFromHistory,
                 onTrailingClick = { onHistoryDelete(entry) },
             )
         }
@@ -459,6 +464,7 @@ private fun SuggestionList(
     onSuggestionClick: (SearchSuggestion) -> Unit,
     onFill: (SearchSuggestion) -> Unit,
 ) {
+    val s = LocalStrings.current
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 120.dp),
@@ -469,7 +475,7 @@ private fun SuggestionList(
                 leading = if (suggestion.isHistory) QMusicIcons.History else QMusicIcons.Search,
                 onClick = { onSuggestionClick(suggestion) },
                 trailing = QMusicIcons.FillQuery,
-                trailingDescription = "Use this suggestion",
+                trailingDescription = s.useThisSuggestion,
                 onTrailingClick = { onFill(suggestion) },
             )
         }

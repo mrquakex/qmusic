@@ -26,7 +26,7 @@ class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
 
     override suspend fun install(info: UpdateInfo): Result<Unit> = runCatching {
         if (info.downloadUrl.isBlank() || !info.downloadUrl.endsWith(".apk", ignoreCase = true)) {
-            error("This release has no APK to download")
+            error(getString(R.string.update_no_apk))
         }
         if (!context.packageManager.canRequestPackageInstalls()) {
             // Ask once; the person turns the switch on and taps the update button again.
@@ -34,7 +34,7 @@ class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
                 Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
-            error("Allow installs from QMusic in the settings that just opened, then tap Update again")
+            error(getString(R.string.update_allow_permission))
         }
         val file = download(info.downloadUrl)
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.updates", file)
@@ -55,7 +55,7 @@ class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
         connection.readTimeout = 20_000
         connection.instanceFollowRedirects = true
         try {
-            if (connection.responseCode !in 200..299) error("Download failed (HTTP ${connection.responseCode})")
+            if (connection.responseCode !in 200..299) error(getString(R.string.update_download_failed, connection.responseCode))
             val total = connection.contentLengthLong
             connection.inputStream.use { input ->
                 target.outputStream().use { output ->
@@ -74,5 +74,19 @@ class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
             connection.disconnect()
         }
         target
+    }
+
+    /**
+     * Resolves strings from res/values/strings.xml and res/values-tr/strings.xml matching the in-app
+     * language setting kept in SharedPreferences.
+     */
+    private fun getString(resId: Int, vararg formatArgs: Any): String {
+        val prefs = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE)
+        val lang = prefs.getString("language", "tr") ?: "tr"
+        val locale = if (lang == "en") java.util.Locale.ENGLISH else java.util.Locale("tr")
+        val config = android.content.res.Configuration(context.resources.configuration)
+        config.setLocale(locale)
+        val localizedContext = context.createConfigurationContext(config)
+        return localizedContext.getString(resId, *formatArgs)
     }
 }

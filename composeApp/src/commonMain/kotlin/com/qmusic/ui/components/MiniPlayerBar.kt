@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.qmusic.engine.models.SongItem
+import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.BgSurface
 import com.qmusic.ui.theme.DarkSurfaceVariant
 import com.qmusic.ui.theme.QMusicIcons
@@ -142,6 +143,7 @@ fun MiniPlayerBar(
 
             Spacer(modifier = Modifier.width(14.dp))
 
+            val s = LocalStrings.current
             Row(
                 modifier = Modifier
                     .weight(1f)
@@ -157,7 +159,7 @@ fun MiniPlayerBar(
                     color = Color.White,
                 )
                 Text(
-                    text = currentTrack.artists.joinToString { it.name }.ifEmpty { "Unknown artist" },
+                    text = currentTrack.artists.joinToString { it.name }.ifEmpty { s.unknownArtist },
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -168,7 +170,7 @@ fun MiniPlayerBar(
             IconButton(onClick = onTogglePlayPause, modifier = Modifier.size(52.dp)) {
                 Icon(
                     imageVector = if (isPlaying) QMusicIcons.Pause else QMusicIcons.Play,
-                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    contentDescription = if (isPlaying) s.pause else s.play,
                     tint = Color.White,
                     modifier = Modifier.size(30.dp),
                 )
@@ -176,7 +178,7 @@ fun MiniPlayerBar(
             IconButton(onClick = onNext, modifier = Modifier.size(52.dp)) {
                 Icon(
                     imageVector = QMusicIcons.Next,
-                    contentDescription = "Next",
+                    contentDescription = s.next,
                     tint = Color.White,
                     modifier = Modifier.size(26.dp),
                 )

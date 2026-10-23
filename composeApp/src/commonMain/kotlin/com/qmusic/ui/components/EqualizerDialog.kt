@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.DarkSurface
 import com.qmusic.ui.theme.DarkSurfaceVariant
 import com.qmusic.ui.viewmodel.EqualizerPreset
@@ -50,6 +51,7 @@ fun EqualizerDialog(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val s = LocalStrings.current
     Dialog(onDismissRequest = onDismissRequest) {
         Card(
             modifier = modifier
@@ -71,14 +73,14 @@ fun EqualizerDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "10-Band Equalizer",
+                        text = s.equalizerTitle,
                         style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     IconButton(onClick = onDismissRequest) {
                         Icon(
                             imageVector = QMusicIcons.Close,
-                            contentDescription = "Close",
+                            contentDescription = s.close,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -98,7 +100,7 @@ fun EqualizerDialog(
                         FilterChip(
                             selected = isSelected,
                             onClick = { onPresetSelect(preset) },
-                            label = { Text(preset.displayName) },
+                            label = { Text(s.presetDisplayName(preset)) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = MaterialTheme.colorScheme.primary,
                                 selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
@@ -162,7 +164,7 @@ fun EqualizerDialog(
                         containerColor = MaterialTheme.colorScheme.primary,
                     ),
                 ) {
-                    Text("Apply & Close")
+                    Text(s.applyAndClose)
                 }
             }
         }

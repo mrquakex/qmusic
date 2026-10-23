@@ -51,6 +51,7 @@ import com.qmusic.ui.components.ArtistCircleCard
 import com.qmusic.ui.components.SectionTitle
 import com.qmusic.ui.components.ShelfCard
 import com.qmusic.ui.components.upscaleThumbnail
+import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.BgRoot
 import com.qmusic.ui.theme.DarkBackground
 import com.qmusic.ui.theme.DarkSurfaceVariant
@@ -74,6 +75,7 @@ fun ArtistScreen(
     isFavoritePredicate: (String) -> Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val s = LocalStrings.current
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -107,7 +109,7 @@ fun ArtistScreen(
                         ) {
                             Icon(QMusicIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Play")
+                            Text(s.play)
                         }
                         OutlinedButton(
                             onClick = { onShuffle(page.topSongs) },
@@ -116,7 +118,7 @@ fun ArtistScreen(
                         ) {
                             Icon(QMusicIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Shuffle")
+                            Text(s.shuffle)
                         }
                     }
                 }
@@ -126,7 +128,7 @@ fun ArtistScreen(
                 }
 
                 if (page.topSongs.isNotEmpty()) {
-                    item { SectionTitle("Top songs", Modifier.padding(horizontal = 16.dp)) }
+                    item { SectionTitle(s.sectionTopSongs, Modifier.padding(horizontal = 16.dp)) }
                     items(page.topSongs, key = { it.id }) { song ->
                         SongListItem(
                             song = song,
@@ -192,7 +194,7 @@ fun ArtistScreen(
         ) {
             Icon(
                 imageVector = QMusicIcons.Back,
-                contentDescription = "Back",
+                contentDescription = s.back,
                 tint = Color.White,
             )
         }

@@ -30,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.DarkSurface
 import com.qmusic.ui.theme.DarkSurfaceVariant
 import kotlin.math.roundToInt
@@ -44,6 +45,7 @@ fun SpotifyImportDialog(
     modifier: Modifier = Modifier,
 ) {
     var urlInput by remember { mutableStateOf("") }
+    val s = LocalStrings.current
 
     Dialog(onDismissRequest = {
         if (!isImporting) onDismissRequest()
@@ -67,7 +69,7 @@ fun SpotifyImportDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "Import Spotify Playlist",
+                        text = s.importSpotifyTitle,
                         style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
@@ -75,7 +77,7 @@ fun SpotifyImportDialog(
                         IconButton(onClick = onDismissRequest) {
                             Icon(
                                 imageVector = QMusicIcons.Close,
-                                contentDescription = "Close",
+                                contentDescription = s.close,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -85,7 +87,7 @@ fun SpotifyImportDialog(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Enter a public Spotify playlist link. Tracks will be resolved to YouTube Music audio streams and saved directly to your local library.",
+                    text = s.spotifyImportDescription,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -97,7 +99,7 @@ fun SpotifyImportDialog(
                     onValueChange = { urlInput = it },
                     enabled = !isImporting,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Spotify Playlist URL") },
+                    label = { Text(s.spotifyUrlLabel) },
                     placeholder = { Text("https://open.spotify.com/playlist/...") },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = DarkSurfaceVariant,
@@ -153,7 +155,7 @@ fun SpotifyImportDialog(
                                 contentColor = MaterialTheme.colorScheme.onSurface,
                             ),
                         ) {
-                            Text("Cancel")
+                            Text(s.cancel)
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                     }
@@ -165,7 +167,7 @@ fun SpotifyImportDialog(
                             containerColor = MaterialTheme.colorScheme.primary,
                         ),
                     ) {
-                        Text(if (isImporting) "Importing..." else "Start Import")
+                        Text(if (isImporting) s.importing else s.startImport)
                     }
                 }
             }

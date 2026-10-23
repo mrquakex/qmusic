@@ -6,6 +6,9 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /** User preferences the app keeps between launches. */
 interface AppSettings {
+    /** Language code: "tr" (Turkish, default) or "en" (English). */
+    val language: StateFlow<String>
+
     /** Every song that is liked (on this device or on YouTube Music) is downloaded automatically. */
     val autoDownloadLiked: StateFlow<Boolean>
 
@@ -18,6 +21,8 @@ interface AppSettings {
     /** Look for a new version each time the app opens. */
     val autoCheckUpdates: StateFlow<Boolean>
 
+    fun setLanguage(code: String)
+
     fun setAutoDownloadLiked(enabled: Boolean)
 
     fun setVideoByDefault(enabled: Boolean)
@@ -29,9 +34,13 @@ interface AppSettings {
 
 /** Keeps the values for the life of the process only (tests, desktop previews). */
 class InMemoryAppSettings(
+    language: String = "tr",
     autoDownloadLiked: Boolean = false,
     wifiOnly: Boolean = true,
 ) : AppSettings {
+    private val _language = MutableStateFlow(language)
+    override val language: StateFlow<String> = _language.asStateFlow()
+
     private val _auto = MutableStateFlow(autoDownloadLiked)
     override val autoDownloadLiked: StateFlow<Boolean> = _auto.asStateFlow()
 
@@ -43,6 +52,10 @@ class InMemoryAppSettings(
 
     private val _check = MutableStateFlow(true)
     override val autoCheckUpdates: StateFlow<Boolean> = _check.asStateFlow()
+
+    override fun setLanguage(code: String) {
+        _language.value = code
+    }
 
     override fun setVideoByDefault(enabled: Boolean) {
         _video.value = enabled

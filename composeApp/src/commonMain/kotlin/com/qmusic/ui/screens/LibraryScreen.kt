@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.qmusic.database.entity.PlaylistEntity
 import com.qmusic.engine.models.SongItem
+import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.BgRoot
 import com.qmusic.ui.theme.DarkSurface
 import com.qmusic.ui.theme.DarkSurfaceVariant
@@ -83,16 +84,17 @@ fun LibraryScreen(
     onCreatePlaylist: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val s = LocalStrings.current
     var selectedTabIndex by remember { mutableIntStateOf(0) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
     var confirmRemoveAll by remember { mutableStateOf(false) }
 
     val tabs = listOf(
-        "Favorites" to favorites.size,
-        "Playlists" to playlists.size,
-        "Downloads" to downloads.size,
-        "History" to history.size,
+        s.tabFavorites to favorites.size,
+        s.tabPlaylists to playlists.size,
+        s.tabDownloads to downloads.size,
+        s.tabHistory to history.size,
     )
 
     Column(
@@ -108,7 +110,7 @@ fun LibraryScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "Your Library",
+                text = s.yourLibrary,
                 style = MaterialTheme.typography.headlineLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -116,7 +118,7 @@ fun LibraryScreen(
                 IconButton(onClick = { showCreatePlaylistDialog = true }) {
                     Icon(
                         imageVector = QMusicIcons.Add,
-                        contentDescription = "New Playlist",
+                        contentDescription = s.newPlaylist,
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 }
@@ -152,7 +154,7 @@ fun LibraryScreen(
         when (selectedTabIndex) {
             0 -> SongsTab(
                 songs = favorites,
-                empty = "No favorite songs yet.\nTap the heart on any song to add it here.",
+                empty = s.favoritesEmpty,
                 isFavoritePredicate = isFavoritePredicate,
                 downloadedIds = downloadedIds,
                 downloadProgress = downloadProgress,
@@ -179,7 +181,7 @@ fun LibraryScreen(
 
             2 -> SongsTab(
                 songs = downloads,
-                empty = "Nothing downloaded yet.\nDownload your liked songs from the Favorites tab, or use a song's menu.",
+                empty = s.downloadsEmpty,
                 isFavoritePredicate = isFavoritePredicate,
                 downloadedIds = downloadedIds,
                 downloadProgress = downloadProgress,
@@ -200,7 +202,7 @@ fun LibraryScreen(
 
             else -> SongsTab(
                 songs = history,
-                empty = "No playback history yet.\nSongs you listen to will appear here.",
+                empty = s.historyEmpty,
                 isFavoritePredicate = isFavoritePredicate,
                 downloadedIds = downloadedIds,
                 downloadProgress = downloadProgress,
@@ -215,12 +217,12 @@ fun LibraryScreen(
     if (showCreatePlaylistDialog) {
         AlertDialog(
             onDismissRequest = { showCreatePlaylistDialog = false },
-            title = { Text("New Playlist") },
+            title = { Text(s.newPlaylistTitle) },
             text = {
                 OutlinedTextField(
                     value = newPlaylistName,
                     onValueChange = { newPlaylistName = it },
-                    label = { Text("Playlist Name") },
+                    label = { Text(s.playlistNameLabel) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = DarkSurfaceVariant,
                         unfocusedContainerColor = DarkSurfaceVariant,
@@ -241,7 +243,7 @@ fun LibraryScreen(
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                ) { Text("Create") }
+                ) { Text(s.create) }
             },
             dismissButton = {
                 Button(
@@ -250,7 +252,7 @@ fun LibraryScreen(
                         containerColor = DarkSurfaceVariant,
                         contentColor = MaterialTheme.colorScheme.onSurface,
                     ),
-                ) { Text("Cancel") }
+                ) { Text(s.cancel) }
             },
             containerColor = DarkSurface,
         )
@@ -260,17 +262,17 @@ fun LibraryScreen(
         AlertDialog(
             onDismissRequest = { confirmRemoveAll = false },
             containerColor = DarkSurface,
-            title = { Text("Remove all downloads?") },
-            text = { Text("The songs stay in your library; only the copies on this device are deleted.") },
+            title = { Text(s.removeAllDownloadsTitle) },
+            text = { Text(s.removeAllDownloadsMessage) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         confirmRemoveAll = false
                         onRemoveAllDownloads()
                     },
-                ) { Text("Remove all") }
+                ) { Text(s.removeAll) }
             },
-            dismissButton = { TextButton(onClick = { confirmRemoveAll = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { confirmRemoveAll = false }) { Text(s.cancel) } },
         )
     }
 }
@@ -319,16 +321,17 @@ private fun PlayShuffleRow(
     onShuffle: (List<SongItem>) -> Unit,
 ) {
     if (songs.isEmpty()) return
+    val s = LocalStrings.current
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Button(onClick = { onPlayAll(songs) }, shape = RoundedCornerShape(12.dp)) {
             Icon(QMusicIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Play")
+            Text(s.play)
         }
         OutlinedButton(onClick = { onShuffle(songs) }, shape = RoundedCornerShape(12.dp)) {
             Icon(QMusicIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Shuffle")
+            Text(s.shuffle)
         }
     }
 }
@@ -346,6 +349,7 @@ private fun OfflineCard(
     onAutoDownloadChange: (Boolean) -> Unit,
     onWifiOnlyChange: (Boolean) -> Unit,
 ) {
+    val s = LocalStrings.current
     val saved = songs.count { it.id in downloadedIds }
     val pending = songs.count { it.id in downloadProgress }
     val missing = songs.size - saved - pending
@@ -366,17 +370,12 @@ private fun OfflineCard(
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Listen offline",
+                        text = s.listenOffline,
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = when {
-                            songs.isEmpty() -> "Like some songs to save them here."
-                            pending > 0 -> "Downloading $pending ${if (pending == 1) "song" else "songs"} · $saved of ${songs.size} saved"
-                            saved == songs.size -> "All ${songs.size} songs are on this device."
-                            else -> "$saved of ${songs.size} songs are on this device."
-                        },
+                        text = s.listenOfflineSubtitle(songs.isEmpty(), pending, saved, songs.size),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -390,25 +389,25 @@ private fun OfflineCard(
                     color = Color.White,
                     trackColor = Color.White.copy(alpha = 0.18f),
                 )
-                OutlinedButton(onClick = onCancel, shape = RoundedCornerShape(12.dp)) { Text("Cancel downloads") }
+                OutlinedButton(onClick = onCancel, shape = RoundedCornerShape(12.dp)) { Text(s.cancelDownloads) }
             } else if (missing > 0) {
                 Button(onClick = onDownloadAll, shape = RoundedCornerShape(12.dp)) {
                     Icon(QMusicIcons.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Download all ($missing)")
+                    Text(s.downloadAllCount(missing))
                 }
             }
 
             SwitchRow(
-                title = "Auto-download liked songs",
-                subtitle = "Every song you like is saved on this device.",
+                title = s.autoDownloadLikedTitle,
+                subtitle = s.autoDownloadLikedSubtitle,
                 checked = autoDownload,
                 onChange = onAutoDownloadChange,
             )
             if (autoDownload) {
                 SwitchRow(
-                    title = "Wi-Fi only",
-                    subtitle = "Wait for Wi-Fi instead of using mobile data.",
+                    title = s.wifiOnlyTitle,
+                    subtitle = s.wifiOnlySubtitle,
                     checked = wifiOnly,
                     onChange = onWifiOnlyChange,
                 )
@@ -452,6 +451,7 @@ private fun DownloadsSummary(
     onCancel: () -> Unit,
     onRemoveAll: () -> Unit,
 ) {
+    val s = LocalStrings.current
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -465,21 +465,21 @@ private fun DownloadsSummary(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "$count ${if (count == 1) "song" else "songs"} · ${formatBytes(bytes)}",
+                    text = s.downloadsSummaryCount(count, formatBytes(bytes)),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = if (inProgress > 0) "$inProgress still downloading" else "Available without a connection",
+                    text = s.downloadsSummaryStatus(inProgress),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             if (inProgress > 0) {
-                TextButton(onClick = onCancel) { Text("Cancel") }
+                TextButton(onClick = onCancel) { Text(s.cancel) }
             }
             if (count > 0) {
-                TextButton(onClick = onRemoveAll) { Text("Remove all") }
+                TextButton(onClick = onRemoveAll) { Text(s.removeAll) }
             }
         }
     }
@@ -487,8 +487,9 @@ private fun DownloadsSummary(
 
 @Composable
 private fun PlaylistsTab(playlists: List<PlaylistEntity>, onOpenPlaylist: (PlaylistEntity) -> Unit) {
+    val s = LocalStrings.current
     if (playlists.isEmpty()) {
-        EmptyLibraryPlaceholder(message = "No custom playlists yet.\nCreate one with the + button.")
+        EmptyLibraryPlaceholder(message = s.playlistsEmpty)
         return
     }
     LazyColumn(
@@ -511,7 +512,7 @@ private fun PlaylistsTab(playlists: List<PlaylistEntity>, onOpenPlaylist: (Playl
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = "Playlist",
+                        text = s.playlistItemLabel,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

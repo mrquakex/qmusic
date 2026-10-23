@@ -46,6 +46,7 @@ import com.qmusic.ui.components.ArtistCircleCard
 import com.qmusic.ui.components.ShelfCard
 import com.qmusic.engine.models.HomeSection
 import com.qmusic.engine.models.SongItem
+import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.DarkSurface
 import com.qmusic.ui.theme.DarkSurfaceVariant
 
@@ -62,6 +63,7 @@ fun HomeScreen(
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val s = LocalStrings.current
     val listState = rememberLazyListState()
     LazyColumn(
         state = listState,
@@ -95,7 +97,7 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = "Made for you by Mrquake",
+                        text = s.homeSubtitle,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.secondary,
                     )
@@ -104,7 +106,7 @@ fun HomeScreen(
                 IconButton(onClick = onRefresh) {
                     Icon(
                         imageVector = QMusicIcons.Refresh,
-                        contentDescription = "Refresh Home",
+                        contentDescription = s.refreshHome,
                         tint = MaterialTheme.colorScheme.onSurface,
                     )
                 }
@@ -128,12 +130,12 @@ fun HomeScreen(
                 ) {
                     Icon(
                         imageVector = QMusicIcons.Search,
-                        contentDescription = "Search",
+                        contentDescription = s.search,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
-                        text = "Search tracks, artists, albums...",
+                        text = s.searchPlaceholder,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -158,13 +160,13 @@ fun HomeScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Sign in to YouTube Music",
+                                text = s.signInYouTubeMusic,
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Get your own mixes, recommendations and listening history.",
+                                text = s.signInPromptSubtitle,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -177,7 +179,7 @@ fun HomeScreen(
                                 containerColor = MaterialTheme.colorScheme.primary,
                             ),
                         ) {
-                            Text("Sign in")
+                            Text(s.signIn)
                         }
                     }
                 }
@@ -201,7 +203,7 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Button(onClick = onRefresh, shape = RoundedCornerShape(12.dp)) { Text("Try again") }
+                    Button(onClick = onRefresh, shape = RoundedCornerShape(12.dp)) { Text(s.tryAgain) }
                 }
             }
         }
@@ -274,6 +276,7 @@ fun SongListItem(
     downloadProgress: Float? = null,
     flat: Boolean = false,
 ) {
+    val s = LocalStrings.current
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -325,7 +328,7 @@ fun SongListItem(
                         if (isDownloaded) {
                             Icon(
                                 imageVector = QMusicIcons.DownloadDone,
-                                contentDescription = "Downloaded",
+                                contentDescription = s.downloaded,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(14.dp),
                             )
@@ -354,7 +357,7 @@ fun SongListItem(
                 IconButton(onClick = onToggleFavorite) {
                     Icon(
                         imageVector = if (isFavorite) QMusicIcons.HeartFilled else QMusicIcons.Heart,
-                        contentDescription = if (isFavorite) "Favorited" else "Favorite",
+                        contentDescription = if (isFavorite) s.favorited else s.favorite,
                         tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -362,7 +365,7 @@ fun SongListItem(
                     IconButton(onClick = onMore) {
                         Icon(
                             imageVector = QMusicIcons.More,
-                            contentDescription = "More",
+                            contentDescription = s.moreOptions,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }

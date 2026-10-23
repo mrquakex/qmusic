@@ -28,6 +28,9 @@ import com.qmusic.updater.NoOpUpdateInstaller
 import com.qmusic.updater.UpdateChecker
 import com.qmusic.updater.UpdateInstaller
 import com.qmusic.updater.model.UpdateInfo
+import com.qmusic.ui.strings.AppStrings
+import com.qmusic.ui.strings.EnglishStrings
+import com.qmusic.ui.strings.TurkishStrings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -92,9 +95,19 @@ class MainViewModel(
     private val autoRefillQueue: Boolean = true,
     /** Called with the raw cookie string after sign-in, or null after sign-out, so the host can persist the session. */
     private val onSessionChanged: (String?) -> Unit = {},
+    private val stringsProvider: (() -> AppStrings)? = null,
 ) : ViewModel() {
 
     private val scope: CoroutineScope = externalScope ?: viewModelScope
+    private val strings: AppStrings get() = stringsProvider?.invoke() ?: if (settings.language.value == "en") EnglishStrings else TurkishStrings
+
+    val language: StateFlow<String> = settings.language
+
+    fun setLanguage(code: String) {
+        settings.setLanguage(code)
+        youTube.setLanguage(code)
+        loadHomeContent()
+    }
 
     // Navigation and Modal UI States
     private val _currentTab = MutableStateFlow(ScreenTab.HOME)
@@ -307,6 +320,7 @@ class MainViewModel(
 
     init {
         youTube.setAuth(youTubeAuth)
+        youTube.setLanguage(settings.language.value)
         if (autoLoadHome) {
             loadHomeContent()
             if (youTubeAuth.isLoggedIn) loadLikedSongs()
@@ -720,7 +734,7 @@ class MainViewModel(
                 _searchResults.value = page.songs
                 _isSearching.value = false
             }.onFailure { throwable ->
-                _searchError.value = throwable.message ?: "Failed to load search results"
+                _searchError.value = throwable.message ?: strings.searchFailed
                 _isSearching.value = false
             }
         }
@@ -735,9 +749,9 @@ class MainViewModel(
         homeJob = scope.launch {
             youTube.home().onSuccess { sections ->
                 _homeSections.value = sections
-                if (sections.isEmpty()) _homeError.value = "YouTube Music returned nothing to show right now."
+                if (sections.isEmpty()) _homeError.value = strings.youtubeReturnedNothing
             }.onFailure { throwable ->
-                _homeError.value = throwable.message ?: "Could not load YouTube Music"
+                _homeError.value = throwable.message ?: strings.couldNotLoadYouTube
             }
             _isLoadingHome.value = false
         }
@@ -803,7 +817,7 @@ class MainViewModel(
                 // Only show the result if the user has not already moved on to another page.
                 if (_routes.value.lastOrNull() == route) _collectionPage.value = complete
             }.onFailure { throwable ->
-                if (_routes.value.lastOrNull() == route) _collectionError.value = throwable.message ?: "Could not open this page"
+                if (_routes.value.lastOrNull() == route) _collectionError.value = throwable.message ?: strings.couldNotOpenPage
             }
             if (_routes.value.lastOrNull() == route) _isLoadingCollection.value = false
         }
@@ -825,7 +839,7 @@ class MainViewModel(
                 artistCache[route.browseId] = complete
                 if (_routes.value.lastOrNull() == route) _artistPage.value = complete
             }.onFailure { throwable ->
-                if (_routes.value.lastOrNull() == route) _artistError.value = throwable.message ?: "Could not open this artist"
+                if (_routes.value.lastOrNull() == route) _artistError.value = throwable.message ?: strings.couldNotOpenArtist
             }
             if (_routes.value.lastOrNull() == route) _isLoadingArtist.value = false
         }
@@ -838,24 +852,24 @@ class MainViewModel(
 
         _isImportingSpotify.value = true
         _spotifyImportProgress.value = 0f
-        _spotifyImportStatus.value = "Fetching Spotify playlist metadata..."
+        _spotifyImportStatus.value = strings.spotifyImportFetching
 
         scope.launch {
             val playlistResult = spotifyImporter.importPlaylistFromUrl(cleanUrl)
             playlistResult.onSuccess { playlist ->
                 val totalTracks = playlist.tracks.size
                 if (totalTracks == 0) {
-                    _spotifyImportStatus.value = "No tracks found in playlist."
+                    _spotifyImportStatus.value = strings.spotifyImportNoTracks
                     _isImportingSpotify.value = false
                     return@launch
                 }
 
-                _spotifyImportStatus.value = "Creating playlist '${playlist.title}'..."
+                _spotifyImportStatus.value = strings.spotifyImportCreating(playlist.title)
                 val playlistId = repository.createPlaylist(playlist.title)
 
                 var matchedCount = 0
                 for ((index, track) in playlist.tracks.withIndex()) {
-                    _spotifyImportStatus.value = "Matching track ${index + 1}/$totalTracks: ${track.title}"
+                    _spotifyImportStatus.value = strings.spotifyImportMatching(index + 1, totalTracks, track.title)
                     _spotifyImportProgress.value = (index + 1).toFloat() / totalTracks.toFloat()
 
                     val matchResult = spotifyImporter.matchTrackToYouTube(track, youTube)
@@ -865,11 +879,11 @@ class MainViewModel(
                     }
                 }
 
-                _spotifyImportStatus.value = "Import complete! $matchedCount of $totalTracks tracks imported."
+                _spotifyImportStatus.value = strings.spotifyImportComplete(matchedCount, totalTracks)
                 _isImportingSpotify.value = false
                 onFinished?.invoke(matchedCount)
             }.onFailure { error ->
-                _spotifyImportStatus.value = "Import failed: ${error.message}"
+                _spotifyImportStatus.value = strings.spotifyImportFailed(error.message ?: "")
                 _isImportingSpotify.value = false
             }
         }
@@ -904,11 +918,11 @@ class MainViewModel(
     fun installUpdate() {
         val info = _updateInfo.value ?: return
         if (updateProgress.value != null) return
-        _updateMessage.value = "Downloading v${info.versionName}..."
+        _updateMessage.value = strings.downloadingUpdate(info.versionName)
         scope.launch {
             updateInstaller.install(info)
-                .onSuccess { _updateMessage.value = "Update available: v${info.versionName}" }
-                .onFailure { _updateMessage.value = it.message ?: "Could not install the update" }
+                .onSuccess { _updateMessage.value = strings.updateAvailable(info.versionName) }
+                .onFailure { _updateMessage.value = strings.couldNotInstallUpdate(it.message ?: "") }
         }
     }
 
@@ -924,13 +938,13 @@ class MainViewModel(
                 _isCheckingUpdate.value = false
                 if (info != null) {
                     _updateInfo.value = info
-                    _updateMessage.value = "Update available: v${info.versionName}"
+                    _updateMessage.value = strings.updateAvailable(info.versionName)
                 } else if (!silent) {
-                    _updateMessage.value = "You are using the latest version"
+                    _updateMessage.value = strings.latestVersion
                 }
             }.onFailure { error ->
                 _isCheckingUpdate.value = false
-                if (!silent) _updateMessage.value = "Check update failed: ${error.message}"
+                if (!silent) _updateMessage.value = strings.updateCheckFailed(error.message ?: "")
             }
         }
     }

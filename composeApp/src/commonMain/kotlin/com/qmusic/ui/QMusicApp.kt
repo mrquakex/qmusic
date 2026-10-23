@@ -18,6 +18,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -40,6 +41,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.qmusic.engine.models.SongItem
+import com.qmusic.ui.strings.EnglishStrings
+import com.qmusic.ui.strings.LocalStrings
+import com.qmusic.ui.strings.TurkishStrings
 import com.qmusic.ui.auth.YouTubeLoginView
 import com.qmusic.ui.components.AddToPlaylistDialog
 import com.qmusic.ui.components.EqualizerDialog
@@ -84,13 +88,6 @@ data class NavigationTabItem(
     val icon: ImageVector,
 )
 
-private val NavTabs = listOf(
-    NavigationTabItem(ScreenTab.HOME, "Home", QMusicIcons.Home),
-    NavigationTabItem(ScreenTab.SEARCH, "Search", QMusicIcons.Search),
-    NavigationTabItem(ScreenTab.LIBRARY, "Library", QMusicIcons.Library),
-    NavigationTabItem(ScreenTab.SETTINGS, "Settings", QMusicIcons.Settings),
-)
-
 @Composable
 fun QMusicApp(
     viewModel: MainViewModel,
@@ -103,7 +100,20 @@ fun QMusicApp(
             return@QMusicTheme
         }
 
-        val currentTab by viewModel.currentTab.collectAsState()
+        val language by viewModel.language.collectAsState()
+        val strings = if (language == "en") EnglishStrings else TurkishStrings
+
+        CompositionLocalProvider(LocalStrings provides strings) {
+            val navTabs = remember(strings) {
+                listOf(
+                    NavigationTabItem(ScreenTab.HOME, strings.tabHome, QMusicIcons.Home),
+                    NavigationTabItem(ScreenTab.SEARCH, strings.tabSearch, QMusicIcons.Search),
+                    NavigationTabItem(ScreenTab.LIBRARY, strings.tabLibrary, QMusicIcons.Library),
+                    NavigationTabItem(ScreenTab.SETTINGS, strings.tabSettings, QMusicIcons.Settings),
+                )
+            }
+
+            val currentTab by viewModel.currentTab.collectAsState()
         val currentTrack by viewModel.currentTrack.collectAsState()
         val isPlaying by viewModel.isPlaying.collectAsState()
         // Only the players read this: it ticks every 250 ms and must not recompose the whole app.
@@ -294,12 +304,12 @@ fun QMusicApp(
                         }
 
                         QMusicNavigationBar(
-                            items = NavTabs.map { NavBarItem(it.title, it.icon) },
-                            selectedIndex = NavTabs.indexOfFirst { it.tab == currentTab },
+                            items = navTabs.map { NavBarItem(it.title, it.icon) },
+                            selectedIndex = navTabs.indexOfFirst { it.tab == currentTab },
                             onSelect = { index ->
                                 // Tapping a tab leaves any open page, as in every music app.
                                 viewModel.clearRoutes()
-                                viewModel.selectTab(NavTabs[index].tab)
+                                viewModel.selectTab(navTabs[index].tab)
                             },
                         )
                     }
@@ -398,6 +408,8 @@ fun QMusicApp(
                             updateProgress = updateProgress,
                             onInstallUpdate = { viewModel.installUpdate() },
                             onOpenSpotifyImport = { viewModel.setShowSpotifyImportDialog(true) },
+                            language = language,
+                            onLanguageChange = { viewModel.setLanguage(it) },
                         )
                     }
 
@@ -611,6 +623,7 @@ fun QMusicApp(
                     onDismiss = { viewModel.setShowYouTubeLoginDialog(false) },
                 )
             }
+        }
         }
     }
 }

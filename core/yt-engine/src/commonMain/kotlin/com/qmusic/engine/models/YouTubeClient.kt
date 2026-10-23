@@ -4,8 +4,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class YouTubeLocale(
-    val gl: String = "US",
-    val hl: String = "en",
+    val gl: String = "TR",
+    val hl: String = "tr",
 )
 
 @Serializable
@@ -18,8 +18,8 @@ data class InnertubeContext(
         val clientName: String,
         val clientVersion: String,
         val osVersion: String? = null,
-        val gl: String = "US",
-        val hl: String = "en",
+        val gl: String = "TR",
+        val hl: String = "tr",
         val visitorData: String? = null,
         val userAgent: String? = null,
         val deviceMake: String? = null,

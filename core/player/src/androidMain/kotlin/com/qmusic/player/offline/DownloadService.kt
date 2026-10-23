@@ -56,14 +56,29 @@ class DownloadService : Service() {
         super.onDestroy()
     }
 
+    /**
+     * Determines notification texts based on the in-app language preference saved in SharedPreferences
+     * ("tr" by default or "en"). This keeps notification text synchronized with the in-app language setting
+     * regardless of the system-wide device language.
+     */
     private fun notification(remaining: Int, averageProgress: Float = 0f): Notification {
         val open = packageManager.getLaunchIntentForPackage(packageName)?.let {
             PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         }
+        val prefs = getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE)
+        val isEnglish = prefs.getString("language", "tr") == "en"
+
+        val title = if (isEnglish) "Downloading music" else "Müzik indiriliyor"
+        val content = if (isEnglish) {
+            if (remaining > 0) "$remaining ${if (remaining == 1) "song" else "songs"} left" else "Starting…"
+        } else {
+            if (remaining > 0) "$remaining şarkı kaldı" else "Başlatılıyor…"
+        }
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle("Downloading music")
-            .setContentText(if (remaining > 0) "$remaining ${if (remaining == 1) "song" else "songs"} left" else "Starting…")
+            .setContentTitle(title)
+            .setContentText(content)
             .setProgress(100, (averageProgress * 100).toInt(), remaining == 0)
             .setOnlyAlertOnce(true)
             .setOngoing(true)

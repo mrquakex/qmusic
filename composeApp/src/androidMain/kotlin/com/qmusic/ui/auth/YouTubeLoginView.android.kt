@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.qmusic.engine.auth.YouTubeAuth
+import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.DarkBackground
 import com.qmusic.ui.theme.DarkSurface
 
@@ -34,6 +35,7 @@ actual fun YouTubeLoginView(
     onDismiss: () -> Unit,
     modifier: Modifier,
 ) {
+    val s = LocalStrings.current
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -50,13 +52,13 @@ actual fun YouTubeLoginView(
                 IconButton(onClick = onDismiss) {
                     Icon(
                         imageVector = QMusicIcons.Close,
-                        contentDescription = "Close",
+                        contentDescription = s.close,
                         tint = MaterialTheme.colorScheme.onSurface,
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Sign in to YouTube Music",
+                    text = s.signInYouTubeMusic,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )

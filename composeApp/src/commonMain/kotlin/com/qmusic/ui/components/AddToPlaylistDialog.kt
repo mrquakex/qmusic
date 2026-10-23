@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.qmusic.database.entity.PlaylistEntity
 import com.qmusic.engine.models.SongItem
+import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.BgSurface
 import com.qmusic.ui.theme.QMusicIcons
 
@@ -41,11 +42,12 @@ fun AddToPlaylistDialog(
 ) {
     var creating by remember { mutableStateOf(playlists.isEmpty()) }
     var name by remember { mutableStateOf("") }
+    val s = LocalStrings.current
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = BgSurface,
-        title = { Text("Add to playlist") },
+        title = { Text(s.addToPlaylist) },
         text = {
             Column {
                 Text(
@@ -60,7 +62,7 @@ fun AddToPlaylistDialog(
                         value = name,
                         onValueChange = { name = it },
                         singleLine = true,
-                        label = { Text("Playlist name") },
+                        label = { Text(s.playlistNameLabel) },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
@@ -75,7 +77,7 @@ fun AddToPlaylistDialog(
                             ) {
                                 Icon(QMusicIcons.Add, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
                                 Spacer(Modifier.width(14.dp))
-                                Text("New playlist", color = MaterialTheme.colorScheme.onSurface)
+                                Text(s.newPlaylist, color = MaterialTheme.colorScheme.onSurface)
                             }
                         }
                         items(playlists, key = { it.id }) { playlist ->
@@ -97,11 +99,11 @@ fun AddToPlaylistDialog(
         },
         confirmButton = {
             if (creating) {
-                TextButton(onClick = { onCreate(name) }, enabled = name.isNotBlank()) { Text("Create") }
+                TextButton(onClick = { onCreate(name) }, enabled = name.isNotBlank()) { Text(s.create) }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(s.cancel) }
         },
     )
 }

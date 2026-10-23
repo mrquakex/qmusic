@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
+import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.BgRoot
 import com.qmusic.ui.theme.DarkSurface
 import com.qmusic.ui.theme.DarkSurfaceVariant
@@ -80,7 +81,10 @@ fun SettingsScreen(
     onRemoveAllDownloads: () -> Unit = {},
     autoCheckUpdates: Boolean = true,
     onAutoCheckUpdatesChange: (Boolean) -> Unit = {},
+    language: String = "tr",
+    onLanguageChange: (String) -> Unit = {},
 ) {
+    val s = LocalStrings.current
     val uriHandler = LocalUriHandler.current
     var confirmRemoveDownloads by remember { mutableStateOf(false) }
 
@@ -91,46 +95,46 @@ fun SettingsScreen(
             .padding(horizontal = 16.dp, vertical = 16.dp),
     ) {
         Text(
-            text = "Settings",
+            text = s.settingsTitle,
             style = MaterialTheme.typography.headlineLarge,
             color = MaterialTheme.colorScheme.onSurface,
         )
 
-        Section("Account") {
+        Section(s.sectionAccount) {
             if (isLoggedInYouTube) {
                 ActionRow(
                     icon = QMusicIcons.Account,
                     title = "YouTube Music",
-                    subtitle = "Signed in. Your home, likes and library are synced.",
-                    action = { OutlinedButton(onClick = onLogoutYouTubeClick) { Text("Sign out") } },
+                    subtitle = s.accountSignedInSubtitle,
+                    action = { OutlinedButton(onClick = onLogoutYouTubeClick) { Text(s.signOut) } },
                 )
             } else {
                 ActionRow(
                     icon = QMusicIcons.Account,
                     title = "YouTube Music",
-                    subtitle = "Sign in for your own mixes, likes and library.",
-                    action = { Button(onClick = onLoginYouTubeClick) { Text("Sign in") } },
+                    subtitle = s.accountSignedOutSubtitle,
+                    action = { Button(onClick = onLoginYouTubeClick) { Text(s.signIn) } },
                 )
             }
         }
 
-        Section("Playback") {
+        Section(s.sectionPlayback) {
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "Crossfade",
+                        text = s.crossfadeTitle,
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        text = if (crossfadeSeconds == 0) "Off" else "${crossfadeSeconds}s",
+                        text = if (crossfadeSeconds == 0) s.off else "${crossfadeSeconds}s",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Text(
-                    text = "Songs blend into each other as one ends. Tapping a song never fades.",
+                    text = s.crossfadeSubtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -149,25 +153,25 @@ fun SettingsScreen(
             RowDivider()
             ActionRow(
                 icon = QMusicIcons.Tune,
-                title = "Equalizer",
-                subtitle = "10 bands",
+                title = s.equalizerTitle,
+                subtitle = s.equalizerSubtitle,
                 onClick = onOpenEqualizerClick,
             )
             RowDivider()
             SwitchRow(
                 icon = QMusicIcons.VideoPlay,
-                title = "Show music videos",
-                subtitle = "Open the player on the video when a song has one. Off: the cover comes first.",
+                title = s.showVideosTitle,
+                subtitle = s.showVideosSubtitle,
                 checked = videoByDefault,
                 onChange = onVideoByDefaultChange,
             )
         }
 
-        Section("Downloads") {
+        Section(s.sectionDownloads) {
             SwitchRow(
                 icon = QMusicIcons.Download,
-                title = "Auto-download liked songs",
-                subtitle = "Every song you like is saved on this device.",
+                title = s.autoDownloadLikedTitle,
+                subtitle = s.autoDownloadLikedSubtitle,
                 checked = autoDownload,
                 onChange = onAutoDownloadChange,
             )
@@ -175,8 +179,8 @@ fun SettingsScreen(
                 RowDivider()
                 SwitchRow(
                     icon = null,
-                    title = "Wi-Fi only",
-                    subtitle = "Wait for Wi-Fi instead of using mobile data.",
+                    title = s.wifiOnlyTitle,
+                    subtitle = s.wifiOnlySubtitle,
                     checked = wifiOnly,
                     onChange = onWifiOnlyChange,
                 )
@@ -184,26 +188,26 @@ fun SettingsScreen(
             RowDivider()
             ActionRow(
                 icon = QMusicIcons.Trash,
-                title = "Remove all downloads",
-                subtitle = if (downloadedBytes > 0) "${settingsSize(downloadedBytes)} on this device" else "Nothing downloaded",
+                title = s.removeAllDownloadsTitle,
+                subtitle = s.settingsDownloadedSize(downloadedBytes),
                 onClick = if (downloadedBytes > 0) ({ confirmRemoveDownloads = true }) else null,
             )
         }
 
-        Section("Library") {
+        Section(s.sectionLibrary) {
             ActionRow(
                 icon = QMusicIcons.PlaylistAdd,
-                title = "Import from Spotify",
-                subtitle = "Bring a public Spotify playlist into your library.",
+                title = s.importSpotifyTitle,
+                subtitle = s.importSpotifySubtitle,
                 onClick = onOpenSpotifyImport,
             )
         }
 
-        Section("Updates") {
+        Section(s.sectionUpdates) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Version $currentAppVersion", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                        Text(s.versionLabel(currentAppVersion), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
                         if (updateMessage != null) {
                             Text(
                                 text = updateMessage,
@@ -216,7 +220,7 @@ fun SettingsScreen(
                         if (isCheckingUpdate) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
                         } else {
-                            Text("Check")
+                            Text(s.checkUpdate)
                         }
                     }
                 }
@@ -239,7 +243,7 @@ fun SettingsScreen(
                         )
                     } else {
                         Button(onClick = onInstallUpdate, modifier = Modifier.fillMaxWidth()) {
-                            Text("Update to v${updateInfo.versionName}")
+                            Text(s.updateToVersion(updateInfo.versionName))
                         }
                     }
                 }
@@ -247,29 +251,65 @@ fun SettingsScreen(
             RowDivider()
             SwitchRow(
                 icon = null,
-                title = "Check on launch",
-                subtitle = "Look for a new version whenever the app opens.",
+                title = s.checkOnLaunchTitle,
+                subtitle = s.checkOnLaunchSubtitle,
                 checked = autoCheckUpdates,
                 onChange = onAutoCheckUpdatesChange,
             )
         }
 
-        Section("About") {
+        Section(s.sectionLanguage) {
             ActionRow(
-                icon = QMusicIcons.Headphones,
-                title = "QMusic",
-                subtitle = "Made by Mrquake",
+                icon = null,
+                title = s.languageOptionTurkish,
+                subtitle = if (language == "tr") s.selectedLanguage else "",
+                action = if (language == "tr") {
+                    {
+                        Icon(
+                            imageVector = QMusicIcons.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                } else null,
+                onClick = { onLanguageChange("tr") },
             )
             RowDivider()
             ActionRow(
                 icon = null,
-                title = "Source code",
+                title = s.languageOptionEnglish,
+                subtitle = if (language == "en") s.selectedLanguage else "",
+                action = if (language == "en") {
+                    {
+                        Icon(
+                            imageVector = QMusicIcons.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                } else null,
+                onClick = { onLanguageChange("en") },
+            )
+        }
+
+        Section(s.sectionAbout) {
+            ActionRow(
+                icon = QMusicIcons.Headphones,
+                title = "QMusic",
+                subtitle = s.madeBy,
+            )
+            RowDivider()
+            ActionRow(
+                icon = null,
+                title = s.sourceCodeTitle,
                 subtitle = "github.com/mrquakex/qmusic",
                 onClick = { runCatching { uriHandler.openUri(REPOSITORY_URL) } },
             )
             RowDivider()
             Text(
-                text = "Open source under the GNU GPL v3. Streams are resolved with the open-source PipePipe extractor.",
+                text = s.aboutLicense,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),
@@ -282,15 +322,15 @@ fun SettingsScreen(
     if (confirmRemoveDownloads) {
         AlertDialog(
             onDismissRequest = { confirmRemoveDownloads = false },
-            title = { Text("Remove all downloads?") },
-            text = { Text("The songs stay in your library; they just need a connection to play again.") },
+            title = { Text(s.removeAllDownloadsTitle) },
+            text = { Text(s.removeAllDownloadsConfirmMessage) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmRemoveDownloads = false
                     onRemoveAllDownloads()
-                }) { Text("Remove") }
+                }) { Text(s.remove) }
             },
-            dismissButton = { TextButton(onClick = { confirmRemoveDownloads = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { confirmRemoveDownloads = false }) { Text(s.cancel) } },
         )
     }
 }

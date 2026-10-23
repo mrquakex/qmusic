@@ -30,6 +30,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.qmusic.engine.models.SongItem
+import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.BgSurface
 import com.qmusic.ui.theme.BorderSubtle
 import com.qmusic.ui.theme.DarkSurfaceVariant
@@ -98,23 +99,24 @@ fun SongActionsSheet(
                     )
                 }
             }
+            val s = LocalStrings.current
             HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
 
-            ActionRow(QMusicIcons.Next, "Play next", onPlayNext)
-            ActionRow(QMusicIcons.Queue, "Add to queue", onAddToQueue)
-            ActionRow(QMusicIcons.PlaylistAdd, "Add to playlist", onAddToPlaylist)
+            ActionRow(QMusicIcons.Next, s.playNext, onPlayNext)
+            ActionRow(QMusicIcons.Queue, s.addToQueue, onAddToQueue)
+            ActionRow(QMusicIcons.PlaylistAdd, s.addToPlaylist, onAddToPlaylist)
             ActionRow(
                 icon = if (isFavorite) QMusicIcons.HeartFilled else QMusicIcons.Heart,
-                label = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                label = if (isFavorite) s.removeFromFavorites else s.addToFavorites,
                 onClick = onToggleFavorite,
             )
             ActionRow(
                 icon = if (isDownloaded) QMusicIcons.Trash else QMusicIcons.Download,
-                label = if (isDownloaded) "Remove download" else "Download",
+                label = if (isDownloaded) s.removeDownload else s.download,
                 onClick = onToggleDownload,
             )
             if (onGoToArtist != null) {
-                ActionRow(QMusicIcons.Account, "Go to artist", onGoToArtist)
+                ActionRow(QMusicIcons.Account, s.goToArtist, onGoToArtist)
             }
         }
     }

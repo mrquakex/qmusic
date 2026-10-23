@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.qmusic.engine.models.SongItem
+import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.BgSurface
 import com.qmusic.ui.theme.DarkBackground
 import com.qmusic.ui.theme.QMusicIcons
@@ -57,6 +58,7 @@ fun LocalPlaylistScreen(
     isFavoritePredicate: (String) -> Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val s = LocalStrings.current
     var renaming by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf(false) }
 
@@ -73,7 +75,7 @@ fun LocalPlaylistScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(QMusicIcons.Back, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
+                Icon(QMusicIcons.Back, contentDescription = s.back, tint = MaterialTheme.colorScheme.onSurface)
             }
             Text(
                 text = name,
@@ -84,17 +86,17 @@ fun LocalPlaylistScreen(
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = { renaming = true }) {
-                Icon(QMusicIcons.Edit, contentDescription = "Rename playlist", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(QMusicIcons.Edit, contentDescription = s.renamePlaylist, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(onClick = { confirmingDelete = true }) {
-                Icon(QMusicIcons.Trash, contentDescription = "Delete playlist", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(QMusicIcons.Trash, contentDescription = s.deletePlaylist, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
         if (songs.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    text = "This playlist is empty.\nUse a song's menu to add it here.",
+                    text = s.localPlaylistEmpty,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -112,15 +114,15 @@ fun LocalPlaylistScreen(
                         Button(onClick = { onPlayAll(songs) }, shape = RoundedCornerShape(12.dp)) {
                             Icon(QMusicIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Play")
+                            Text(s.play)
                         }
                         OutlinedButton(onClick = { onShuffle(songs) }, shape = RoundedCornerShape(12.dp)) {
                             Icon(QMusicIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Shuffle")
+                            Text(s.shuffle)
                         }
                         Text(
-                            text = "${songs.size} songs",
+                            text = s.songsCount(songs.size),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -141,7 +143,7 @@ fun LocalPlaylistScreen(
                         IconButton(onClick = { onRemoveSong(song) }) {
                             Icon(
                                 QMusicIcons.Close,
-                                contentDescription = "Remove from playlist",
+                                contentDescription = s.removeFromPlaylist,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp),
                             )
@@ -157,7 +159,7 @@ fun LocalPlaylistScreen(
         AlertDialog(
             onDismissRequest = { renaming = false },
             containerColor = BgSurface,
-            title = { Text("Rename playlist") },
+            title = { Text(s.renamePlaylist) },
             text = {
                 OutlinedTextField(
                     value = text,
@@ -173,9 +175,9 @@ fun LocalPlaylistScreen(
                         renaming = false
                     },
                     enabled = text.isNotBlank(),
-                ) { Text("Save") }
+                ) { Text(s.save) }
             },
-            dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { renaming = false }) { Text(s.cancel) } },
         )
     }
 
@@ -183,17 +185,17 @@ fun LocalPlaylistScreen(
         AlertDialog(
             onDismissRequest = { confirmingDelete = false },
             containerColor = BgSurface,
-            title = { Text("Delete \"$name\"?") },
-            text = { Text("The songs stay in your library; only this playlist is removed.") },
+            title = { Text(s.deletePlaylistTitle(name)) },
+            text = { Text(s.deletePlaylistMessage) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         confirmingDelete = false
                         onDelete()
                     },
-                ) { Text("Delete") }
+                ) { Text(s.delete) }
             },
-            dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text(s.cancel) } },
         )
     }
 }

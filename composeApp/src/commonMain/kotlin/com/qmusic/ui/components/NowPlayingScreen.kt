@@ -86,6 +86,7 @@ import coil3.compose.AsyncImage
 import com.qmusic.engine.models.SongItem
 import com.qmusic.player.RepeatMode
 import com.qmusic.player.SleepTimerState
+import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.BgRoot
 import com.qmusic.ui.theme.BgSurface
 import com.qmusic.ui.theme.DarkSurfaceVariant
@@ -341,6 +342,7 @@ private fun TopBar(
     onMore: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val s = LocalStrings.current
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -350,7 +352,7 @@ private fun TopBar(
         IconButton(onClick = onDismiss) {
             Icon(
                 imageVector = QMusicIcons.ChevronDown,
-                contentDescription = "Collapse player",
+                contentDescription = s.collapsePlayer,
                 tint = Color.White,
                 modifier = Modifier.size(28.dp),
             )
@@ -360,7 +362,7 @@ private fun TopBar(
                 SongVideoSwitch(videoSelected = videoSelected, onSelectVideo = onSelectVideo)
             } else {
                 Text(
-                    text = "NOW PLAYING",
+                    text = s.nowPlaying.uppercase(),
                     style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 2.sp),
                     color = Color.White.copy(alpha = 0.7f),
                     textAlign = TextAlign.Center,
@@ -370,7 +372,7 @@ private fun TopBar(
         IconButton(onClick = onMore) {
             Icon(
                 imageVector = QMusicIcons.More,
-                contentDescription = "More",
+                contentDescription = s.moreOptions,
                 tint = Color.White,
             )
         }
@@ -380,14 +382,15 @@ private fun TopBar(
 /** The headphones / video pill of YouTube Music: one side is filled, the other is a tap target. */
 @Composable
 private fun SongVideoSwitch(videoSelected: Boolean, onSelectVideo: (Boolean) -> Unit) {
+    val s = LocalStrings.current
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(50))
             .background(Color.Black.copy(alpha = 0.45f))
             .padding(4.dp),
     ) {
-        SwitchSide(QMusicIcons.Headphones, "Song", selected = !videoSelected) { onSelectVideo(false) }
-        SwitchSide(QMusicIcons.VideoPlay, "Video", selected = videoSelected) { onSelectVideo(true) }
+        SwitchSide(QMusicIcons.Headphones, s.song, selected = !videoSelected) { onSelectVideo(false) }
+        SwitchSide(QMusicIcons.VideoPlay, s.video, selected = videoSelected) { onSelectVideo(true) }
     }
 }
 
@@ -472,6 +475,7 @@ private fun MediaPage(
 
 @Composable
 private fun LyricsPage(state: LyricsState) {
+    val s = LocalStrings.current
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -482,7 +486,7 @@ private fun LyricsPage(state: LyricsState) {
             LyricsState.Idle, LyricsState.Loading -> CircularProgressIndicator(color = Color.White)
 
             LyricsState.Unavailable -> Text(
-                text = "No lyrics for this song",
+                text = s.lyricsUnavailable,
                 style = MaterialTheme.typography.bodyLarge,
                 color = Color.White.copy(alpha = 0.6f),
             )
@@ -520,6 +524,7 @@ private fun QueuePage(
     onClick: (Int) -> Unit,
     onRemove: (Int) -> Unit,
 ) {
+    val s = LocalStrings.current
     val listState = rememberLazyListState()
     LaunchedEffect(visible, queueIndex) {
         if (visible && queueIndex in queue.indices) listState.animateScrollToItem((queueIndex - 1).coerceAtLeast(0))
@@ -527,7 +532,7 @@ private fun QueuePage(
 
     if (queue.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("The queue is empty", color = Color.White.copy(alpha = 0.6f))
+            Text(s.queueEmpty, color = Color.White.copy(alpha = 0.6f))
         }
         return
     }
@@ -584,7 +589,7 @@ private fun QueuePage(
                 if (current) {
                     Icon(
                         imageVector = if (isPlaying) QMusicIcons.Volume else QMusicIcons.Pause,
-                        contentDescription = "Playing now",
+                        contentDescription = s.playingNow,
                         tint = Color.White,
                         modifier = Modifier.size(20.dp),
                     )
@@ -592,7 +597,7 @@ private fun QueuePage(
                     IconButton(onClick = { onRemove(index) }, modifier = Modifier.size(36.dp)) {
                         Icon(
                             imageVector = QMusicIcons.Close,
-                            contentDescription = "Remove from queue",
+                            contentDescription = s.removeFromQueue,
                             tint = Color.White.copy(alpha = 0.5f),
                             modifier = Modifier.size(18.dp),
                         )
@@ -609,6 +614,7 @@ private fun TrackInfo(
     track: SongItem,
     onArtistClick: (() -> Unit)?,
 ) {
+    val s = LocalStrings.current
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = track.title,
@@ -618,7 +624,7 @@ private fun TrackInfo(
             modifier = Modifier.basicMarquee(),
         )
         Text(
-            text = track.artists.joinToString { it.name }.ifEmpty { "Unknown artist" },
+            text = track.artists.joinToString { it.name }.ifEmpty { s.unknownArtist },
             style = MaterialTheme.typography.bodyLarge,
             color = Color.White.copy(alpha = 0.7f),
             maxLines = 1,
@@ -644,6 +650,7 @@ private fun ChipsRow(
     onSleep: () -> Unit,
     onEqualizer: () -> Unit,
 ) {
+    val s = LocalStrings.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -653,12 +660,12 @@ private fun ChipsRow(
     ) {
         ActionChip(
             icon = if (isFavorite) QMusicIcons.HeartFilled else QMusicIcons.Heart,
-            label = if (isFavorite) "Liked" else "Like",
+            label = if (isFavorite) s.liked else s.like,
             active = isFavorite,
             onClick = onToggleFavorite,
         )
-        ActionChip(QMusicIcons.Lyrics, "Lyrics", active = lyricsOpen, onClick = onLyrics)
-        ActionChip(QMusicIcons.PlaylistAdd, "Save", active = false, onClick = onAddToPlaylist)
+        ActionChip(QMusicIcons.Lyrics, s.lyrics, active = lyricsOpen, onClick = onLyrics)
+        ActionChip(QMusicIcons.PlaylistAdd, s.save, active = false, onClick = onAddToPlaylist)
         if (downloadProgress != null) {
             Row(
                 modifier = Modifier
@@ -679,7 +686,7 @@ private fun ChipsRow(
         } else {
             ActionChip(
                 icon = if (isDownloaded) QMusicIcons.DownloadDone else QMusicIcons.Download,
-                label = if (isDownloaded) "Downloaded" else "Download",
+                label = if (isDownloaded) s.downloaded else s.download,
                 active = isDownloaded,
                 onClick = onDownload,
             )
@@ -687,8 +694,8 @@ private fun ChipsRow(
         ActionChip(
             icon = QMusicIcons.Moon,
             label = when {
-                !sleepTimer.active -> "Sleep"
-                sleepTimer.atEndOfTrack -> "End of song"
+                !sleepTimer.active -> s.sleepTimer
+                sleepTimer.atEndOfTrack -> s.endOfSong
                 else -> formatTime(sleepTimer.remainingMs)
             },
             active = sleepTimer.active,
@@ -696,7 +703,7 @@ private fun ChipsRow(
         )
         ActionChip(
             icon = QMusicIcons.Tune,
-            label = if (crossfadeSeconds > 0) "EQ · Fade ${crossfadeSeconds}s" else "Equalizer",
+            label = if (crossfadeSeconds > 0) s.eqFadeLabel(crossfadeSeconds) else s.equalizerTitle,
             active = false,
             onClick = onEqualizer,
         )
@@ -816,6 +823,7 @@ private fun Controls(
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
 ) {
+    val s = LocalStrings.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -823,12 +831,12 @@ private fun Controls(
     ) {
         ModeButton(
             icon = QMusicIcons.Shuffle,
-            description = if (shuffle) "Shuffle on" else "Shuffle off",
+            description = if (shuffle) s.shuffleOn else s.shuffleOff,
             active = shuffle,
             onClick = onToggleShuffle,
         )
         IconButton(onClick = onPrevious, modifier = Modifier.size(56.dp)) {
-            Icon(QMusicIcons.Previous, contentDescription = "Previous", tint = Color.White, modifier = Modifier.size(32.dp))
+            Icon(QMusicIcons.Previous, contentDescription = s.previous, tint = Color.White, modifier = Modifier.size(32.dp))
         }
         FilledIconButton(
             onClick = onTogglePlayPause,
@@ -838,19 +846,19 @@ private fun Controls(
         ) {
             Icon(
                 imageVector = if (isPlaying) QMusicIcons.Pause else QMusicIcons.Play,
-                contentDescription = if (isPlaying) "Pause" else "Play",
+                contentDescription = if (isPlaying) s.pause else s.play,
                 modifier = Modifier.size(34.dp),
             )
         }
         IconButton(onClick = onNext, modifier = Modifier.size(56.dp)) {
-            Icon(QMusicIcons.Next, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(32.dp))
+            Icon(QMusicIcons.Next, contentDescription = s.next, tint = Color.White, modifier = Modifier.size(32.dp))
         }
         ModeButton(
             icon = if (repeat == RepeatMode.ONE) QMusicIcons.RepeatOne else QMusicIcons.Repeat,
             description = when (repeat) {
-                RepeatMode.OFF -> "Repeat off"
-                RepeatMode.ALL -> "Repeat all"
-                RepeatMode.ONE -> "Repeat one"
+                RepeatMode.OFF -> s.repeatOff
+                RepeatMode.ALL -> s.repeatAll
+                RepeatMode.ONE -> s.repeatOne
             },
             active = repeat != RepeatMode.OFF,
             onClick = onCycleRepeat,
@@ -882,6 +890,7 @@ private fun ModeButton(icon: ImageVector, description: String, active: Boolean, 
 /** A grab bar with the next song's title, as at the bottom of YouTube Music's player. */
 @Composable
 private fun UpNextHandle(next: SongItem?, onClick: () -> Unit) {
+    val s = LocalStrings.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -899,7 +908,7 @@ private fun UpNextHandle(next: SongItem?, onClick: () -> Unit) {
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = next?.let { "Up next · ${it.title}" } ?: "Up next",
+            text = s.upNext(next?.title),
             style = MaterialTheme.typography.labelLarge,
             color = Color.White.copy(alpha = 0.85f),
             maxLines = 1,
@@ -915,29 +924,30 @@ private fun SleepTimerDialog(
     onEndOfTrack: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val s = LocalStrings.current
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = BgSurface,
-        title = { Text("Sleep timer") },
+        title = { Text(s.sleepTimerTitle) },
         text = {
             Column {
                 listOf(5, 10, 15, 30, 45, 60).forEach { minutes ->
                     TextButton(onClick = { onMinutes(minutes) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("$minutes minutes", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
+                        Text(s.sleepTimerMinutes(minutes), modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
                     }
                 }
                 TextButton(onClick = onEndOfTrack, modifier = Modifier.fillMaxWidth()) {
-                    Text("End of this song", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
+                    Text(s.endOfThisSong, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
                 }
                 if (active) {
                     TextButton(onClick = { onMinutes(0) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Turn off timer", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
+                        Text(s.turnOffTimer, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
                     }
                 }
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(s.close) } },
     )
 }
 

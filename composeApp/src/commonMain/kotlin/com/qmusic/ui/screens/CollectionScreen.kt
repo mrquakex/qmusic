@@ -35,6 +35,7 @@ import coil3.compose.AsyncImage
 import com.qmusic.engine.models.CollectionItem
 import com.qmusic.engine.models.CollectionPage
 import com.qmusic.engine.models.SongItem
+import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.DarkBackground
 import com.qmusic.ui.theme.DarkSurfaceVariant
 import com.qmusic.ui.theme.QMusicIcons
@@ -56,6 +57,7 @@ fun CollectionScreen(
     isFavoritePredicate: (String) -> Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val s = LocalStrings.current
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -71,7 +73,7 @@ fun CollectionScreen(
             IconButton(onClick = onBack) {
                 Icon(
                     imageVector = QMusicIcons.Back,
-                    contentDescription = "Back",
+                    contentDescription = s.back,
                     tint = MaterialTheme.colorScheme.onSurface,
                 )
             }
@@ -129,7 +131,7 @@ fun CollectionScreen(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                text = "${songs.size} songs",
+                                text = s.songsCount(songs.size),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -142,7 +144,7 @@ fun CollectionScreen(
                                 ) {
                                     Icon(QMusicIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Play")
+                                    Text(s.play)
                                 }
                                 OutlinedButton(
                                     onClick = { onShuffle(songs) },
