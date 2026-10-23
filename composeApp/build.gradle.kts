@@ -65,6 +65,9 @@ kotlin {
                 implementation(libs.androidx.webkit)
                 implementation(libs.media3.exoplayer)
                 implementation(libs.media3.ui)
+                implementation("androidx.appcompat:appcompat:1.7.0")
+                implementation("androidx.mediarouter:mediarouter:1.7.0")
+                implementation("com.google.android.gms:play-services-cast-framework:21.5.0")
                 implementation(libs.koin.android)
             }
         }

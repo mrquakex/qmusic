@@ -396,6 +396,7 @@ private fun TopBar(
                 )
             }
         }
+        com.qmusic.ui.CastButton(modifier = Modifier.size(48.dp))
         IconButton(onClick = onMore) {
             Icon(
                 imageVector = QMusicIcons.More,

@@ -43,3 +43,6 @@
 
 # OkHttp 4.x (ktor, media3) and 5.x (PipePipe) share a classpath; the unused SSE helper still references the old Util.
 -dontwarn okhttp3.internal.Util
+
+# Named only in the manifest (cast options meta-data), so R8 cannot see it is used.
+-keep class com.qmusic.app.CastOptionsProvider { *; }

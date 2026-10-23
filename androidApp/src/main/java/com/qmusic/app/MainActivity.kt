@@ -5,7 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,7 +21,7 @@ import kotlinx.coroutines.launch
 import com.qmusic.ui.viewmodel.MainViewModel
 import com.qmusic.ui.viewmodel.ScreenTab
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* best effort */ }
@@ -57,6 +57,8 @@ class MainActivity : ComponentActivity() {
 
         this.viewModel = viewModel
         openUpdatesIfAsked(intent)
+
+        CastBridge.init(this)
 
         // The heart in the playback notification: shows and toggles the like of the playing song.
         MediaActions.onToggleLike = { viewModel.currentTrack.value?.let(viewModel::toggleFavorite) }

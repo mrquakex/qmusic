@@ -85,6 +85,10 @@ dependencies {
     implementation(project(":core:updater"))
 
     implementation(libs.androidx.core.ktx)
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.mediarouter:mediarouter:1.7.0")
+    implementation("com.google.android.gms:play-services-cast-framework:21.5.0")
+    implementation("androidx.media3:media3-cast:1.5.1")
     implementation(libs.coil.compose) // the widget loads the cover itself
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)

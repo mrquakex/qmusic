@@ -3,7 +3,7 @@
     <color name="qmusic_root">#FF050507</color>
     <color name="qmusic_icon_bg">#FF0A0A0C</color>
 
-    <style name="Theme.QMusic" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.QMusic" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowBackground">@color/qmusic_root</item>
         <item name="android:colorBackground">@color/qmusic_root</item>
         <item name="android:statusBarColor">@android:color/transparent</item>

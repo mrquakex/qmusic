@@ -282,10 +282,56 @@ class CrossfadeExoPlayerAdapter(
         }
     }
 
+    // --- Casting: while a remote player is attached, the controls and the shown state are its ---
+    @Volatile
+    private var remote: Player? = null
+
+    /** Queue index of the remote player's first item. */
+    private var remoteStart = 0
+
+    /** Asked to cast from a queue index when a song is chosen while casting. */
+    @Volatile
+    var onRemotePlayAt: ((Int) -> Unit)? = null
+
+    val isCasting: Boolean get() = remote != null
+
+    /** Hands playback to [player] (whose first item is queue index [startIndex]), or takes it back with null. */
+    fun attachRemote(player: Player?, startIndex: Int = 0) {
+        remote = player
+        remoteStart = startIndex
+        if (player != null) {
+            activePlayer.pause()
+            forwardingPlayer.pause()
+        }
+    }
+
+    /** Back from casting: plays the queue here from [index], at [positionMs]. */
+    fun resumeLocally(index: Int, positionMs: Long) {
+        playAt(index, startPositionMs = positionMs)
+    }
+
+    /** Mirrors the remote player into the state the app shows; false when nothing is cast. */
+    private fun syncRemote(): Boolean {
+        val r = remote ?: return false
+        _playbackPosition.value = r.currentPosition
+        if (r.duration > 0) _duration.value = r.duration
+        _isPlaying.value = r.isPlaying
+        val index = remoteStart + r.currentMediaItemIndex
+        if (index != _queueIndex.value && index in _queue.value.indices) {
+            _queueIndex.value = index
+            _currentTrack.value = _queue.value[index]
+        }
+        return true
+    }
+
     private fun startProgressTicker() {
         tickerJob?.cancel()
         tickerJob = scope.launch {
             while (isActive) {
+                if (syncRemote()) {
+                    delay(250)
+                    continue
+                }
                 applyLoudness()
                 if (activePlayer.playbackState == Player.STATE_READY || activePlayer.isPlaying) {
                     _playbackPosition.value = activePlayer.currentPosition
@@ -379,6 +425,7 @@ class CrossfadeExoPlayerAdapter(
     }
 
     override fun next() {
+        remote?.let { if (it.hasNextMediaItem()) it.seekToNextMediaItem(); return }
         val queue = _queue.value
         val index = _queueIndex.value + 1
         when {
@@ -388,6 +435,7 @@ class CrossfadeExoPlayerAdapter(
     }
 
     override fun previous() {
+        remote?.let { it.seekToPrevious(); return }
         val index = _queueIndex.value
         if (index <= 0 || activePlayer.currentPosition > RESTART_THRESHOLD_MS) {
             seekTo(0L)
@@ -578,6 +626,11 @@ class CrossfadeExoPlayerAdapter(
         fadeMs: Long = MANUAL_FADE_MS,
     ) {
         val song = _queue.value.getOrNull(index) ?: return
+        // Casting: the chosen song plays on the cast device instead.
+        if (remote != null) {
+            onRemotePlayAt?.invoke(index)
+            return
+        }
         if (song.id != retriedFor) retriedFor = null // a new song gets its own retry
         resolveJob?.cancel()
         advancedFromIndex = -1
@@ -871,16 +924,31 @@ class CrossfadeExoPlayerAdapter(
     }
 
     override fun pause() {
+        remote?.let {
+            it.pause()
+            _isPlaying.value = false
+            return
+        }
         activePlayer.pause()
         _isPlaying.value = false
     }
 
     override fun resume() {
+        remote?.let {
+            it.play()
+            _isPlaying.value = true
+            return
+        }
         activePlayer.play()
         _isPlaying.value = true
     }
 
     override fun seekTo(positionMs: Long) {
+        remote?.let {
+            it.seekTo(positionMs)
+            _playbackPosition.value = positionMs
+            return
+        }
         activePlayer.seekTo(positionMs)
         _playbackPosition.value = positionMs
     }

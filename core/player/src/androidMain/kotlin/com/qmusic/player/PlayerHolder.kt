@@ -63,6 +63,20 @@ object PlayerHolder {
     @Volatile
     var audioQuality: AudioQuality = AudioQuality.HIGH
 
+    /**
+     * An address a Chromecast can play: the best AAC (audio/mp4) stream, which every cast device decodes; other
+     * formats only when there is no AAC one.
+     */
+    suspend fun resolveCastUrl(videoId: String): Pair<String, String>? {
+        val streams = youTube.resolveStreamUrls(videoId).getOrNull()
+            ?.filter { !it.isDrm && it.mimeType.startsWith("audio") }
+            .orEmpty()
+        val pick = streams.filter { it.mimeType.startsWith("audio/mp4") }.maxByOrNull(AudioStream::bitrate)
+            ?: streams.maxByOrNull(AudioStream::bitrate)
+            ?: return null
+        return pick.url to pick.mimeType.substringBefore(';')
+    }
+
     /** Picks the non-DRM audio stream of [videoId] that matches [quality], or null if none could be resolved. */
     private suspend fun resolveAudioUrl(videoId: String, quality: AudioQuality): String? {
         val key = "${quality.name}:$videoId"
