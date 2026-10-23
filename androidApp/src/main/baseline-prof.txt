@@ -1,0 +1,16 @@
+# Baseline profile: tells ART to compile these AOT at install time instead of interpreting them at first launch.
+# Covers the app, Compose, Media3 and the networking stack, i.e. everything that runs while the UI first draws and
+# while a song starts, which is where first-use jank comes from.
+HSPLcom/qmusic/**;->**(**)**
+Lcom/qmusic/**;
+HSPLandroidx/compose/**;->**(**)**
+Landroidx/compose/**;
+HSPLandroidx/media3/**;->**(**)**
+Landroidx/media3/**;
+HSPLcoil3/**;->**(**)**
+Lcoil3/**;
+HSPLio/ktor/**;->**(**)**
+Lio/ktor/**;
+HSPLkotlinx/coroutines/**;->**(**)**
+HSPLkotlinx/serialization/**;->**(**)**
+HSPLokhttp3/**;->**(**)**

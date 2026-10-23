@@ -1,0 +1,199 @@
+package com.qmusic.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.qmusic.engine.models.SongItem
+import com.qmusic.ui.theme.BgSurface
+import com.qmusic.ui.theme.DarkBackground
+import com.qmusic.ui.theme.QMusicIcons
+
+/** A playlist the user made on this device: play, shuffle, rename, delete and remove songs. */
+@Composable
+fun LocalPlaylistScreen(
+    name: String,
+    songs: List<SongItem>,
+    downloadedIds: Set<String>,
+    onBack: () -> Unit,
+    onPlayAll: (List<SongItem>) -> Unit,
+    onShuffle: (List<SongItem>) -> Unit,
+    onSongClick: (SongItem, List<SongItem>) -> Unit,
+    onSongMore: (SongItem) -> Unit,
+    onRemoveSong: (SongItem) -> Unit,
+    onRename: (String) -> Unit,
+    onDelete: () -> Unit,
+    onToggleFavorite: (SongItem) -> Unit,
+    isFavoritePredicate: (String) -> Boolean,
+    modifier: Modifier = Modifier,
+) {
+    var renaming by remember { mutableStateOf(false) }
+    var confirmingDelete by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(DarkBackground)
+            .statusBarsPadding(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(QMusicIcons.Back, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
+            }
+            Text(
+                text = name,
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = { renaming = true }) {
+                Icon(QMusicIcons.Edit, contentDescription = "Rename playlist", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onClick = { confirmingDelete = true }) {
+                Icon(QMusicIcons.Trash, contentDescription = "Delete playlist", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        if (songs.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "This playlist is empty.\nUse a song's menu to add it here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp),
+            ) {
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Button(onClick = { onPlayAll(songs) }, shape = RoundedCornerShape(12.dp)) {
+                            Icon(QMusicIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Play")
+                        }
+                        OutlinedButton(onClick = { onShuffle(songs) }, shape = RoundedCornerShape(12.dp)) {
+                            Icon(QMusicIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Shuffle")
+                        }
+                        Text(
+                            text = "${songs.size} songs",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                items(songs, key = { it.id }) { song ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SongListItem(
+                            song = song,
+                            isFavorite = isFavoritePredicate(song.id),
+                            onClick = { onSongClick(song, songs) },
+                            onToggleFavorite = { onToggleFavorite(song) },
+                            onMore = { onSongMore(song) },
+                            isDownloaded = song.id in downloadedIds,
+                            flat = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { onRemoveSong(song) }) {
+                            Icon(
+                                QMusicIcons.Close,
+                                contentDescription = "Remove from playlist",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (renaming) {
+        var text by remember { mutableStateOf(name) }
+        AlertDialog(
+            onDismissRequest = { renaming = false },
+            containerColor = BgSurface,
+            title = { Text("Rename playlist") },
+            text = {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRename(text)
+                        renaming = false
+                    },
+                    enabled = text.isNotBlank(),
+                ) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (confirmingDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = false },
+            containerColor = BgSurface,
+            title = { Text("Delete \"$name\"?") },
+            text = { Text("The songs stay in your library; only this playlist is removed.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmingDelete = false
+                        onDelete()
+                    },
+                ) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Cancel") } },
+        )
+    }
+}
