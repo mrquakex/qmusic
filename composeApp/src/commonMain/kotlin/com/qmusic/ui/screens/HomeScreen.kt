@@ -155,10 +155,15 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .statusBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                        .padding(start = 20.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     QMusicHeaderLogo(modifier = Modifier.weight(1f))
+                    // As on YouTube Music: cast and search sit at the right of the logo
+                    com.qmusic.ui.CastButton(modifier = Modifier.size(48.dp))
+                    IconButton(onClick = onSearchClick) {
+                        Icon(QMusicIcons.Search, contentDescription = LocalStrings.current.tabSearch, tint = Color.White)
+                    }
                 }
             }
 

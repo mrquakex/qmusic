@@ -84,15 +84,24 @@ fun QMusicWordmark(
     )
 }
 
-/** Header lockup: symbol + wordmark. */
+/**
+ * Header lockup, read as "qMusic": the symbol is the q, so only "Music" follows it (the way YouTube Music puts
+ * "Music" after its play mark), in one colour and weight.
+ */
 @Composable
 fun QMusicHeaderLogo(
     modifier: Modifier = Modifier,
     color: Color = Color.White,
 ) {
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        QMusicLogo(size = 28.dp, tint = color)
-        Spacer(Modifier.width(6.dp))
-        QMusicWordmark(color = color)
+        QMusicLogo(size = 30.dp, tint = color)
+        Spacer(Modifier.width(1.dp))
+        Text(
+            text = "Music",
+            color = color,
+            fontSize = 21.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.5).sp,
+        )
     }
 }
