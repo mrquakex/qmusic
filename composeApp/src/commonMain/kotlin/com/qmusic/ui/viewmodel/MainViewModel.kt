@@ -1575,12 +1575,13 @@ class MainViewModel(
         if (sampleId == song.id) return
         sampleId = song.id
         sampleJob?.cancel()
-        playerController.play(song)
-        sampleJob = scope.launch {
-            // Wait until this song is loaded and its length known, then jump into it.
-            while (playerController.currentTrack.value?.id != song.id || playerController.duration.value <= 0L) delay(100)
-            playerController.seekTo((playerController.duration.value * SAMPLE_START).toLong())
-        }
+        // The stream is opened right at that point: starting at 0 and jumping later loaded the song twice, and the
+        // jump could land before the new song was there (so the preview began at the start, and late).
+        val length = (song.duration ?: 0) * 1000L
+        playerController.playFrom(song, if (length > 0) (length * SAMPLE_START).toLong() else SAMPLE_FALLBACK_MS)
+        // The next previews are looked up now, so swiping to them does not wait for that.
+        val next = _samples.value.dropWhile { it.id != song.id }.drop(1).take(SAMPLE_WARM_AHEAD)
+        playerController.warmUp(next)
     }
 
     /** "Play full song": back to the start, and it keeps playing after leaving the tab. */
@@ -1814,6 +1815,9 @@ class MainViewModel(
         const val WARM_QUICK_PICKS = 4
         const val WARM_PAGE_SONGS = 3
         const val SAMPLE_START = 0.3
+        /** Where a preview starts when the song's length is not known. */
+        const val SAMPLE_FALLBACK_MS = 45_000L
+        const val SAMPLE_WARM_AHEAD = 2
         const val MESSAGE_MS = 3_000L
         const val SUGGESTED_SEARCHES = 12
         const val LIBRARY_DOWNLOADS_TAB = 2

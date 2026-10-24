@@ -40,6 +40,12 @@ interface PlayerController {
     /** Plays a single song; the queue becomes just that song. */
     fun play(song: SongItem)
 
+    /** Plays [song] on its own starting at [positionMs] (loaded there directly, not from the start and then moved). */
+    fun playFrom(song: SongItem, positionMs: Long) {
+        play(song)
+        seekTo(positionMs)
+    }
+
     /** Replaces the queue with [songs] and starts playing at [startIndex]. */
     fun playQueue(songs: List<SongItem>, startIndex: Int = 0)
 

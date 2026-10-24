@@ -348,6 +348,14 @@ class CrossfadeExoPlayerAdapter(
 
     override fun play(song: SongItem) = playQueue(listOf(song), 0)
 
+    override fun playFrom(song: SongItem, positionMs: Long) {
+        orderedQueue = null
+        pendingStart = null
+        _queue.value = listOf(song)
+        // A start past 0 is a clean cut (no crossfade from the previous song) and skips the rapid-skip wait.
+        playAt(0, startPositionMs = positionMs.coerceAtLeast(1L))
+    }
+
     override fun playQueue(songs: List<SongItem>, startIndex: Int) {
         if (songs.isEmpty()) return
         val start = startIndex.coerceIn(songs.indices)
