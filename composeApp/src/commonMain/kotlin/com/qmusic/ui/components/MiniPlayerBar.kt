@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -57,7 +58,7 @@ import com.qmusic.ui.theme.QMusicLogo
 
 /**
  * The mini player, laid out like YouTube Music's: a flat bar flush with the navigation bar under it, square cover on
- * the left, title and artist stacked, plain play/next icons on the right and a hairline of progress along the top.
+ * the left, title and artist stacked, plain play/next icons on the right and a hairline of progress along the bottom edge.
  *
  * Drag it up to open the full player (the caller turns the drag into the sheet position); swipe it sideways to
  * skip, with a tick of haptic feedback.
@@ -221,16 +222,26 @@ fun MiniPlayerBar(
             }
         }
 
-        // Progress: a hairline along the top edge
+        // Progress, as on YouTube Music: a hairline on the seam between the mini player and the navigation bar,
+        // over a barely visible track; it fades with the rest as the full player rises.
         Box(
             modifier = Modifier
-                .align(Alignment.TopStart)
-                .fillMaxWidth(progress)
-                .height(2.dp)
-                .background(Color.White.copy(alpha = 0.9f)),
-        )
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .height(PROGRESS_HEIGHT)
+                .graphicsLayer { alpha = contentAlpha() }
+                .background(Color.White.copy(alpha = 0.12f)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(progress)
+                    .fillMaxHeight()
+                    .background(Color.White),
+            )
+        }
     }
 }
 
+private val PROGRESS_HEIGHT = 1.5.dp
 private const val SWIPE_SKIP_PX = 140f
 private const val SLIDE_OUT_MS = 160
