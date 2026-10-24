@@ -40,6 +40,32 @@ class SharedPreferencesAppSettings(context: Context) : AppSettings {
         _check.value = enabled
     }
 
+    private val _crossfade = MutableStateFlow(prefs.getInt(KEY_CROSSFADE, 3))
+    override val crossfadeSeconds: StateFlow<Int> = _crossfade.asStateFlow()
+
+    private val _bands = MutableStateFlow(prefs.getString(KEY_EQ_BANDS, null).orEmpty())
+    override val equalizerBands: StateFlow<String> = _bands.asStateFlow()
+
+    private val _preset = MutableStateFlow(prefs.getString(KEY_EQ_PRESET, null) ?: "FLAT")
+    override val equalizerPreset: StateFlow<String> = _preset.asStateFlow()
+
+    override fun setCrossfadeSeconds(seconds: Int) {
+        prefs.edit().putInt(KEY_CROSSFADE, seconds).apply()
+        _crossfade.value = seconds
+    }
+
+    override fun setEqualizer(bands: String, preset: String) {
+        prefs.edit().putString(KEY_EQ_BANDS, bands).putString(KEY_EQ_PRESET, preset).apply()
+        _bands.value = bands
+        _preset.value = preset
+    }
+
+    override fun loadSession(): String? = prefs.getString(KEY_SESSION, null)
+
+    override fun saveSession(json: String) {
+        prefs.edit().putString(KEY_SESSION, json).apply()
+    }
+
     private val _qualityWifi = MutableStateFlow(prefs.getString(KEY_QUALITY_WIFI, null) ?: "HIGH")
     override val audioQualityWifi: StateFlow<String> = _qualityWifi.asStateFlow()
 
@@ -97,6 +123,10 @@ class SharedPreferencesAppSettings(context: Context) : AppSettings {
         const val KEY_UPDATE_NOTIFICATIONS = "update_notifications"
         const val KEY_AUTO_UPDATE = "auto_update"
         const val KEY_QUALITY_WIFI = "audio_quality_wifi"
+        const val KEY_CROSSFADE = "crossfade_seconds"
+        const val KEY_EQ_BANDS = "equalizer_bands"
+        const val KEY_EQ_PRESET = "equalizer_preset"
+        const val KEY_SESSION = "last_session"
         const val KEY_QUALITY_MOBILE = "audio_quality_mobile"
         const val KEY_NORMALIZE = "normalize_volume"
         const val KEY_VIDEO = "video_by_default"

@@ -27,7 +27,7 @@ import kotlinx.coroutines.Dispatchers
         PlaylistSongCrossRef::class,
         SearchHistoryEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @ConstructedBy(QMusicDatabaseConstructor::class)
@@ -52,10 +52,18 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
+/** v2 -> v3: playlists keep the order of their songs (existing songs keep the order they were added in). */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE `playlist_song_cross_ref` ADD COLUMN `position` INTEGER NOT NULL DEFAULT 0")
+        connection.execSQL("UPDATE `playlist_song_cross_ref` SET `position` = rowid")
+    }
+}
+
 fun getRoomDatabase(builder: RoomDatabase.Builder<QMusicDatabase>): QMusicDatabase {
     return builder
         .setDriver(BundledSQLiteDriver())
-        .addMigrations(MIGRATION_1_2)
+        .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
         .setQueryCoroutineContext(Dispatchers.IO)
         .build()
 }

@@ -24,5 +24,8 @@ interface MusicRepository {
     suspend fun clearSearchHistory(): Unit
 
     /** How many times each song was played in the last [withinDays] days (all time when null), most played first. */
+    /** Puts the songs of a playlist in the order of [songIds]. */
+    suspend fun reorderPlaylist(playlistId: Long, songIds: List<String>) {}
+
     suspend fun playCounts(withinDays: Int?): List<Pair<SongItem, Int>> = emptyList()
 }

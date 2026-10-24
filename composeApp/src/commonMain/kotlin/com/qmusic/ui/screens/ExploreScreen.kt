@@ -52,6 +52,7 @@ fun ExploreScreen(
     onPlayAll: (List<SongItem>) -> Unit,
     onCollectionClick: (CollectionItem) -> Unit,
     onMoodClick: (MoodButton) -> Unit,
+    onSeeAll: (com.qmusic.engine.models.HomeSection) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val s = LocalStrings.current
@@ -94,7 +95,7 @@ fun ExploreScreen(
                 contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp),
             ) {
                 items(page.sections) { section ->
-                    HomeShelf(section, onSongClick, onSongMore, onPlayAll, onCollectionClick)
+                    HomeShelf(section, onSongClick, onSongMore, onPlayAll, onCollectionClick, onSeeAll)
                 }
                 items(page.moods) { group ->
                     Column(modifier = Modifier.padding(horizontal = 16.dp)) {

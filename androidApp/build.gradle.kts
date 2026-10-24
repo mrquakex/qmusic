@@ -6,9 +6,10 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
-// Push notifications for new versions need the Firebase config; without the file the app builds and runs without them.
+// Push notifications for new versions and crash reports need the Firebase config; without the file the app builds and runs without them.
 if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
+    apply(plugin = "com.google.firebase.crashlytics")
 }
 
 android {
@@ -92,6 +93,7 @@ dependencies {
     implementation(libs.coil.compose) // the widget loads the cover itself
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
+    implementation(libs.firebase.crashlytics)
     implementation(libs.ktor.client.core)
     implementation(libs.androidx.activity.compose)
     implementation(libs.koin.android)

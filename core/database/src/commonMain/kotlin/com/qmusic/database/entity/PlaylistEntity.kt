@@ -17,5 +17,8 @@ data class PlaylistEntity(
 )
 data class PlaylistSongCrossRef(
     val playlistId: Long,
-    val songId: String
+    val songId: String,
+    /** Place of the song in the playlist, smallest first. */
+    @androidx.room.ColumnInfo(defaultValue = "0")
+    val position: Long = 0,
 )

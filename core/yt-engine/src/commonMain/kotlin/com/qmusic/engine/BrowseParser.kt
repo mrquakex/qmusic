@@ -139,6 +139,10 @@ internal object BrowseParser {
             avatar = thumbnails(header.path("thumbnail", "musicThumbnailRenderer", "thumbnail", "thumbnails")).lastOrNull()?.url,
             style = style,
             canPlayAll = header.path("moreContentButton", "buttonRenderer", "navigationEndpoint", "watchEndpoint") != null,
+            moreBrowseId = (header.path("moreContentButton", "buttonRenderer", "navigationEndpoint", "browseEndpoint")
+                ?: header.path("title").runs().firstOrNull().path("navigationEndpoint", "browseEndpoint")).path("browseId").str(),
+            moreParams = (header.path("moreContentButton", "buttonRenderer", "navigationEndpoint", "browseEndpoint")
+                ?: header.path("title").runs().firstOrNull().path("navigationEndpoint", "browseEndpoint")).path("params").str(),
         )
     }
 
@@ -246,6 +250,12 @@ internal object BrowseParser {
         return HomeSection(title = title, songs = songs, style = SectionStyle.ROWS)
     }
 
+    /** The "E" badge YouTube Music puts on explicit songs. */
+    private fun isExplicit(badges: JsonElement?): Boolean =
+        badges.arr().orEmpty().any {
+            it.path("musicInlineBadgeRenderer", "icon", "iconType").str() == "MUSIC_EXPLICIT_BADGE"
+        }
+
     private fun twoRowSong(renderer: JsonObject): SongItem? {
         val videoId = renderer.path("navigationEndpoint", "watchEndpoint", "videoId").str() ?: return null
         val subtitleRuns = renderer["subtitle"].runs()
@@ -261,6 +271,7 @@ internal object BrowseParser {
             thumbnail = thumbs.lastOrNull()?.url,
             thumbnails = thumbs,
             videoType = videoTypeOf(renderer),
+            explicit = isExplicit(renderer["subtitleBadges"]),
         )
     }
 
@@ -408,6 +419,7 @@ internal object BrowseParser {
             thumbnail = thumbs.lastOrNull()?.url ?: fallbackThumbnail,
             thumbnails = thumbs,
             videoType = videoType,
+            explicit = isExplicit(renderer["badges"]),
         )
     }
 
@@ -493,7 +505,33 @@ internal object BrowseParser {
 
         // The top artist is shown on its own card, so it is not repeated in the Artists list.
         top?.let { artists.remove(it.browseId) }
-        return SearchResultsPage(top, songs.values.toList(), albums.values.toList(), artists.values.toList(), playlists.values.toList())
+        val continuation = sections.firstNotNullOfOrNull { continuationToken(it.path("musicShelfRenderer")) }
+        return SearchResultsPage(top, songs.values.toList(), albums.values.toList(), artists.values.toList(), playlists.values.toList(), continuation)
+    }
+
+    /** The next part of a filtered search's list. */
+    fun searchContinuation(root: JsonObject): SearchResultsPage {
+        val shelf = root.path("continuationContents", "musicShelfContinuation")
+        val songs = mutableListOf<SongItem>()
+        val albums = mutableListOf<CollectionItem>()
+        val artists = mutableListOf<ArtistItem>()
+        val playlists = mutableListOf<CollectionItem>()
+        shelf.path("contents").arr().orEmpty().forEach { element ->
+            val row = element.path("musicResponsiveListItemRenderer").obj() ?: return@forEach
+            val song = track(row)
+            if (song != null) {
+                songs += song
+            } else {
+                libraryRow(row)?.let { item ->
+                    when (item.kind) {
+                        CollectionKind.ALBUM -> albums += item
+                        CollectionKind.ARTIST -> artists += ArtistItem(item.browseId, item.title, item.subtitle, item.thumbnail)
+                        else -> playlists += item
+                    }
+                }
+            }
+        }
+        return SearchResultsPage(null, songs, albums, artists, playlists, continuationToken(shelf))
     }
 
     // ---- Artist page ---------------------------------------------------------------------------

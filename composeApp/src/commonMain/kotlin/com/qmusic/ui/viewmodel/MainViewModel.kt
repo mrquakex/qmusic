@@ -87,6 +87,10 @@ data class Backup(
     val searches: List<String> = emptyList(),
 )
 
+/** The queue and moment the app was at, for the next launch. */
+@kotlinx.serialization.Serializable
+data class SavedSession(val queue: List<SongItem>, val index: Int, val positionMs: Long)
+
 @kotlinx.serialization.Serializable
 data class BackupPlaylist(val name: String, val songs: List<SongItem>)
 
@@ -486,6 +490,27 @@ class MainViewModel(
                 }
             }
         }
+        // The sound settings chosen last time: crossfade length and equalizer.
+        setCrossfadeDuration(settings.crossfadeSeconds.value)
+        runCatching { EqualizerPreset.valueOf(settings.equalizerPreset.value) }.getOrNull()?.let { _selectedPreset.value = it }
+        settings.equalizerBands.value.split(",").mapNotNull { it.toFloatOrNull() }.takeIf { it.size == 10 }?.let { bands ->
+            _equalizerBands.value = bands
+            bands.forEachIndexed { index, gain -> playerController.setEqualizerBand(index, gain) }
+        }
+        restoreSession()
+        // The queue and the moment are written down as they change, so a later launch can carry on.
+        scope.launch {
+            combine(playerController.queue, playerController.queueIndex) { queue, index -> queue to index }
+                .collect { saveSession() }
+        }
+        if (autoLoadHome) {
+            scope.launch {
+                while (true) {
+                    delay(SESSION_SAVE_MS)
+                    if (playerController.isPlaying.value) saveSession()
+                }
+            }
+        }
         // Stream quality follows the connection: the Wi-Fi choice on Wi-Fi, the mobile one on mobile data.
         scope.launch {
             combine(settings.audioQualityWifi, settings.audioQualityMobile, connectivity.isUnmetered) { wifi, mobile, unmetered ->
@@ -670,6 +695,7 @@ class MainViewModel(
         val clamped = seconds.coerceIn(0, 12)
         _crossfadeDuration.value = clamped
         playerController.setCrossfadeDuration(clamped)
+        settings.setCrossfadeSeconds(clamped)
     }
 
     fun setEqualizerBand(bandIndex: Int, gainDb: Float) {
@@ -679,6 +705,7 @@ class MainViewModel(
             updated[bandIndex] = clamped
             _equalizerBands.value = updated
             playerController.setEqualizerBand(bandIndex, clamped)
+            settings.setEqualizer(updated.joinToString(","), _selectedPreset.value.name)
         }
     }
 
@@ -688,6 +715,7 @@ class MainViewModel(
         preset.gains.forEachIndexed { index, gain ->
             playerController.setEqualizerBand(index, gain)
         }
+        settings.setEqualizer(preset.gains.joinToString(","), preset.name)
     }
 
     // --- Library & Favorites ---
@@ -876,6 +904,10 @@ class MainViewModel(
         }
     }
 
+    fun reorderLocalPlaylist(playlistId: Long, songIds: List<String>) {
+        scope.launch { repository.reorderPlaylist(playlistId, songIds) }
+    }
+
     fun removeSongFromPlaylist(playlistId: Long, song: SongItem) {
         scope.launch { repository.removeSongFromPlaylist(playlistId, song.id) }
     }
@@ -926,6 +958,36 @@ class MainViewModel(
     fun removeDownload(song: SongItem) {
         downloads.remove(song.id)
         scope.launch { repository.setDownloaded(song, false) }
+    }
+
+    // --- Carrying on where the last session stopped ---
+    private fun saveSession() {
+        val queue = playerController.queue.value
+        val index = playerController.queueIndex.value
+        if (queue.isEmpty() || index !in queue.indices) return
+        // Only the songs around the current one: enough to carry on, small enough to write often.
+        val from = (index - SESSION_BEHIND).coerceAtLeast(0)
+        val songs = queue.subList(from, (index + SESSION_AHEAD).coerceAtMost(queue.size))
+        val session = SavedSession(songs, index - from, playerController.playbackPosition.value)
+        runCatching { settings.saveSession(backupJson.encodeToString(SavedSession.serializer(), session)) }
+    }
+
+    private fun restoreSession() {
+        val text = settings.loadSession() ?: return
+        val session = runCatching { backupJson.decodeFromString(SavedSession.serializer(), text) }.getOrNull() ?: return
+        playerController.restoreQueue(session.queue, session.index, session.positionMs)
+    }
+
+    // --- Playback speed ---
+    private val _playbackSpeed = MutableStateFlow(1f)
+    val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
+
+    /** Steps through the speeds: 1x, 1.25x, 1.5x, 1.75x, 2x, then 0.75x and back to 1x. */
+    fun cyclePlaybackSpeed() {
+        val speeds = listOf(1f, 1.25f, 1.5f, 1.75f, 2f, 0.75f)
+        val next = speeds[(speeds.indexOf(_playbackSpeed.value) + 1).mod(speeds.size)]
+        _playbackSpeed.value = next
+        playerController.setPlaybackSpeed(next)
     }
 
     // --- Related (the player's "Related" tab) ---
@@ -1009,8 +1071,34 @@ class MainViewModel(
 
     // --- Lyrics ---
     /** Loads the lyrics of the playing song (cached per song). Called when the lyrics page is shown. */
+    private val _lyricsTranslation = MutableStateFlow<List<String>?>(null)
+    /** The lyrics in the app's language, line by line; null while the original is shown. */
+    val lyricsTranslation: StateFlow<List<String>?> = _lyricsTranslation.asStateFlow()
+    private var translatedFor: String? = null
+
+    fun toggleLyricsTranslation() {
+        if (_lyricsTranslation.value != null) {
+            _lyricsTranslation.value = null
+            return
+        }
+        val song = currentTrack.value ?: return
+        val lyrics = (_lyricsState.value as? LyricsState.Available)?.lyrics ?: return
+        val lines = if (lyrics.isSynced) lyrics.lines.map { it.text } else lyrics.text.split("\n")
+        scope.launch {
+            youTube.translate(lines.joinToString("\n"), settings.language.value)
+                .onSuccess { translated ->
+                    if (currentTrack.value?.id == song.id) {
+                        translatedFor = song.id
+                        _lyricsTranslation.value = translated
+                    }
+                }
+                .onFailure { showMessage(it.message ?: "") }
+        }
+    }
+
     fun loadLyrics() {
         val song = currentTrack.value ?: return
+        if (translatedFor != song.id) _lyricsTranslation.value = null
         lyricsJob?.cancel()
         if (lyricsCache.containsKey(song.id)) {
             _lyricsState.value = lyricsCache[song.id]?.let(LyricsState::Available) ?: LyricsState.Unavailable
@@ -1076,6 +1164,31 @@ class MainViewModel(
         scope.launch { repository.clearSearchHistory() }
     }
 
+    private var loadingMoreResults = false
+
+    /** Fetches the next part of a filtered search when its list is scrolled to the end. */
+    fun loadMoreSearchResults() {
+        val page = _searchPage.value ?: return
+        val token = page.continuation ?: return
+        if (loadingMoreResults) return
+        loadingMoreResults = true
+        scope.launch {
+            youTube.searchMore(token).onSuccess { more ->
+                val current = _searchPage.value
+                if (current?.continuation == token) {
+                    _searchPage.value = current.copy(
+                        songs = (current.songs + more.songs).distinctBy { it.id },
+                        albums = (current.albums + more.albums).distinctBy { it.browseId },
+                        artists = (current.artists + more.artists).distinctBy { it.browseId },
+                        playlists = (current.playlists + more.playlists).distinctBy { it.browseId },
+                        continuation = more.continuation,
+                    )
+                }
+            }
+            loadingMoreResults = false
+        }
+    }
+
     /** The back arrow of the search box: leaves the results and the typed words. */
     fun clearSearch() {
         suggestionJob?.cancel()
@@ -1101,6 +1214,19 @@ class MainViewModel(
         _showSearchResults.value = true
         _isSearching.value = true
         _searchError.value = null
+
+        // No connection: the downloaded songs are what can be played, so the search looks there.
+        if (!isOnline.value) {
+            val words = trimmed.lowercase()
+            val found = downloadedSongs.value.filter { song ->
+                song.title.lowercase().contains(words) || song.artists.any { it.name.lowercase().contains(words) }
+            }
+            _searchPage.value = SearchResultsPage(songs = found)
+            _searchResults.value = found
+            _isSearching.value = false
+            showMessage(strings.offlineSearchNote)
+            return
+        }
 
         scope.launch {
             repository.recordSearch(trimmed)
@@ -1535,6 +1661,9 @@ class MainViewModel(
 
     private companion object {
         const val RADIO_REFILL_THRESHOLD = 3
+        const val SESSION_SAVE_MS = 10_000L
+        const val SESSION_BEHIND = 20
+        const val SESSION_AHEAD = 80
         const val BACKUP_HISTORY = 500
         const val BACKUP_SEARCHES = 50
         val backupJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; prettyPrint = true }

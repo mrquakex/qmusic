@@ -90,6 +90,7 @@ fun ArtistScreen(
     onToggleSubscribe: () -> Unit = {},
     onStartRadio: (SongItem) -> Unit = {},
     onShare: (ArtistPage) -> Unit = {},
+    onSeeAll: (com.qmusic.engine.models.HomeSection) -> Unit = {},
 ) {
     val s = LocalStrings.current
     val listState = rememberLazyListState()
@@ -175,39 +176,15 @@ fun ArtistScreen(
                 }
 
                 items(page.sections) { section ->
-                    Column(modifier = Modifier.padding(top = 10.dp)) {
-                        SectionTitle(section.title, Modifier.padding(horizontal = 16.dp))
-                        Spacer(Modifier.height(12.dp))
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        ) {
-                            items(section.songs) { song ->
-                                ShelfCard(
-                                    title = song.title,
-                                    subtitle = song.artists.joinToString { it.name },
-                                    thumbnail = song.thumbnail ?: song.thumbnails.firstOrNull()?.url,
-                                    onClick = { onSongClick(song, section.songs) },
-                                )
-                            }
-                            items(section.collections) { collection ->
-                                if (collection.kind == CollectionKind.ARTIST) {
-                                    ArtistCircleCard(
-                                        name = collection.title,
-                                        subtitle = collection.subtitle,
-                                        thumbnail = collection.thumbnail,
-                                        onClick = { onCollectionClick(collection) },
-                                    )
-                                } else {
-                                    ShelfCard(
-                                        title = collection.title,
-                                        subtitle = collection.subtitle.orEmpty(),
-                                        thumbnail = collection.thumbnail,
-                                        onClick = { onCollectionClick(collection) },
-                                    )
-                                }
-                            }
-                        }
+                    Box(modifier = Modifier.padding(top = 10.dp)) {
+                        HomeShelf(
+                            section = section,
+                            onSongClick = onSongClick,
+                            onSongMore = onSongMore,
+                            onPlayAll = onPlayAll,
+                            onCollectionClick = onCollectionClick,
+                            onSeeAll = onSeeAll,
+                        )
                     }
                 }
 

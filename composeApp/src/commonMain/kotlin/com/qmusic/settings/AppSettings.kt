@@ -28,6 +28,22 @@ interface AppSettings {
 
     fun setUpdateNotifications(enabled: Boolean)
 
+    /** Crossfade length in seconds. */
+    val crossfadeSeconds: StateFlow<Int>
+
+    /** The ten equalizer gains as "g0,g1,...", empty for flat; and the name of the chosen preset. */
+    val equalizerBands: StateFlow<String>
+    val equalizerPreset: StateFlow<String>
+
+    fun setCrossfadeSeconds(seconds: Int)
+
+    fun setEqualizer(bands: String, preset: String)
+
+    /** The queue, the song in it and the moment it was at, so the next launch can carry on (JSON); null if none. */
+    fun loadSession(): String?
+
+    fun saveSession(json: String)
+
     /** Stream quality on Wi-Fi and on mobile data: "HIGH", "NORMAL" or "LOW". */
     val audioQualityWifi: StateFlow<String>
     val audioQualityMobile: StateFlow<String>
@@ -86,6 +102,32 @@ class InMemoryAppSettings(
 
     override fun setAutoCheckUpdates(enabled: Boolean) {
         _check.value = enabled
+    }
+
+    private val _crossfade = MutableStateFlow(3)
+    override val crossfadeSeconds: StateFlow<Int> = _crossfade.asStateFlow()
+
+    private val _bands = MutableStateFlow("")
+    override val equalizerBands: StateFlow<String> = _bands.asStateFlow()
+
+    private val _preset = MutableStateFlow("FLAT")
+    override val equalizerPreset: StateFlow<String> = _preset.asStateFlow()
+
+    private var session: String? = null
+
+    override fun setCrossfadeSeconds(seconds: Int) {
+        _crossfade.value = seconds
+    }
+
+    override fun setEqualizer(bands: String, preset: String) {
+        _bands.value = bands
+        _preset.value = preset
+    }
+
+    override fun loadSession(): String? = session
+
+    override fun saveSession(json: String) {
+        session = json
     }
 
     private val _qualityWifi = MutableStateFlow("HIGH")

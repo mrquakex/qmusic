@@ -60,6 +60,12 @@ interface PlayerController {
     /** Empties the queue but for the song that is playing. */
     fun clearQueue() = Unit
 
+    /** Shows [songs] as the queue at [index] and [positionMs] without playing; the first play starts there. */
+    fun restoreQueue(songs: List<SongItem>, index: Int, positionMs: Long) = Unit
+
+    /** Playback speed (1 = normal), for podcasts and long listens. */
+    fun setPlaybackSpeed(speed: Float) = Unit
+
     fun next()
 
     /** Restarts the current song when more than a few seconds in, otherwise goes to the previous one. */

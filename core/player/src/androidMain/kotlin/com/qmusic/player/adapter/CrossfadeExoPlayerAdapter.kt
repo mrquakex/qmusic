@@ -391,6 +391,27 @@ class CrossfadeExoPlayerAdapter(
         if (index in _queue.value.indices) playAt(index)
     }
 
+    /** Where a restored song starts on its first play; null once it has been loaded. */
+    private var pendingStart: Long? = null
+
+    override fun restoreQueue(songs: List<SongItem>, index: Int, positionMs: Long) {
+        if (songs.isEmpty() || index !in songs.indices || _queue.value.isNotEmpty()) return
+        _queue.value = songs
+        _queueIndex.value = index
+        _currentTrack.value = songs[index]
+        _playbackPosition.value = positionMs
+        _duration.value = (songs[index].duration?.toLong() ?: 0L) * 1000L
+        pendingStart = positionMs
+    }
+
+    private var speed = 1f
+
+    override fun setPlaybackSpeed(speed: Float) {
+        this.speed = speed
+        playerA.setPlaybackSpeed(speed)
+        playerB.setPlaybackSpeed(speed)
+    }
+
     override fun clearQueue() {
         val current = _queue.value.getOrNull(_queueIndex.value) ?: return
         _queue.value = listOf(current)
@@ -632,6 +653,7 @@ class CrossfadeExoPlayerAdapter(
             return
         }
         if (song.id != retriedFor) retriedFor = null // a new song gets its own retry
+        if (startPositionMs == 0L) pendingStart = null
         resolveJob?.cancel()
         advancedFromIndex = -1
         _queueIndex.value = index
@@ -939,11 +961,23 @@ class CrossfadeExoPlayerAdapter(
             _isPlaying.value = true
             return
         }
+        // A queue restored from the last session is loaded only now, at the moment it had reached.
+        if (activePlayer.mediaItemCount == 0 && _queueIndex.value in _queue.value.indices) {
+            val start = pendingStart ?: 0L
+            pendingStart = null
+            playAt(_queueIndex.value, startPositionMs = start)
+            return
+        }
         activePlayer.play()
         _isPlaying.value = true
     }
 
     override fun seekTo(positionMs: Long) {
+        if (activePlayer.mediaItemCount == 0 && pendingStart != null) {
+            pendingStart = positionMs
+            _playbackPosition.value = positionMs
+            return
+        }
         remote?.let {
             it.seekTo(positionMs)
             _playbackPosition.value = positionMs

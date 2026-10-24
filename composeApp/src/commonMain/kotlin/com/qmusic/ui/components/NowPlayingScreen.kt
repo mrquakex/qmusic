@@ -158,6 +158,11 @@ fun NowPlayingScreen(
     onRelatedCollectionClick: (com.qmusic.engine.models.CollectionItem) -> Unit = {},
     onSaveQueue: (String) -> Unit = {},
     onClearQueue: () -> Unit = {},
+    onRelatedSongMore: (SongItem) -> Unit = {},
+    playbackSpeed: Float = 1f,
+    onCycleSpeed: () -> Unit = {},
+    lyricsTranslation: List<String>? = null,
+    onToggleTranslation: () -> Unit = {},
     modifier: Modifier = Modifier,
     /** Controls fade in over the last part of the drag, like YouTube Music's. */
     contentAlpha: () -> Float = { 1f },
@@ -256,7 +261,7 @@ fun NowPlayingScreen(
                         modifier = Modifier.draggable(dragState, Orientation.Vertical, onDragStopped = { onSheetDragStopped(it) }),
                     )
 
-                    1 -> LyricsPage(lyrics, positionMs, onSeekTo)
+                    1 -> LyricsPage(lyrics, positionMs, onSeekTo, lyricsTranslation, onToggleTranslation)
                     2 -> QueuePage(
                         queue = queue,
                         queueIndex = queueIndex,
@@ -269,7 +274,7 @@ fun NowPlayingScreen(
                         onClear = onClearQueue,
                     )
 
-                    else -> RelatedPage(related, onRelatedSongClick, onRelatedCollectionClick)
+                    else -> RelatedPage(related, onRelatedSongClick, onRelatedCollectionClick, onRelatedSongMore)
                 }
             }
 
@@ -302,6 +307,8 @@ fun NowPlayingScreen(
                     onSleep = { showSleepDialog = true },
                     onEqualizer = onOpenEqualizer,
                     relatedOpen = pagerState.currentPage == 3,
+                    speed = playbackSpeed,
+                    onSpeed = onCycleSpeed,
                     onRelated = {
                         scope.launch { pagerState.animateScrollToPage(if (pagerState.currentPage == 3) 0 else 3) }
                     },
@@ -497,11 +504,26 @@ private fun MediaPage(
 }
 
 @Composable
-private fun LyricsPage(state: LyricsState, positionMs: () -> Long, onSeekTo: (Long) -> Unit) {
+private fun LyricsPage(
+    state: LyricsState,
+    positionMs: () -> Long,
+    onSeekTo: (Long) -> Unit,
+    translation: List<String>? = null,
+    onToggleTranslation: () -> Unit = {},
+) {
     val s = LocalStrings.current
+    Column(modifier = Modifier.fillMaxSize()) {
+    if (state is LyricsState.Available) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onToggleTranslation) {
+                Text(if (translation != null) s.showOriginalLyrics else s.translateLyrics, color = Color.White)
+            }
+        }
+    }
     Box(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
+            .weight(1f)
             .padding(vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -514,16 +536,27 @@ private fun LyricsPage(state: LyricsState, positionMs: () -> Long, onSeekTo: (Lo
                 color = Color.White.copy(alpha = 0.6f),
             )
 
-            is LyricsState.Available -> if (state.lyrics.isSynced) SyncedLyrics(state.lyrics, positionMs, onSeekTo) else Column(
+            is LyricsState.Available -> if (state.lyrics.isSynced) SyncedLyrics(state.lyrics, positionMs, onSeekTo, translation) else Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState()),
             ) {
-                Text(
-                    text = state.lyrics.text,
-                    style = MaterialTheme.typography.titleLarge.copy(lineHeight = 32.sp, fontWeight = FontWeight.SemiBold),
-                    color = Color.White,
-                )
+                if (translation == null) {
+                    Text(
+                        text = state.lyrics.text,
+                        style = MaterialTheme.typography.titleLarge.copy(lineHeight = 32.sp, fontWeight = FontWeight.SemiBold),
+                        color = Color.White,
+                    )
+                } else {
+                    // Each line with its translation under it
+                    state.lyrics.text.split("\n").forEachIndexed { index, line ->
+                        Text(line, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold), color = Color.White)
+                        translation.getOrNull(index)?.takeIf { it.isNotBlank() && it.trim() != line.trim() }?.let {
+                            Text(it, style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = 0.6f))
+                        }
+                        Spacer(Modifier.height(6.dp))
+                    }
+                }
                 state.lyrics.source?.let { source ->
                     Spacer(Modifier.height(16.dp))
                     Text(
@@ -536,6 +569,7 @@ private fun LyricsPage(state: LyricsState, positionMs: () -> Long, onSeekTo: (Lo
             }
         }
     }
+    }
 }
 
 /** Songs, albums and artists like the one playing, as YouTube Music shows them under "Related". */
@@ -544,6 +578,7 @@ private fun RelatedPage(
     sections: List<com.qmusic.engine.models.HomeSection>?,
     onSongClick: (SongItem, List<SongItem>) -> Unit,
     onCollectionClick: (com.qmusic.engine.models.CollectionItem) -> Unit,
+    onSongMore: (SongItem) -> Unit = {},
 ) {
     val s = LocalStrings.current
     when {
@@ -564,7 +599,7 @@ private fun RelatedPage(
                 com.qmusic.ui.screens.HomeShelf(
                     section = sections[index],
                     onSongClick = onSongClick,
-                    onSongMore = {},
+                    onSongMore = onSongMore,
                     onPlayAll = { songs -> songs.firstOrNull()?.let { onSongClick(it, songs) } },
                     onCollectionClick = onCollectionClick,
                 )
@@ -575,7 +610,7 @@ private fun RelatedPage(
 
 /** Lines that follow the song: the one being sung is bright, the rest dim, and tapping a line jumps to it. */
 @Composable
-private fun SyncedLyrics(lyrics: Lyrics, positionMs: () -> Long, onSeekTo: (Long) -> Unit) {
+private fun SyncedLyrics(lyrics: Lyrics, positionMs: () -> Long, onSeekTo: (Long) -> Unit, translation: List<String>? = null) {
     val lines = lyrics.lines
     val listState = rememberLazyListState()
     // Read inside derivedStateOf: the position ticks 4 times a second, but this only changes when a new line starts.
@@ -599,16 +634,22 @@ private fun SyncedLyrics(lyrics: Lyrics, positionMs: () -> Long, onSeekTo: (Long
                 },
                 label = "lyricAlpha",
             )
-            Text(
-                text = line.text.ifBlank { "\u266A" },
-                style = MaterialTheme.typography.titleLarge.copy(lineHeight = 32.sp, fontWeight = FontWeight.Bold),
-                color = Color.White.copy(alpha = alpha),
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
                     .clickable { onSeekTo(line.timeMs) }
                     .padding(vertical = 8.dp),
-            )
+            ) {
+                Text(
+                    text = line.text.ifBlank { "\u266A" },
+                    style = MaterialTheme.typography.titleLarge.copy(lineHeight = 32.sp, fontWeight = FontWeight.Bold),
+                    color = Color.White.copy(alpha = alpha),
+                )
+                translation?.getOrNull(index)?.takeIf { it.isNotBlank() && it.trim() != line.text.trim() }?.let {
+                    Text(it, style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = alpha * 0.65f))
+                }
+            }
         }
         lyrics.source?.let { source ->
             item {
@@ -904,6 +945,8 @@ private fun ChipsRow(
     onEqualizer: () -> Unit,
     relatedOpen: Boolean = false,
     onRelated: () -> Unit = {},
+    speed: Float = 1f,
+    onSpeed: () -> Unit = {},
 ) {
     val s = LocalStrings.current
     Row(
@@ -916,6 +959,12 @@ private fun ChipsRow(
         LikeChip(isFavorite = isFavorite, label = if (isFavorite) s.liked else s.like, onClick = onToggleFavorite)
         ActionChip(QMusicIcons.Lyrics, s.lyrics, active = lyricsOpen, onClick = onLyrics)
         ActionChip(QMusicIcons.Samples, s.related, active = relatedOpen, onClick = onRelated)
+        ActionChip(
+            QMusicIcons.Next,
+            s.playbackSpeed(if (speed % 1f == 0f) "${speed.toInt()}x" else "${speed}x"),
+            active = speed != 1f,
+            onClick = onSpeed,
+        )
         ActionChip(QMusicIcons.PlaylistAdd, s.save, active = false, onClick = onAddToPlaylist)
         if (downloadProgress != null) {
             Row(

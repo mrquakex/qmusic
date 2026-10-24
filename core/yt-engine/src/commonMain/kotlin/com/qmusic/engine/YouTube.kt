@@ -280,6 +280,25 @@ class YouTube(
             check(response.status.value in 200..299) { "YouTube Music answered ${response.status.value}" }
         }
 
+    /** The next part of a filtered search ([continuation] from the previous page). */
+    suspend fun searchMore(continuation: String): Result<SearchResultsPage> =
+        runCatching {
+            BrowseParser.searchContinuation(json.parseToJsonElement(ytmusic.search(continuation = continuation).bodyAsText()).jsonObject)
+        }
+
+    /**
+     * [text] translated into [target] ("tr", "en") line by line, through Google Translate's public endpoint.
+     * Empty lines stay where they were, so the result lines up with the original.
+     */
+    suspend fun translate(text: String, target: String): Result<List<String>> =
+        runCatching {
+            val url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=$target&dt=t&q=" +
+                text.encodeURLParameter()
+            val body = ytmusic.fetchText(url) ?: error("Translation is not available")
+            val parts = json.parseToJsonElement(body).jsonArray.firstOrNull()?.jsonArray.orEmpty()
+            parts.joinToString("") { part -> part.jsonArray.firstOrNull()?.jsonPrimitive?.contentOrNull.orEmpty() }.split("\n")
+        }
+
     /** Songs, albums and artists like [videoId] (the player's "Related" tab). */
     suspend fun related(videoId: String): Result<List<HomeSection>> =
         runCatching {

@@ -46,6 +46,9 @@ data class HomeSection(
     val style: SectionStyle = SectionStyle.CARDS,
     /** The shelf offers "Play all". */
     val canPlayAll: Boolean = false,
+    /** The full list behind the shelf ("See all"), when YouTube Music has one. */
+    val moreBrowseId: String? = null,
+    val moreParams: String? = null,
 )
 
 /** A tile of "Moods & genres" ("Chill", "Rock", ...), opening its own page. */
@@ -118,6 +121,8 @@ data class SearchResultsPage(
     val albums: List<CollectionItem> = emptyList(),
     val artists: List<ArtistItem> = emptyList(),
     val playlists: List<CollectionItem> = emptyList(),
+    /** More results of a filtered search, fetched as the list is scrolled to its end. */
+    val continuation: String? = null,
 ) {
     val isEmpty: Boolean
         get() = top == null && songs.isEmpty() && albums.isEmpty() && artists.isEmpty() && playlists.isEmpty()

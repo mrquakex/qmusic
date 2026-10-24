@@ -85,6 +85,7 @@ class MusicRepositoryImpl(
         playlistDao.insertPlaylistSongCrossRef(
             PlaylistSongCrossRef(
                 playlistId = playlistId,
+                position = playlistDao.maxPosition(playlistId) + 1,
                 songId = song.id
             )
         )
@@ -107,6 +108,10 @@ class MusicRepositoryImpl(
             isDownloaded = false,
             downloadPath = null
         )
+    }
+
+    override suspend fun reorderPlaylist(playlistId: Long, songIds: List<String>) {
+        songIds.forEachIndexed { index, id -> playlistDao.setPosition(playlistId, id, index.toLong()) }
     }
 
     override suspend fun playCounts(withinDays: Int?): List<Pair<SongItem, Int>> {

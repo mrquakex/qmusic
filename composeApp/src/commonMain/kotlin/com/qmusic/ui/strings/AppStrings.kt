@@ -56,6 +56,14 @@ interface AppStrings {
     val exploreMoods: String
     val moreYouMayLike: String
     val tabAlbums: String
+    val seeAll: String
+    val reorderPlaylist: String
+    val moveUp: String
+    val moveDown: String
+    val translateLyrics: String
+    val showOriginalLyrics: String
+    fun playbackSpeed(speed: String): String
+    val offlineSearchNote: String
     fun queueSaved(name: String): String
     val saveQueue: String
     val clearQueue: String
@@ -340,6 +348,14 @@ object TurkishStrings : AppStrings {
     override val exploreMoods: String = "Ruh halleri ve türler"
     override val moreYouMayLike: String = "Beğenebileceğiniz diğer içerikler"
     override val tabAlbums: String = "Albümler"
+    override val seeAll: String = "Tümü"
+    override val reorderPlaylist: String = "Sırayı düzenle"
+    override val moveUp: String = "Yukarı taşı"
+    override val moveDown: String = "Aşağı taşı"
+    override val translateLyrics: String = "Çevir"
+    override val showOriginalLyrics: String = "Orijinal"
+    override fun playbackSpeed(speed: String): String = "Hız $speed"
+    override val offlineSearchNote: String = "İnternet yok: indirilenlerin içinde arandı"
     override fun queueSaved(name: String): String = "Sıra \"$name\" olarak kaydedildi"
     override val saveQueue: String = "Sırayı kaydet"
     override val clearQueue: String = "Temizle"
@@ -646,6 +662,14 @@ object EnglishStrings : AppStrings {
     override val exploreMoods: String = "Moods & genres"
     override val moreYouMayLike: String = "More you may like"
     override val tabAlbums: String = "Albums"
+    override val seeAll: String = "See all"
+    override val reorderPlaylist: String = "Reorder"
+    override val moveUp: String = "Move up"
+    override val moveDown: String = "Move down"
+    override val translateLyrics: String = "Translate"
+    override val showOriginalLyrics: String = "Original"
+    override fun playbackSpeed(speed: String): String = "Speed $speed"
+    override val offlineSearchNote: String = "No internet: searched your downloads"
     override fun queueSaved(name: String): String = "Queue saved as \"$name\""
     override val saveQueue: String = "Save queue"
     override val clearQueue: String = "Clear"

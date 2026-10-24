@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.qmusic.engine.models.SongItem
@@ -56,10 +57,19 @@ fun LocalPlaylistScreen(
     onDelete: () -> Unit,
     onToggleFavorite: (SongItem) -> Unit,
     isFavoritePredicate: (String) -> Boolean,
+    onReorder: (List<String>) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val s = LocalStrings.current
     var renaming by remember { mutableStateOf(false) }
+    var reordering by remember { mutableStateOf(false) }
+    // The order shown while arranging; saved after every move so leaving the page keeps it.
+    var ordered by remember(songs) { mutableStateOf(songs) }
+    fun move(from: Int, to: Int) {
+        if (to !in ordered.indices) return
+        ordered = ordered.toMutableList().apply { add(to, removeAt(from)) }
+        onReorder(ordered.map { it.id })
+    }
     var confirmingDelete by remember { mutableStateOf(false) }
 
     Column(
@@ -85,6 +95,15 @@ fun LocalPlaylistScreen(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (songs.size > 1) {
+                IconButton(onClick = { reordering = !reordering }) {
+                    Icon(
+                        if (reordering) QMusicIcons.Check else QMusicIcons.DragHandle,
+                        contentDescription = s.reorderPlaylist,
+                        tint = if (reordering) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             IconButton(onClick = { renaming = true }) {
                 Icon(QMusicIcons.Edit, contentDescription = s.renamePlaylist, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -111,12 +130,12 @@ fun LocalPlaylistScreen(
             ) {
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Button(onClick = { onPlayAll(songs) }, shape = RoundedCornerShape(12.dp)) {
+                        Button(onClick = { onPlayAll(ordered) }, shape = RoundedCornerShape(12.dp)) {
                             Icon(QMusicIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(s.play)
                         }
-                        OutlinedButton(onClick = { onShuffle(songs) }, shape = RoundedCornerShape(12.dp)) {
+                        OutlinedButton(onClick = { onShuffle(ordered) }, shape = RoundedCornerShape(12.dp)) {
                             Icon(QMusicIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(s.shuffle)
@@ -128,25 +147,34 @@ fun LocalPlaylistScreen(
                         )
                     }
                 }
-                items(songs, key = { it.id }) { song ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                itemsIndexed(ordered, key = { _, song -> song.id }) { index, song ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.animateItem()) {
                         SongListItem(
                             song = song,
                             isFavorite = isFavoritePredicate(song.id),
-                            onClick = { onSongClick(song, songs) },
+                            onClick = { onSongClick(song, ordered) },
                             onToggleFavorite = { onToggleFavorite(song) },
                             onMore = { onSongMore(song) },
                             isDownloaded = song.id in downloadedIds,
                             flat = true,
                             modifier = Modifier.weight(1f),
                         )
-                        IconButton(onClick = { onRemoveSong(song) }) {
-                            Icon(
-                                QMusicIcons.Close,
-                                contentDescription = s.removeFromPlaylist,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp),
-                            )
+                        if (reordering) {
+                            IconButton(onClick = { move(index, index - 1) }, enabled = index > 0) {
+                                Icon(QMusicIcons.ChevronDown, contentDescription = s.moveUp, modifier = Modifier.size(20.dp).rotate(180f))
+                            }
+                            IconButton(onClick = { move(index, index + 1) }, enabled = index < ordered.lastIndex) {
+                                Icon(QMusicIcons.ChevronDown, contentDescription = s.moveDown, modifier = Modifier.size(20.dp))
+                            }
+                        } else {
+                            IconButton(onClick = { onRemoveSong(song) }) {
+                                Icon(
+                                    QMusicIcons.Close,
+                                    contentDescription = s.removeFromPlaylist,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
                         }
                     }
                 }

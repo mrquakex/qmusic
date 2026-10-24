@@ -133,6 +133,8 @@ fun QMusicApp(
         val playbackPositionState = viewModel.playbackPosition.collectAsState()
         val bufferedPositionState = viewModel.bufferedPosition.collectAsState()
         val share = rememberShare()
+        val playbackSpeed by viewModel.playbackSpeed.collectAsState()
+        val lyricsTranslation by viewModel.lyricsTranslation.collectAsState()
         val related by viewModel.related.collectAsState()
         val backupFiles = rememberBackupFiles(
             content = { viewModel.exportBackup() },
@@ -424,6 +426,7 @@ fun QMusicApp(
                             onSongMore = { viewModel.showSongMenu(it) },
                             onPlayAll = { viewModel.playAll(it) },
                             onChipClick = { viewModel.selectHomeChip(it) },
+                            onSeeAll = { section -> section.moreBrowseId?.let { viewModel.openExplore(it, section.moreParams, section.title) } },
                             onOpenExplore = { id, title -> viewModel.openExplore(id, null, title) },
                             onCollectionClick = { viewModel.openCollection(it) },
                             onSearchClick = { viewModel.selectTab(ScreenTab.SEARCH) },
@@ -457,6 +460,7 @@ fun QMusicApp(
                             downloadedIds = downloadedIds,
                             onQueryChange = { viewModel.setSearchQuery(it) },
                             onBack = { viewModel.clearSearch() },
+                            onLoadMoreResults = { viewModel.loadMoreSearchResults() },
                             recentSongs = history,
                             suggestedSearches = suggestedSearches,
                             onOpenExplore = { id, title -> viewModel.openExplore(id, null, title) },
@@ -594,6 +598,7 @@ fun QMusicApp(
                             onShare = { page ->
                                 share("${page.name}\nhttps://music.youtube.com/channel/${page.channelId ?: route.browseId}")
                             },
+                            onSeeAll = { section -> section.moreBrowseId?.let { viewModel.openExplore(it, section.moreParams, section.title) } },
                         )
 
                         Route.Stats -> StatsScreen(
@@ -616,6 +621,7 @@ fun QMusicApp(
                             onPlayAll = { viewModel.playAll(it) },
                             onCollectionClick = { viewModel.openCollection(it) },
                             onMoodClick = { viewModel.openExplore(it.browseId, it.params, it.text) },
+                            onSeeAll = { section -> section.moreBrowseId?.let { viewModel.openExplore(it, section.moreParams, section.title) } },
                         )
 
                         is Route.LocalPlaylist -> {
@@ -635,6 +641,7 @@ fun QMusicApp(
                                 onDelete = { viewModel.deletePlaylist(route.id) },
                                 onToggleFavorite = { viewModel.toggleFavorite(it) },
                                 isFavoritePredicate = { it in favoriteIds },
+                                onReorder = { viewModel.reorderLocalPlaylist(route.id, it) },
                             )
                         }
 
@@ -707,6 +714,11 @@ fun QMusicApp(
                             },
                             onSaveQueue = { viewModel.saveQueueAsPlaylist(it) },
                             onClearQueue = { viewModel.clearQueue() },
+                            onRelatedSongMore = { viewModel.showSongMenu(it) },
+                            playbackSpeed = playbackSpeed,
+                            onCycleSpeed = { viewModel.cyclePlaybackSpeed() },
+                            lyricsTranslation = lyricsTranslation,
+                            onToggleTranslation = { viewModel.toggleLyricsTranslation() },
                             contentAlpha = { ((sheetProgress.value - 0.55f) / 0.45f).coerceIn(0f, 1f) },
                             coverAlpha = { if (coverSettled()) 1f else 0f },
                             backdropAlpha = { (sheetProgress.value * 4f).coerceIn(0f, 1f) },

@@ -27,8 +27,15 @@ interface PlaylistDao {
         SELECT songs.* FROM songs
         INNER JOIN playlist_song_cross_ref ON songs.id = playlist_song_cross_ref.songId
         WHERE playlist_song_cross_ref.playlistId = :playlistId
+        ORDER BY playlist_song_cross_ref.position
     """)
     fun getSongsForPlaylist(playlistId: Long): Flow<List<SongEntity>>
+
+    @Query("SELECT COALESCE(MAX(position), 0) FROM playlist_song_cross_ref WHERE playlistId = :playlistId")
+    suspend fun maxPosition(playlistId: Long): Long
+
+    @Query("UPDATE playlist_song_cross_ref SET position = :position WHERE playlistId = :playlistId AND songId = :songId")
+    suspend fun setPosition(playlistId: Long, songId: String, position: Long): Int
 
     @Query("DELETE FROM playlist_song_cross_ref WHERE playlistId = :playlistId AND songId = :songId")
     suspend fun removeSongFromPlaylist(playlistId: Long, songId: String): Int

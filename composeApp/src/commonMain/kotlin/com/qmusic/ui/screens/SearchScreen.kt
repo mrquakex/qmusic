@@ -43,6 +43,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -86,6 +87,7 @@ fun SearchScreen(
     onQueryChange: (String) -> Unit,
     onBack: () -> Unit,
     recentSongs: List<SongItem>,
+    onLoadMoreResults: () -> Unit = {},
     suggestedSearches: List<String>,
     onOpenExplore: (browseId: String, title: String) -> Unit,
     onVoiceSearch: (() -> Unit)?,
@@ -211,6 +213,7 @@ fun SearchScreen(
                 onArtistClick = onArtistClick,
                 onToggleFavorite = onToggleFavorite,
                 isFavoritePredicate = isFavoritePredicate,
+                onLoadMore = onLoadMoreResults,
             )
         } else if (query.isBlank()) {
             SearchHistory(
@@ -291,6 +294,7 @@ private fun SearchResults(
     onArtistClick: (ArtistItem) -> Unit,
     onToggleFavorite: (SongItem) -> Unit,
     isFavoritePredicate: (String) -> Boolean,
+    onLoadMore: () -> Unit = {},
 ) {
     val s = LocalStrings.current
     when {
@@ -318,7 +322,19 @@ private fun SearchResults(
             // With a filter chip active the one matching group fills the screen as a plain list; "All" mixes
             // the groups, with horizontal shelves for the visual ones.
             val single = filter != null
+            val resultsState = androidx.compose.foundation.lazy.rememberLazyListState()
+            // Near the end of a filtered list, the next part is fetched (YouTube Music pages its results).
+            val nearEnd by androidx.compose.runtime.remember {
+                androidx.compose.runtime.derivedStateOf {
+                    val info = resultsState.layoutInfo
+                    (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - 4
+                }
+            }
+            androidx.compose.runtime.LaunchedEffect(nearEnd, page.continuation) {
+                if (nearEnd && single && page.continuation != null) onLoadMore()
+            }
             LazyColumn(
+                state = resultsState,
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 contentPadding = PaddingValues(bottom = 120.dp),

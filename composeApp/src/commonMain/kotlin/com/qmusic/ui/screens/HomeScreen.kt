@@ -98,6 +98,7 @@ fun HomeScreen(
     onCollectionClick: (CollectionItem) -> Unit,
     onChipClick: (HomeChip) -> Unit,
     onOpenExplore: (browseId: String, title: String) -> Unit,
+    onSeeAll: (HomeSection) -> Unit = {},
     onSearchClick: () -> Unit,
     onSignIn: () -> Unit,
     onRefresh: () -> Unit,
@@ -304,7 +305,7 @@ fun HomeScreen(
             }
 
             items(ordered) { section ->
-                HomeShelf(section, onSongClick, onSongMore, onPlayAll, onCollectionClick)
+                HomeShelf(section, onSongClick, onSongMore, onPlayAll, onCollectionClick, onSeeAll)
             }
 
             if (isOnline && !isLoadingMore && sections.isNotEmpty()) {
@@ -536,6 +537,21 @@ private fun OfflineBanner(downloadCount: Int, onOpenDownloads: () -> Unit) {
     }
 }
 
+/** The small "E" YouTube Music shows before the artist of an explicit song. */
+@Composable
+fun ExplicitBadge() {
+    Box(
+        modifier = Modifier
+            .padding(end = 6.dp)
+            .clip(RoundedCornerShape(2.dp))
+            .background(MaterialTheme.colorScheme.onSurfaceVariant)
+            .padding(horizontal = 4.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("E", style = MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Color.Black)
+    }
+}
+
 /** How far down the colour of the first speed-dial picture reaches. */
 private val TINT_HEIGHT = 460.dp
 
@@ -564,9 +580,10 @@ fun HomeShelf(
     onSongMore: (SongItem) -> Unit,
     onPlayAll: (List<SongItem>) -> Unit,
     onCollectionClick: (CollectionItem) -> Unit,
+    onSeeAll: ((HomeSection) -> Unit)? = null,
 ) {
     Column {
-        SectionHeader(section, onPlayAll)
+        SectionHeader(section, onPlayAll, onSeeAll)
         Spacer(modifier = Modifier.height(12.dp))
         when (section.style) {
             SectionStyle.ROWS -> SongColumns(section, onSongClick, onSongMore)
@@ -649,7 +666,7 @@ fun ExploreTiles(onOpenExplore: (browseId: String, title: String) -> Unit, modif
 
 /** The shelf title with the small line above it, the round picture beside it and "Play all" at the end. */
 @Composable
-private fun SectionHeader(section: HomeSection, onPlayAll: (List<SongItem>) -> Unit) {
+private fun SectionHeader(section: HomeSection, onPlayAll: (List<SongItem>) -> Unit, onSeeAll: ((HomeSection) -> Unit)? = null) {
     val s = LocalStrings.current
     Row(
         modifier = Modifier
@@ -695,6 +712,11 @@ private fun SectionHeader(section: HomeSection, onPlayAll: (List<SongItem>) -> U
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
             ) {
                 Text(s.playAllShelf, style = MaterialTheme.typography.labelLarge)
+            }
+        } else if (onSeeAll != null && section.moreBrowseId != null) {
+            // YouTube Music's arrow next to a shelf: the whole list behind it
+            IconButton(onClick = { onSeeAll(section) }) {
+                Icon(QMusicIcons.ChevronRight, contentDescription = s.seeAll, tint = MaterialTheme.colorScheme.onSurface)
             }
         }
     }
@@ -744,13 +766,16 @@ private fun SongColumns(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            Text(
-                                text = song.artists.joinToString { it.name }.ifEmpty { "YouTube Music" },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (song.explicit) ExplicitBadge()
+                                Text(
+                                    text = song.artists.joinToString { it.name }.ifEmpty { "YouTube Music" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                         IconButton(onClick = { onSongMore(song) }) {
                             Icon(
@@ -881,6 +906,7 @@ fun SongListItem(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                         }
+                        if (song.explicit) ExplicitBadge()
                         Text(
                             text = song.artists.joinToString { it.name }.ifEmpty { "YouTube Music" },
                             style = MaterialTheme.typography.bodySmall,
