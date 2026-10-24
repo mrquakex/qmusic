@@ -105,6 +105,9 @@ class SpotifyWebApi(
 
     // ------------------------------------------------------------------ pages
 
+    /** One song by its Spotify id (a shared link). */
+    suspend fun track(trackId: String): SongItem? = track(call(HttpMethod.Get, "/tracks/$trackId").obj())
+
     suspend fun playlistPage(playlistId: String): CollectionPage {
         val meta = call(HttpMethod.Get, "/playlists/$playlistId?fields=name,description,images,collaborative,owner(id,display_name)").obj()
             ?: error("Playlist not found")

@@ -1384,9 +1384,7 @@ class MainViewModel(
             "playlist" -> openCollection(CollectionItem(SpotifyIds.playlist(link.id), "", kind = CollectionKind.PLAYLIST))
             "artist" -> openArtist(SpotifyIds.artist(link.id), "")
             else -> scope.launch {
-                // A track: Spotify's search by its id is not open to the web token, so its album page shows it.
-                runCatching { spotify.search(link.id, SearchFilter.SONGS) }.getOrNull()?.songs
-                    ?.firstOrNull { it.id == SpotifyIds.track(link.id) }
+                runCatching { spotify.track(link.id) }.getOrNull()
                     ?.let {
                         play(it)
                         setPlayerExpanded(true)
