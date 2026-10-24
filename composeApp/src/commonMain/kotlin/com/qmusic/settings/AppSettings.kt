@@ -96,6 +96,11 @@ object SettingKeys {
     const val DOWNLOAD_QUALITY = "download_quality"
 
     const val DEFAULT_CACHE_MB = "512"
+
+    /** Smart downloads: on/off, the songs it fetched (comma-separated ids) and when it last refreshed (epoch ms). */
+    const val SMART_DOWNLOADS = "smart_downloads"
+    const val SMART_IDS = "smart_download_ids"
+    const val SMART_REFRESHED_AT = "smart_downloads_at"
 }
 
 /** The Settings rows that have no property of their own in [AppSettings]. */
@@ -108,6 +113,7 @@ data class MoreSettings(
     val downloadQuality: String = "HIGH",
     val lastFmAvailable: Boolean = false,
     val lastFmUser: String? = null,
+    val smartDownloads: Boolean = false,
 )
 
 /** A change made on one of the [MoreSettings] rows. */
@@ -117,6 +123,7 @@ sealed interface MoreSettingsChange {
     data class NotificationLyrics(val on: Boolean) : MoreSettingsChange
     data class CacheLimit(val mb: String) : MoreSettingsChange
     data class DownloadQuality(val quality: String) : MoreSettingsChange
+    data class SmartDownloads(val on: Boolean) : MoreSettingsChange
     data object ClearCache : MoreSettingsChange
     data class LastFmSignIn(val user: String, val password: String) : MoreSettingsChange
     data object LastFmSignOut : MoreSettingsChange

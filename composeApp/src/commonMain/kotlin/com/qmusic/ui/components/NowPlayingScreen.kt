@@ -70,6 +70,7 @@ import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.layout.layout
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -393,7 +394,12 @@ fun NowPlayingScreen(
                     ) { controls() }
                 }
             } else {
-                Column(modifier = Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .widthIn(max = PLAYER_MAX_WIDTH)
+                        .align(Alignment.TopCenter),
+                ) {
                     topBar()
                     pages(Modifier.weight(1f).fillMaxWidth())
                     controls()
@@ -766,6 +772,9 @@ class LyricsTools(
 )
 
 private const val LYRIC_SHIFT_MS = 500L
+
+/** A tall tablet keeps the player at a comfortable width, centred, rather than stretching it edge to edge. */
+private val PLAYER_MAX_WIDTH = 600.dp
 
 /** Narrower screens keep the phone layout even when turned sideways. */
 val LANDSCAPE_MIN_WIDTH = 560.dp

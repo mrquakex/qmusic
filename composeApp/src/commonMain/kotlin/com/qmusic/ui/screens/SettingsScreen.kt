@@ -235,6 +235,14 @@ fun SettingsScreen(
                 )
             }
             RowDivider()
+            SwitchRow(
+                icon = QMusicIcons.Samples,
+                title = s.smartDownloadsTitle,
+                subtitle = s.smartDownloadsSubtitle,
+                checked = more.smartDownloads,
+                onChange = { onMore(MoreSettingsChange.SmartDownloads(it)) },
+            )
+            RowDivider()
             QualityRow(s.downloadQualityTitle, more.downloadQuality) { onMore(MoreSettingsChange.DownloadQuality(it)) }
             RowDivider()
             PillRow(

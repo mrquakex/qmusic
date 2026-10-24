@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shown when the QMusic icon is held: straight to the liked songs on shuffle, the downloads, or search. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_shuffle"
+        android:shortcutId="shuffle_liked"
+        android:shortcutShortLabel="@string/shortcut_shuffle_liked">
+        <intent
+            android:action="com.qmusic.app.SHORTCUT"
+            android:targetClass="com.qmusic.app.MainActivity"
+            android:targetPackage="com.qmusic.app">
+            <extra android:name="shortcut" android:value="shuffle_liked" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_downloads"
+        android:shortcutId="downloads"
+        android:shortcutShortLabel="@string/shortcut_downloads">
+        <intent
+            android:action="com.qmusic.app.SHORTCUT"
+            android:targetClass="com.qmusic.app.MainActivity"
+            android:targetPackage="com.qmusic.app">
+            <extra android:name="shortcut" android:value="downloads" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_search"
+        android:shortcutId="search"
+        android:shortcutShortLabel="@string/shortcut_search">
+        <intent
+            android:action="com.qmusic.app.SHORTCUT"
+            android:targetClass="com.qmusic.app.MainActivity"
+            android:targetPackage="com.qmusic.app">
+            <extra android:name="shortcut" android:value="search" />
+        </intent>
+    </shortcut>
+</shortcuts>

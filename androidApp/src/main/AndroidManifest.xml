@@ -50,6 +50,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
             <!-- YouTube Music / YouTube links open here (Android lists the app under "Open with"). -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -91,6 +94,21 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/qmusic_widget_info" />
         </receiver>
+
+        <!-- Quick Settings tile: play / pause what is playing, or open the app when nothing is. -->
+        <service
+            android:name=".PlaybackTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_qmusic"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="false" />
+        </service>
 
         <receiver
             android:name=".InstallResultReceiver"

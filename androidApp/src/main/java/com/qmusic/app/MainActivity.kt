@@ -19,6 +19,7 @@ import com.qmusic.ui.strings.TurkishStrings
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import com.qmusic.ui.viewmodel.MainViewModel
 import com.qmusic.ui.viewmodel.ScreenTab
@@ -61,7 +62,10 @@ class MainActivity : AppCompatActivity() {
         this.viewModel = viewModel
         openUpdatesIfAsked(intent)
         // A rotation recreates the activity with the same intent: the link was opened the first time already.
-        if (savedInstanceState == null) openLinkIfAny(intent)
+        if (savedInstanceState == null) {
+            openLinkIfAny(intent)
+            openShortcutIfAny(intent)
+        }
 
         CastBridge.init(this)
 
@@ -100,6 +104,35 @@ class MainActivity : AppCompatActivity() {
         setIntent(intent)
         openUpdatesIfAsked(intent)
         openLinkIfAny(intent)
+        openShortcutIfAny(intent)
+    }
+
+    /** One of the shortcuts shown when the app icon is held. */
+    private fun openShortcutIfAny(intent: Intent?) {
+        if (intent?.action != ACTION_SHORTCUT) return
+        val vm = viewModel ?: return
+        when (intent.getStringExtra("shortcut")) {
+            "search" -> vm.selectTab(ScreenTab.SEARCH)
+            "downloads" -> vm.openDownloads()
+            "shuffle_liked" -> likeWatcher.launch {
+                // Right after launch the liked songs are still being read from the database: wait for them briefly.
+                val liked = kotlinx.coroutines.withTimeoutOrNull(SHORTCUT_WAIT_MS) {
+                    vm.favorites.first { it.isNotEmpty() }
+                }.orEmpty()
+                if (liked.isNotEmpty()) {
+                    vm.shuffleAll(liked)
+                    vm.setPlayerExpanded(true)
+                } else {
+                    vm.openDownloads()
+                }
+            }
+        }
+        intent.action = Intent.ACTION_MAIN
+    }
+
+    private companion object {
+        const val ACTION_SHORTCUT = "com.qmusic.app.SHORTCUT"
+        const val SHORTCUT_WAIT_MS = 3_000L
     }
 
     /** A YouTube / YouTube Music link tapped elsewhere, or shared to the app. */

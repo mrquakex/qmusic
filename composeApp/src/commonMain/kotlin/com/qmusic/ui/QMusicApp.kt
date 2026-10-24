@@ -24,6 +24,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -322,8 +324,23 @@ fun QMusicApp(
             // and interpolated, so it grows and slides continuously with the finger instead of cross-fading.
             val coverSettled = { sheetProgress.value >= COVER_HANDOVER }
 
-            Scaffold(
-                modifier = Modifier.fillMaxSize(),
+            // Tablets and other wide screens: the tabs go down the left side instead of along the bottom.
+            val wide = maxWidth >= com.qmusic.ui.components.RAIL_MIN_WIDTH
+            val selectTab: (Int) -> Unit = { index ->
+                // Tapping a tab leaves any open page, as in every music app.
+                viewModel.clearRoutes()
+                viewModel.onTabClicked(navTabs[index].tab)
+            }
+            Row(modifier = Modifier.fillMaxSize()) {
+                if (wide) {
+                    com.qmusic.ui.components.QMusicNavigationRail(
+                        items = navTabs.map { NavBarItem(it.title, it.icon) },
+                        selectedIndex = navTabs.indexOfFirst { it.tab == currentTab },
+                        onSelect = selectTab,
+                    )
+                }
+                Scaffold(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
                 containerColor = DarkBackground,
                 topBar = {
                     // Pages bring their own header (and sit under the status bar), so the logo bar steps aside;
@@ -388,15 +405,16 @@ fun QMusicApp(
                             )
                         }
 
-                        QMusicNavigationBar(
-                            items = navTabs.map { NavBarItem(it.title, it.icon) },
-                            selectedIndex = navTabs.indexOfFirst { it.tab == currentTab },
-                            onSelect = { index ->
-                                // Tapping a tab leaves any open page, as in every music app.
-                                viewModel.clearRoutes()
-                                viewModel.onTabClicked(navTabs[index].tab)
-                            },
-                        )
+                        if (wide) {
+                            // The tabs are on the side rail; only the system bar's room is kept here.
+                            Spacer(Modifier.fillMaxWidth().navigationBarsPadding())
+                        } else {
+                            QMusicNavigationBar(
+                                items = navTabs.map { NavBarItem(it.title, it.icon) },
+                                selectedIndex = navTabs.indexOfFirst { it.tab == currentTab },
+                                onSelect = selectTab,
+                            )
+                        }
                     }
                 },
             ) { innerPadding ->
@@ -657,6 +675,8 @@ fun QMusicApp(
                     }
                 }
             }
+            }
+
 
             // Full-screen player: it rises with the drag, over everything including the bottom bar
             if (sheetVisible) {

@@ -96,6 +96,33 @@ fun LibraryScreen(
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
     var confirmRemoveAll by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    var order by remember { mutableStateOf(LibraryOrder.RECENT) }
+    val words = query.trim().lowercase()
+    fun refine(songs: List<SongItem>): List<SongItem> = songs
+        .filter { song ->
+            words.isEmpty() ||
+                song.title.lowercase().contains(words) ||
+                song.artists.any { it.name.lowercase().contains(words) } ||
+                song.album?.name?.lowercase()?.contains(words) == true
+        }
+        .let { list ->
+            when (order) {
+                LibraryOrder.RECENT -> list
+                LibraryOrder.TITLE -> list.sortedBy { it.title.lowercase() }
+                LibraryOrder.ARTIST -> list.sortedBy { it.artists.firstOrNull()?.name?.lowercase() ?: "\uffff" }
+            }
+        }
+    fun refineItems(items: List<CollectionItem>): List<CollectionItem> = items
+        .filter { words.isEmpty() || it.title.lowercase().contains(words) || it.subtitle?.lowercase()?.contains(words) == true }
+        .let { list -> if (order == LibraryOrder.RECENT) list else list.sortedBy { it.title.lowercase() } }
+    val shownFavorites = refine(favorites)
+    val shownDownloads = refine(downloads)
+    val shownHistory = refine(history)
+    val shownPlaylists = playlists
+        .filter { words.isEmpty() || it.name.lowercase().contains(words) }
+        .let { list -> if (order == LibraryOrder.RECENT) list else list.sortedBy { it.name.lowercase() } }
 
     val tabs = listOf(
         s.tabFavorites to favorites.size,
@@ -124,6 +151,16 @@ fun LibraryScreen(
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.weight(1f))
+            IconButton(onClick = {
+                searching = !searching
+                if (!searching) query = ""
+            }) {
+                Icon(
+                    imageVector = if (searching) QMusicIcons.Close else QMusicIcons.Search,
+                    contentDescription = s.searchLibrary,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
             IconButton(onClick = onOpenStats) {
                 Icon(
                     imageVector = QMusicIcons.Stats,
@@ -140,6 +177,28 @@ fun LibraryScreen(
                     )
                 }
             }
+        }
+
+        if (searching) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                placeholder = { Text(s.searchLibrary) },
+                leadingIcon = { Icon(QMusicIcons.Search, contentDescription = null) },
+                shape = RoundedCornerShape(50),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = DarkSurfaceVariant,
+                    unfocusedContainerColor = DarkSurfaceVariant,
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent,
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+            )
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -166,12 +225,32 @@ fun LibraryScreen(
             }
         }
 
+        // The order of what is listed: tap to go through the choices (history stays newest first)
+        if (selectedTabIndex != 3) {
+            Text(
+                text = s.sortBy(
+                    when (order) {
+                        LibraryOrder.RECENT -> s.sortRecent
+                        LibraryOrder.TITLE -> s.sortTitle
+                        LibraryOrder.ARTIST -> s.sortArtist
+                    },
+                ),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(top = 10.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { order = LibraryOrder.entries[(order.ordinal + 1) % LibraryOrder.entries.size] }
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+            )
+        }
+
         Spacer(modifier = Modifier.height(14.dp))
 
         when (selectedTabIndex) {
             0 -> SongsTab(
-                songs = favorites,
-                empty = s.favoritesEmpty,
+                songs = shownFavorites,
+                empty = if (words.isEmpty()) s.favoritesEmpty else s.libraryNoMatch,
                 isFavoritePredicate = isFavoritePredicate,
                 downloadedIds = downloadedIds,
                 downloadProgress = downloadProgress,
@@ -179,7 +258,7 @@ fun LibraryScreen(
                 onSongMore = onSongMore,
                 onToggleFavorite = onToggleFavorite,
                 header = {
-                    PlayShuffleRow(favorites, onPlayAll, onShuffle)
+                    PlayShuffleRow(shownFavorites, onPlayAll, onShuffle)
                     OfflineCard(
                         songs = favorites,
                         downloadedIds = downloadedIds,
@@ -195,19 +274,19 @@ fun LibraryScreen(
             )
 
             1 -> PlaylistsTab(
-                playlists = playlists,
+                playlists = shownPlaylists,
                 onOpenPlaylist = onOpenPlaylist,
-                ytPlaylists = ytPlaylists,
+                ytPlaylists = refineItems(ytPlaylists),
                 onOpenCollection = onOpenCollection,
             )
 
-            4 -> CollectionsTab(ytAlbums, s.albumsEmpty, round = false, onOpen = onOpenCollection)
+            4 -> CollectionsTab(refineItems(ytAlbums), if (words.isEmpty()) s.albumsEmpty else s.libraryNoMatch, round = false, onOpen = onOpenCollection)
 
-            5 -> CollectionsTab(ytArtists, s.artistsEmpty, round = true, onOpen = onOpenCollection)
+            5 -> CollectionsTab(refineItems(ytArtists), if (words.isEmpty()) s.artistsEmpty else s.libraryNoMatch, round = true, onOpen = onOpenCollection)
 
             2 -> SongsTab(
-                songs = downloads,
-                empty = s.downloadsEmpty,
+                songs = shownDownloads,
+                empty = if (words.isEmpty()) s.downloadsEmpty else s.libraryNoMatch,
                 isFavoritePredicate = isFavoritePredicate,
                 downloadedIds = downloadedIds,
                 downloadProgress = downloadProgress,
@@ -222,20 +301,20 @@ fun LibraryScreen(
                         onCancel = onCancelDownloads,
                         onRemoveAll = { confirmRemoveAll = true },
                     )
-                    PlayShuffleRow(downloads, onPlayAll, onShuffle)
+                    PlayShuffleRow(shownDownloads, onPlayAll, onShuffle)
                 },
             )
 
             else -> SongsTab(
-                songs = history,
-                empty = s.historyEmpty,
+                songs = shownHistory,
+                empty = if (words.isEmpty()) s.historyEmpty else s.libraryNoMatch,
                 isFavoritePredicate = isFavoritePredicate,
                 downloadedIds = downloadedIds,
                 downloadProgress = downloadProgress,
                 onSongClick = onSongClick,
                 onSongMore = onSongMore,
                 onToggleFavorite = onToggleFavorite,
-                header = { PlayShuffleRow(history, onPlayAll, onShuffle) },
+                header = { PlayShuffleRow(shownHistory, onPlayAll, onShuffle) },
             )
         }
     }
@@ -302,6 +381,9 @@ fun LibraryScreen(
         )
     }
 }
+
+/** How the library lists are ordered. */
+private enum class LibraryOrder { RECENT, TITLE, ARTIST }
 
 @Composable
 private fun SongsTab(

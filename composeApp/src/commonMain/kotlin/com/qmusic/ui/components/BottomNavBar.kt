@@ -3,7 +3,14 @@ package com.qmusic.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,6 +32,72 @@ import androidx.compose.ui.unit.dp
 import com.qmusic.ui.theme.BgSurface
 
 data class NavBarItem(val label: String, val icon: ImageVector)
+
+/**
+ * The same tabs down the left side, for tablets and other wide screens (as YouTube Music does there): the bottom bar
+ * would stretch five icons across a whole tablet and take height the pages need.
+ */
+@Composable
+fun QMusicNavigationRail(
+    items: List<NavBarItem>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(RAIL_WIDTH)
+            .background(BgSurface)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(top = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        com.qmusic.ui.theme.QMusicLogo(size = 34.dp, tint = Color.White)
+        Spacer(Modifier.height(8.dp))
+        items.forEachIndexed { index, item ->
+            val selected = index == selectedIndex
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { onSelect(index) }
+                    .padding(vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(if (selected) Color.White.copy(alpha = 0.14f) else Color.Transparent)
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                ) {
+                    Icon(
+                        imageVector = item.icon,
+                        contentDescription = item.label,
+                        tint = if (selected) Color.White else Color.White.copy(alpha = 0.62f),
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = item.label,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selected) Color.White else Color.White.copy(alpha = 0.62f),
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/** From this width on, the tabs move to the side rail. */
+val RAIL_MIN_WIDTH = 600.dp
+private val RAIL_WIDTH = 88.dp
 
 /**
  * Bottom navigation in the shape YouTube Music uses: evenly spaced icons with their label always shown underneath,

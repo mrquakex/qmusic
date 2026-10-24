@@ -57,6 +57,14 @@ interface AppStrings {
     val moreYouMayLike: String
     val tabAlbums: String
     val seeAll: String
+    val searchLibrary: String
+    val sortRecent: String
+    val sortTitle: String
+    val sortArtist: String
+    fun sortBy(order: String): String
+    val libraryNoMatch: String
+    val smartDownloadsTitle: String
+    val smartDownloadsSubtitle: String
     val sectionAppearance: String
     val amoledTitle: String
     val amoledSubtitle: String
@@ -375,6 +383,14 @@ object TurkishStrings : AppStrings {
     override val moreYouMayLike: String = "Beğenebileceğiniz diğer içerikler"
     override val tabAlbums: String = "Albümler"
     override val seeAll: String = "Tümü"
+    override val searchLibrary: String = "Kütüphanede ara"
+    override val sortRecent: String = "Son eklenen"
+    override val sortTitle: String = "Ad (A-Z)"
+    override val sortArtist: String = "Sanatçı (A-Z)"
+    override fun sortBy(order: String): String = "Sırala: $order"
+    override val libraryNoMatch: String = "Eşleşen bir şey yok"
+    override val smartDownloadsTitle: String = "Akıllı indirmeler"
+    override val smartDownloadsSubtitle: String = "En çok dinlediklerin ve onlara benzeyen 50 şarkı Wi-Fi'da kendiliğinden iner ve her gün yenilenir; internet yokken de taze müzik olur"
     override val sectionAppearance: String = "Görünüm"
     override val amoledTitle: String = "Tam siyah tema"
     override val amoledSubtitle: String = "OLED ekranlarda daha koyu ve pil dostu"
@@ -715,6 +731,14 @@ object EnglishStrings : AppStrings {
     override val moreYouMayLike: String = "More you may like"
     override val tabAlbums: String = "Albums"
     override val seeAll: String = "See all"
+    override val searchLibrary: String = "Search your library"
+    override val sortRecent: String = "Recently added"
+    override val sortTitle: String = "Title (A-Z)"
+    override val sortArtist: String = "Artist (A-Z)"
+    override fun sortBy(order: String): String = "Sort: $order"
+    override val libraryNoMatch: String = "Nothing matches"
+    override val smartDownloadsTitle: String = "Smart downloads"
+    override val smartDownloadsSubtitle: String = "Your most played songs and 50 like them download by themselves on Wi-Fi and change every day, so there is fresh music without a connection"
     override val sectionAppearance: String = "Appearance"
     override val amoledTitle: String = "Pure black theme"
     override val amoledSubtitle: String = "Darker and easier on the battery on OLED screens"

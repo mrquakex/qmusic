@@ -13,4 +13,7 @@
     <string name="widget_next">Sonraki</string>
     <string name="widget_nothing_playing">Bir şey çalmıyor</string>
     <string name="widget_tap_to_open">QMusic\'i açmak için dokun</string>
+    <string name="shortcut_shuffle_liked">Beğenilenleri karıştır</string>
+    <string name="shortcut_downloads">İndirilenler</string>
+    <string name="shortcut_search">Ara</string>
 </resources>

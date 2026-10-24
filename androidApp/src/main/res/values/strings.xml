@@ -13,4 +13,8 @@
     <string name="widget_next">Next</string>
     <string name="widget_nothing_playing">Nothing is playing</string>
     <string name="widget_tap_to_open">Tap to open QMusic</string>
+    <string name="shortcut_shuffle_liked">Shuffle liked songs</string>
+    <string name="shortcut_downloads">Downloads</string>
+    <string name="shortcut_search">Search</string>
+    <string name="tile_label">QMusic</string>
 </resources>

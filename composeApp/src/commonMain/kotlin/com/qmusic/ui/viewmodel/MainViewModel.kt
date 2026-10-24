@@ -467,9 +467,9 @@ class MainViewModel(
             settings.string(SettingKeys.DOWNLOAD_QUALITY, "HIGH"),
             _cacheBytes,
         ) { cache, quality, bytes -> Triple(cache, quality, bytes) },
-        scrobbling.user,
-    ) { (amoled, headset, lyrics), (cache, quality, bytes), user ->
-        MoreSettings(amoled, headset, lyrics, cache, bytes, quality, scrobbling.available, user)
+        combine(scrobbling.user, settings.bool(SettingKeys.SMART_DOWNLOADS, false)) { user, smart -> user to smart },
+    ) { (amoled, headset, lyrics), (cache, quality, bytes), (user, smart) ->
+        MoreSettings(amoled, headset, lyrics, cache, bytes, quality, scrobbling.available, user, smart)
     }.stateIn(scope, SharingStarted.Eagerly, MoreSettings())
 
     /** The line being sung, for the lyrics notification: null when that is off, nothing plays or nothing is timed. */
@@ -601,6 +601,12 @@ class MainViewModel(
                     previewCache[track.id] = frames
                     if (playerController.currentTrack.value?.id == track.id) _seekPreview.value = frames
                 }
+        }
+        // Smart downloads refresh themselves once a day, whenever Wi-Fi is there.
+        scope.launch {
+            combine(settings.bool(SettingKeys.SMART_DOWNLOADS, false), connectivity.isUnmetered, connectivity.isOnline) { on, wifi, online ->
+                on && wifi && online
+            }.collect { ready -> if (ready) refreshSmartDownloads() }
         }
         // Lyrics in the notification need the lyrics of every song, not only when the lyrics page is opened.
         scope.launch {
@@ -1162,6 +1168,57 @@ class MainViewModel(
 
     fun onBackupSaved(ok: Boolean) = showMessage(if (ok) strings.backupSaved else strings.backupFailed)
 
+    // --- Smart downloads: a mix of what is played most, and songs like it, kept on the device ---
+    /** The songs smart downloads fetched itself; songs downloaded by hand are never in it (and never removed by it). */
+    private fun smartIds(): Set<String> =
+        settings.string(SettingKeys.SMART_IDS, "").value.split(',').filter { it.isNotBlank() }.toSet()
+
+    private var smartJob: Job? = null
+
+    /** Builds today's mix and swaps it in: new songs download, the ones that left the mix are removed. Once a day. */
+    private fun refreshSmartDownloads(force: Boolean = false) {
+        if (!settings.bool(SettingKeys.SMART_DOWNLOADS, false).value) return
+        if (!connectivity.isOnline.value || !isUnmetered()) return
+        val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+        val last = settings.string(SettingKeys.SMART_REFRESHED_AT, "0").value.toLongOrNull() ?: 0L
+        if (!force && now - last < SMART_REFRESH_MS) return
+        if (smartJob?.isActive == true) return
+        smartJob = scope.launch {
+            val mix = buildSmartMix()
+            if (mix.isEmpty()) return@launch
+            val wanted = mix.mapTo(HashSet()) { it.id }
+            val mine = smartIds()
+            val kept = favorites.value.mapTo(HashSet()) { it.id }
+            // What left the mix makes room, unless it was liked meanwhile.
+            downloadedSongs.value.filter { it.id in mine && it.id !in wanted && it.id !in kept }.forEach(::removeDownload)
+            val already = downloads.downloadedIds.value
+            val fetched = mix.filter { it.id !in already }
+            fetched.forEach(::download)
+            // Ours: what it fetched now, plus what it fetched before and still wants.
+            settings.setString(SettingKeys.SMART_IDS, ((mine intersect wanted) + fetched.map { it.id }).joinToString(","))
+            settings.setString(SettingKeys.SMART_REFRESHED_AT, now.toString())
+        }
+    }
+
+    /** The most played songs of the last month and the liked ones, then YouTube Music's radio of a few of them. */
+    private suspend fun buildSmartMix(): List<SongItem> {
+        val top = repository.playCounts(SMART_DAYS).sortedByDescending { it.second }.map { it.first }.take(SMART_TOP)
+        val liked = favorites.value.take(SMART_LIKED)
+        val seeds = (top.take(SMART_SEEDS) + liked.take(2)).distinctBy { it.id }.ifEmpty { history.value.take(SMART_SEEDS) }
+        val similar = seeds.flatMap { youTube.radio(it.id).getOrDefault(emptyList()).take(SMART_PER_SEED) }
+        return (top + liked + similar).distinctBy { it.id }.take(SMART_COUNT)
+    }
+
+    /** Turning smart downloads off gives the room back: what it fetched (and was not liked meanwhile) is removed. */
+    private fun removeSmartDownloads() {
+        smartJob?.cancel()
+        val mine = smartIds()
+        val kept = favorites.value.mapTo(HashSet()) { it.id }
+        downloadedSongs.value.filter { it.id in mine && it.id !in kept }.forEach(::removeDownload)
+        settings.setString(SettingKeys.SMART_IDS, "")
+        settings.setString(SettingKeys.SMART_REFRESHED_AT, "0")
+    }
+
     // --- Settings without a property of their own ---
     private fun refreshCacheSize() {
         _cacheBytes.value = downloads.streamCacheBytes()
@@ -1174,6 +1231,10 @@ class MainViewModel(
             is MoreSettingsChange.NotificationLyrics -> settings.setBool(SettingKeys.NOTIFICATION_LYRICS, change.on)
             is MoreSettingsChange.CacheLimit -> settings.setString(SettingKeys.CACHE_LIMIT_MB, change.mb)
             is MoreSettingsChange.DownloadQuality -> settings.setString(SettingKeys.DOWNLOAD_QUALITY, change.quality)
+            is MoreSettingsChange.SmartDownloads -> {
+                settings.setBool(SettingKeys.SMART_DOWNLOADS, change.on)
+                if (change.on) refreshSmartDownloads(force = true) else removeSmartDownloads()
+            }
             MoreSettingsChange.ClearCache -> {
                 downloads.clearStreamCache()
                 showMessage(strings.cacheCleared)
@@ -1828,6 +1889,13 @@ class MainViewModel(
     private companion object {
         const val RADIO_REFILL_THRESHOLD = 3
         const val CACHE_REFRESH_MS = 600L
+        const val SMART_REFRESH_MS = 24 * 60 * 60 * 1000L
+        const val SMART_COUNT = 50
+        const val SMART_DAYS = 30
+        const val SMART_TOP = 20
+        const val SMART_LIKED = 15
+        const val SMART_SEEDS = 3
+        const val SMART_PER_SEED = 10
         const val NOTIFICATION_LYRIC_LEAD_MS = 250L
         const val SESSION_SAVE_MS = 10_000L
         const val SESSION_BEHIND = 20
