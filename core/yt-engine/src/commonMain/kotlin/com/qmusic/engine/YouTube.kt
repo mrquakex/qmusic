@@ -193,6 +193,10 @@ class YouTube(
     suspend fun resolveVideoSource(videoId: String, maxHeight: Int = 720): Result<VideoSource?> =
         runCatching { extractor?.videoSource(videoId, maxHeight) }
 
+    /** The small pictures shown over the seek bar while it is held, or null when the video has none. */
+    suspend fun previewFrames(videoId: String): Result<com.qmusic.engine.models.PreviewFrames?> =
+        runCatching { extractor?.previewFrames(videoId) }
+
     /** Search grouped into songs, albums, artists and playlists (or just one group with a [filter]). */
     suspend fun searchPage(query: String, filter: SearchFilter? = null): Result<SearchResultsPage> =
         runCatching {

@@ -1,6 +1,7 @@
 package com.qmusic.engine.extractor
 
 import com.qmusic.engine.models.AudioStream
+import com.qmusic.engine.models.PreviewFrames
 import com.qmusic.engine.models.VideoSource
 import dev.maxrave.pipepipe.extractor.NewPipe
 import dev.maxrave.pipepipe.extractor.downloader.CancellableCall
@@ -51,6 +52,25 @@ private object PipePipeStreamResolver : ExtractorStreamResolver {
             pickVideoSource(info(videoId), maxHeight)
         }
 
+    override suspend fun previewFrames(videoId: String): PreviewFrames? =
+        withContext(Dispatchers.IO) {
+            check(initialised)
+            // The sets differ in picture size; the largest up to PREVIEW_MAX_WIDTH is sharp enough for the bubble.
+            val sets = info(videoId).previewFrames.orEmpty().filter { it.urls.isNotEmpty() && it.frameWidth > 0 }
+            val set = sets.filter { it.frameWidth <= PREVIEW_MAX_WIDTH }.maxByOrNull { it.frameWidth }
+                ?: sets.minByOrNull { it.frameWidth }
+                ?: return@withContext null
+            PreviewFrames(
+                sheetUrls = set.urls,
+                frameWidth = set.frameWidth,
+                frameHeight = set.frameHeight,
+                framesPerRow = set.framesPerPageX,
+                framesPerColumn = set.framesPerPageY,
+                durationPerFrameMs = set.durationPerFrame,
+                totalFrames = set.totalCount,
+            )
+        }
+
     override suspend fun audioStreams(videoId: String): List<AudioStream> =
         withContext(Dispatchers.IO) {
             check(initialised)
@@ -68,6 +88,7 @@ private object PipePipeStreamResolver : ExtractorStreamResolver {
 }
 
 private const val INFO_TTL_MS = 4 * 60 * 1000L
+private const val PREVIEW_MAX_WIDTH = 320
 private const val INFO_CACHE_SIZE = 8
 
 private fun pickVideoSource(info: StreamInfo, maxHeight: Int): VideoSource? {

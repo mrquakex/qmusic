@@ -140,6 +140,7 @@ fun QMusicApp(
         val lyricsOffset by viewModel.lyricsOffsetMs.collectAsState()
         val lyricsMatches by viewModel.lyricsMatches.collectAsState()
         val moreSettings by viewModel.moreSettings.collectAsState()
+        val seekPreview by viewModel.seekPreview.collectAsState()
         val related by viewModel.related.collectAsState()
         val backupFiles = rememberBackupFiles(
             content = { viewModel.exportBackup() },
@@ -726,6 +727,9 @@ fun QMusicApp(
                             onCycleSpeed = { viewModel.cyclePlaybackSpeed() },
                             lyricsTranslation = lyricsTranslation,
                             onToggleTranslation = { viewModel.toggleLyricsTranslation() },
+                            seekPreview = seekPreview,
+                            landscape = this@BoxWithConstraints.maxWidth > this@BoxWithConstraints.maxHeight &&
+                                this@BoxWithConstraints.maxWidth >= com.qmusic.ui.components.LANDSCAPE_MIN_WIDTH,
                             lyricsTools = com.qmusic.ui.components.LyricsTools(
                                 offsetMs = lyricsOffset,
                                 onShift = { viewModel.shiftLyrics(it) },

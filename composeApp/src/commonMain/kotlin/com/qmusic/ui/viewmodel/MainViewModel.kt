@@ -448,6 +448,11 @@ class MainViewModel(
 
     private val _cacheBytes = MutableStateFlow(0L)
 
+    private val previewCache = HashMap<String, com.qmusic.engine.models.PreviewFrames?>()
+    private val _seekPreview = MutableStateFlow<com.qmusic.engine.models.PreviewFrames?>(null)
+    /** Preview frames of the playing song, for the seek bar; fetched once the full player is open. */
+    val seekPreview: StateFlow<com.qmusic.engine.models.PreviewFrames?> = _seekPreview.asStateFlow()
+
     val amoledTheme: StateFlow<Boolean> = settings.bool(SettingKeys.AMOLED, false)
 
     /** The Settings rows without a property of their own: appearance, headphones, cache, Last.fm. */
@@ -499,7 +504,7 @@ class MainViewModel(
 
     // Update Checker State
     // Keep equal to versionName in androidApp/build.gradle.kts, or the update check compares against the wrong number.
-    val currentAppVersion: String = "1.0.16"
+    val currentAppVersion: String = "1.0.17"
     private val _isCheckingUpdate = MutableStateFlow(false)
     val isCheckingUpdate: StateFlow<Boolean> = _isCheckingUpdate.asStateFlow()
 
@@ -578,6 +583,25 @@ class MainViewModel(
             }.collect { playerController.setAudioQuality(it) }
         }
         scope.launch { settings.normalizeVolume.collect { playerController.setNormalizeVolume(it) } }
+        // The seek bar's preview frames: only for the song on screen in the full player, each song asked for once.
+        scope.launch {
+            combine(playerController.currentTrack.distinctUntilChangedBy { it?.id }, _isPlayerExpanded) { track, open -> track to open }
+                .collect { (track, open) ->
+                    if (track == null) {
+                        _seekPreview.value = null
+                        return@collect
+                    }
+                    if (previewCache.containsKey(track.id)) {
+                        _seekPreview.value = previewCache[track.id]
+                        return@collect
+                    }
+                    _seekPreview.value = null
+                    if (!open || !connectivity.isOnline.value) return@collect
+                    val frames = youTube.previewFrames(track.id).getOrNull()
+                    previewCache[track.id] = frames
+                    if (playerController.currentTrack.value?.id == track.id) _seekPreview.value = frames
+                }
+        }
         // Lyrics in the notification need the lyrics of every song, not only when the lyrics page is opened.
         scope.launch {
             combine(

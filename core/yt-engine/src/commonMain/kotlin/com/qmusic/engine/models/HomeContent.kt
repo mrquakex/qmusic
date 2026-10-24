@@ -155,6 +155,32 @@ data class Lyrics(
     val isSynced: Boolean get() = lines.isNotEmpty()
 }
 
+/**
+ * YouTube's preview frames of a video ("storyboard"): sheets of small pictures in a grid, one every
+ * [durationPerFrameMs]. Shown above the seek bar while it is held, as YouTube Music does.
+ */
+data class PreviewFrames(
+    val sheetUrls: List<String>,
+    val frameWidth: Int,
+    val frameHeight: Int,
+    val framesPerRow: Int,
+    val framesPerColumn: Int,
+    val durationPerFrameMs: Int,
+    val totalFrames: Int,
+) {
+    /** Which sheet holds the frame at [positionMs], and where in it (pixels from its top-left corner). */
+    fun frameAt(positionMs: Long): Frame? {
+        if (sheetUrls.isEmpty() || durationPerFrameMs <= 0 || framesPerRow <= 0 || framesPerColumn <= 0) return null
+        val index = (positionMs / durationPerFrameMs).toInt().coerceIn(0, (totalFrames - 1).coerceAtLeast(0))
+        val perSheet = framesPerRow * framesPerColumn
+        val sheet = (index / perSheet).coerceAtMost(sheetUrls.lastIndex)
+        val inSheet = index % perSheet
+        return Frame(sheetUrls[sheet], (inSheet % framesPerRow) * frameWidth, (inSheet / framesPerRow) * frameHeight)
+    }
+
+    data class Frame(val sheetUrl: String, val left: Int, val top: Int)
+}
+
 /** One hit of a lyrics search (LRCLIB), to pick when the found lyrics are wrong. */
 data class LyricsMatch(
     val title: String,

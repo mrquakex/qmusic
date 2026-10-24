@@ -66,6 +66,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.text.drawText
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.layout.layout
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -171,6 +175,9 @@ fun NowPlayingScreen(
     lyricsTranslation: List<String>? = null,
     onToggleTranslation: () -> Unit = {},
     lyricsTools: LyricsTools = LyricsTools(),
+    seekPreview: com.qmusic.engine.models.PreviewFrames? = null,
+    /** The screen (not this sheet, whose height changes while it opens) is wider than tall and wide enough. */
+    landscape: Boolean = false,
     modifier: Modifier = Modifier,
     /** Controls fade in over the last part of the drag, like YouTube Music's. */
     contentAlpha: () -> Float = { 1f },
@@ -332,6 +339,8 @@ fun NowPlayingScreen(
                     fullyStored = isDownloaded,
                     durationMs = if (durationMs > 0) durationMs else (track.duration ?: 0) * 1000L,
                     onSeekTo = onSeekTo,
+                    // The video's frames only while the video is shown; with the picture, only the time
+                    preview = if (showVideo) seekPreview else null,
                 )
     
                 Controls(
@@ -368,7 +377,7 @@ fun NowPlayingScreen(
                 .padding(horizontal = 22.dp),
         ) {
             // Sideways (a phone turned over, a tablet): the cover and its pages on the left, the controls beside them.
-            if (maxWidth > maxHeight && maxWidth >= LANDSCAPE_MIN_WIDTH) {
+            if (landscape) {
                 Row(modifier = Modifier.fillMaxSize()) {
                     Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
                         topBar()
@@ -758,7 +767,8 @@ class LyricsTools(
 
 private const val LYRIC_SHIFT_MS = 500L
 
-private val LANDSCAPE_MIN_WIDTH = 560.dp
+/** Narrower screens keep the phone layout even when turned sideways. */
+val LANDSCAPE_MIN_WIDTH = 560.dp
 
 private fun formatOffset(ms: Long): String {
     if (ms == 0L) return "0.0s"
@@ -1204,6 +1214,7 @@ private fun SeekBar(
     fullyStored: Boolean,
     durationMs: Long,
     onSeekTo: (Long) -> Unit,
+    preview: com.qmusic.engine.models.PreviewFrames? = null,
 ) {
     var held by remember { mutableStateOf(false) }
     var heldFraction by remember { mutableFloatStateOf(0f) }
@@ -1221,6 +1232,9 @@ private fun SeekBar(
     val bubbleStyle = MaterialTheme.typography.labelLarge.copy(color = Color.White)
 
     Column(modifier = Modifier.fillMaxWidth()) {
+        androidx.compose.foundation.layout.BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val barWidthPx = constraints.maxWidth.toFloat()
+        val heldFrame = if (held && durationMs > 0) preview?.frameAt((heldFraction * durationMs).toLong()) else null
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1256,11 +1270,11 @@ private fun SeekBar(
                     cornerRadius = cap,
                 )
             }
-            track(1f, Color.White.copy(alpha = 0.16f))
-            track(loaded, Color.White.copy(alpha = 0.34f))
+            track(1f, Color.White.copy(alpha = 0.11f))
+            track(loaded, Color.White.copy(alpha = 0.20f))
             track(shown, Color.White)
 
-            if (bubbleAlpha > 0f && durationMs > 0) {
+            if (bubbleAlpha > 0f && durationMs > 0 && preview == null) {
                 // The time under the finger, in a dark pill above the bar (it may cover the chips, as on YouTube Music)
                 val text = measurer.measure(formatTime((heldFraction * durationMs).toLong()), bubbleStyle)
                 val padX = 12.dp.toPx()
@@ -1278,6 +1292,10 @@ private fun SeekBar(
                 drawText(text, topLeft = Offset(left + padX, top + padY), alpha = bubbleAlpha)
             }
         }
+        if (heldFrame != null && preview != null) {
+            SeekPreviewBubble(preview, heldFrame, formatTime((heldFraction * durationMs).toLong()), heldFraction, barWidthPx)
+        }
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1289,9 +1307,76 @@ private fun SeekBar(
     }
 }
 
-/** The bar's thickness at rest and while held (dp), as YouTube Music has it. */
-private const val SEEK_IDLE_DP = 4f
+/**
+ * The frame of the video at the held point, with its time on it, centred over the finger and kept on screen, as
+ * YouTube Music shows it. The frame is cut out of YouTube's sheet of small pictures.
+ */
+@Composable
+private fun SeekPreviewBubble(
+    preview: com.qmusic.engine.models.PreviewFrames,
+    frame: com.qmusic.engine.models.PreviewFrames.Frame,
+    time: String,
+    fraction: Float,
+    barWidthPx: Float,
+) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val widthPx = with(density) { PREVIEW_WIDTH.toPx() }
+    val scale = widthPx / preview.frameWidth
+    val heightPx = preview.frameHeight * scale
+    val gapPx = with(density) { PREVIEW_GAP.toPx() }
+    // The bar's line sits in the middle of its 28 dp box; the bubble ends PREVIEW_GAP above that line.
+    val lineTopPx = with(density) { 14.dp.toPx() - (SEEK_HELD_DP / 2).dp.toPx() }
+    val x = (barWidthPx * fraction - widthPx / 2).coerceIn(0f, (barWidthPx - widthPx).coerceAtLeast(0f))
+    val y = lineTopPx - gapPx - heightPx
+    Box(
+        modifier = Modifier
+            // Placed over the page without taking room in it: a bubble that took room made the bar taller and
+            // pushed the whole player up while seeking.
+            .layout { measurable, _ ->
+                val placeable = measurable.measure(
+                    androidx.compose.ui.unit.Constraints.fixed(widthPx.toInt(), heightPx.toInt()),
+                )
+                layout(0, 0) { placeable.place(x.toInt(), y.toInt()) }
+            }
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color.Black),
+    ) {
+        coil3.compose.AsyncImage(
+            // Decoded at its own size, so the fixed scale maps sheet pixels to screen pixels exactly (the last sheet
+            // of a video can be smaller than the others, which stretching to a set size would distort).
+            model = coil3.request.ImageRequest.Builder(coil3.compose.LocalPlatformContext.current)
+                .data(frame.sheetUrl)
+                .size(coil3.size.Size.ORIGINAL)
+                .build(),
+            contentDescription = null,
+            contentScale = androidx.compose.ui.layout.FixedScale(scale),
+            alignment = Alignment.TopStart,
+            modifier = Modifier
+                .wrapContentSize(Alignment.TopStart, unbounded = true)
+                .offset { androidx.compose.ui.unit.IntOffset((-frame.left * scale).toInt(), (-frame.top * scale).toInt()) }
+                .requiredSize(
+                    with(density) { (preview.frameWidth * preview.framesPerRow * scale).toDp() },
+                    with(density) { (preview.frameHeight * preview.framesPerColumn * scale).toDp() },
+                ),
+        )
+        Text(
+            text = time,
+            style = MaterialTheme.typography.labelLarge.copy(
+                shadow = androidx.compose.ui.graphics.Shadow(Color.Black, Offset(0f, 1f), 6f),
+            ),
+            color = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 6.dp),
+        )
+    }
+}
+
+/** The bar's thickness at rest and while held (dp), measured on YouTube Music (10 px and 28 px at 450 dpi). */
+private const val SEEK_IDLE_DP = 3.5f
 private const val SEEK_HELD_DP = 10f
+private val PREVIEW_WIDTH = 132.dp
+private val PREVIEW_GAP = 22.dp
 
 @Composable
 private fun Controls(

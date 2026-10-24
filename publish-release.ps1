@@ -1,6 +1,6 @@
 # Publishes release v<version> on GitHub and uploads release\qmusic-<version>.apk to it.
 # The token is typed here (hidden), used for these calls only, and never written anywhere.
-param([string]$Version = '1.0.16')
+param([string]$Version = '1.0.17')
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
