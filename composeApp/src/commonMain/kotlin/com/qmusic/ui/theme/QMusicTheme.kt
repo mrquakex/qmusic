@@ -8,6 +8,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -15,18 +18,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 // Monochrome design system: pure black / white, no colored accents.
-val BgRoot = Color(0xFF050507)
-val DarkBackground = BgRoot
-val BgSurface = Color(0xFF0B0B0F)
-val DarkSurface = Color(0xFF101016)
-val DarkSurfaceVariant = Color(0xFF181820)
+
+/** Settings › Appearance › Pure black: the backgrounds go to #000 (OLED pixels off). Read as state, so it redraws. */
+var amoledTheme by mutableStateOf(false)
+
+val BgRoot: Color get() = if (amoledTheme) Color.Black else Color(0xFF050507)
+val DarkBackground: Color get() = BgRoot
+val BgSurface: Color get() = if (amoledTheme) Color.Black else Color(0xFF0B0B0F)
+val DarkSurface: Color get() = if (amoledTheme) Color(0xFF0A0A0A) else Color(0xFF101016)
+val DarkSurfaceVariant: Color get() = if (amoledTheme) Color(0xFF151515) else Color(0xFF181820)
 val TextPrimary = Color(0xFFFFFFFF)
 val TextSecondary = Color.White.copy(alpha = 0.65f)
 val TextMuted = Color.White.copy(alpha = 0.40f)
 val BorderSubtle = Color.White.copy(alpha = 0.08f)
 val BorderHover = Color.White.copy(alpha = 0.22f)
 
-val QMusicColorScheme = darkColorScheme(
+val QMusicColorScheme get() = darkColorScheme(
     primary = Color.White,
     onPrimary = BgRoot,
     primaryContainer = DarkSurfaceVariant,

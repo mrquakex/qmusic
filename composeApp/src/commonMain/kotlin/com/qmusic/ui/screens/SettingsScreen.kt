@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -41,6 +42,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
+import com.qmusic.settings.MoreSettings
+import com.qmusic.settings.MoreSettingsChange
 import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.BgRoot
 import com.qmusic.ui.theme.DarkSurface
@@ -98,10 +101,13 @@ fun SettingsScreen(
     onAutoCheckUpdatesChange: (Boolean) -> Unit = {},
     language: String = "tr",
     onLanguageChange: (String) -> Unit = {},
+    more: MoreSettings = MoreSettings(),
+    onMore: (MoreSettingsChange) -> Unit = {},
 ) {
     val s = LocalStrings.current
     val uriHandler = LocalUriHandler.current
     var confirmRemoveDownloads by remember { mutableStateOf(false) }
+    var lastFmDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -192,6 +198,22 @@ fun SettingsScreen(
                 checked = videoByDefault,
                 onChange = onVideoByDefaultChange,
             )
+            RowDivider()
+            SwitchRow(
+                icon = QMusicIcons.Headphones,
+                title = s.headsetResumeTitle,
+                subtitle = s.headsetResumeSubtitle,
+                checked = more.headsetResume,
+                onChange = { onMore(MoreSettingsChange.HeadsetResume(it)) },
+            )
+            RowDivider()
+            SwitchRow(
+                icon = QMusicIcons.Lyrics,
+                title = s.notificationLyricsTitle,
+                subtitle = s.notificationLyricsSubtitle,
+                checked = more.notificationLyrics,
+                onChange = { onMore(MoreSettingsChange.NotificationLyrics(it)) },
+            )
         }
 
         Section(s.sectionDownloads) {
@@ -213,6 +235,23 @@ fun SettingsScreen(
                 )
             }
             RowDivider()
+            QualityRow(s.downloadQualityTitle, more.downloadQuality) { onMore(MoreSettingsChange.DownloadQuality(it)) }
+            RowDivider()
+            PillRow(
+                title = s.cacheLimitTitle,
+                subtitle = s.cacheLimitSubtitle,
+                options = CACHE_CHOICES,
+                value = more.cacheLimitMb,
+                onChange = { onMore(MoreSettingsChange.CacheLimit(it)) },
+            )
+            RowDivider()
+            ActionRow(
+                icon = null,
+                title = s.clearCacheTitle,
+                subtitle = s.cacheUsed(settingsSize(more.cacheBytes)),
+                onClick = { onMore(MoreSettingsChange.ClearCache) },
+            )
+            RowDivider()
             ActionRow(
                 icon = QMusicIcons.Trash,
                 title = s.removeAllDownloadsTitle,
@@ -227,6 +266,35 @@ fun SettingsScreen(
                 title = s.importSpotifyTitle,
                 subtitle = s.importSpotifySubtitle,
                 onClick = onOpenSpotifyImport,
+            )
+            RowDivider()
+            ActionRow(
+                icon = QMusicIcons.Stats,
+                title = "Last.fm",
+                subtitle = when {
+                    !more.lastFmAvailable -> s.lastFmNotConfigured
+                    more.lastFmUser != null -> s.lastFmSignedIn(more.lastFmUser)
+                    else -> s.lastFmSubtitle
+                },
+                action = when {
+                    !more.lastFmAvailable -> null
+                    more.lastFmUser != null -> {
+                        { OutlinedButton(onClick = { onMore(MoreSettingsChange.LastFmSignOut) }) { Text(s.signOut) } }
+                    }
+                    else -> {
+                        { Button(onClick = { lastFmDialog = true }) { Text(s.signIn) } }
+                    }
+                },
+            )
+        }
+
+        Section(s.sectionAppearance) {
+            SwitchRow(
+                icon = null,
+                title = s.amoledTitle,
+                subtitle = s.amoledSubtitle,
+                checked = more.amoled,
+                onChange = { onMore(MoreSettingsChange.Amoled(it)) },
             )
         }
 
@@ -384,6 +452,42 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(100.dp))
     }
 
+    if (lastFmDialog) {
+        var user by remember { mutableStateOf("") }
+        var password by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { lastFmDialog = false },
+            title = { Text("Last.fm") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = user,
+                        onValueChange = { user = it },
+                        singleLine = true,
+                        label = { Text(s.lastFmUsername) },
+                    )
+                    androidx.compose.material3.OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        singleLine = true,
+                        label = { Text(s.lastFmPassword) },
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = user.isNotBlank() && password.isNotEmpty(),
+                    onClick = {
+                        lastFmDialog = false
+                        onMore(MoreSettingsChange.LastFmSignIn(user, password))
+                    },
+                ) { Text(s.signIn) }
+            },
+            dismissButton = { TextButton(onClick = { lastFmDialog = false }) { Text(s.cancel) } },
+        )
+    }
+
     if (confirmRemoveDownloads) {
         AlertDialog(
             onDismissRequest = { confirmRemoveDownloads = false },
@@ -397,6 +501,43 @@ fun SettingsScreen(
             },
             dismissButton = { TextButton(onClick = { confirmRemoveDownloads = false }) { Text(s.cancel) } },
         )
+    }
+}
+
+private val CACHE_CHOICES = listOf("256" to "256 MB", "512" to "512 MB", "1024" to "1 GB", "2048" to "2 GB", "4096" to "4 GB")
+
+/** A setting with a few choices, as pills that scroll sideways when they do not fit. */
+@Composable
+private fun PillRow(title: String, subtitle: String, options: List<Pair<String, String>>, value: String, onChange: (String) -> Unit) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RowIcon(null)
+            Column {
+                Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier
+                .padding(start = 40.dp)
+                .horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            options.forEach { (key, label) ->
+                val selected = key == value
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (selected) Color.Black else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(if (selected) Color.White else DarkSurfaceVariant)
+                        .clickable { onChange(key) }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
+        }
     }
 }
 

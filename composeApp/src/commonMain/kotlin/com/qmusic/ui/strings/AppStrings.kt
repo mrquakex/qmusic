@@ -57,6 +57,32 @@ interface AppStrings {
     val moreYouMayLike: String
     val tabAlbums: String
     val seeAll: String
+    val sectionAppearance: String
+    val amoledTitle: String
+    val amoledSubtitle: String
+    val headsetResumeTitle: String
+    val headsetResumeSubtitle: String
+    val notificationLyricsTitle: String
+    val notificationLyricsSubtitle: String
+    val downloadQualityTitle: String
+    val cacheLimitTitle: String
+    val cacheLimitSubtitle: String
+    val clearCacheTitle: String
+    fun cacheUsed(size: String): String
+    val cacheCleared: String
+    val lastFmSubtitle: String
+    val lastFmNotConfigured: String
+    fun lastFmSignedIn(user: String): String
+    val lastFmUsername: String
+    val lastFmPassword: String
+    val lastFmConnected: String
+    val lastFmFailed: String
+    val lyricsSearch: String
+    val lyricsSearchHint: String
+    val lyricsSearchNone: String
+    val lyricsSynced: String
+    val lyricsOffsetHint: String
+    val linkNotSupported: String
     val reorderPlaylist: String
     val moveUp: String
     val moveDown: String
@@ -349,6 +375,32 @@ object TurkishStrings : AppStrings {
     override val moreYouMayLike: String = "Beğenebileceğiniz diğer içerikler"
     override val tabAlbums: String = "Albümler"
     override val seeAll: String = "Tümü"
+    override val sectionAppearance: String = "Görünüm"
+    override val amoledTitle: String = "Tam siyah tema"
+    override val amoledSubtitle: String = "OLED ekranlarda daha koyu ve pil dostu"
+    override val headsetResumeTitle: String = "Kulaklık bağlanınca çal"
+    override val headsetResumeSubtitle: String = "Bluetooth veya kablolu kulaklık bağlanınca kaldığı yerden devam eder"
+    override val notificationLyricsTitle: String = "Bildirimde şarkı sözleri"
+    override val notificationLyricsSubtitle: String = "Söylenen satır ayrı bir bildirimde ve kilit ekranında görünür"
+    override val downloadQualityTitle: String = "İndirme kalitesi"
+    override val cacheLimitTitle: String = "Önbellek boyutu"
+    override val cacheLimitSubtitle: String = "Dinlenen şarkılar için ayrılan yer; uygulama yeniden açılınca geçerli olur"
+    override val clearCacheTitle: String = "Önbelleği temizle"
+    override fun cacheUsed(size: String): String = "$size kullanılıyor (indirilenler hariç)"
+    override val cacheCleared: String = "Önbellek temizlendi"
+    override val lastFmSubtitle: String = "Dinlediklerini Last.fm hesabına işle"
+    override val lastFmNotConfigured: String = "Bu sürümde Last.fm anahtarı yok"
+    override fun lastFmSignedIn(user: String): String = "$user olarak bağlı"
+    override val lastFmUsername: String = "Kullanıcı adı"
+    override val lastFmPassword: String = "Şifre"
+    override val lastFmConnected: String = "Last.fm bağlandı"
+    override val lastFmFailed: String = "Last.fm'e bağlanılamadı"
+    override val lyricsSearch: String = "Sözleri ara"
+    override val lyricsSearchHint: String = "Şarkı ve sanatçı"
+    override val lyricsSearchNone: String = "Sonuç yok"
+    override val lyricsSynced: String = "Senkron"
+    override val lyricsOffsetHint: String = "Sözlerin zamanlaması"
+    override val linkNotSupported: String = "Bu bağlantı açılamadı"
     override val reorderPlaylist: String = "Sırayı düzenle"
     override val moveUp: String = "Yukarı taşı"
     override val moveDown: String = "Aşağı taşı"
@@ -663,6 +715,32 @@ object EnglishStrings : AppStrings {
     override val moreYouMayLike: String = "More you may like"
     override val tabAlbums: String = "Albums"
     override val seeAll: String = "See all"
+    override val sectionAppearance: String = "Appearance"
+    override val amoledTitle: String = "Pure black theme"
+    override val amoledSubtitle: String = "Darker and easier on the battery on OLED screens"
+    override val headsetResumeTitle: String = "Play when headphones connect"
+    override val headsetResumeSubtitle: String = "Carries on where it stopped when Bluetooth or wired headphones connect"
+    override val notificationLyricsTitle: String = "Lyrics in the notification"
+    override val notificationLyricsSubtitle: String = "The line being sung shows in a notification of its own and on the lock screen"
+    override val downloadQualityTitle: String = "Download quality"
+    override val cacheLimitTitle: String = "Cache size"
+    override val cacheLimitSubtitle: String = "Room kept for songs you stream; applies after the app restarts"
+    override val clearCacheTitle: String = "Clear cache"
+    override fun cacheUsed(size: String): String = "$size used (downloads not included)"
+    override val cacheCleared: String = "Cache cleared"
+    override val lastFmSubtitle: String = "Send what you listen to to your Last.fm account"
+    override val lastFmNotConfigured: String = "This build has no Last.fm key"
+    override fun lastFmSignedIn(user: String): String = "Connected as $user"
+    override val lastFmUsername: String = "Username"
+    override val lastFmPassword: String = "Password"
+    override val lastFmConnected: String = "Last.fm connected"
+    override val lastFmFailed: String = "Could not connect to Last.fm"
+    override val lyricsSearch: String = "Search lyrics"
+    override val lyricsSearchHint: String = "Song and artist"
+    override val lyricsSearchNone: String = "No results"
+    override val lyricsSynced: String = "Synced"
+    override val lyricsOffsetHint: String = "Lyrics timing"
+    override val linkNotSupported: String = "This link can't be opened"
     override val reorderPlaylist: String = "Reorder"
     override val moveUp: String = "Move up"
     override val moveDown: String = "Move down"

@@ -212,6 +212,15 @@ class OfflineDownloader(
         }
     }
 
+    override fun streamCacheBytes(): Long = runCatching { CacheProvider.getPlayerCache(context).cacheSpace }.getOrDefault(0L)
+
+    override fun clearStreamCache() {
+        scope.launch {
+            val streamed = CacheProvider.getPlayerCache(context)
+            streamed.keys.toList().forEach { key -> runCatching { streamed.removeResource(key) } }
+        }
+    }
+
     /** Keeps the process alive and shows a progress notification while songs are downloading. */
     private fun ensureServiceRunning() {
         runCatching {

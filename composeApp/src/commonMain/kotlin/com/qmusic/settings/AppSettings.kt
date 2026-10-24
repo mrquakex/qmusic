@@ -69,6 +69,80 @@ interface AppSettings {
     fun setAutoCheckUpdates(enabled: Boolean)
 
     fun setWifiOnly(enabled: Boolean)
+
+    /** Further choices by name (see [SettingKeys]); each is a flow, so screens follow it as it changes. */
+    fun bool(key: String, default: Boolean): StateFlow<Boolean>
+
+    fun setBool(key: String, value: Boolean)
+
+    fun string(key: String, default: String): StateFlow<String>
+
+    fun setString(key: String, value: String)
+}
+
+/** Names of the choices kept through [AppSettings.bool] and [AppSettings.string]. */
+object SettingKeys {
+    /** Pure black instead of near-black, for OLED screens. */
+    const val AMOLED = "amoled_theme"
+
+    /** Playback carries on when headphones (Bluetooth or wired) connect. */
+    const val HEADSET_RESUME = "resume_on_headset"
+
+    /** The line being sung shows in a notification of its own. */
+    const val NOTIFICATION_LYRICS = "notification_lyrics"
+
+    /** The player reads these two itself (core:player), under the same names. */
+    const val CACHE_LIMIT_MB = "cache_limit_mb"
+    const val DOWNLOAD_QUALITY = "download_quality"
+
+    const val DEFAULT_CACHE_MB = "512"
+}
+
+/** The Settings rows that have no property of their own in [AppSettings]. */
+data class MoreSettings(
+    val amoled: Boolean = false,
+    val headsetResume: Boolean = false,
+    val notificationLyrics: Boolean = false,
+    val cacheLimitMb: String = SettingKeys.DEFAULT_CACHE_MB,
+    val cacheBytes: Long = 0L,
+    val downloadQuality: String = "HIGH",
+    val lastFmAvailable: Boolean = false,
+    val lastFmUser: String? = null,
+)
+
+/** A change made on one of the [MoreSettings] rows. */
+sealed interface MoreSettingsChange {
+    data class Amoled(val on: Boolean) : MoreSettingsChange
+    data class HeadsetResume(val on: Boolean) : MoreSettingsChange
+    data class NotificationLyrics(val on: Boolean) : MoreSettingsChange
+    data class CacheLimit(val mb: String) : MoreSettingsChange
+    data class DownloadQuality(val quality: String) : MoreSettingsChange
+    data object ClearCache : MoreSettingsChange
+    data class LastFmSignIn(val user: String, val password: String) : MoreSettingsChange
+    data object LastFmSignOut : MoreSettingsChange
+}
+
+/** A Last.fm account that what is listened to is sent to ("scrobbled"). */
+interface ScrobbleAccount {
+    /** False when this build has no Last.fm key: the row says so instead of offering to sign in. */
+    val available: Boolean
+
+    /** The signed-in user name, or null. */
+    val user: StateFlow<String?>
+
+    suspend fun signIn(user: String, password: String): Result<Unit>
+
+    fun signOut()
+}
+
+/** Used where nothing is scrobbled (tests, desktop). */
+object NoScrobbling : ScrobbleAccount {
+    override val available: Boolean = false
+    override val user: StateFlow<String?> = MutableStateFlow<String?>(null).asStateFlow()
+
+    override suspend fun signIn(user: String, password: String): Result<Unit> = Result.failure(IllegalStateException("Last.fm is not available"))
+
+    override fun signOut() = Unit
 }
 
 /** Keeps the values for the life of the process only (tests, desktop previews). */
@@ -171,5 +245,20 @@ class InMemoryAppSettings(
 
     override fun setWifiOnly(enabled: Boolean) {
         _wifi.value = enabled
+    }
+
+    private val bools = HashMap<String, MutableStateFlow<Boolean>>()
+    private val strings = HashMap<String, MutableStateFlow<String>>()
+
+    override fun bool(key: String, default: Boolean): StateFlow<Boolean> = bools.getOrPut(key) { MutableStateFlow(default) }
+
+    override fun setBool(key: String, value: Boolean) {
+        bools.getOrPut(key) { MutableStateFlow(value) }.value = value
+    }
+
+    override fun string(key: String, default: String): StateFlow<String> = strings.getOrPut(key) { MutableStateFlow(default) }
+
+    override fun setString(key: String, value: String) {
+        strings.getOrPut(key) { MutableStateFlow(value) }.value = value
     }
 }

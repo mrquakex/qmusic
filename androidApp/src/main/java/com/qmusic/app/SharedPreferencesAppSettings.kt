@@ -116,6 +116,25 @@ class SharedPreferencesAppSettings(context: Context) : AppSettings {
         _wifi.value = enabled
     }
 
+    private val bools = HashMap<String, MutableStateFlow<Boolean>>()
+    private val strings = HashMap<String, MutableStateFlow<String>>()
+
+    override fun bool(key: String, default: Boolean): StateFlow<Boolean> =
+        synchronized(bools) { bools.getOrPut(key) { MutableStateFlow(prefs.getBoolean(key, default)) } }
+
+    override fun setBool(key: String, value: Boolean) {
+        prefs.edit().putBoolean(key, value).apply()
+        synchronized(bools) { bools.getOrPut(key) { MutableStateFlow(value) } }.value = value
+    }
+
+    override fun string(key: String, default: String): StateFlow<String> =
+        synchronized(strings) { strings.getOrPut(key) { MutableStateFlow(prefs.getString(key, null) ?: default) } }
+
+    override fun setString(key: String, value: String) {
+        prefs.edit().putString(key, value).apply()
+        synchronized(strings) { strings.getOrPut(key) { MutableStateFlow(value) } }.value = value
+    }
+
     private companion object {
         const val KEY_LANGUAGE = "language"
         const val KEY_AUTO_DOWNLOAD = "auto_download_liked"

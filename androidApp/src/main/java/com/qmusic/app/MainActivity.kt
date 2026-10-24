@@ -14,6 +14,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.qmusic.player.service.MediaActions
 import com.qmusic.ui.QMusicApp
+import com.qmusic.ui.strings.EnglishStrings
+import com.qmusic.ui.strings.TurkishStrings
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
@@ -51,12 +53,15 @@ class MainActivity : AppCompatActivity() {
                         connectivity = container.connectivity,
                         crashReports = container.crashReports,
                         isUnmetered = container::isUnmetered,
+                        scrobbling = container.lastFm,
                     ) as T
             },
         )[MainViewModel::class.java]
 
         this.viewModel = viewModel
         openUpdatesIfAsked(intent)
+        // A rotation recreates the activity with the same intent: the link was opened the first time already.
+        if (savedInstanceState == null) openLinkIfAny(intent)
 
         CastBridge.init(this)
 
@@ -66,6 +71,14 @@ class MainActivity : AppCompatActivity() {
             combine(viewModel.currentTrack, viewModel.favorites) { track, liked ->
                 track != null && liked.any { it.id == track.id }
             }.collect { MediaActions.liked.value = it }
+        }
+        // Settings › Lyrics in the notification: the line being sung, in a quiet notification of its own.
+        likeWatcher.launch {
+            combine(viewModel.notificationLyricLine, viewModel.currentTrack) { line, track -> line to track }
+                .collect { (line, track) ->
+                    val channel = if (container.settings.language.value == "en") EnglishStrings.lyrics else TurkishStrings.lyrics
+                    LyricsNotification.update(this@MainActivity, track, line, channel)
+                }
         }
 
         setContent {
@@ -78,6 +91,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         likeWatcher.cancel()
+        LyricsNotification.update(this, null, null, "")
         super.onDestroy()
     }
 
@@ -85,6 +99,17 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         openUpdatesIfAsked(intent)
+        openLinkIfAny(intent)
+    }
+
+    /** A YouTube / YouTube Music link tapped elsewhere, or shared to the app. */
+    private fun openLinkIfAny(intent: Intent?) {
+        val text = when (intent?.action) {
+            Intent.ACTION_VIEW -> intent.dataString
+            Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
+            else -> null
+        } ?: return
+        viewModel?.openLink(text)
     }
 
     /** Tapped the "new version" notification: show Settings with the check already done. */

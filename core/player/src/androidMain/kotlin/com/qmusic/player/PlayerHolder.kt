@@ -36,8 +36,8 @@ object PlayerHolder {
             store(context)
             offlineDownloader ?: OfflineDownloader(
                 context = context.applicationContext,
-                // Saved songs are always the best stream, whatever is chosen for streaming.
-                resolveUrl = { id -> resolveAudioUrl(id, AudioQuality.HIGH) },
+                // Saved songs use the quality chosen for downloads (the best one unless changed in Settings).
+                resolveUrl = { id -> resolveAudioUrl(id, downloadQuality(context)) },
             ).also { offlineDownloader = it }
         }
 
@@ -54,6 +54,12 @@ object PlayerHolder {
         }
 
     fun peek(): CrossfadeExoPlayerAdapter? = instance
+
+    private fun downloadQuality(context: Context): AudioQuality =
+        context.applicationContext.getSharedPreferences(com.qmusic.player.cache.CacheProvider.SETTINGS_FILE, Context.MODE_PRIVATE)
+            .getString("download_quality", null)
+            ?.let { runCatching { AudioQuality.valueOf(it) }.getOrNull() }
+            ?: AudioQuality.HIGH
 
     /** The music video of [videoId] (720p at most, to keep playback smooth on mobile data), or null. */
     private suspend fun resolveVideo(videoId: String) =

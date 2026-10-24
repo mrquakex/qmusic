@@ -77,6 +77,56 @@ class BrowseParserTest {
     }
 
     @Test
+    fun explicitBadgeAndSeeAllLinkAreRead() {
+        val json = """
+        {"contents":{"singleColumnBrowseResultsRenderer":{"tabs":[{"tabRenderer":{"content":{"sectionListRenderer":{"contents":[
+          {"musicCarouselShelfRenderer":{
+            "header":{"musicCarouselShelfBasicHeaderRenderer":{"title":{"runs":[{"text":"Top songs"}]},
+              "moreContentButton":{"buttonRenderer":{"navigationEndpoint":{"browseEndpoint":{"browseId":"VLPLtop","params":"ggMC"}}}}}},
+            "contents":[
+              {"musicResponsiveListItemRenderer":{
+                "badges":[{"musicInlineBadgeRenderer":{"icon":{"iconType":"MUSIC_EXPLICIT_BADGE"}}}],
+                "flexColumns":[
+                  {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Rap God","navigationEndpoint":{"watchEndpoint":{"videoId":"XbGs_qK2PQA"}}}]}}},
+                  {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Eminem","navigationEndpoint":{"browseEndpoint":{"browseId":"UCem"}}}]}}}]}},
+              {"musicResponsiveListItemRenderer":{
+                "flexColumns":[
+                  {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Clean","navigationEndpoint":{"watchEndpoint":{"videoId":"cleanSong01"}}}]}}},
+                  {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Someone","navigationEndpoint":{"browseEndpoint":{"browseId":"UCso"}}}]}}}]}}
+            ]}}
+        ]}}}}]}}}
+        """
+        val section = BrowseParser.homeSections(parse(json)).single()
+        assertEquals("VLPLtop", section.moreBrowseId)
+        assertEquals("ggMC", section.moreParams)
+        assertEquals(listOf(true, false), section.songs.map { it.explicit })
+    }
+
+    @Test
+    fun filteredSearchCarriesOnWithItsContinuation() {
+        val first = """
+        {"contents":{"tabbedSearchResultsRenderer":{"tabs":[{"tabRenderer":{"content":{"sectionListRenderer":{"contents":[
+          {"musicShelfRenderer":{
+            "contents":[{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"songAAAAAAA"},
+              "flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"A","navigationEndpoint":{"watchEndpoint":{"videoId":"songAAAAAAA"}}}]}}}]}}],
+            "continuations":[{"nextContinuationData":{"continuation":"MORE_1"}}]}}
+        ]}}}}]}}}
+        """
+        val page = BrowseParser.searchPage(parse(first))
+        assertEquals(listOf("songAAAAAAA"), page.songs.map { it.id })
+        assertEquals("MORE_1", page.continuation)
+
+        val next = """
+        {"continuationContents":{"musicShelfContinuation":{
+          "contents":[{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"songBBBBBBB"},
+            "flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"B","navigationEndpoint":{"watchEndpoint":{"videoId":"songBBBBBBB"}}}]}}}]}}]}}}
+        """
+        val more = BrowseParser.searchContinuation(parse(next))
+        assertEquals(listOf("songBBBBBBB"), more.songs.map { it.id })
+        assertNull(more.continuation)
+    }
+
+    @Test
     fun homeContinuationTokenIsFound() {
         assertEquals("NEXT_PAGE", BrowseParser.homeContinuation(parse(homeJson)))
         assertNull(BrowseParser.homeContinuation(parse("""{"contents":{}}""")))

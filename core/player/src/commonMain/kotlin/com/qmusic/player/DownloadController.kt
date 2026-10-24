@@ -31,6 +31,12 @@ interface DownloadController {
 
     /** Deletes every downloaded song (and stops what is still downloading). */
     fun removeAll()
+
+    /** Space taken by songs kept from streaming (not the downloads), in bytes. */
+    fun streamCacheBytes(): Long = 0L
+
+    /** Empties what streaming kept; downloads stay. */
+    fun clearStreamCache() = Unit
 }
 
 /** Used where nothing can be stored (desktop previews, tests). */

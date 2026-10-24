@@ -1,3 +1,4 @@
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -12,6 +13,11 @@ if (file("google-services.json").exists()) {
     apply(plugin = "com.google.firebase.crashlytics")
 }
 
+// Last.fm's key and secret stay out of the repository: they are read from local.properties when present.
+val localProperties = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+
 android {
     namespace = "com.qmusic.app"
     compileSdk = 36
@@ -24,6 +30,8 @@ android {
         versionName = "1.0.14"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "LASTFM_KEY", "\"${localProperties.getProperty("lastfm.key", "")}\"")
+        buildConfigField("String", "LASTFM_SECRET", "\"${localProperties.getProperty("lastfm.secret", "")}\"")
     }
 
     buildTypes {
@@ -50,6 +58,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

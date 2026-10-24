@@ -155,6 +155,14 @@ data class Lyrics(
     val isSynced: Boolean get() = lines.isNotEmpty()
 }
 
+/** One hit of a lyrics search (LRCLIB), to pick when the found lyrics are wrong. */
+data class LyricsMatch(
+    val title: String,
+    val artist: String,
+    val durationSeconds: Int?,
+    val lyrics: Lyrics,
+)
+
 @Serializable
 data class LyricLine(
     val timeMs: Long,

@@ -50,6 +50,24 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- YouTube Music / YouTube links open here (Android lists the app under "Open with"). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="music.youtube.com" />
+                <data android:host="www.youtube.com" />
+                <data android:host="youtube.com" />
+                <data android:host="m.youtube.com" />
+                <data android:host="youtu.be" />
+            </intent-filter>
+            <!-- "Share" from YouTube or YouTube Music: the shared link opens in QMusic. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
 
         <provider

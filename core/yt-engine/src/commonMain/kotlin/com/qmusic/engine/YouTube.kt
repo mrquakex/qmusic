@@ -11,6 +11,7 @@ import com.qmusic.engine.models.ArtistPage
 import com.qmusic.engine.models.CollectionItem
 import com.qmusic.engine.models.CollectionPage
 import com.qmusic.engine.models.Lyrics
+import com.qmusic.engine.models.LyricsMatch
 import com.qmusic.engine.models.SearchResultsPage
 import com.qmusic.engine.models.ExplorePage
 import com.qmusic.engine.models.HomePage
@@ -52,6 +53,7 @@ class YouTube(
 
         /** The home feed ends after about six pages; this is only a safety stop. */
         const val HOME_MAX_PAGES = 10
+        const val MAX_LYRICS_MATCHES = 20
 
         val STREAM_CLIENTS = listOf(
             YouTubeClient.ANDROID_VR,
@@ -344,6 +346,46 @@ class YouTube(
             val lines = LrcParser.parse(synced)
             if (lines.isEmpty()) return@runCatching null
             Lyrics(text = lines.joinToString("\n") { it.text }, source = "LRCLIB", lines = lines)
+        }
+
+    /** Lyrics found by words ("song artist"), timed ones first, for when the matched ones are wrong. */
+    suspend fun searchLyrics(query: String): Result<List<LyricsMatch>> =
+        runCatching {
+            val body = ytmusic.fetchText("https://lrclib.net/api/search?q=" + query.encodeURLParameter()) ?: return@runCatching emptyList()
+            json.parseToJsonElement(body).jsonArray.mapNotNull { element ->
+                val entry = element.jsonObject
+                fun text(name: String) = entry[name]?.jsonPrimitive?.contentOrNull
+                val lines = text("syncedLyrics")?.let(LrcParser::parse).orEmpty()
+                val plain = text("plainLyrics")
+                val lyrics = when {
+                    lines.isNotEmpty() -> Lyrics(text = lines.joinToString("\n") { it.text }, source = "LRCLIB", lines = lines)
+                    !plain.isNullOrBlank() -> Lyrics(text = plain, source = "LRCLIB")
+                    else -> return@mapNotNull null
+                }
+                LyricsMatch(
+                    title = text("trackName").orEmpty(),
+                    artist = text("artistName").orEmpty(),
+                    durationSeconds = text("duration")?.toDoubleOrNull()?.toInt(),
+                    lyrics = lyrics,
+                )
+            }.sortedByDescending { it.lyrics.isSynced }.take(MAX_LYRICS_MATCHES)
+        }
+
+    /** One song by its id (for a link opened in the app): title, artists and cover as YouTube Music has them. */
+    suspend fun song(videoId: String): Result<SongItem> =
+        runCatching {
+            if (ytmusic.auth?.isLoggedIn != true) ytmusic.ensureVisitorData()
+            val root = json.parseToJsonElement(ytmusic.next(videoId = videoId, client = YouTubeClient.WEB_REMIX).bodyAsText()).jsonObject
+            BrowseParser.upNext(root).firstOrNull { it.id == videoId }
+                ?: getSongInfo(videoId).getOrNull()?.let { info ->
+                    SongItem(
+                        id = videoId,
+                        title = info.title ?: videoId,
+                        artists = listOfNotNull(info.author?.let { com.qmusic.engine.models.Artist(it, info.authorId) }),
+                        thumbnail = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg",
+                    )
+                }
+                ?: error("No song $videoId")
         }
 
     /** The signed-in account's "Liked music" playlist (empty when nobody is signed in). */

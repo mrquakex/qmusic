@@ -15,6 +15,7 @@ import com.qmusic.engine.models.HomeChip
 import com.qmusic.engine.models.HomeSection
 import com.qmusic.engine.models.SectionStyle
 import com.qmusic.engine.models.Lyrics
+import com.qmusic.engine.models.LyricsMatch
 import com.qmusic.engine.models.SearchFilter
 import com.qmusic.engine.models.SearchResultsPage
 import com.qmusic.engine.models.SearchSuggestion
@@ -27,6 +28,11 @@ import com.qmusic.player.RepeatMode
 import com.qmusic.network.AlwaysOnline
 import com.qmusic.network.ConnectivityMonitor
 import com.qmusic.settings.AppSettings
+import com.qmusic.settings.MoreSettings
+import com.qmusic.settings.MoreSettingsChange
+import com.qmusic.settings.NoScrobbling
+import com.qmusic.settings.ScrobbleAccount
+import com.qmusic.settings.SettingKeys
 import com.qmusic.settings.CrashReports
 import com.qmusic.settings.NoCrashReports
 import com.qmusic.settings.InMemoryAppSettings
@@ -51,6 +57,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -145,6 +152,8 @@ class MainViewModel(
     /** Called with the raw cookie string after sign-in, or null after sign-out, so the host can persist the session. */
     private val onSessionChanged: (String?) -> Unit = {},
     private val stringsProvider: (() -> AppStrings)? = null,
+    /** Last.fm, where what is listened to can be sent (nothing by default). */
+    val scrobbling: ScrobbleAccount = NoScrobbling,
 ) : ViewModel() {
 
     private val scope: CoroutineScope = externalScope ?: viewModelScope
@@ -421,6 +430,57 @@ class MainViewModel(
     val lyricsState: StateFlow<LyricsState> = _lyricsState.asStateFlow()
     private val lyricsCache = HashMap<String, Lyrics?>()
     private var lyricsJob: Job? = null
+    private val _lyricsTranslation = MutableStateFlow<List<String>?>(null)
+    /** The lyrics in the app's language, line by line; null while the original is shown. */
+    val lyricsTranslation: StateFlow<List<String>?> = _lyricsTranslation.asStateFlow()
+    private var translatedFor: String? = null
+
+    /** How far the timed lyrics are moved, per song (positive: lines come earlier). */
+    private val lyricsOffsets = MutableStateFlow<Map<String, Long>>(emptyMap())
+    val lyricsOffsetMs: StateFlow<Long> = combine(playerController.currentTrack, lyricsOffsets) { track, offsets ->
+        track?.let { offsets[it.id] } ?: 0L
+    }.stateIn(scope, SharingStarted.Eagerly, 0L)
+
+    private val _lyricsMatches = MutableStateFlow<List<LyricsMatch>?>(null)
+    /** The lyrics search's hits; null while it runs (or when no search is open). */
+    val lyricsMatches: StateFlow<List<LyricsMatch>?> = _lyricsMatches.asStateFlow()
+    private var lyricsSearchJob: Job? = null
+
+    private val _cacheBytes = MutableStateFlow(0L)
+
+    val amoledTheme: StateFlow<Boolean> = settings.bool(SettingKeys.AMOLED, false)
+
+    /** The Settings rows without a property of their own: appearance, headphones, cache, Last.fm. */
+    val moreSettings: StateFlow<MoreSettings> = combine(
+        combine(
+            settings.bool(SettingKeys.AMOLED, false),
+            settings.bool(SettingKeys.HEADSET_RESUME, false),
+            settings.bool(SettingKeys.NOTIFICATION_LYRICS, false),
+        ) { amoled, headset, lyrics -> Triple(amoled, headset, lyrics) },
+        combine(
+            settings.string(SettingKeys.CACHE_LIMIT_MB, SettingKeys.DEFAULT_CACHE_MB),
+            settings.string(SettingKeys.DOWNLOAD_QUALITY, "HIGH"),
+            _cacheBytes,
+        ) { cache, quality, bytes -> Triple(cache, quality, bytes) },
+        scrobbling.user,
+    ) { (amoled, headset, lyrics), (cache, quality, bytes), user ->
+        MoreSettings(amoled, headset, lyrics, cache, bytes, quality, scrobbling.available, user)
+    }.stateIn(scope, SharingStarted.Eagerly, MoreSettings())
+
+    /** The line being sung, for the lyrics notification: null when that is off, nothing plays or nothing is timed. */
+    val notificationLyricLine: StateFlow<String?> by lazy {
+        combine(
+            settings.bool(SettingKeys.NOTIFICATION_LYRICS, false),
+            lyricsState,
+            playbackPosition,
+            isPlaying,
+            lyricsOffsetMs,
+        ) { on, state, position, playing, offset ->
+            if (!on || !playing) return@combine null
+            val lyrics = (state as? LyricsState.Available)?.lyrics?.takeIf { it.isSynced } ?: return@combine null
+            lyrics.lines.lastOrNull { it.timeMs <= position + offset + NOTIFICATION_LYRIC_LEAD_MS }?.text?.takeIf { it.isNotBlank() }
+        }.distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, null)
+    }
     private var radioFilledFor: String? = null
 
     // Spotify Import State
@@ -518,6 +578,14 @@ class MainViewModel(
             }.collect { playerController.setAudioQuality(it) }
         }
         scope.launch { settings.normalizeVolume.collect { playerController.setNormalizeVolume(it) } }
+        // Lyrics in the notification need the lyrics of every song, not only when the lyrics page is opened.
+        scope.launch {
+            combine(
+                playerController.currentTrack.distinctUntilChangedBy { it?.id },
+                settings.bool(SettingKeys.NOTIFICATION_LYRICS, false),
+            ) { track, on -> track != null && on }
+                .collect { wanted -> if (wanted) loadLyrics() }
+        }
         // History follows what actually plays, so songs reached through next/auto-advance are recorded too.
         scope.launch {
             playerController.currentTrack
@@ -529,6 +597,7 @@ class MainViewModel(
 
     // --- Navigation & Sheet Controls ---
     fun selectTab(tab: ScreenTab) {
+        if (tab == ScreenTab.SETTINGS) refreshCacheSize()
         // Leaving "For you" stops the preview that was playing there, as on YouTube Music.
         if (_currentTab.value == ScreenTab.FOR_YOU && tab != ScreenTab.FOR_YOU) stopSample()
         _currentTab.value = tab
@@ -1069,12 +1138,84 @@ class MainViewModel(
 
     fun onBackupSaved(ok: Boolean) = showMessage(if (ok) strings.backupSaved else strings.backupFailed)
 
+    // --- Settings without a property of their own ---
+    private fun refreshCacheSize() {
+        _cacheBytes.value = downloads.streamCacheBytes()
+    }
+
+    fun onMoreSettings(change: MoreSettingsChange) {
+        when (change) {
+            is MoreSettingsChange.Amoled -> settings.setBool(SettingKeys.AMOLED, change.on)
+            is MoreSettingsChange.HeadsetResume -> settings.setBool(SettingKeys.HEADSET_RESUME, change.on)
+            is MoreSettingsChange.NotificationLyrics -> settings.setBool(SettingKeys.NOTIFICATION_LYRICS, change.on)
+            is MoreSettingsChange.CacheLimit -> settings.setString(SettingKeys.CACHE_LIMIT_MB, change.mb)
+            is MoreSettingsChange.DownloadQuality -> settings.setString(SettingKeys.DOWNLOAD_QUALITY, change.quality)
+            MoreSettingsChange.ClearCache -> {
+                downloads.clearStreamCache()
+                showMessage(strings.cacheCleared)
+                scope.launch {
+                    delay(CACHE_REFRESH_MS)
+                    refreshCacheSize()
+                }
+            }
+            is MoreSettingsChange.LastFmSignIn -> scope.launch {
+                scrobbling.signIn(change.user.trim(), change.password)
+                    .onSuccess { showMessage(strings.lastFmConnected) }
+                    .onFailure { showMessage(it.message?.takeIf(String::isNotBlank) ?: strings.lastFmFailed) }
+            }
+            MoreSettingsChange.LastFmSignOut -> scrobbling.signOut()
+        }
+    }
+
+    /**
+     * Opens a YouTube / YouTube Music link (shared to the app or tapped elsewhere): a song plays, a playlist, album
+     * or artist opens on its page.
+     */
+    fun openLink(text: String) {
+        when (val link = AppLinks.parse(text)) {
+            null -> showMessage(strings.linkNotSupported)
+            is AppLink.Song -> scope.launch {
+                val song = youTube.song(link.videoId).getOrNull() ?: SongItem(id = link.videoId, title = link.videoId)
+                play(song)
+                setPlayerExpanded(true)
+            }
+            is AppLink.Playlist -> openCollection(CollectionItem(browseId = "VL" + link.listId, title = "", kind = CollectionKind.PLAYLIST))
+            is AppLink.Album -> openCollection(CollectionItem(browseId = link.browseId, title = "", kind = CollectionKind.ALBUM))
+            is AppLink.Artist -> openArtist(link.channelId, "")
+        }
+    }
+
     // --- Lyrics ---
+    fun shiftLyrics(deltaMs: Long) {
+        val id = currentTrack.value?.id ?: return
+        val offsets = lyricsOffsets.value
+        lyricsOffsets.value = offsets + (id to ((offsets[id] ?: 0L) + deltaMs))
+    }
+
+    fun searchLyrics(query: String) {
+        if (query.isBlank()) return
+        lyricsSearchJob?.cancel()
+        _lyricsMatches.value = null
+        lyricsSearchJob = scope.launch {
+            _lyricsMatches.value = youTube.searchLyrics(query.trim()).getOrDefault(emptyList())
+        }
+    }
+
+    fun closeLyricsSearch() {
+        lyricsSearchJob?.cancel()
+        _lyricsMatches.value = null
+    }
+
+    /** Shows the picked lyrics for the playing song from now on. */
+    fun useLyrics(match: LyricsMatch) {
+        val song = currentTrack.value ?: return
+        lyricsCache[song.id] = match.lyrics
+        _lyricsTranslation.value = null
+        _lyricsState.value = LyricsState.Available(match.lyrics)
+        closeLyricsSearch()
+    }
+
     /** Loads the lyrics of the playing song (cached per song). Called when the lyrics page is shown. */
-    private val _lyricsTranslation = MutableStateFlow<List<String>?>(null)
-    /** The lyrics in the app's language, line by line; null while the original is shown. */
-    val lyricsTranslation: StateFlow<List<String>?> = _lyricsTranslation.asStateFlow()
-    private var translatedFor: String? = null
 
     fun toggleLyricsTranslation() {
         if (_lyricsTranslation.value != null) {
@@ -1661,6 +1802,8 @@ class MainViewModel(
 
     private companion object {
         const val RADIO_REFILL_THRESHOLD = 3
+        const val CACHE_REFRESH_MS = 600L
+        const val NOTIFICATION_LYRIC_LEAD_MS = 250L
         const val SESSION_SAVE_MS = 10_000L
         const val SESSION_BEHIND = 20
         const val SESSION_AHEAD = 80

@@ -43,8 +43,15 @@ class AppContainer(private val application: Application) {
     val updateChecker: UpdateChecker by lazy { GithubReleaseUpdateChecker() }
     val updateInstaller: UpdateInstaller by lazy { ApkUpdateInstaller(application) }
     val downloads: DownloadController get() = PlayerHolder.downloads(application)
+    val lastFm: LastFm by lazy { LastFm(application) }
     val playerController: PlayerController by lazy {
-        ServicePlayerController(application, PlayerHolder.get(application).also { WidgetUpdater.start(application, it) })
+        ServicePlayerController(
+            application,
+            PlayerHolder.get(application).also {
+                WidgetUpdater.start(application, it)
+                lastFm.follow(it)
+            },
+        )
     }
 }
 

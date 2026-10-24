@@ -59,6 +59,10 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -163,6 +167,7 @@ fun NowPlayingScreen(
     onCycleSpeed: () -> Unit = {},
     lyricsTranslation: List<String>? = null,
     onToggleTranslation: () -> Unit = {},
+    lyricsTools: LyricsTools = LyricsTools(),
     modifier: Modifier = Modifier,
     /** Controls fade in over the last part of the drag, like YouTube Music's. */
     contentAlpha: () -> Float = { 1f },
@@ -218,13 +223,7 @@ fun NowPlayingScreen(
         )
         }
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 22.dp),
-        ) {
+        val topBar: @Composable () -> Unit = {
             TopBar(
                 hasVideo = track.hasVideo,
                 videoSelected = videoPreferred,
@@ -243,11 +242,11 @@ fun NowPlayingScreen(
                     .draggable(dragState, Orientation.Vertical, onDragStopped = { onSheetDragStopped(it) }),
             )
 
+        }
+        val pages: @Composable (Modifier) -> Unit = { pagerModifier ->
             HorizontalPager(
                 state = pagerState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                modifier = pagerModifier,
             ) { page ->
                 when (page) {
                     0 -> MediaPage(
@@ -261,7 +260,15 @@ fun NowPlayingScreen(
                         modifier = Modifier.draggable(dragState, Orientation.Vertical, onDragStopped = { onSheetDragStopped(it) }),
                     )
 
-                    1 -> LyricsPage(lyrics, positionMs, onSeekTo, lyricsTranslation, onToggleTranslation)
+                    1 -> LyricsPage(
+                        state = lyrics,
+                        positionMs = positionMs,
+                        onSeekTo = onSeekTo,
+                        translation = lyricsTranslation,
+                        onToggleTranslation = onToggleTranslation,
+                        tools = lyricsTools,
+                        defaultQuery = (track.title + " " + track.artists.firstOrNull()?.name.orEmpty()).trim(),
+                    )
                     2 -> QueuePage(
                         queue = queue,
                         queueIndex = queueIndex,
@@ -278,6 +285,8 @@ fun NowPlayingScreen(
                 }
             }
 
+        }
+        val controls: @Composable () -> Unit = {
             Column(modifier = Modifier.graphicsLayer { alpha = contentAlpha() }) {
                 Spacer(Modifier.height(12.dp))
     
@@ -346,6 +355,37 @@ fun NowPlayingScreen(
                     next = queue.getOrNull(queueIndex + 1),
                     onClick = { scope.launch { pagerState.animateScrollToPage(2) } },
                 )
+            }
+        }
+        androidx.compose.foundation.layout.BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 22.dp),
+        ) {
+            // Sideways (a phone turned over, a tablet): the cover and its pages on the left, the controls beside them.
+            if (maxWidth > maxHeight && maxWidth >= LANDSCAPE_MIN_WIDTH) {
+                Row(modifier = Modifier.fillMaxSize()) {
+                    Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                        topBar()
+                        pages(Modifier.weight(1f).fillMaxWidth())
+                    }
+                    Spacer(Modifier.width(24.dp))
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.Center,
+                    ) { controls() }
+                }
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    topBar()
+                    pages(Modifier.weight(1f).fillMaxWidth())
+                    controls()
+                }
             }
         }
     }
@@ -510,15 +550,50 @@ private fun LyricsPage(
     onSeekTo: (Long) -> Unit,
     translation: List<String>? = null,
     onToggleTranslation: () -> Unit = {},
+    tools: LyricsTools = LyricsTools(),
+    defaultQuery: String = "",
 ) {
     val s = LocalStrings.current
+    var searching by remember { mutableStateOf(false) }
+    val openSearch = {
+        searching = true
+        tools.onSearch(defaultQuery)
+    }
     Column(modifier = Modifier.fillMaxSize()) {
     if (state is LyricsState.Available) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (state.lyrics.isSynced) {
+                // Lines a bit late or early on this recording: nudge them half a second at a time.
+                TextButton(onClick = { tools.onShift(-LYRIC_SHIFT_MS) }) { Text("\u2212", color = Color.White) }
+                Text(
+                    text = formatOffset(tools.offsetMs),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.semantics { contentDescription = s.lyricsOffsetHint },
+                )
+                TextButton(onClick = { tools.onShift(LYRIC_SHIFT_MS) }) { Text("+", color = Color.White) }
+            }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = openSearch) { Text(s.search, color = Color.White) }
             TextButton(onClick = onToggleTranslation) {
                 Text(if (translation != null) s.showOriginalLyrics else s.translateLyrics, color = Color.White)
             }
         }
+    }
+    if (searching) {
+        LyricsSearchDialog(
+            defaultQuery = defaultQuery,
+            matches = tools.matches,
+            onSearch = tools.onSearch,
+            onPick = {
+                searching = false
+                tools.onUse(it)
+            },
+            onDismiss = {
+                searching = false
+                tools.onCloseSearch()
+            },
+        )
     }
     Box(
         modifier = Modifier
@@ -530,13 +605,16 @@ private fun LyricsPage(
         when (state) {
             LyricsState.Idle, LyricsState.Loading -> CircularProgressIndicator(color = Color.White)
 
-            LyricsState.Unavailable -> Text(
-                text = s.lyricsUnavailable,
-                style = MaterialTheme.typography.bodyLarge,
-                color = Color.White.copy(alpha = 0.6f),
-            )
+            LyricsState.Unavailable -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = s.lyricsUnavailable,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White.copy(alpha = 0.6f),
+                )
+                TextButton(onClick = openSearch) { Text(s.lyricsSearch, color = Color.White) }
+            }
 
-            is LyricsState.Available -> if (state.lyrics.isSynced) SyncedLyrics(state.lyrics, positionMs, onSeekTo, translation) else Column(
+            is LyricsState.Available -> if (state.lyrics.isSynced) SyncedLyrics(state.lyrics, { positionMs() + tools.offsetMs }, { onSeekTo((it - tools.offsetMs).coerceAtLeast(0L)) }, translation) else Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState()),
@@ -662,6 +740,91 @@ private fun SyncedLyrics(lyrics: Lyrics, positionMs: () -> Long, onSeekTo: (Long
             }
         }
     }
+}
+
+/** What the lyrics page can change: when the lines come, and which lyrics are shown. */
+class LyricsTools(
+    val offsetMs: Long = 0L,
+    val onShift: (Long) -> Unit = {},
+    /** Hits of the open lyrics search; null while it runs. */
+    val matches: List<com.qmusic.engine.models.LyricsMatch>? = null,
+    val onSearch: (String) -> Unit = {},
+    val onUse: (com.qmusic.engine.models.LyricsMatch) -> Unit = {},
+    val onCloseSearch: () -> Unit = {},
+)
+
+private const val LYRIC_SHIFT_MS = 500L
+
+private val LANDSCAPE_MIN_WIDTH = 560.dp
+
+private fun formatOffset(ms: Long): String {
+    if (ms == 0L) return "0.0s"
+    val tenths = kotlin.math.abs(ms) / 100
+    return (if (ms > 0) "+" else "\u2212") + "${tenths / 10}.${tenths % 10}s"
+}
+
+/** Lyrics looked up by words, for when the ones found for the song are wrong or missing. */
+@Composable
+private fun LyricsSearchDialog(
+    defaultQuery: String,
+    matches: List<com.qmusic.engine.models.LyricsMatch>?,
+    onSearch: (String) -> Unit,
+    onPick: (com.qmusic.engine.models.LyricsMatch) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val s = LocalStrings.current
+    var query by remember { mutableStateOf(defaultQuery) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(s.lyricsSearch) },
+        text = {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        placeholder = { Text(s.lyricsSearchHint) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { onSearch(query) }) {
+                        Icon(QMusicIcons.Search, contentDescription = s.search)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                when {
+                    matches == null -> Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                    matches.isEmpty() -> Text(s.lyricsSearchNone, modifier = Modifier.padding(vertical = 12.dp))
+                    else -> LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+                        itemsIndexed(matches) { _, match ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onPick(match) }
+                                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                            ) {
+                                Text(match.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    text = listOfNotNull(
+                                        match.artist.takeIf { it.isNotBlank() },
+                                        match.durationSeconds?.let { formatTime(it * 1000L) },
+                                        if (match.lyrics.isSynced) s.lyricsSynced else null,
+                                    ).joinToString(" \u00B7 "),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(s.cancel) } },
+    )
 }
 
 /** The line is shown this much before its time, since reading is quicker than the ear. */

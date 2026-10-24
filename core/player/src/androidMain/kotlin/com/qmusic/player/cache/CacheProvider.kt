@@ -17,6 +17,7 @@ object CacheProvider {
     private const val PLAYER_CACHE_DIR = "player_cache"
     private const val DOWNLOAD_CACHE_DIR = "download_cache"
     private const val DEFAULT_PLAYER_CACHE_SIZE = 512L * 1024 * 1024 // 512 MiB
+    const val SETTINGS_FILE = "qmusic_settings"
 
     @Volatile
     private var playerCache: SimpleCache? = null
@@ -40,7 +41,7 @@ object CacheProvider {
     @Synchronized
     fun getPlayerCache(
         context: Context,
-        maxSizeBytes: Long = DEFAULT_PLAYER_CACHE_SIZE,
+        maxSizeBytes: Long = chosenPlayerCacheSize(context),
     ): SimpleCache {
         return playerCache ?: run {
             val cacheDir = File(context.applicationContext.cacheDir, PLAYER_CACHE_DIR)
@@ -50,6 +51,12 @@ object CacheProvider {
             }
         }
     }
+
+    /** The size picked in Settings ("cache_limit_mb", written by the app); read once, when the cache opens. */
+    private fun chosenPlayerCacheSize(context: Context): Long =
+        context.getSharedPreferences(SETTINGS_FILE, Context.MODE_PRIVATE).getString("cache_limit_mb", null)
+            ?.toLongOrNull()?.takeIf { it > 0 }?.let { it * 1024 * 1024 }
+            ?: DEFAULT_PLAYER_CACHE_SIZE
 
     /**
      * Returns the persistent cache used for downloaded audio files without automatic eviction.

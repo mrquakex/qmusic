@@ -11,5 +11,6 @@ class QMusicApplication : Application() {
         container = AppContainer(this)
         container.crashReports.install(this)
         UpdatePush.subscribe(this)
+        HeadsetResume.start(this, container.settings)
     }
 }

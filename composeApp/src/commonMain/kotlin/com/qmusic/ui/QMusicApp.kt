@@ -105,6 +105,8 @@ fun QMusicApp(
     viewModel: MainViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val amoled by viewModel.amoledTheme.collectAsState()
+    androidx.compose.runtime.SideEffect { com.qmusic.ui.theme.amoledTheme = amoled }
     QMusicTheme {
         var showSplash by remember { mutableStateOf(true) }
         if (showSplash) {
@@ -135,6 +137,9 @@ fun QMusicApp(
         val share = rememberShare()
         val playbackSpeed by viewModel.playbackSpeed.collectAsState()
         val lyricsTranslation by viewModel.lyricsTranslation.collectAsState()
+        val lyricsOffset by viewModel.lyricsOffsetMs.collectAsState()
+        val lyricsMatches by viewModel.lyricsMatches.collectAsState()
+        val moreSettings by viewModel.moreSettings.collectAsState()
         val related by viewModel.related.collectAsState()
         val backupFiles = rememberBackupFiles(
             content = { viewModel.exportBackup() },
@@ -553,6 +558,8 @@ fun QMusicApp(
                             onOpenSpotifyImport = { viewModel.setShowSpotifyImportDialog(true) },
                             language = language,
                             onLanguageChange = { viewModel.setLanguage(it) },
+                            more = moreSettings,
+                            onMore = { viewModel.onMoreSettings(it) },
                         )
                     }
 
@@ -719,6 +726,14 @@ fun QMusicApp(
                             onCycleSpeed = { viewModel.cyclePlaybackSpeed() },
                             lyricsTranslation = lyricsTranslation,
                             onToggleTranslation = { viewModel.toggleLyricsTranslation() },
+                            lyricsTools = com.qmusic.ui.components.LyricsTools(
+                                offsetMs = lyricsOffset,
+                                onShift = { viewModel.shiftLyrics(it) },
+                                matches = lyricsMatches,
+                                onSearch = { viewModel.searchLyrics(it) },
+                                onUse = { viewModel.useLyrics(it) },
+                                onCloseSearch = { viewModel.closeLyricsSearch() },
+                            ),
                             contentAlpha = { ((sheetProgress.value - 0.55f) / 0.45f).coerceIn(0f, 1f) },
                             coverAlpha = { if (coverSettled()) 1f else 0f },
                             backdropAlpha = { (sheetProgress.value * 4f).coerceIn(0f, 1f) },
