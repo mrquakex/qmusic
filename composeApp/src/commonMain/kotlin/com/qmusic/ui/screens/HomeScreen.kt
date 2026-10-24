@@ -98,6 +98,8 @@ fun HomeScreen(
     onCollectionClick: (CollectionItem) -> Unit,
     onChipClick: (HomeChip) -> Unit,
     onOpenExplore: (browseId: String, title: String) -> Unit,
+    /** YouTube Music's Explore tiles (new releases, charts, moods); not with a Spotify account. */
+    showExplore: Boolean = true,
     onSeeAll: (HomeSection) -> Unit = {},
     onSearchClick: () -> Unit,
     onSignIn: () -> Unit,
@@ -189,7 +191,7 @@ fun HomeScreen(
                                 items(downloads) { song ->
                                     ShelfCard(
                                         title = song.title,
-                                        subtitle = song.artists.joinToString { it.name }.ifEmpty { "YouTube Music" },
+                                        subtitle = song.artists.joinToString { it.name }.ifEmpty { LocalStrings.current.unknownArtist },
                                         thumbnail = song.thumbnail ?: song.thumbnails.firstOrNull()?.url,
                                         onClick = { onSongClick(song, downloads) },
                                     )
@@ -313,7 +315,7 @@ fun HomeScreen(
                 HomeShelf(section, onSongClick, onSongMore, onPlayAll, onCollectionClick, onSeeAll)
             }
 
-            if (isOnline && !isLoadingMore && sections.isNotEmpty()) {
+            if (isOnline && !isLoadingMore && sections.isNotEmpty() && showExplore) {
                 item {
                     Column {
                         Text(
@@ -608,7 +610,7 @@ fun HomeShelf(
                 items(section.songs) { song ->
                     ShelfCard(
                         title = song.title,
-                        subtitle = song.artists.joinToString { it.name }.ifEmpty { "YouTube Music" },
+                        subtitle = song.artists.joinToString { it.name }.ifEmpty { LocalStrings.current.unknownArtist },
                         thumbnail = song.thumbnail ?: song.thumbnails.firstOrNull()?.url,
                         onClick = { onSongClick(song, section.songs) },
                     )
@@ -774,7 +776,7 @@ private fun SongColumns(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (song.explicit) ExplicitBadge()
                                 Text(
-                                    text = song.artists.joinToString { it.name }.ifEmpty { "YouTube Music" },
+                                    text = song.artists.joinToString { it.name }.ifEmpty { LocalStrings.current.unknownArtist },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
@@ -824,7 +826,7 @@ private fun VideoCard(song: SongItem, onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            text = song.artists.joinToString { it.name }.ifEmpty { "YouTube Music" },
+            text = song.artists.joinToString { it.name }.ifEmpty { LocalStrings.current.unknownArtist },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -913,7 +915,7 @@ fun SongListItem(
                         }
                         if (song.explicit) ExplicitBadge()
                         Text(
-                            text = song.artists.joinToString { it.name }.ifEmpty { "YouTube Music" },
+                            text = song.artists.joinToString { it.name }.ifEmpty { LocalStrings.current.unknownArtist },
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,

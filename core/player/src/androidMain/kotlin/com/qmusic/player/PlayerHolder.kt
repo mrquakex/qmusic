@@ -3,6 +3,8 @@ package com.qmusic.player
 import android.content.Context
 import com.qmusic.engine.YouTube
 import com.qmusic.engine.models.AudioStream
+import com.qmusic.engine.models.SongItem
+import com.qmusic.engine.models.SpotifyIds
 import com.qmusic.player.source.StreamUrlStore
 import com.qmusic.player.adapter.CrossfadeExoPlayerAdapter
 import com.qmusic.player.offline.OfflineDownloader
@@ -46,7 +48,7 @@ object PlayerHolder {
             instance ?: store(context).let { CrossfadeExoPlayerAdapter(
                 context = context.applicationContext,
                 streamUrlResolver = { id -> resolveAudioUrl(id, audioQuality) },
-                loudnessResolver = { id -> youTube.loudnessDb(id).getOrNull() },
+                loudnessResolver = { id -> youtubeIdFor(id)?.let { youTube.loudnessDb(it).getOrNull() } },
                 onStaleUrl = { id -> urlStore?.remove(id) },
                 offline = downloads(context),
                 videoResolver = ::resolveVideo,
@@ -63,7 +65,21 @@ object PlayerHolder {
 
     /** The music video of [videoId] (720p at most, to keep playback smooth on mobile data), or null. */
     private suspend fun resolveVideo(videoId: String) =
-        youTube.resolveVideoSource(videoId).getOrNull()
+        youtubeIdFor(videoId)?.let { youTube.resolveVideoSource(it).getOrNull() }
+
+    /**
+     * Finds the YouTube recording of a song that came from Spotify (set by the app, which keeps what it found);
+     * null while there is no Spotify account.
+     */
+    @Volatile
+    var spotifyMatcher: (suspend (SongItem) -> String?)? = null
+
+    /** The YouTube video to stream for [id]: itself, or for a Spotify song the recording found for it. */
+    suspend fun youtubeIdFor(id: String): String? {
+        if (!SpotifyIds.isSpotify(id)) return id
+        val song = SongDirectory.get(id) ?: instance?.queue?.value?.firstOrNull { it.id == id } ?: return null
+        return spotifyMatcher?.invoke(song)
+    }
 
     /** The quality streamed right now; set from the settings and the kind of connection. */
     @Volatile
@@ -74,7 +90,7 @@ object PlayerHolder {
      * formats only when there is no AAC one.
      */
     suspend fun resolveCastUrl(videoId: String): Pair<String, String>? {
-        val streams = youTube.resolveStreamUrls(videoId).getOrNull()
+        val streams = youTube.resolveStreamUrls(youtubeIdFor(videoId) ?: return null).getOrNull()
             ?.filter { !it.isDrm && it.mimeType.startsWith("audio") }
             .orEmpty()
         val pick = streams.filter { it.mimeType.startsWith("audio/mp4") }.maxByOrNull(AudioStream::bitrate)
@@ -87,7 +103,7 @@ object PlayerHolder {
     private suspend fun resolveAudioUrl(videoId: String, quality: AudioQuality): String? {
         val key = "${quality.name}:$videoId"
         urlStore?.get(key)?.let { return it }
-        val streams = youTube.resolveStreamUrls(videoId)
+        val streams = youTube.resolveStreamUrls(youtubeIdFor(videoId) ?: return null)
             .getOrNull()
             ?.filter { !it.isDrm && it.mimeType.startsWith("audio") }
             .orEmpty()

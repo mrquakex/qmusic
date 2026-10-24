@@ -974,7 +974,7 @@ private fun QueuePage(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = song.artists.joinToString { it.name }.ifEmpty { "YouTube Music" },
+                        text = song.artists.joinToString { it.name }.ifEmpty { LocalStrings.current.unknownArtist },
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White.copy(alpha = 0.55f),
                         maxLines = 1,

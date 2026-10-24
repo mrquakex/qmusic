@@ -90,6 +90,7 @@ fun SearchScreen(
     onLoadMoreResults: () -> Unit = {},
     suggestedSearches: List<String>,
     onOpenExplore: (browseId: String, title: String) -> Unit,
+    showExplore: Boolean = true,
     onVoiceSearch: (() -> Unit)?,
     onRecognizeSong: (() -> Unit)?,
     onFilterChange: (SearchFilter?) -> Unit,
@@ -221,6 +222,7 @@ fun SearchScreen(
                 recentSongs = recentSongs,
                 suggestedSearches = suggestedSearches,
                 onOpenExplore = onOpenExplore,
+                showExplore = showExplore,
                 onSongClick = onSongClick,
                 onFill = onQueryChange,
                 onHistoryClick = onHistoryClick,
@@ -495,6 +497,7 @@ private fun SearchHistory(
     recentSongs: List<SongItem>,
     suggestedSearches: List<String>,
     onOpenExplore: (browseId: String, title: String) -> Unit,
+    showExplore: Boolean = true,
     onSongClick: (SongItem, List<SongItem>) -> Unit,
     onFill: (String) -> Unit,
     onHistoryClick: (String) -> Unit,
@@ -574,7 +577,7 @@ private fun SearchHistory(
         }
         item {
             Spacer(Modifier.height(20.dp))
-            ExploreTiles(onOpenExplore)
+            if (showExplore) ExploreTiles(onOpenExplore)
             Spacer(Modifier.height(12.dp))
         }
         if (suggestedSearches.isNotEmpty()) {

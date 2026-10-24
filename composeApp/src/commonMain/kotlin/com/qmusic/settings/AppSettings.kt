@@ -97,10 +97,51 @@ object SettingKeys {
 
     const val DEFAULT_CACHE_MB = "512"
 
+    /** Which account the app uses: see [AccountMode]. */
+    const val ACCOUNT_MODE = "account_mode"
+
+    /** Spotify songs and the YouTube recordings found for them ("spotifyId=videoId;..."). */
+    const val SPOTIFY_MATCHES = "spotify_matches"
+
     /** Smart downloads: on/off, the songs it fetched (comma-separated ids) and when it last refreshed (epoch ms). */
     const val SMART_DOWNLOADS = "smart_downloads"
     const val SMART_IDS = "smart_download_ids"
     const val SMART_REFRESHED_AT = "smart_downloads_at"
+}
+
+/** The one account the app works with, chosen on the welcome screen; the other service never shows. */
+object AccountMode {
+    /** Not chosen yet: the welcome screen asks. */
+    const val UNSET = ""
+    const val YOUTUBE = "youtube"
+    const val SPOTIFY = "spotify"
+    const val NONE = "none"
+}
+
+/**
+ * The Spotify account, signed in on Spotify's own web page; the token of its web player is what the app calls
+ * Spotify with. [available] is false where there is no web view to sign in with.
+ */
+interface SpotifySession {
+    val available: Boolean
+    val signedIn: StateFlow<Boolean>
+
+    /** The access token; [refresh] gets a new one (after Spotify refused the last). Null when signed out. */
+    suspend fun token(refresh: Boolean): String?
+
+    /** The sign-in page finished: the session cookies are there now. */
+    fun onSignedIn()
+
+    fun signOut()
+}
+
+/** Where there is no Spotify sign-in (tests, desktop). */
+object NoSpotifySession : SpotifySession {
+    override val available: Boolean = false
+    override val signedIn: StateFlow<Boolean> = MutableStateFlow(false).asStateFlow()
+    override suspend fun token(refresh: Boolean): String? = null
+    override fun onSignedIn() = Unit
+    override fun signOut() = Unit
 }
 
 /** The Settings rows that have no property of their own in [AppSettings]. */

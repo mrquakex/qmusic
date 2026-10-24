@@ -57,6 +57,33 @@ interface AppStrings {
     val moreYouMayLike: String
     val tabAlbums: String
     val seeAll: String
+    val welcomeTitle: String
+    val welcomeSubtitle: String
+    val continueWithYouTube: String
+    val continueWithSpotify: String
+    val welcomeNote: String
+    val continueWithoutAccount: String
+    val signInSpotify: String
+    val spotifySignInHint: String
+    val spotifyNotSupported: String
+    val connectAccount: String
+    val connectAccountSubtitle: String
+    val changeAccount: String
+    val changeAccountSubtitle: String
+    val changeAccountConfirm: String
+    val spotifySignedInSubtitle: String
+    val spotifySignedOutSubtitle: String
+    val spotifySessionExpired: String
+    val spotifyRecentlyPlayed: String
+    val spotifyTopSongs: String
+    val spotifyTopArtists: String
+    val spotifyYourPlaylists: String
+    val spotifyNewReleases: String
+    fun spotifyMoreLike(title: String): String
+    val spotifyAlbums: String
+    val spotifySingles: String
+    val spotifyRelated: String
+    fun spotifyFollowers(count: String): String
     val searchLibrary: String
     val sortRecent: String
     val sortTitle: String
@@ -383,6 +410,33 @@ object TurkishStrings : AppStrings {
     override val moreYouMayLike: String = "Beğenebileceğiniz diğer içerikler"
     override val tabAlbums: String = "Albümler"
     override val seeAll: String = "Tümü"
+    override val welcomeTitle: String = "Müziğin seninle"
+    override val welcomeSubtitle: String = "Kütüphaneni, beğendiklerini ve listelerini getirmek için hesabını seç."
+    override val continueWithYouTube: String = "YouTube Music ile devam et"
+    override val continueWithSpotify: String = "Spotify ile devam et"
+    override val welcomeNote: String = "Yalnızca seçtiğin hesap kullanılır. Ayarlar'dan istediğin zaman değiştirebilirsin."
+    override val continueWithoutAccount: String = "Hesapsız devam et"
+    override val signInSpotify: String = "Spotify'a giriş yap"
+    override val spotifySignInHint: String = "En sorunsuzu e-posta ya da kullanıcı adınla girmen."
+    override val spotifyNotSupported: String = "Spotify girişi bu cihazda kullanılamıyor."
+    override val connectAccount: String = "Hesap bağla"
+    override val connectAccountSubtitle: String = "YouTube Music ya da Spotify"
+    override val changeAccount: String = "Hesabı değiştir"
+    override val changeAccountSubtitle: String = "Diğer hizmete geç ya da başka bir hesapla gir"
+    override val changeAccountConfirm: String = "Bu hesaptan çıkış yapılacak. İndirilenler ve cihazdaki listelerin kalır."
+    override val spotifySignedInSubtitle: String = "Bağlı. Beğenilerin, listelerin ve kitaplığın eşitleniyor."
+    override val spotifySignedOutSubtitle: String = "Oturum kapalı. Kitaplığın için tekrar giriş yap."
+    override val spotifySessionExpired: String = "Spotify oturumun kapandı. Ayarlar'dan tekrar giriş yap."
+    override val spotifyRecentlyPlayed: String = "Son dinlediklerin"
+    override val spotifyTopSongs: String = "En çok dinlediklerin"
+    override val spotifyTopArtists: String = "Sevdiğin sanatçılar"
+    override val spotifyYourPlaylists: String = "Çalma listelerin"
+    override val spotifyNewReleases: String = "Yeni çıkanlar"
+    override fun spotifyMoreLike(title: String): String = "$title gibi"
+    override val spotifyAlbums: String = "Albümler"
+    override val spotifySingles: String = "Single'lar ve EP'ler"
+    override val spotifyRelated: String = "Hayranları bunları da dinliyor"
+    override fun spotifyFollowers(count: String): String = "$count takipçi"
     override val searchLibrary: String = "Kütüphanede ara"
     override val sortRecent: String = "Son eklenen"
     override val sortTitle: String = "Ad (A-Z)"
@@ -731,6 +785,33 @@ object EnglishStrings : AppStrings {
     override val moreYouMayLike: String = "More you may like"
     override val tabAlbums: String = "Albums"
     override val seeAll: String = "See all"
+    override val welcomeTitle: String = "Your music, with you"
+    override val welcomeSubtitle: String = "Choose your account to bring your library, likes and playlists."
+    override val continueWithYouTube: String = "Continue with YouTube Music"
+    override val continueWithSpotify: String = "Continue with Spotify"
+    override val welcomeNote: String = "Only the account you choose is used. You can change it any time in Settings."
+    override val continueWithoutAccount: String = "Continue without an account"
+    override val signInSpotify: String = "Sign in to Spotify"
+    override val spotifySignInHint: String = "Signing in with your email or username works best."
+    override val spotifyNotSupported: String = "Spotify sign-in isn't available on this device."
+    override val connectAccount: String = "Connect an account"
+    override val connectAccountSubtitle: String = "YouTube Music or Spotify"
+    override val changeAccount: String = "Change account"
+    override val changeAccountSubtitle: String = "Switch service or sign in with another account"
+    override val changeAccountConfirm: String = "You'll be signed out of this account. Your downloads and device playlists stay."
+    override val spotifySignedInSubtitle: String = "Connected. Your likes, playlists and library are synced."
+    override val spotifySignedOutSubtitle: String = "Signed out. Sign in again for your library."
+    override val spotifySessionExpired: String = "Your Spotify session ended. Sign in again in Settings."
+    override val spotifyRecentlyPlayed: String = "Recently played"
+    override val spotifyTopSongs: String = "Your top songs"
+    override val spotifyTopArtists: String = "Artists you love"
+    override val spotifyYourPlaylists: String = "Your playlists"
+    override val spotifyNewReleases: String = "New releases"
+    override fun spotifyMoreLike(title: String): String = "More like $title"
+    override val spotifyAlbums: String = "Albums"
+    override val spotifySingles: String = "Singles and EPs"
+    override val spotifyRelated: String = "Fans also like"
+    override fun spotifyFollowers(count: String): String = "$count followers"
     override val searchLibrary: String = "Search your library"
     override val sortRecent: String = "Recently added"
     override val sortTitle: String = "Title (A-Z)"

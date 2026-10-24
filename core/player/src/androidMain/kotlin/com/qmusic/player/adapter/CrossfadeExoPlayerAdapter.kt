@@ -164,6 +164,8 @@ class CrossfadeExoPlayerAdapter(
     private var tickerJob: Job? = null
 
     init {
+        // Every song handed to the player is known by id, so a Spotify song can be matched to a stream later.
+        scope.launch { _queue.collect { com.qmusic.player.SongDirectory.remember(it) } }
         forwardingPlayer.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
                 _isPlaying.value = playing
@@ -734,6 +736,7 @@ class CrossfadeExoPlayerAdapter(
 
     override fun warmUp(songs: List<SongItem>) {
         if (songs.isEmpty()) return
+        com.qmusic.player.SongDirectory.remember(songs)
         scope.launch { songs.forEach { warm(it) } }
     }
 

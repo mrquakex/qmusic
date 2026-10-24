@@ -50,6 +50,7 @@ import kotlinx.coroutines.launch
 import com.qmusic.engine.models.SongItem
 import com.qmusic.ui.strings.EnglishStrings
 import com.qmusic.ui.strings.LocalStrings
+import com.qmusic.ui.strings.forService
 import com.qmusic.ui.strings.TurkishStrings
 import com.qmusic.ui.auth.YouTubeLoginView
 import com.qmusic.ui.components.AddToPlaylistDialog
@@ -117,9 +118,39 @@ fun QMusicApp(
         }
 
         val language by viewModel.language.collectAsState()
-        val strings = if (language == "en") EnglishStrings else TurkishStrings
+        val accountMode by viewModel.accountMode.collectAsState()
+        val spotifySignedIn by viewModel.spotifySignedIn.collectAsState()
+        val showSpotifyLoginDialog by viewModel.showSpotifyLoginDialog.collectAsState()
+        val strings = (if (language == "en") EnglishStrings else TurkishStrings)
+            .forService(accountMode == com.qmusic.settings.AccountMode.SPOTIFY)
 
         CompositionLocalProvider(LocalStrings provides strings) {
+            // First launch: which account brings the music (the sign-in pages open over it).
+            if (accountMode == com.qmusic.settings.AccountMode.UNSET) {
+                val ytLogin by viewModel.showYouTubeLoginDialog.collectAsState()
+                PlatformBackHandler(enabled = ytLogin) { viewModel.setShowYouTubeLoginDialog(false) }
+                PlatformBackHandler(enabled = showSpotifyLoginDialog) { viewModel.setShowSpotifyLoginDialog(false) }
+                Box(modifier = modifier.fillMaxSize()) {
+                    com.qmusic.ui.screens.WelcomeScreen(
+                        onYouTube = { viewModel.chooseAccount(com.qmusic.settings.AccountMode.YOUTUBE) },
+                        onSpotify = { viewModel.chooseAccount(com.qmusic.settings.AccountMode.SPOTIFY) },
+                        onWithoutAccount = { viewModel.chooseAccount(com.qmusic.settings.AccountMode.NONE) },
+                    )
+                    if (ytLogin) {
+                        YouTubeLoginView(
+                            onCookiesCaptured = { cookies -> viewModel.onYouTubeCookiesCaptured(cookies) },
+                            onDismiss = { viewModel.setShowYouTubeLoginDialog(false) },
+                        )
+                    }
+                    if (showSpotifyLoginDialog) {
+                        com.qmusic.ui.auth.SpotifyLoginView(
+                            onSignedIn = { viewModel.onSpotifySignedIn() },
+                            onDismiss = { viewModel.setShowSpotifyLoginDialog(false) },
+                        )
+                    }
+                }
+                return@CompositionLocalProvider
+            }
             val navTabs = remember(strings) {
                 listOf(
                     NavigationTabItem(ScreenTab.HOME, strings.tabHome, QMusicIcons.Home),
@@ -444,7 +475,7 @@ fun QMusicApp(
                             isLoading = isLoadingHome,
                             isLoadingMore = isLoadingMoreHome,
                             error = homeError,
-                            isLoggedIn = isLoggedInYouTube,
+                            isLoggedIn = isLoggedInYouTube || (accountMode == com.qmusic.settings.AccountMode.SPOTIFY && spotifySignedIn),
                             scrollToTop = viewModel.homeScrollToTop,
                             onSongClick = { song, context -> viewModel.play(song, context) },
                             onSongMore = { viewModel.showSongMenu(it) },
@@ -452,9 +483,16 @@ fun QMusicApp(
                             onChipClick = { viewModel.selectHomeChip(it) },
                             onSeeAll = { section -> section.moreBrowseId?.let { viewModel.openExplore(it, section.moreParams, section.title) } },
                             onOpenExplore = { id, title -> viewModel.openExplore(id, null, title) },
+                            showExplore = accountMode != com.qmusic.settings.AccountMode.SPOTIFY,
                             onCollectionClick = { viewModel.openCollection(it) },
                             onSearchClick = { viewModel.selectTab(ScreenTab.SEARCH) },
-                            onSignIn = { viewModel.setShowYouTubeLoginDialog(true) },
+                            onSignIn = {
+                                when (accountMode) {
+                                    com.qmusic.settings.AccountMode.SPOTIFY -> viewModel.setShowSpotifyLoginDialog(true)
+                                    com.qmusic.settings.AccountMode.YOUTUBE -> viewModel.setShowYouTubeLoginDialog(true)
+                                    else -> viewModel.changeAccount()
+                                }
+                            },
                             onRefresh = { viewModel.loadHomeContent() },
                         )
 
@@ -488,6 +526,7 @@ fun QMusicApp(
                             recentSongs = history,
                             suggestedSearches = suggestedSearches,
                             onOpenExplore = { id, title -> viewModel.openExplore(id, null, title) },
+                            showExplore = accountMode != com.qmusic.settings.AccountMode.SPOTIFY,
                             onVoiceSearch = voiceSearch,
                             onRecognizeSong = songRecognition,
                             onFilterChange = { viewModel.setSearchFilter(it) },
@@ -579,6 +618,11 @@ fun QMusicApp(
                             onLanguageChange = { viewModel.setLanguage(it) },
                             more = moreSettings,
                             onMore = { viewModel.onMoreSettings(it) },
+                            accountMode = accountMode,
+                            spotifySignedIn = spotifySignedIn,
+                            onSpotifySignIn = { viewModel.setShowSpotifyLoginDialog(true) },
+                            onSpotifySignOut = { viewModel.signOutSpotify() },
+                            onChangeAccount = { viewModel.changeAccount() },
                         )
                     }
 
@@ -898,6 +942,13 @@ fun QMusicApp(
                     statusText = spotifyImportStatus,
                     onStartImport = { url -> viewModel.importSpotifyPlaylist(url) },
                     onDismissRequest = { viewModel.setShowSpotifyImportDialog(false) },
+                )
+            }
+
+            if (showSpotifyLoginDialog) {
+                com.qmusic.ui.auth.SpotifyLoginView(
+                    onSignedIn = { viewModel.onSpotifySignedIn() },
+                    onDismiss = { viewModel.setShowSpotifyLoginDialog(false) },
                 )
             }
 

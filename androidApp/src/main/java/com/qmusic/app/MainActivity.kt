@@ -55,6 +55,8 @@ class MainActivity : AppCompatActivity() {
                         crashReports = container.crashReports,
                         isUnmetered = container::isUnmetered,
                         scrobbling = container.lastFm,
+                        spotifySession = container.spotifySession,
+                        spotifyLinker = container.spotifyLinker,
                     ) as T
             },
         )[MainViewModel::class.java]

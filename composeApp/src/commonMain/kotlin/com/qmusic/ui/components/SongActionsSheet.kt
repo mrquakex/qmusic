@@ -94,7 +94,7 @@ fun SongActionsSheet(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = song.artists.joinToString { it.name }.ifEmpty { "YouTube Music" },
+                        text = song.artists.joinToString { it.name }.ifEmpty { LocalStrings.current.unknownArtist },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

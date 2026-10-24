@@ -88,6 +88,7 @@ class OfflineDownloader(
     override fun download(song: SongItem) {
         val id = song.id
         if (isDownloaded(id) || jobs.containsKey(id)) return
+        com.qmusic.player.SongDirectory.remember(listOf(song))
         // Visible as "waiting" straight away, before it is its turn.
         setProgress(id, 0f)
         ensureServiceRunning()

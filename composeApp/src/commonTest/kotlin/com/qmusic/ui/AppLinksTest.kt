@@ -32,6 +32,14 @@ class AppLinksTest {
     }
 
     @Test
+    fun spotifyLinksAreRead() {
+        assertEquals(AppLink.Spotify("track", "4uLU6hMCjMI75M1A2tKUQC"), AppLinks.parse("https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC?si=x"))
+        assertEquals(AppLink.Spotify("album", "abc"), AppLinks.parse("https://open.spotify.com/intl-tr/album/abc"))
+        assertEquals(AppLink.Spotify("playlist", "p1"), AppLinks.parse("Dinle https://open.spotify.com/playlist/p1"))
+        assertNull(AppLinks.parse("https://open.spotify.com/user/someone"))
+    }
+
+    @Test
     fun otherLinksAndPlainTextAreIgnored() {
         assertNull(AppLinks.parse("https://example.com/watch?v=kOn-HdEg6AQ"))
         assertNull(AppLinks.parse("no link here"))

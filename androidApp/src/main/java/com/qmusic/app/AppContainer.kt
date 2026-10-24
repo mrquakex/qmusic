@@ -44,6 +44,13 @@ class AppContainer(private val application: Application) {
     val updateInstaller: UpdateInstaller by lazy { ApkUpdateInstaller(application) }
     val downloads: DownloadController get() = PlayerHolder.downloads(application)
     val lastFm: LastFm by lazy { LastFm(application) }
+    val spotifySession: SpotifyWebSession by lazy { SpotifyWebSession(application) }
+    val spotifyLinker: com.qmusic.ui.viewmodel.SpotifyLinker by lazy {
+        com.qmusic.ui.viewmodel.SpotifyLinker(youTube, spotifyImporter, settings).also { linker ->
+            // The player asks for the YouTube recording of a Spotify song right before it plays it.
+            PlayerHolder.spotifyMatcher = { song -> linker.youtubeId(song) }
+        }
+    }
     val playerController: PlayerController by lazy {
         ServicePlayerController(
             application,

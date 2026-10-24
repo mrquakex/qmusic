@@ -103,6 +103,11 @@ fun SettingsScreen(
     onLanguageChange: (String) -> Unit = {},
     more: MoreSettings = MoreSettings(),
     onMore: (MoreSettingsChange) -> Unit = {},
+    accountMode: String = com.qmusic.settings.AccountMode.YOUTUBE,
+    spotifySignedIn: Boolean = false,
+    onSpotifySignIn: () -> Unit = {},
+    onSpotifySignOut: () -> Unit = {},
+    onChangeAccount: () -> Unit = {},
 ) {
     val s = LocalStrings.current
     val uriHandler = LocalUriHandler.current
@@ -121,8 +126,36 @@ fun SettingsScreen(
             color = MaterialTheme.colorScheme.onSurface,
         )
 
+        var confirmChangeAccount by remember { mutableStateOf(false) }
+        if (confirmChangeAccount) {
+            AlertDialog(
+                onDismissRequest = { confirmChangeAccount = false },
+                title = { Text(s.changeAccount) },
+                text = { Text(s.changeAccountConfirm) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirmChangeAccount = false
+                        onChangeAccount()
+                    }) { Text(s.changeAccount) }
+                },
+                dismissButton = { TextButton(onClick = { confirmChangeAccount = false }) { Text(s.cancel) } },
+            )
+        }
         Section(s.sectionAccount) {
-            if (isLoggedInYouTube) {
+            when (accountMode) {
+            com.qmusic.settings.AccountMode.SPOTIFY -> ActionRow(
+                icon = QMusicIcons.Account,
+                title = "Spotify",
+                subtitle = if (spotifySignedIn) s.spotifySignedInSubtitle else s.spotifySignedOutSubtitle,
+                action = {
+                    if (spotifySignedIn) {
+                        OutlinedButton(onClick = onSpotifySignOut) { Text(s.signOut) }
+                    } else {
+                        Button(onClick = onSpotifySignIn) { Text(s.signIn) }
+                    }
+                },
+            )
+            com.qmusic.settings.AccountMode.YOUTUBE -> if (isLoggedInYouTube) {
                 ActionRow(
                     icon = QMusicIcons.Account,
                     title = "YouTube Music",
@@ -135,6 +168,22 @@ fun SettingsScreen(
                     title = "YouTube Music",
                     subtitle = s.accountSignedOutSubtitle,
                     action = { Button(onClick = onLoginYouTubeClick) { Text(s.signIn) } },
+                )
+            }
+            else -> ActionRow(
+                icon = QMusicIcons.Account,
+                title = s.connectAccount,
+                subtitle = s.connectAccountSubtitle,
+                onClick = onChangeAccount,
+            )
+            }
+            if (accountMode == com.qmusic.settings.AccountMode.SPOTIFY || accountMode == com.qmusic.settings.AccountMode.YOUTUBE) {
+                RowDivider()
+                ActionRow(
+                    icon = null,
+                    title = s.changeAccount,
+                    subtitle = s.changeAccountSubtitle,
+                    onClick = { confirmChangeAccount = true },
                 )
             }
         }
@@ -269,13 +318,15 @@ fun SettingsScreen(
         }
 
         Section(s.sectionLibrary) {
-            ActionRow(
-                icon = QMusicIcons.PlaylistAdd,
-                title = s.importSpotifyTitle,
-                subtitle = s.importSpotifySubtitle,
-                onClick = onOpenSpotifyImport,
-            )
-            RowDivider()
+            if (accountMode == com.qmusic.settings.AccountMode.NONE) {
+                ActionRow(
+                    icon = QMusicIcons.PlaylistAdd,
+                    title = s.importSpotifyTitle,
+                    subtitle = s.importSpotifySubtitle,
+                    onClick = onOpenSpotifyImport,
+                )
+                RowDivider()
+            }
             ActionRow(
                 icon = QMusicIcons.Stats,
                 title = "Last.fm",

@@ -27,7 +27,14 @@ import com.qmusic.player.PlayerController
 import com.qmusic.player.RepeatMode
 import com.qmusic.network.AlwaysOnline
 import com.qmusic.network.ConnectivityMonitor
+import com.qmusic.settings.AccountMode
 import com.qmusic.settings.AppSettings
+import com.qmusic.settings.NoSpotifySession
+import com.qmusic.settings.SpotifySession
+import com.qmusic.engine.models.SpotifyIds
+import com.qmusic.spotify.SpotifySignedOutException
+import com.qmusic.spotify.SpotifyWebApi
+import com.qmusic.ui.strings.forService
 import com.qmusic.settings.MoreSettings
 import com.qmusic.settings.MoreSettingsChange
 import com.qmusic.settings.NoScrobbling
@@ -154,10 +161,28 @@ class MainViewModel(
     private val stringsProvider: (() -> AppStrings)? = null,
     /** Last.fm, where what is listened to can be sent (nothing by default). */
     val scrobbling: ScrobbleAccount = NoScrobbling,
+    /** The Spotify account, when it is the one chosen. */
+    val spotifySession: SpotifySession = NoSpotifySession,
+    /** Finds the YouTube recording of a Spotify song (null where Spotify is not offered). */
+    private val spotifyLinker: SpotifyLinker? = null,
 ) : ViewModel() {
 
     private val scope: CoroutineScope = externalScope ?: viewModelScope
-    private val strings: AppStrings get() = stringsProvider?.invoke() ?: if (settings.language.value == "en") EnglishStrings else TurkishStrings
+    private val strings: AppStrings
+        get() = stringsProvider?.invoke()
+            ?: (if (settings.language.value == "en") EnglishStrings else TurkishStrings).forService(isSpotify)
+
+    // --- The account: YouTube Music or Spotify, chosen on the welcome screen; only that one is ever used ---
+    val accountMode: StateFlow<String> = settings.string(SettingKeys.ACCOUNT_MODE, AccountMode.UNSET)
+    val isSpotify: Boolean get() = accountMode.value == AccountMode.SPOTIFY
+    val spotifySignedIn: StateFlow<Boolean> = spotifySession.signedIn
+    private val spotify: SpotifyWebApi by lazy { SpotifyWebApi(token = { refresh -> spotifySession.token(refresh) }) }
+
+    private val _showSpotifyLoginDialog = MutableStateFlow(false)
+    val showSpotifyLoginDialog: StateFlow<Boolean> = _showSpotifyLoginDialog.asStateFlow()
+
+    /** Spotify playlists the account owns (only those can be changed or have songs added). */
+    private var spotifyOwned: Set<String> = emptySet()
 
     val language: StateFlow<String> = settings.language
 
@@ -515,6 +540,8 @@ class MainViewModel(
     val updateMessage: StateFlow<String?> = _updateMessage.asStateFlow()
 
     init {
+        // Someone signed in to YouTube Music before the welcome screen existed: that is their choice.
+        if (accountMode.value == AccountMode.UNSET && youTubeAuth.isLoggedIn) settings.setString(SettingKeys.ACCOUNT_MODE, AccountMode.YOUTUBE)
         youTube.setAuth(youTubeAuth)
         youTube.setLanguage(settings.language.value)
         if (autoLoadHome) {
@@ -527,7 +554,7 @@ class MainViewModel(
                 }
             }
             loadHomeContent()
-            if (youTubeAuth.isLoggedIn) {
+            if (youTubeAuth.isLoggedIn || isSpotify) {
                 loadLikedSongs()
                 loadYouTubeLibrary()
             }
@@ -549,7 +576,8 @@ class MainViewModel(
                     if (track == null || index < 0 || upcoming > RADIO_REFILL_THRESHOLD) return@collect
                     if (radioFilledFor == track.id || repeatMode.value == RepeatMode.ONE) return@collect
                     radioFilledFor = track.id
-                    youTube.radio(track.id).onSuccess { more ->
+                    val seed = ytId(track) ?: return@collect
+                    youTube.radio(seed).onSuccess { more ->
                         if (playerController.currentTrack.value?.id == track.id) playerController.appendToQueue(more)
                     }
                 }
@@ -825,7 +853,14 @@ class MainViewModel(
             val savedHere = localFavorites.value.any { it.id == song.id }
             if (savedHere != like) repository.toggleFavorite(song)
 
-            if (youTubeAuth.isLoggedIn) {
+            if (isSpotify) {
+                _likedSongs.value = if (like) listOf(song) + _likedSongs.value.filter { it.id != song.id }
+                else _likedSongs.value.filter { it.id != song.id }
+                runCatching {
+                    val trackId = spotifyTrackId(song) ?: error("No Spotify track")
+                    spotify.setTrackSaved(trackId, like)
+                }.onFailure { onSpotifyFailure(it) }
+            } else if (youTubeAuth.isLoggedIn) {
                 _likedSongs.value = if (like) listOf(song) + _likedSongs.value.filter { it.id != song.id }
                 else _likedSongs.value.filter { it.id != song.id }
                 youTube.setLiked(song.id, like).onFailure {
@@ -852,6 +887,23 @@ class MainViewModel(
 
     /** Fetches the account's playlists, albums and artists; a no-op while signed out. */
     fun loadYouTubeLibrary() {
+        if (isSpotify) {
+            if (!spotifySignedIn.value) {
+                _ytPlaylists.value = emptyList()
+                _ytAlbums.value = emptyList()
+                _ytArtists.value = emptyList()
+                return
+            }
+            scope.launch {
+                runCatching { spotify.playlists() }.onSuccess { list ->
+                    spotifyOwned = list.filter { it.owned }.mapTo(HashSet()) { it.item.browseId }
+                    _ytPlaylists.value = list.map { it.item }
+                }.onFailure { onSpotifyFailure(it) }
+            }
+            scope.launch { runCatching { spotify.savedAlbums() }.onSuccess { _ytAlbums.value = it } }
+            scope.launch { runCatching { spotify.followedArtists() }.onSuccess { _ytArtists.value = it } }
+            return
+        }
         if (!youTubeAuth.isLoggedIn) {
             _ytPlaylists.value = emptyList()
             _ytAlbums.value = emptyList()
@@ -865,6 +917,16 @@ class MainViewModel(
 
     /** Adds [song] to one of the account's YouTube Music playlists, and says how it went. */
     fun addSongToYouTubePlaylist(playlist: CollectionItem, song: SongItem) {
+        SpotifyIds.playlistId(playlist.browseId)?.let { playlistId ->
+            scope.launch {
+                runCatching {
+                    spotify.addToPlaylist(playlistId, listOf(spotifyTrackId(song) ?: error("No Spotify track")))
+                    collectionCache.remove(playlist.browseId)
+                }.onSuccess { showMessage(strings.addedToPlaylist(playlist.title)) }
+                    .onFailure { showMessage(strings.couldNotAddToPlaylist) }
+            }
+            return
+        }
         scope.launch {
             youTube.addToPlaylist(playlist.browseId, song.id)
                 .onSuccess { showMessage(strings.addedToPlaylist(playlist.title)) }
@@ -888,6 +950,18 @@ class MainViewModel(
 
     /** Fetches the account's "Liked music"; a no-op while signed out. */
     fun loadLikedSongs() {
+        if (isSpotify) {
+            if (!spotifySignedIn.value) {
+                _likedSongs.value = emptyList()
+                return
+            }
+            _isSyncingLikes.value = true
+            scope.launch {
+                runCatching { spotify.savedTracks() }.onSuccess { _likedSongs.value = it }.onFailure { onSpotifyFailure(it) }
+                _isSyncingLikes.value = false
+            }
+            return
+        }
         if (!youTubeAuth.isLoggedIn) {
             _likedSongs.value = emptyList()
             return
@@ -938,7 +1012,14 @@ class MainViewModel(
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return
         scope.launch {
-            if (onYouTube && youTubeAuth.isLoggedIn) {
+            if (onYouTube && isSpotify) {
+                runCatching { spotify.createPlaylist(trimmed, listOfNotNull(spotifyTrackId(song))) }
+                    .onSuccess {
+                        showMessage(strings.addedToPlaylist(trimmed))
+                        loadYouTubeLibrary()
+                    }
+                    .onFailure { showMessage(strings.couldNotAddToPlaylist) }
+            } else if (onYouTube && youTubeAuth.isLoggedIn) {
                 youTube.createPlaylist(trimmed, listOf(song.id))
                     .onSuccess {
                         showMessage(strings.addedToPlaylist(trimmed))
@@ -965,6 +1046,17 @@ class MainViewModel(
         val page = collectionCache[item.browseId] ?: return
         val setVideoId = page.setVideoIds[song.id] ?: return
         updateCollection(item.browseId) { it.copy(songs = it.songs.filterNot { s -> s.id == song.id }) }
+        SpotifyIds.playlistId(item.browseId)?.let { playlistId ->
+            scope.launch {
+                runCatching { spotify.removeFromPlaylist(playlistId, SpotifyIds.trackId(song.id) ?: error("No track")) }
+                    .onSuccess { showMessage(strings.removedFromPlaylist) }
+                    .onFailure {
+                        updateCollection(item.browseId) { page }
+                        showMessage(strings.couldNotChangePlaylist)
+                    }
+            }
+            return
+        }
         scope.launch {
             youTube.removeFromPlaylist(item.browseId, song.id, setVideoId)
                 .onSuccess { showMessage(strings.removedFromPlaylist) }
@@ -979,6 +1071,16 @@ class MainViewModel(
         val page = collectionCache[item.browseId] ?: return
         if (from !in page.songs.indices || to !in page.songs.indices || from == to) return
         val moved = page.songs.toMutableList().apply { add(to, removeAt(from)) }
+        SpotifyIds.playlistId(item.browseId)?.let { playlistId ->
+            updateCollection(item.browseId) { it.copy(songs = moved) }
+            scope.launch {
+                runCatching { spotify.moveInPlaylist(playlistId, from, to) }.onFailure {
+                    updateCollection(item.browseId) { page }
+                    showMessage(strings.couldNotChangePlaylist)
+                }
+            }
+            return
+        }
         val setVideoId = page.setVideoIds[moved[to].id] ?: return
         val successor = moved.getOrNull(to + 1)?.let { page.setVideoIds[it.id] }
         updateCollection(item.browseId) { it.copy(songs = moved) }
@@ -992,7 +1094,8 @@ class MainViewModel(
 
     fun deleteYouTubePlaylist(item: CollectionItem) {
         scope.launch {
-            youTube.deletePlaylist(item.browseId)
+            val spotifyPlaylist = SpotifyIds.playlistId(item.browseId)
+            (if (spotifyPlaylist != null) runCatching { spotify.deletePlaylist(spotifyPlaylist) } else youTube.deletePlaylist(item.browseId))
                 .onSuccess {
                     collectionCache.remove(item.browseId)
                     popRoute()
@@ -1105,7 +1208,7 @@ class MainViewModel(
         _related.value = null
         relatedJob?.cancel()
         relatedJob = scope.launch {
-            val sections = youTube.related(song.id).getOrDefault(emptyList())
+            val sections = ytId(song)?.let { youTube.related(it).getOrDefault(emptyList()) }.orEmpty()
             relatedCache[song.id] = sections
             if (currentTrack.value?.id == song.id) _related.value = sections
         }
@@ -1205,7 +1308,7 @@ class MainViewModel(
         val top = repository.playCounts(SMART_DAYS).sortedByDescending { it.second }.map { it.first }.take(SMART_TOP)
         val liked = favorites.value.take(SMART_LIKED)
         val seeds = (top.take(SMART_SEEDS) + liked.take(2)).distinctBy { it.id }.ifEmpty { history.value.take(SMART_SEEDS) }
-        val similar = seeds.flatMap { youTube.radio(it.id).getOrDefault(emptyList()).take(SMART_PER_SEED) }
+        val similar = seeds.flatMap { seed -> ytId(seed)?.let { youTube.radio(it).getOrDefault(emptyList()).take(SMART_PER_SEED) }.orEmpty() }
         return (top + liked + similar).distinctBy { it.id }.take(SMART_COUNT)
     }
 
@@ -1267,6 +1370,28 @@ class MainViewModel(
             is AppLink.Playlist -> openCollection(CollectionItem(browseId = "VL" + link.listId, title = "", kind = CollectionKind.PLAYLIST))
             is AppLink.Album -> openCollection(CollectionItem(browseId = link.browseId, title = "", kind = CollectionKind.ALBUM))
             is AppLink.Artist -> openArtist(link.channelId, "")
+            is AppLink.Spotify -> openSpotifyLink(link)
+        }
+    }
+
+    private fun openSpotifyLink(link: AppLink.Spotify) {
+        if (!isSpotify || !spotifySignedIn.value) {
+            showMessage(strings.linkNotSupported)
+            return
+        }
+        when (link.kind) {
+            "album" -> openCollection(CollectionItem(SpotifyIds.album(link.id), "", kind = CollectionKind.ALBUM))
+            "playlist" -> openCollection(CollectionItem(SpotifyIds.playlist(link.id), "", kind = CollectionKind.PLAYLIST))
+            "artist" -> openArtist(SpotifyIds.artist(link.id), "")
+            else -> scope.launch {
+                // A track: Spotify's search by its id is not open to the web token, so its album page shows it.
+                runCatching { spotify.search(link.id, SearchFilter.SONGS) }.getOrNull()?.songs
+                    ?.firstOrNull { it.id == SpotifyIds.track(link.id) }
+                    ?.let {
+                        play(it)
+                        setPlayerExpanded(true)
+                    } ?: showMessage(strings.linkNotSupported)
+            }
         }
     }
 
@@ -1334,7 +1459,7 @@ class MainViewModel(
         lyricsJob = scope.launch {
             // Lines that move with the song are preferred; YouTube Music's plain text is the fallback.
             val synced = async { youTube.syncedLyrics(song.title, song.artists.joinToString(", ") { it.name }, song.duration).getOrNull() }
-            val plain = youTube.lyrics(song.id).getOrNull()
+            val plain = ytId(song)?.let { youTube.lyrics(it).getOrNull() }
             val lyrics = synced.await() ?: plain
             lyricsCache[song.id] = lyrics
             if (currentTrack.value?.id == song.id) {
@@ -1364,7 +1489,7 @@ class MainViewModel(
         suggestionJob = scope.launch {
             delay(SUGGESTION_DEBOUNCE_MS)
             youTube.searchSuggestions(trimmed).onSuccess { suggestions ->
-                if (_searchQuery.value.trim() == trimmed) _remoteSuggestions.value = suggestions
+                if (_searchQuery.value.trim() == trimmed) _remoteSuggestions.value = if (isSpotify) suggestions.filterNot { it.isRich } else suggestions
             }
         }
     }
@@ -1399,7 +1524,8 @@ class MainViewModel(
         if (loadingMoreResults) return
         loadingMoreResults = true
         scope.launch {
-            youTube.searchMore(token).onSuccess { more ->
+            val next = if (isSpotify) runCatching { spotify.searchMore(_searchQuery.value.trim(), token) ?: error("No more") } else youTube.searchMore(token)
+            next.onSuccess { more ->
                 val current = _searchPage.value
                 if (current?.continuation == token) {
                     _searchPage.value = current.copy(
@@ -1456,7 +1582,7 @@ class MainViewModel(
 
         scope.launch {
             repository.recordSearch(trimmed)
-            val result = youTube.searchPage(query = trimmed, filter = filter)
+            val result = if (isSpotify) runCatching { spotify.search(trimmed, filter) } else youTube.searchPage(query = trimmed, filter = filter)
             result.onSuccess { page ->
                 _searchPage.value = page
                 playerController.warmUp(page.songs.take(3))
@@ -1497,6 +1623,7 @@ class MainViewModel(
             lastHomeTap = null
             if (tab == ScreenTab.LIBRARY) {
                 _libraryStartTab.value = 0
+                if (isSpotify) loadLikedSongs()
                 // The account's library may have changed on another device since it was last fetched.
                 loadYouTubeLibrary()
             }
@@ -1505,6 +1632,10 @@ class MainViewModel(
     }
 
     private fun loadHome(params: String?) {
+        if (isSpotify) {
+            loadSpotifyHome()
+            return
+        }
         homeJob?.cancel()
         _isLoadingHome.value = true
         _isLoadingMoreHome.value = false
@@ -1589,7 +1720,14 @@ class MainViewModel(
         _collectionError.value = null
         _isLoadingCollection.value = true
         scope.launch {
-            youTube.collection(item.browseId).onSuccess { page ->
+            val spotifyPlaylist = SpotifyIds.playlistId(item.browseId)
+            val spotifyAlbum = SpotifyIds.albumId(item.browseId)
+            val loaded = when {
+                spotifyPlaylist != null -> runCatching { spotify.playlistPage(spotifyPlaylist) }
+                spotifyAlbum != null -> runCatching { spotify.albumPage(spotifyAlbum) }
+                else -> youTube.collection(item.browseId)
+            }
+            loaded.onSuccess { page ->
                 val complete = page.copy(
                     title = page.title.ifBlank { item.title },
                     thumbnail = page.thumbnail ?: item.thumbnail,
@@ -1611,6 +1749,22 @@ class MainViewModel(
     fun toggleArtistSubscription() {
         val page = _artistPage.value ?: return
         val channelId = page.channelId ?: return
+        SpotifyIds.artistId(channelId)?.let { artistId ->
+            if (!spotifySignedIn.value) {
+                setShowSpotifyLoginDialog(true)
+                return
+            }
+            val updated = page.copy(subscribed = !page.subscribed)
+            _artistPage.value = updated
+            artistCache[channelId] = updated
+            scope.launch {
+                runCatching { spotify.setArtistFollowed(artistId, updated.subscribed) }.onSuccess { loadYouTubeLibrary() }.onFailure {
+                    if (_artistPage.value?.channelId == channelId) _artistPage.value = page
+                    artistCache[channelId] = page
+                }
+            }
+            return
+        }
         if (!youTubeAuth.isLoggedIn) {
             setShowYouTubeLoginDialog(true)
             return
@@ -1647,7 +1801,7 @@ class MainViewModel(
         if (loadingMoreSamples) return
         loadingMoreSamples = true
         scope.launch {
-            youTube.radio(last.id).onSuccess { more ->
+            youTube.radio(ytId(last) ?: last.id).onSuccess { more ->
                 val known = _samples.value.mapTo(HashSet()) { it.id }
                 _samples.value = _samples.value + more.filter { it.id !in known }
             }
@@ -1761,7 +1915,9 @@ class MainViewModel(
         _artistError.value = null
         _isLoadingArtist.value = true
         scope.launch {
-            youTube.artist(route.browseId).onSuccess { page ->
+            val spotifyArtist = SpotifyIds.artistId(route.browseId)
+            val loaded = if (spotifyArtist != null) runCatching { spotifyArtistPage(route.browseId, spotify.artist(spotifyArtist)) } else youTube.artist(route.browseId)
+            loaded.onSuccess { page ->
                 val complete = page.copy(name = page.name.ifBlank { route.name })
                 artistCache[route.browseId] = complete
                 if (_routes.value.lastOrNull() == route) {
@@ -1819,6 +1975,156 @@ class MainViewModel(
         }
     }
 
+    // --- Spotify ---
+    fun setShowSpotifyLoginDialog(show: Boolean) {
+        _showSpotifyLoginDialog.value = show
+    }
+
+    /** The welcome screen's choice: sign in to that service, or go on without an account. */
+    fun chooseAccount(mode: String) {
+        when (mode) {
+            AccountMode.YOUTUBE -> setShowYouTubeLoginDialog(true)
+            AccountMode.SPOTIFY -> if (spotifySession.available) setShowSpotifyLoginDialog(true) else showMessage(strings.spotifyNotSupported)
+            else -> {
+                settings.setString(SettingKeys.ACCOUNT_MODE, AccountMode.NONE)
+                loadHomeContent()
+            }
+        }
+    }
+
+    /** Signed in on Spotify's page: Spotify is the account from now on, and YouTube Music is signed out of. */
+    fun onSpotifySignedIn() {
+        spotifySession.onSignedIn()
+        _showSpotifyLoginDialog.value = false
+        if (youTubeAuth.isLoggedIn) {
+            youTubeAuth.setCookies("")
+            youTube.setAuth(youTubeAuth)
+            _isLoggedIn.value = false
+            onSessionChanged(null)
+        }
+        settings.setString(SettingKeys.ACCOUNT_MODE, AccountMode.SPOTIFY)
+        reloadAccount()
+    }
+
+    /** Signs out of Spotify; the app stays a Spotify app (Settings offers to sign in again). */
+    fun signOutSpotify() {
+        spotifySession.signOut()
+        reloadAccount()
+    }
+
+    /** Back to the welcome screen: the current account is signed out of. */
+    fun changeAccount() {
+        if (spotifySignedIn.value) spotifySession.signOut()
+        if (youTubeAuth.isLoggedIn) {
+            youTubeAuth.setCookies("")
+            youTube.setAuth(youTubeAuth)
+            _isLoggedIn.value = false
+            onSessionChanged(null)
+        }
+        settings.setString(SettingKeys.ACCOUNT_MODE, AccountMode.UNSET)
+        clearRoutes()
+        selectTab(ScreenTab.HOME)
+        reloadAccount()
+    }
+
+    /** Everything that came from the account, fetched again (after a sign-in, a sign-out or a switch). */
+    private fun reloadAccount() {
+        collectionCache.clear()
+        artistCache.clear()
+        _likedSongs.value = emptyList()
+        _ytPlaylists.value = emptyList()
+        _ytAlbums.value = emptyList()
+        _ytArtists.value = emptyList()
+        _homeChips.value = emptyList()
+        _selectedHomeChip.value = null
+        loadHomeContent()
+        loadLikedSongs()
+        loadYouTubeLibrary()
+    }
+
+    /** The YouTube video for [song]: itself, or for a Spotify song the recording found for it. */
+    private suspend fun ytId(song: SongItem): String? =
+        if (SpotifyIds.isSpotify(song.id)) spotifyLinker?.youtubeId(song) else song.id
+
+    /** The Spotify track of [song], searched on Spotify when the song came from elsewhere (a radio, a link). */
+    private suspend fun spotifyTrackId(song: SongItem): String? =
+        SpotifyIds.trackId(song.id)
+            ?: runCatching { spotify.findTrack(song.title, song.artists.firstOrNull()?.name.orEmpty(), song.duration) }.getOrNull()
+
+    private fun onSpotifyFailure(error: Throwable) {
+        if (error is SpotifySignedOutException) showMessage(strings.spotifySessionExpired)
+    }
+
+    /** The Spotify home: what was played, the favourites, the playlists, new releases and songs like the top one. */
+    private fun loadSpotifyHome() {
+        homeJob?.cancel()
+        _homeChips.value = emptyList()
+        _isLoadingMoreHome.value = false
+        if (!spotifySignedIn.value) {
+            _homeSections.value = emptyList()
+            _homeError.value = strings.spotifySignedOutSubtitle
+            _isLoadingHome.value = false
+            return
+        }
+        _isLoadingHome.value = true
+        _homeError.value = null
+        homeJob = scope.launch {
+            val s = strings
+            val recent = async { runCatching { spotify.recentlyPlayed() }.getOrDefault(emptyList()) }
+            val top = async { runCatching { spotify.topTracks() }.getOrDefault(emptyList()) }
+            val artists = async { runCatching { spotify.topArtists() }.getOrDefault(emptyList()) }
+            val playlists = async { runCatching { spotify.playlists(max = 50).map { it.item } }.getOrDefault(emptyList()) }
+            val releases = async { runCatching { spotify.newReleases() }.getOrDefault(emptyList()) }
+            val signedOut = runCatching { spotify.me() }.exceptionOrNull() is SpotifySignedOutException
+            val sections = listOfNotNull(
+                HomeSection(s.spotifyRecentlyPlayed, songs = recent.await().take(HOME_ROW_SONGS), style = SectionStyle.ROWS, canPlayAll = true),
+                HomeSection(s.spotifyTopSongs, songs = top.await().take(HOME_ROW_SONGS), style = SectionStyle.ROWS, canPlayAll = true),
+                HomeSection(s.spotifyTopArtists, collections = artists.await()),
+                HomeSection(s.spotifyYourPlaylists, collections = playlists.await()),
+                HomeSection(s.spotifyNewReleases, collections = releases.await()),
+            ).filter { it.songs.isNotEmpty() || it.collections.isNotEmpty() }
+            _homeSections.value = sections
+            _isLoadingHome.value = false
+            if (sections.isEmpty()) {
+                _homeError.value = if (signedOut) s.spotifySessionExpired else s.youtubeReturnedNothing
+                return@launch
+            }
+            playerController.warmUp(sections.flatMap { it.songs.take(WARM_QUICK_PICKS) })
+            // Songs like the favourite of the month, found by sound: something new next to what is known.
+            val seed = (top.await() + recent.await()).firstOrNull() ?: return@launch
+            val similar = ytId(seed)?.let { youTube.radio(it).getOrDefault(emptyList()) }.orEmpty().take(HOME_ROW_SONGS)
+            if (similar.isNotEmpty()) {
+                _homeSections.value = _homeSections.value.take(2) +
+                    HomeSection(s.spotifyMoreLike(seed.title), songs = similar, style = SectionStyle.ROWS, canPlayAll = true) +
+                    _homeSections.value.drop(2)
+            }
+        }
+    }
+
+    /** An artist page from Spotify's parts, worded in the app's language. */
+    private fun spotifyArtistPage(browseId: String, artist: com.qmusic.spotify.SpotifyArtist): ArtistPage {
+        val s = strings
+        return ArtistPage(
+            name = artist.name,
+            thumbnail = artist.image,
+            topSongs = artist.topSongs,
+            sections = listOfNotNull(
+                artist.albums.takeIf { it.isNotEmpty() }?.let { HomeSection(s.spotifyAlbums, collections = it) },
+                artist.singles.takeIf { it.isNotEmpty() }?.let { HomeSection(s.spotifySingles, collections = it) },
+                artist.related.takeIf { it.isNotEmpty() }?.let { HomeSection(s.spotifyRelated, collections = it) },
+            ),
+            audience = artist.followers?.let { s.spotifyFollowers(compactCount(it)) },
+            channelId = browseId,
+            subscribed = artist.following,
+        )
+    }
+
+    private fun compactCount(n: Long): String = when {
+        n >= 1_000_000 -> "${n / 1_000_000}.${(n % 1_000_000) / 100_000}M".replace(".0M", "M")
+        n >= 1_000 -> "${n / 1_000}K"
+        else -> n.toString()
+    }
+
     // --- YouTube Authentication ---
     fun onYouTubeCookiesCaptured(cookies: String) {
         youTubeAuth.setCookies(cookies)
@@ -1826,6 +2132,8 @@ class MainViewModel(
         _isLoggedIn.value = youTubeAuth.isLoggedIn
         _showYouTubeLoginDialog.value = false
         if (youTubeAuth.isLoggedIn) {
+            if (spotifySignedIn.value) spotifySession.signOut()
+            settings.setString(SettingKeys.ACCOUNT_MODE, AccountMode.YOUTUBE)
             onSessionChanged(cookies)
             loadHomeContent()
             loadLikedSongs()
@@ -1889,6 +2197,7 @@ class MainViewModel(
     private companion object {
         const val RADIO_REFILL_THRESHOLD = 3
         const val CACHE_REFRESH_MS = 600L
+        const val HOME_ROW_SONGS = 20
         const val SMART_REFRESH_MS = 24 * 60 * 60 * 1000L
         const val SMART_COUNT = 50
         const val SMART_DAYS = 30
