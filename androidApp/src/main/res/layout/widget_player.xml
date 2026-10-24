@@ -1,71 +1,101 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The home-screen player: cover, title and artist, previous / play-pause / next. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+  The home-screen player, YouTube Music style: a rounded card tinted with the colour of the cover, the cover, title
+  and artist, and previous / play-pause (in a white circle) / next.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@drawable/widget_background"
-    android:gravity="center_vertical"
-    android:orientation="horizontal"
-    android:padding="10dp">
+    android:layout_height="match_parent">
 
+    <!-- The card: a white rounded shape, coloured at run time from the cover (setColorFilter). -->
     <ImageView
-        android:id="@+id/widget_cover"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:background="@drawable/widget_cover_placeholder"
-        android:clipToOutline="true"
+        android:id="@+id/widget_bg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
         android:contentDescription="@null"
-        android:scaleType="centerCrop" />
+        android:scaleType="fitXY"
+        android:src="@drawable/widget_background"
+        android:tint="#F21B1B21" />
 
     <LinearLayout
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="12dp"
-        android:layout_weight="1"
-        android:orientation="vertical">
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="10dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="8dp">
 
-        <TextView
-            android:id="@+id/widget_title"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="#FFFFFFFF"
-            android:textSize="15sp"
-            android:textStyle="bold" />
+        <ImageView
+            android:id="@+id/widget_cover"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
+            android:background="@drawable/widget_cover_placeholder"
+            android:clipToOutline="true"
+            android:contentDescription="@null"
+            android:scaleType="centerCrop" />
 
-        <TextView
-            android:id="@+id/widget_artist"
-            android:layout_width="match_parent"
+        <LinearLayout
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="#B3FFFFFF"
-            android:textSize="13sp" />
+            android:layout_marginStart="12dp"
+            android:layout_marginEnd="4dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/widget_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:textColor="#FFFFFFFF"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/widget_artist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textColor="#B3FFFFFF"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/widget_previous"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/widget_button_ripple"
+            android:contentDescription="@string/widget_previous"
+            android:padding="8dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_widget_previous" />
+
+        <ImageButton
+            android:id="@+id/widget_play_pause"
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/widget_play_circle"
+            android:contentDescription="@string/widget_play_pause"
+            android:padding="11dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_widget_play_dark" />
+
+        <ImageButton
+            android:id="@+id/widget_next"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/widget_button_ripple"
+            android:contentDescription="@string/widget_next"
+            android:padding="8dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_widget_next" />
     </LinearLayout>
-
-    <ImageButton
-        android:id="@+id/widget_previous"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:background="@android:color/transparent"
-        android:contentDescription="@string/widget_previous"
-        android:src="@drawable/ic_widget_previous" />
-
-    <ImageButton
-        android:id="@+id/widget_play_pause"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:background="@android:color/transparent"
-        android:contentDescription="@string/widget_play_pause"
-        android:src="@drawable/ic_widget_play" />
-
-    <ImageButton
-        android:id="@+id/widget_next"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:background="@android:color/transparent"
-        android:contentDescription="@string/widget_next"
-        android:src="@drawable/ic_widget_next" />
-</LinearLayout>
+</FrameLayout>

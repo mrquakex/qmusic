@@ -91,7 +91,8 @@ class DelegatingForwardingPlayer(initialPlayer: Player) : ForwardingPlayer(initi
             }
 
             override fun onAvailableCommandsChanged(availableCommands: Player.Commands) {
-                listener.onAvailableCommandsChanged(availableCommands)
+                // The inner player only knows its one song; previous / next follow the app's queue instead.
+                listener.onAvailableCommandsChanged(this@DelegatingForwardingPlayer.availableCommands)
             }
 
             override fun onTrackSelectionParametersChanged(parameters: TrackSelectionParameters) {

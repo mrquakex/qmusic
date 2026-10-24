@@ -75,6 +75,8 @@ object WidgetUpdater {
     private var watcher: Job? = null
     private var coverFor: String? = null
     private var cover: Bitmap? = null
+    /** The card's colour, taken from [cover]. */
+    private var tint: Int = DEFAULT_TINT
 
     /** Starts following [player]; called once the player exists. */
     fun start(context: Context, player: PlayerController) {
@@ -103,6 +105,7 @@ object WidgetUpdater {
             val bitmap = (SingletonImageLoader.get(context).execute(request) as? SuccessResult)?.image?.toBitmap()
             coverFor = track.id
             cover = bitmap
+            tint = tintOf(bitmap)
             push(context, track, playing)
         }
     }
@@ -120,7 +123,8 @@ object WidgetUpdater {
         )
         val art = cover.takeIf { track != null && coverFor == track.id }
         if (art != null) views.setImageViewBitmap(R.id.widget_cover, art) else views.setImageViewResource(R.id.widget_cover, R.mipmap.ic_launcher)
-        views.setImageViewResource(R.id.widget_play_pause, if (playing) R.drawable.ic_widget_pause else R.drawable.ic_widget_play)
+        views.setInt(R.id.widget_bg, "setColorFilter", if (art != null) tint else DEFAULT_TINT)
+        views.setImageViewResource(R.id.widget_play_pause, if (playing) R.drawable.ic_widget_pause_dark else R.drawable.ic_widget_play_dark)
 
         views.setOnClickPendingIntent(R.id.widget_play_pause, action(context, QMusicWidget.ACTION_PLAY_PAUSE, 1))
         views.setOnClickPendingIntent(R.id.widget_next, action(context, QMusicWidget.ACTION_NEXT, 2))
@@ -133,6 +137,21 @@ object WidgetUpdater {
         }
         manager.updateAppWidget(component, views)
     }
+
+    /**
+     * A deep shade of the cover's average colour: the card matches the song, and white text stays readable on it.
+     */
+    private fun tintOf(bitmap: Bitmap?): Int {
+        bitmap ?: return DEFAULT_TINT
+        val average = runCatching { Bitmap.createScaledBitmap(bitmap, 1, 1, true).getPixel(0, 0) }.getOrNull() ?: return DEFAULT_TINT
+        val hsv = FloatArray(3)
+        android.graphics.Color.colorToHSV(average, hsv)
+        hsv[1] = hsv[1].coerceAtMost(0.65f)
+        hsv[2] = hsv[2].coerceIn(0.16f, 0.34f)
+        return android.graphics.Color.HSVToColor(0xF2, hsv)
+    }
+
+    private const val DEFAULT_TINT = 0xF21B1B21.toInt()
 
     private fun action(context: Context, action: String, code: Int): PendingIntent =
         PendingIntent.getBroadcast(

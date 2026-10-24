@@ -98,6 +98,15 @@ class SimpleMediaService : MediaLibraryService() {
         }
 
         val session = builder.build()
+        // Android 13+ draws the controls itself and puts the first custom button (the heart) in the "previous"
+        // place, on the left, whenever it thinks there is no previous. Keeping both places for previous / next
+        // leaves the heart where music apps have it: on the right.
+        session.setSessionExtras(
+            Bundle().apply {
+                putBoolean(androidx.media3.session.MediaConstants.EXTRAS_KEY_SLOT_RESERVATION_SEEK_TO_PREV, true)
+                putBoolean(androidx.media3.session.MediaConstants.EXTRAS_KEY_SLOT_RESERVATION_SEEK_TO_NEXT, true)
+            },
+        )
         mediaLibrarySession = session
         // Nothing ever binds to this service as a media controller, so Media3 would never learn about the
         // session and never post the playback notification (or the lock-screen / headset controls).
