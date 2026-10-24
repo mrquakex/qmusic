@@ -63,6 +63,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.text.drawText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -1190,9 +1193,9 @@ private fun ActionChip(icon: ImageVector, label: String, active: Boolean, onClic
 }
 
 /**
- * YouTube Music's progress bar: a thin line with the played part in white, the part already loaded in a lighter
- * tone, and a small dot that grows while it is held. Tapping anywhere on it jumps there. The position ticks every
- * 250 ms, so it is read inside the drawing only and nothing above this bar recomposes.
+ * YouTube Music's progress bar: a thin rounded line (no dot) with the played part in white and the part already loaded
+ * in a lighter tone. Touching it thickens the line and shows the time under the finger in a bubble above it; letting
+ * go jumps there. The position ticks every 250 ms, so it is read inside the drawing only and nothing above recomposes.
  */
 @Composable
 private fun SeekBar(
@@ -1202,57 +1205,53 @@ private fun SeekBar(
     durationMs: Long,
     onSeekTo: (Long) -> Unit,
 ) {
-    var dragging by remember { mutableStateOf(false) }
-    var dragFraction by remember { mutableFloatStateOf(0f) }
+    var held by remember { mutableStateOf(false) }
+    var heldFraction by remember { mutableFloatStateOf(0f) }
     val position = positionMs()
     val played = if (durationMs > 0) (position.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
-    val shown = if (dragging) dragFraction else played
+    val shown = if (held) heldFraction else played
     val loaded = when {
         durationMs <= 0 -> 0f
         fullyStored -> 1f
         else -> (bufferedMs().toFloat() / durationMs).coerceIn(shown, 1f)
     }
-    val thumbRadius by animateFloatAsState(if (dragging) 9f else 6f, label = "thumb")
+    val thickness by animateFloatAsState(if (held) SEEK_HELD_DP else SEEK_IDLE_DP, label = "seekThickness")
+    val bubbleAlpha by animateFloatAsState(if (held) 1f else 0f, label = "seekBubble")
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val bubbleStyle = MaterialTheme.typography.labelLarge.copy(color = Color.White)
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(32.dp)
+                .height(28.dp)
                 .pointerInput(durationMs) {
                     if (durationMs <= 0) return@pointerInput
-                    detectTapGestures { offset ->
-                        onSeekTo(((offset.x / size.width).coerceIn(0f, 1f) * durationMs).toLong())
-                    }
-                }
-                .pointerInput(durationMs) {
-                    if (durationMs <= 0) return@pointerInput
-                    detectHorizontalDragGestures(
-                        onDragStart = { offset ->
-                            dragging = true
-                            dragFraction = (offset.x / size.width).coerceIn(0f, 1f)
-                        },
-                        onDragEnd = {
-                            onSeekTo((dragFraction * durationMs).toLong())
-                            dragging = false
-                        },
-                        onDragCancel = { dragging = false },
-                    ) { change, delta ->
-                        change.consume()
-                        dragFraction = (dragFraction + delta / size.width).coerceIn(0f, 1f)
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        held = true
+                        heldFraction = (down.position.x / size.width).coerceIn(0f, 1f)
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            heldFraction = (change.position.x / size.width).coerceIn(0f, 1f)
+                            change.consume()
+                        }
+                        onSeekTo((heldFraction * durationMs).toLong())
+                        held = false
                     }
                 },
         ) {
-            val inset = 8.dp.toPx()
-            val width = size.width - inset * 2
+            val width = size.width
             val centerY = size.height / 2
-            val stroke = 3.dp.toPx()
+            val stroke = thickness.dp.toPx()
             val cap = CornerRadius(stroke / 2, stroke / 2)
             fun track(fraction: Float, color: Color) {
                 if (fraction <= 0f) return
                 drawRoundRect(
                     color = color,
-                    topLeft = Offset(inset, centerY - stroke / 2),
+                    topLeft = Offset(0f, centerY - stroke / 2),
                     size = Size(width * fraction, stroke),
                     cornerRadius = cap,
                 )
@@ -1260,20 +1259,39 @@ private fun SeekBar(
             track(1f, Color.White.copy(alpha = 0.16f))
             track(loaded, Color.White.copy(alpha = 0.34f))
             track(shown, Color.White)
-            if (durationMs > 0) drawCircle(Color.White, radius = thumbRadius.dp.toPx(), center = Offset(inset + width * shown, centerY))
+
+            if (bubbleAlpha > 0f && durationMs > 0) {
+                // The time under the finger, in a dark pill above the bar (it may cover the chips, as on YouTube Music)
+                val text = measurer.measure(formatTime((heldFraction * durationMs).toLong()), bubbleStyle)
+                val padX = 12.dp.toPx()
+                val padY = 6.dp.toPx()
+                val bubbleWidth = text.size.width + padX * 2
+                val bubbleHeight = text.size.height + padY * 2
+                val left = (width * heldFraction - bubbleWidth / 2).coerceIn(0f, (width - bubbleWidth).coerceAtLeast(0f))
+                val top = centerY - stroke / 2 - 12.dp.toPx() - bubbleHeight
+                drawRoundRect(
+                    color = Color(0xFF26262B).copy(alpha = 0.95f * bubbleAlpha),
+                    topLeft = Offset(left, top),
+                    size = Size(bubbleWidth, bubbleHeight),
+                    cornerRadius = CornerRadius(10.dp.toPx(), 10.dp.toPx()),
+                )
+                drawText(text, topLeft = Offset(left + padX, top + padY), alpha = bubbleAlpha)
+            }
         }
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            val elapsed = if (dragging) (dragFraction * durationMs).toLong() else position
+            val elapsed = if (held) (heldFraction * durationMs).toLong() else position
             Text(formatTime(elapsed), style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.6f))
             Text(formatTime(durationMs), style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.6f))
         }
     }
 }
+
+/** The bar's thickness at rest and while held (dp), as YouTube Music has it. */
+private const val SEEK_IDLE_DP = 4f
+private const val SEEK_HELD_DP = 10f
 
 @Composable
 private fun Controls(
