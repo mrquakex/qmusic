@@ -51,6 +51,11 @@ private val LiquidEase = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
 private val PopEase = CubicBezierEasing(0.34f, 1.56f, 0.64f, 1f)
 private val SlideEase = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 
+/** The splash plays once per process: coming back to an app that is still running goes straight in. */
+object SplashState {
+    var shown: Boolean = false
+}
+
 /**
  * 4-stage monochrome splash: laser contour trace, liquid fill, equalizer bars pop,
  * wordmark slide-up. Calls [onFinished] once the choreography completes.
@@ -67,14 +72,16 @@ fun QMusicSplash(
 
     LaunchedEffect(Unit) {
         coroutineScope {
-            launch { delay(100); trace.animateTo(1f, tween(1150, easing = LaserEase)) }
-            launch { delay(800); fill.animateTo(1f, tween(850, easing = LiquidEase)) }
-            launch { delay(1050); bars.animateTo(1f, tween(550, easing = PopEase)) }
+            // About 1.2 s in all: long enough to read as a logo, short enough not to feel like waiting.
+            launch { delay(50); trace.animateTo(1f, tween(550, easing = LaserEase)) }
+            launch { delay(380); fill.animateTo(1f, tween(450, easing = LiquidEase)) }
+            launch { delay(520); bars.animateTo(1f, tween(350, easing = PopEase)) }
             letters.forEachIndexed { index, anim ->
-                launch { delay(1120L + index * 60L); anim.animateTo(1f, tween(600, easing = SlideEase)) }
+                launch { delay(560L + index * 35L); anim.animateTo(1f, tween(380, easing = SlideEase)) }
             }
         }
-        delay(700)
+        delay(150)
+        SplashState.shown = true
         onFinished()
     }
 

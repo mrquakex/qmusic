@@ -108,7 +108,7 @@ fun QMusicApp(
     val amoled by viewModel.amoledTheme.collectAsState()
     androidx.compose.runtime.SideEffect { com.qmusic.ui.theme.amoledTheme = amoled }
     QMusicTheme {
-        var showSplash by remember { mutableStateOf(true) }
+        var showSplash by remember { mutableStateOf(!com.qmusic.ui.components.SplashState.shown) }
         if (showSplash) {
             QMusicSplash(onFinished = { showSplash = false }, modifier = modifier)
             return@QMusicTheme
