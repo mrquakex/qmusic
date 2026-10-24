@@ -16,6 +16,7 @@ import coil3.toBitmap
 import com.qmusic.engine.models.SongItem
 import com.qmusic.player.PlayerController
 import com.qmusic.player.PlayerHolder
+import com.qmusic.player.service.SimpleMediaService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,6 +39,11 @@ class QMusicWidget : AppWidgetProvider() {
         super.onReceive(context, intent)
         val player: PlayerController? = PlayerHolder.peek()
         val hasSong = player?.currentTrack?.value != null
+        // The playback notification belongs to the media service: once it has stopped (a long pause, the
+        // notification swiped away), playing from here alone would sound without one. Taps on a widget may start it.
+        if (hasSong && intent.action in WIDGET_ACTIONS) {
+            runCatching { context.startService(Intent(context, SimpleMediaService::class.java)) }
+        }
         when (intent.action) {
             ACTION_PLAY_PAUSE -> if (hasSong) {
                 if (player!!.isPlaying.value) player.pause() else player.resume()
@@ -59,6 +65,7 @@ class QMusicWidget : AppWidgetProvider() {
         const val ACTION_PLAY_PAUSE = "com.qmusic.widget.PLAY_PAUSE"
         const val ACTION_NEXT = "com.qmusic.widget.NEXT"
         const val ACTION_PREVIOUS = "com.qmusic.widget.PREVIOUS"
+        private val WIDGET_ACTIONS = setOf(ACTION_PLAY_PAUSE, ACTION_NEXT, ACTION_PREVIOUS)
     }
 }
 
