@@ -13,13 +13,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -27,7 +23,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -57,8 +52,8 @@ private val PopEase = CubicBezierEasing(0.34f, 1.56f, 0.64f, 1f)
 private val SlideEase = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 
 /**
- * 5-stage monochrome splash: laser contour trace, liquid fill, equalizer bars pop,
- * wordmark slide-up, thin loader. Calls [onFinished] once the choreography completes.
+ * 4-stage monochrome splash: laser contour trace, liquid fill, equalizer bars pop,
+ * wordmark slide-up. Calls [onFinished] once the choreography completes.
  */
 @Composable
 fun QMusicSplash(
@@ -95,12 +90,6 @@ fun QMusicSplash(
         targetValue = 0.38f,
         animationSpec = infiniteRepeatable(tween(850, easing = LinearEasing), RepeatMode.Reverse),
         label = "eq2",
-    )
-    val loaderShift by pulse.animateFloat(
-        initialValue = -1.1f,
-        targetValue = 2.5f,
-        animationSpec = infiniteRepeatable(tween(1350, easing = LaserEase)),
-        label = "loader",
     )
 
     val glyph = remember { PathParser().parsePathString(Q_GLYPH_PATH).toPath() }
@@ -164,24 +153,6 @@ fun QMusicSplash(
                         modifier = Modifier.graphicsLayer { translationY = (1f - p) * 40.dp.toPx() },
                     )
                 }
-            }
-
-            // Stage 5: thin loader.
-            Box(
-                modifier = Modifier
-                    .padding(top = 24.dp)
-                    .width(92.dp)
-                    .height(2.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Color.White.copy(alpha = 0.1f)),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .width(38.dp)
-                        .height(2.dp)
-                        .graphicsLayer { translationX = loaderShift * 38.dp.toPx() }
-                        .background(Color.White),
-                )
             }
         }
     }
