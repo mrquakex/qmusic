@@ -44,6 +44,7 @@ class AppContainer(private val application: Application) {
     val updateInstaller: UpdateInstaller by lazy { ApkUpdateInstaller(application) }
     val downloads: DownloadController get() = PlayerHolder.downloads(application)
     val lastFm: LastFm by lazy { LastFm(application) }
+    val ringtoneMaker: AndroidRingtoneMaker by lazy { AndroidRingtoneMaker(application) }
     val spotifySession: SpotifyWebSession by lazy { SpotifyWebSession(application) }
     val spotifyLinker: com.qmusic.ui.viewmodel.SpotifyLinker by lazy {
         com.qmusic.ui.viewmodel.SpotifyLinker(youTube, spotifyImporter, settings).also { linker ->

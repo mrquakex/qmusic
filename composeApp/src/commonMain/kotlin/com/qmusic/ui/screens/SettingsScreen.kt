@@ -108,6 +108,8 @@ fun SettingsScreen(
     onSpotifySignIn: () -> Unit = {},
     onSpotifySignOut: () -> Unit = {},
     onChangeAccount: () -> Unit = {},
+    /** Opens the list of ringtones made in the app; null where there are none to make. */
+    onOpenRingtones: (() -> Unit)? = null,
 ) {
     val s = LocalStrings.current
     val uriHandler = LocalUriHandler.current
@@ -318,6 +320,15 @@ fun SettingsScreen(
         }
 
         Section(s.sectionLibrary) {
+            if (onOpenRingtones != null) {
+                ActionRow(
+                    icon = QMusicIcons.Bell,
+                    title = s.myRingtones,
+                    subtitle = s.myRingtonesSubtitle,
+                    onClick = onOpenRingtones,
+                )
+                RowDivider()
+            }
             if (accountMode == com.qmusic.settings.AccountMode.NONE) {
                 ActionRow(
                     icon = QMusicIcons.PlaylistAdd,

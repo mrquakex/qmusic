@@ -54,6 +54,8 @@ fun SongActionsSheet(
     onStartRadio: () -> Unit = {},
     onRemoveFromPlaylist: (() -> Unit)? = null,
     onShare: () -> Unit = {},
+    /** Opens the ringtone editor for the song; null where ringtones cannot be made. */
+    onMakeRingtone: (() -> Unit)? = null,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -121,6 +123,7 @@ fun SongActionsSheet(
                 onClick = onToggleDownload,
             )
             ActionRow(QMusicIcons.Share, s.share, onShare)
+            if (onMakeRingtone != null) ActionRow(QMusicIcons.Bell, s.makeRingtone, onMakeRingtone)
             if (onGoToArtist != null) {
                 ActionRow(QMusicIcons.Account, s.goToArtist, onGoToArtist)
             }

@@ -28,6 +28,9 @@ import com.qmusic.player.RepeatMode
 import com.qmusic.network.AlwaysOnline
 import com.qmusic.network.ConnectivityMonitor
 import com.qmusic.settings.AccountMode
+import com.qmusic.ringtone.NoRingtones
+import com.qmusic.ringtone.RingtoneMaker
+import com.qmusic.ringtone.RingtoneStudio
 import com.qmusic.settings.AppSettings
 import com.qmusic.settings.NoSpotifySession
 import com.qmusic.settings.SpotifySession
@@ -68,6 +71,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 import kotlinx.coroutines.flow.stateIn
@@ -89,6 +93,8 @@ sealed interface Route {
     data class LocalPlaylist(val id: Long, val name: String) : Route
     data class Explore(val browseId: String, val params: String?, val title: String) : Route
     data object Stats : Route
+    data class RingtoneEditor(val song: SongItem) : Route
+    data object Ringtones : Route
 }
 
 /** The backup file: what lives only on this device. */
@@ -165,6 +171,8 @@ class MainViewModel(
     val spotifySession: SpotifySession = NoSpotifySession,
     /** Finds the YouTube recording of a Spotify song (null where Spotify is not offered). */
     private val spotifyLinker: SpotifyLinker? = null,
+    /** What the phone does for ringtones (nothing where there are none). */
+    ringtoneMaker: RingtoneMaker = NoRingtones,
 ) : ViewModel() {
 
     private val scope: CoroutineScope = externalScope ?: viewModelScope
@@ -401,6 +409,38 @@ class MainViewModel(
     val artistError: StateFlow<String?> = _artistError.asStateFlow()
 
     private val collectionCache = HashMap<String, CollectionPage>()
+
+    /** Making ringtones from songs: the editor, and the list of the ones made. */
+    val ringtones = RingtoneStudio(
+        maker = ringtoneMaker,
+        player = playerController,
+        settings = settings,
+        scope = scope,
+        strings = { strings },
+        message = { showMessage(it) },
+        isOnline = { connectivity.isOnline.value },
+    )
+
+    init {
+        // Leaving the editor (or the list) stops its preview and gives the song's file back.
+        scope.launch {
+            _routes.map { it.lastOrNull() }.distinctUntilChanged().collect { top ->
+                if (top !is Route.RingtoneEditor) ringtones.close()
+                if (top != Route.Ringtones) ringtones.leaveList()
+            }
+        }
+    }
+
+    fun openRingtoneEditor(song: SongItem) {
+        dismissSongMenu()
+        push(Route.RingtoneEditor(song))
+    }
+
+    /** The list of ringtones made; from the editor it takes the editor's place, so Back leads to where that was opened. */
+    fun openRingtones() {
+        if (_routes.value.lastOrNull() is Route.RingtoneEditor) _routes.value = _routes.value.dropLast(1)
+        push(Route.Ringtones)
+    }
     private val artistCache = HashMap<String, ArtistPage>()
 
     // Song actions: the "more" sheet and the add-to-playlist picker
@@ -1702,6 +1742,8 @@ class MainViewModel(
             is Route.Artist -> loadArtist(route)
             is Route.Explore -> loadExplore(route)
             is Route.Stats -> loadStats(_statsPeriod.value)
+            is Route.RingtoneEditor -> ringtones.open(route.song)
+            Route.Ringtones -> ringtones.refreshList()
             is Route.LocalPlaylist, null -> Unit
         }
     }

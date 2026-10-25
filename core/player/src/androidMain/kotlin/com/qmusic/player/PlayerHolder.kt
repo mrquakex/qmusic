@@ -99,6 +99,9 @@ object PlayerHolder {
         return pick.url to pick.mimeType.substringBefore(';')
     }
 
+    /** The address of the best audio stream of [videoId] (a ringtone is cut from the best sound there is). */
+    suspend fun resolveBestAudioUrl(videoId: String): String? = resolveAudioUrl(videoId, AudioQuality.HIGH)
+
     /** Picks the non-DRM audio stream of [videoId] that matches [quality], or null if none could be resolved. */
     private suspend fun resolveAudioUrl(videoId: String, quality: AudioQuality): String? {
         val key = "${quality.name}:$videoId"

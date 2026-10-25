@@ -57,6 +57,56 @@ interface AppStrings {
     val moreYouMayLike: String
     val tabAlbums: String
     val seeAll: String
+    val makeRingtone: String
+    val ringtoneFetching: String
+    val ringtoneAnalyzing: String
+    val ringtoneErrorOffline: String
+    val ringtoneErrorTooLong: String
+    val ringtoneErrorGeneric: String
+    val ringtoneRetry: String
+    val ringtonePart: String
+    val ringtoneStart: String
+    val ringtoneEnd: String
+    val ringtoneSuggest: String
+    val ringtonePreview: String
+    val ringtoneStopPreview: String
+    val ringtoneFadeIn: String
+    val ringtoneFadeInSubtitle: String
+    val ringtoneFadeOut: String
+    val ringtoneFadeOutSubtitle: String
+    val ringtoneLouder: String
+    val ringtoneLouderSubtitle: String
+    val ringtoneName: String
+    val ringtoneCreate: String
+    val ringtoneCreating: String
+    val ringtoneSaveFailed: String
+    val ringtoneReady: String
+    val ringtoneSavedNote: String
+    val ringtoneSetPhone: String
+    val ringtoneSetNotification: String
+    val ringtoneSetAlarm: String
+    val ringtoneSetContact: String
+    val ringtoneIsSet: String
+    val ringtonePhoneSet: String
+    val ringtoneNotificationSet: String
+    val ringtoneAlarmSet: String
+    val ringtoneNeedsPermission: String
+    val ringtoneContactsPermission: String
+    val ringtoneNotAccepted: String
+    val ringtoneEditAgain: String
+    val myRingtones: String
+    val myRingtonesSubtitle: String
+    val ringtonesEmpty: String
+    val ringtoneInUsePhone: String
+    val ringtoneInUseNotification: String
+    val ringtoneInUseAlarm: String
+    val ringtoneDelete: String
+    val ringtoneDeleteTitle: String
+    val ringtoneDeleteMessage: String
+    val ringtoneDeleted: String
+    val ringtoneDeleteKept: String
+    fun ringtoneContactSet(name: String): String
+    fun ringtoneLength(seconds: Int): String
     val welcomeTitle: String
     val welcomeSubtitle: String
     val continueWithYouTube: String
@@ -410,6 +460,56 @@ object TurkishStrings : AppStrings {
     override val moreYouMayLike: String = "Beğenebileceğiniz diğer içerikler"
     override val tabAlbums: String = "Albümler"
     override val seeAll: String = "Tümü"
+    override val makeRingtone: String = "Zil sesi yap"
+    override val ringtoneFetching: String = "Şarkı hazırlanıyor…"
+    override val ringtoneAnalyzing: String = "Ses inceleniyor…"
+    override val ringtoneErrorOffline: String = "İnternet yok. Şarkıyı önce indir, sonra zil sesi yap."
+    override val ringtoneErrorTooLong: String = "Bu içerik zil sesi için çok uzun."
+    override val ringtoneErrorGeneric: String = "Şarkı zil sesi için hazırlanamadı."
+    override val ringtoneRetry: String = "Tekrar dene"
+    override val ringtonePart: String = "Seçilen bölüm"
+    override val ringtoneStart: String = "Başlangıç"
+    override val ringtoneEnd: String = "Bitiş"
+    override val ringtoneSuggest: String = "En iyi bölümü bul"
+    override val ringtonePreview: String = "Dinle"
+    override val ringtoneStopPreview: String = "Durdur"
+    override val ringtoneFadeIn: String = "Yavaş başlasın"
+    override val ringtoneFadeInSubtitle: String = "Ses sessizlikten yükselir"
+    override val ringtoneFadeOut: String = "Yavaş bitsin"
+    override val ringtoneFadeOutSubtitle: String = "Ses yumuşakça kısılır"
+    override val ringtoneLouder: String = "Sesi yükselt"
+    override val ringtoneLouderSubtitle: String = "Sessiz kayıtlar zil için güçlendirilir, ses bozulmaz"
+    override val ringtoneName: String = "Zil sesi adı"
+    override val ringtoneCreate: String = "Zil sesini oluştur"
+    override val ringtoneCreating: String = "Zil sesi hazırlanıyor…"
+    override val ringtoneSaveFailed: String = "Zil sesi oluşturulamadı."
+    override val ringtoneReady: String = "Zil sesin hazır"
+    override val ringtoneSavedNote: String = "Telefonunun ses ayarlarında da bulursun."
+    override val ringtoneSetPhone: String = "Telefon zil sesi yap"
+    override val ringtoneSetNotification: String = "Bildirim sesi yap"
+    override val ringtoneSetAlarm: String = "Alarm sesi yap"
+    override val ringtoneSetContact: String = "Bir kişiye ata"
+    override val ringtoneIsSet: String = "Ayarlandı"
+    override val ringtonePhoneSet: String = "Telefon zil sesi ayarlandı"
+    override val ringtoneNotificationSet: String = "Bildirim sesi ayarlandı"
+    override val ringtoneAlarmSet: String = "Alarm sesi ayarlandı"
+    override val ringtoneNeedsPermission: String = "Sesi değiştirebilmek için QMusic'e izin vermelisin."
+    override val ringtoneContactsPermission: String = "Kişiye zil sesi atamak için Kişiler izni gerekir."
+    override val ringtoneNotAccepted: String = "Telefon bu sesi kabul etmedi. Ses ayarlarından kendin seçebilirsin."
+    override val ringtoneEditAgain: String = "Düzenlemeye dön"
+    override val myRingtones: String = "Zil seslerim"
+    override val myRingtonesSubtitle: String = "Yaptığın zil sesleri"
+    override val ringtonesEmpty: String = "Henüz zil sesi yapmadın. Bir şarkının ⋮ menüsünden \"Zil sesi yap\"ı seç."
+    override val ringtoneInUsePhone: String = "Telefon"
+    override val ringtoneInUseNotification: String = "Bildirim"
+    override val ringtoneInUseAlarm: String = "Alarm"
+    override val ringtoneDelete: String = "Sil"
+    override val ringtoneDeleteTitle: String = "Zil sesi silinsin mi?"
+    override val ringtoneDeleteMessage: String = "Telefondan da silinir. Ayarlı olduğu yerlerde telefonun kendi sesi kullanılır."
+    override val ringtoneDeleted: String = "Zil sesi silindi"
+    override val ringtoneDeleteKept: String = "Dosya telefonda kaldı, listeden çıkarıldı."
+    override fun ringtoneContactSet(name: String): String = "$name için zil sesi ayarlandı"
+    override fun ringtoneLength(seconds: Int): String = "$seconds sn"
     override val welcomeTitle: String = "Müziğin seninle"
     override val welcomeSubtitle: String = "Kütüphaneni, beğendiklerini ve listelerini getirmek için hesabını seç."
     override val continueWithYouTube: String = "YouTube Music ile devam et"
@@ -785,6 +885,56 @@ object EnglishStrings : AppStrings {
     override val moreYouMayLike: String = "More you may like"
     override val tabAlbums: String = "Albums"
     override val seeAll: String = "See all"
+    override val makeRingtone: String = "Make a ringtone"
+    override val ringtoneFetching: String = "Getting the song ready…"
+    override val ringtoneAnalyzing: String = "Reading the sound…"
+    override val ringtoneErrorOffline: String = "No connection. Download the song first, then make a ringtone."
+    override val ringtoneErrorTooLong: String = "This is too long for a ringtone."
+    override val ringtoneErrorGeneric: String = "The song couldn't be prepared."
+    override val ringtoneRetry: String = "Try again"
+    override val ringtonePart: String = "Selected part"
+    override val ringtoneStart: String = "Start"
+    override val ringtoneEnd: String = "End"
+    override val ringtoneSuggest: String = "Find the best part"
+    override val ringtonePreview: String = "Preview"
+    override val ringtoneStopPreview: String = "Stop"
+    override val ringtoneFadeIn: String = "Fade in"
+    override val ringtoneFadeInSubtitle: String = "The sound rises from silence"
+    override val ringtoneFadeOut: String = "Fade out"
+    override val ringtoneFadeOutSubtitle: String = "The sound fades away gently"
+    override val ringtoneLouder: String = "Make it louder"
+    override val ringtoneLouderSubtitle: String = "Quiet recordings are raised for a ringtone, without distortion"
+    override val ringtoneName: String = "Ringtone name"
+    override val ringtoneCreate: String = "Create ringtone"
+    override val ringtoneCreating: String = "Creating your ringtone…"
+    override val ringtoneSaveFailed: String = "The ringtone couldn't be created."
+    override val ringtoneReady: String = "Your ringtone is ready"
+    override val ringtoneSavedNote: String = "You'll also find it in your phone's sound settings."
+    override val ringtoneSetPhone: String = "Set as phone ringtone"
+    override val ringtoneSetNotification: String = "Set as notification sound"
+    override val ringtoneSetAlarm: String = "Set as alarm sound"
+    override val ringtoneSetContact: String = "Assign to a contact"
+    override val ringtoneIsSet: String = "Set"
+    override val ringtonePhoneSet: String = "Phone ringtone set"
+    override val ringtoneNotificationSet: String = "Notification sound set"
+    override val ringtoneAlarmSet: String = "Alarm sound set"
+    override val ringtoneNeedsPermission: String = "QMusic needs permission to change your sounds."
+    override val ringtoneContactsPermission: String = "Assigning a ringtone to a contact needs the Contacts permission."
+    override val ringtoneNotAccepted: String = "Your phone didn't accept it. You can pick it yourself in the sound settings."
+    override val ringtoneEditAgain: String = "Back to editing"
+    override val myRingtones: String = "My ringtones"
+    override val myRingtonesSubtitle: String = "Ringtones you made"
+    override val ringtonesEmpty: String = "No ringtones yet. Pick \"Make a ringtone\" in a song's ⋮ menu."
+    override val ringtoneInUsePhone: String = "Phone"
+    override val ringtoneInUseNotification: String = "Notification"
+    override val ringtoneInUseAlarm: String = "Alarm"
+    override val ringtoneDelete: String = "Delete"
+    override val ringtoneDeleteTitle: String = "Delete this ringtone?"
+    override val ringtoneDeleteMessage: String = "It is removed from your phone too. Where it was set, the phone's own sound takes over."
+    override val ringtoneDeleted: String = "Ringtone deleted"
+    override val ringtoneDeleteKept: String = "The file stayed on the phone; it was taken off the list."
+    override fun ringtoneContactSet(name: String): String = "Ringtone set for $name"
+    override fun ringtoneLength(seconds: Int): String = "$seconds s"
     override val welcomeTitle: String = "Your music, with you"
     override val welcomeSubtitle: String = "Choose your account to bring your library, likes and playlists."
     override val continueWithYouTube: String = "Continue with YouTube Music"

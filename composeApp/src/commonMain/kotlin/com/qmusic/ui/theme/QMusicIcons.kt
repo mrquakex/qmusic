@@ -172,6 +172,8 @@ object QMusicIcons {
 
     val ChevronRight: ImageVector = stroked("ChevronRight", "M9 5l7 7-7 7")
 
+    val Bell: ImageVector = stroked("Bell", "M6 9a6 6 0 1 1 12 0c0 3.5 1 5 2 6.5H4c1-1.5 2-3 2-6.5z", "M10 19a2 2 0 0 0 4 0")
+
     val Samples: ImageVector = stroked("Samples", "M4 5.5l7.5 6.5L4 18.5zM12.5 5.5l7.5 6.5-7.5 6.5z")
 
     val Stats: ImageVector = stroked("Stats", "M5 20V11M12 20V4M19 20v-6")

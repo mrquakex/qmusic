@@ -505,7 +505,7 @@ fun QMusicApp(
                             onToggleFavorite = { viewModel.toggleFavorite(it) },
                             onAddToPlaylist = { viewModel.showPlaylistPicker(it) },
                             onShare = { song ->
-                                share("${song.title} - ${song.artists.joinToString { it.name }}\nhttps://music.youtube.com/watch?v=${song.id}")
+                                share("${song.title} - ${song.artists.joinToString { it.name }}\n${song.shareLink}")
                             },
                             onPlayFull = { viewModel.playSampleFully(it) },
                         )
@@ -623,6 +623,7 @@ fun QMusicApp(
                             onSpotifySignIn = { viewModel.setShowSpotifyLoginDialog(true) },
                             onSpotifySignOut = { viewModel.signOutSpotify() },
                             onChangeAccount = { viewModel.changeAccount() },
+                            onOpenRingtones = if (viewModel.ringtones.available) ({ viewModel.openRingtones() }) else null,
                         )
                     }
 
@@ -669,6 +670,17 @@ fun QMusicApp(
                                 share("${page.name}\nhttps://music.youtube.com/channel/${page.channelId ?: route.browseId}")
                             },
                             onSeeAll = { section -> section.moreBrowseId?.let { viewModel.openExplore(it, section.moreParams, section.title) } },
+                        )
+
+                        is Route.RingtoneEditor -> com.qmusic.ui.screens.RingtoneEditorScreen(
+                            studio = viewModel.ringtones,
+                            onBack = { viewModel.popRoute() },
+                            onOpenList = { viewModel.openRingtones() },
+                        )
+
+                        Route.Ringtones -> com.qmusic.ui.screens.RingtonesScreen(
+                            studio = viewModel.ringtones,
+                            onBack = { viewModel.popRoute() },
                         )
 
                         Route.Stats -> StatsScreen(
@@ -850,8 +862,16 @@ fun QMusicApp(
                         }
                     },
                     onShare = {
-                        share("${song.title} - ${song.artists.joinToString { it.name }}\nhttps://music.youtube.com/watch?v=${song.id}")
+                        share("${song.title} - ${song.artists.joinToString { it.name }}\n${song.shareLink}")
                         viewModel.dismissSongMenu()
+                    },
+                    onMakeRingtone = if (viewModel.ringtones.available) {
+                        {
+                            viewModel.setPlayerExpanded(false)
+                            viewModel.openRingtoneEditor(song)
+                        }
+                    } else {
+                        null
                     },
                     onToggleFavorite = {
                         viewModel.toggleFavorite(song)

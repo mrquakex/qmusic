@@ -100,6 +100,9 @@ object SettingKeys {
     /** Which account the app uses: see [AccountMode]. */
     const val ACCOUNT_MODE = "account_mode"
 
+    /** The ringtones made in the app (a JSON list, newest first). */
+    const val RINGTONES = "ringtones_made"
+
     /** Spotify songs and the YouTube recordings found for them ("spotifyId=videoId;..."). */
     const val SPOTIFY_MATCHES = "spotify_matches"
 
