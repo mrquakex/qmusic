@@ -81,8 +81,14 @@ class SpotifyWebSession(private val context: Context) : SpotifySession {
         _signedIn.value = false
     }
 
-    private fun hasCookie(): Boolean =
-        runCatching { CookieManager.getInstance().getCookie("https://open.spotify.com")?.contains("sp_dc=") == true }.getOrDefault(false)
+    private fun hasCookie(): Boolean = runCatching {
+        val cm = CookieManager.getInstance()
+        listOfNotNull(
+            cm.getCookie("https://open.spotify.com"),
+            cm.getCookie("https://accounts.spotify.com"),
+            cm.getCookie("https://spotify.com"),
+        ).any { "sp_dc=" in it }
+    }.getOrDefault(false)
 
     /** Opens the web player out of sight and catches its token: (token, expiry in epoch ms), or null. */
     @SuppressLint("SetJavaScriptEnabled")
@@ -101,7 +107,9 @@ class SpotifyWebSession(private val context: Context) : SpotifySession {
             }
             web.settings.javaScriptEnabled = true
             web.settings.domStorageEnabled = true
+            web.settings.databaseEnabled = true
             web.settings.userAgentString = SPOTIFY_DESKTOP_AGENT
+            CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
             web.webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                     request ?: return null
@@ -138,8 +146,14 @@ class SpotifyWebSession(private val context: Context) : SpotifySession {
     private fun fetch(url: String, headers: Map<String, String>): String? {
         val connection = URL(url).openConnection() as HttpURLConnection
         return try {
-            headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
-            connection.setRequestProperty("Cookie", CookieManager.getInstance().getCookie(url).orEmpty())
+            headers.forEach { (key, value) ->
+                if (!key.equals("Accept-Encoding", ignoreCase = true)) {
+                    connection.setRequestProperty(key, value)
+                }
+            }
+            val cm = CookieManager.getInstance()
+            val cookie = cm.getCookie(url) ?: cm.getCookie("https://open.spotify.com") ?: ""
+            connection.setRequestProperty("Cookie", cookie)
             connection.setRequestProperty("User-Agent", SPOTIFY_DESKTOP_AGENT)
             connection.connectTimeout = 15_000
             connection.readTimeout = 15_000

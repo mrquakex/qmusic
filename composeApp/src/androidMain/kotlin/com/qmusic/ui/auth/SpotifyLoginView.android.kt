@@ -1,7 +1,11 @@
 package com.qmusic.ui.auth
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
+import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
@@ -29,7 +33,7 @@ import com.qmusic.ui.theme.DarkSurface
 import com.qmusic.ui.theme.QMusicIcons
 
 /**
- * Spotify's sign-in page in a web view. Once it lands on the web player with the session cookie (`sp_dc`), the
+ * Spotify's sign-in page in a web view. Once it sets the session cookie (`sp_dc`), the
  * account is signed in: the app then gets the web player's token the same way (see the app's Spotify session).
  */
 @SuppressLint("SetJavaScriptEnabled")
@@ -59,25 +63,67 @@ actual fun SpotifyLoginView(
                 }
             }
             AndroidView(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
                 factory = { context ->
                     WebView(context).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                        setBackgroundColor(android.graphics.Color.parseColor("#121212"))
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
+                        settings.databaseEnabled = true
+                        settings.useWideViewPort = true
+                        settings.loadWithOverviewMode = true
+                        settings.javaScriptCanOpenWindowsAutomatically = true
                         // The web player (and its token) only runs for a desktop browser; the phone page sends to the app store.
                         settings.userAgentString = SPOTIFY_DESKTOP_AGENT
                         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                         var done = false
+
+                        fun checkSignedIn(view: WebView?): Boolean {
+                            if (done) return true
+                            val cm = CookieManager.getInstance()
+                            val cookies = listOfNotNull(
+                                cm.getCookie("https://open.spotify.com"),
+                                cm.getCookie("https://accounts.spotify.com"),
+                                cm.getCookie("https://spotify.com"),
+                            ).joinToString("; ")
+                            if ("sp_dc=" in cookies) {
+                                done = true
+                                cm.flush()
+                                view?.stopLoading()
+                                onSignedIn()
+                                return true
+                            }
+                            return false
+                        }
+
+                        webChromeClient = WebChromeClient()
                         webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                if (checkSignedIn(view)) return true
+                                val scheme = request?.url?.scheme?.lowercase() ?: return false
+                                if (scheme != "https" && scheme != "http") return true
+                                return false
+                            }
+
+                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                super.onPageStarted(view, url, favicon)
+                                checkSignedIn(view)
+                            }
+
+                            override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                                super.doUpdateVisitedHistory(view, url, isReload)
+                                checkSignedIn(view)
+                            }
+
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
-                                if (done || url?.startsWith("https://open.spotify.com") != true) return
-                                val cookies = CookieManager.getInstance().getCookie("https://open.spotify.com").orEmpty()
-                                if ("sp_dc=" in cookies) {
-                                    done = true
-                                    CookieManager.getInstance().flush()
-                                    onSignedIn()
-                                }
+                                checkSignedIn(view)
                             }
                         }
                         loadUrl("https://accounts.spotify.com/login?continue=https%3A%2F%2Fopen.spotify.com%2F")

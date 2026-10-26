@@ -1,6 +1,7 @@
 package com.qmusic.ui.auth
 
 import android.annotation.SuppressLint
+import android.view.ViewGroup
 import com.qmusic.ui.theme.QMusicIcons
 import android.webkit.CookieManager
 import android.webkit.WebView
@@ -65,9 +66,15 @@ actual fun YouTubeLoginView(
             }
 
             AndroidView(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
                 factory = { context ->
                     WebView(context).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
                         settings.userAgentString =
