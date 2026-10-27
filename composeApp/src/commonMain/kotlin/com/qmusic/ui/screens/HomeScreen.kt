@@ -100,6 +100,7 @@ fun HomeScreen(
     onOpenExplore: (browseId: String, title: String) -> Unit,
     /** YouTube Music's Explore tiles (new releases, charts, moods); not with a Spotify account. */
     showExplore: Boolean = true,
+    currentTrack: SongItem? = null,
     onSeeAll: (HomeSection) -> Unit = {},
     onSearchClick: () -> Unit,
     onSignIn: () -> Unit,
@@ -113,7 +114,8 @@ fun HomeScreen(
         scrollToTop.collect { listState.animateScrollToItem(0) }
     }
 
-    val tint = rememberDominantColor(speedDial.firstOrNull()?.let { it.thumbnail ?: it.thumbnails.firstOrNull()?.url })
+    val tintSong = currentTrack ?: speedDial.firstOrNull() ?: ordered.firstOrNull()?.songs?.firstOrNull()
+    val tint = rememberDominantColor(tintSong?.let { it.thumbnail ?: it.thumbnails.firstOrNull()?.url })
     // Heights of the rows seen so far: the logo row is short, so "how far the page has moved" has to add up the
     // rows above the first visible one, not only that row's own offset (which made the colour vanish at once).
     val itemSizes = remember { HashMap<Int, Int>() }
@@ -249,6 +251,19 @@ fun HomeScreen(
 
             if (isOnline && chips.isNotEmpty()) {
                 item {
+                    val hasTint = animatedTint.alpha > 0.01f
+                    val chipContainer = if (hasTint) {
+                        androidx.compose.ui.graphics.lerp(Color.White, animatedTint.copy(alpha = 1f), 0.72f)
+                            .copy(alpha = 0.28f)
+                    } else {
+                        DarkSurfaceVariant
+                    }
+                    val chipBorder = if (hasTint) {
+                        androidx.compose.ui.graphics.lerp(Color.White, animatedTint.copy(alpha = 1f), 0.5f)
+                            .copy(alpha = 0.24f)
+                    } else {
+                        Color.White.copy(alpha = 0.10f)
+                    }
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -258,14 +273,19 @@ fun HomeScreen(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(if (selected) Color.White else DarkSurfaceVariant)
+                                    .background(if (selected) Color.White else chipContainer)
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (selected) Color.White else chipBorder,
+                                        shape = RoundedCornerShape(10.dp),
+                                    )
                                     .clickable { onChipClick(chip) }
                                     .padding(horizontal = 16.dp, vertical = 10.dp),
                             ) {
                                 Text(
                                     text = chip.text,
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = if (selected) Color.Black else MaterialTheme.colorScheme.onSurface,
+                                    color = if (selected) Color.Black else Color.White,
                                     maxLines = 1,
                                 )
                             }

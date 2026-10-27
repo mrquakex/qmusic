@@ -484,6 +484,7 @@ fun QMusicApp(
                             onSeeAll = { section -> section.moreBrowseId?.let { viewModel.openExplore(it, section.moreParams, section.title) } },
                             onOpenExplore = { id, title -> viewModel.openExplore(id, null, title) },
                             showExplore = accountMode != com.qmusic.settings.AccountMode.SPOTIFY,
+                            currentTrack = currentTrack,
                             onCollectionClick = { viewModel.openCollection(it) },
                             onSearchClick = { viewModel.selectTab(ScreenTab.SEARCH) },
                             onSignIn = {

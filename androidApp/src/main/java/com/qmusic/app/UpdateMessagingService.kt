@@ -24,7 +24,8 @@ class UpdateMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         if (message.data["type"] != "update") return
         val version = message.data["version"] ?: return
-        UpdatePush.notify(applicationContext, version)
+        val summary = message.data["body"] ?: message.notification?.body
+        UpdatePush.notify(applicationContext, version, summary)
     }
 }
 
@@ -40,7 +41,7 @@ object UpdatePush {
         FirebaseMessaging.getInstance().subscribeToTopic(TOPIC)
     }
 
-    fun notify(context: Context, version: String) {
+    fun notify(context: Context, version: String, summary: String? = null) {
         val prefs = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE)
         if (!prefs.getBoolean("update_notifications", true)) return
         if (!isNewer(version, installedVersion(context))) return
@@ -62,12 +63,14 @@ object UpdatePush {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val bodyText = summary?.takeIf { it.isNotBlank() } ?: context.getString(R.string.update_ready_text)
         manager.notify(
             NOTIFICATION_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
                 .setContentTitle(context.getString(R.string.update_ready_title, version))
-                .setContentText(context.getString(R.string.update_ready_text))
+                .setContentText(bodyText)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(bodyText))
                 .setAutoCancel(true)
                 .setContentIntent(open)
                 .build(),
