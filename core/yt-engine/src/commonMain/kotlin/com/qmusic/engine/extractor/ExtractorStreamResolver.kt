@@ -17,6 +17,9 @@ interface ExtractorStreamResolver {
 
     /** The video's preview frames (for the seek bar), or null when YouTube has none. */
     suspend fun previewFrames(videoId: String): com.qmusic.engine.models.PreviewFrames? = null
+
+    /** Drops any cached stream extraction for [videoId] so the next lookup fetches fresh URLs. */
+    fun invalidate(videoId: String) {}
 }
 
 /** Null on platforms that ship no extractor. */

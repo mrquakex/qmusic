@@ -166,6 +166,7 @@ class CrossfadeExoPlayerAdapter(
     init {
         // Every song handed to the player is known by id, so a Spotify song can be matched to a stream later.
         scope.launch { _queue.collect { com.qmusic.player.SongDirectory.remember(it) } }
+        forwardingPlayer.onTrackEnded = { advanceWhenTrackEnds() }
         forwardingPlayer.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
                 _isPlaying.value = playing
@@ -194,6 +195,46 @@ class CrossfadeExoPlayerAdapter(
         startProgressTicker()
     }
 
+    private val transitionWakeLock: android.os.PowerManager.WakeLock? by lazy {
+        runCatching {
+            val pm = context.applicationContext.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            pm?.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "QMusic:TransitionWakeLock")?.apply {
+                setReferenceCounted(false)
+            }
+        }.getOrNull()
+    }
+
+    private val transitionWifiLock: android.net.wifi.WifiManager.WifiLock? by lazy {
+        runCatching {
+            val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+            @Suppress("DEPRECATION")
+            val mode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+            } else {
+                android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            }
+            wm?.createWifiLock(mode, "QMusic:TransitionWifiLock")?.apply {
+                setReferenceCounted(false)
+            }
+        }.getOrNull()
+    }
+
+    private fun acquireTransitionLocks() {
+        runCatching { transitionWakeLock?.acquire(TRANSITION_LOCK_TIMEOUT_MS) }
+        runCatching { if (transitionWifiLock?.isHeld == false) transitionWifiLock?.acquire() }
+    }
+
+    private fun releaseTransitionLocks() {
+        runCatching { if (transitionWakeLock?.isHeld == true) transitionWakeLock?.release() }
+        runCatching { if (transitionWifiLock?.isHeld == true) transitionWifiLock?.release() }
+    }
+
+    private fun ensureServiceRunning() {
+        runCatching {
+            context.startService(android.content.Intent(context, com.qmusic.player.service.SimpleMediaService::class.java))
+        }
+    }
+
     private fun createPlayer(
         crossfadeProcessor: CrossfadeFilterAudioProcessor,
         equalizerProcessor: EqualizerAudioProcessor,
@@ -213,8 +254,15 @@ class CrossfadeExoPlayerAdapter(
         val mediaSourceFactory = DefaultMediaSourceFactory(context)
             .setDataSourceFactory(dataSourceFactory)
 
+        val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+            .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+            .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build()
+
         return ExoPlayer.Builder(context, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setAudioAttributes(audioAttributes, /* handleAudioFocus = */ false)
+            .setWakeMode(androidx.media3.common.C.WAKE_MODE_NETWORK)
             .setHandleAudioBecomingNoisy(true)
             // Start as soon as ~0.75 s of sound is in (default 2.5 s): songs begin noticeably sooner, and the
             // buffer still fills up to its usual size behind the playback.
@@ -231,18 +279,25 @@ class CrossfadeExoPlayerAdapter(
             .build()
     }
 
-    /** The song already retried once with a fresh address; a second failure is reported instead of looping. */
+    /** Retries per song with a freshly resolved address before reporting failure. */
     private var retriedFor: String? = null
+    private var retryCount: Int = 0
 
     /**
      * A saved address can stop working (it ran out, or the connection changed): look the song up again and
-     * continue from where it stopped, once.
+     * continue from where it stopped.
      */
     private fun recoverFromStaleStream() {
         val song = _currentTrack.value ?: return
-        if (offline?.isDownloaded(song.id) == true || retriedFor == song.id) return
-        retriedFor = song.id
+        if (offline?.isDownloaded(song.id) == true) return
+        if (retriedFor != song.id) {
+            retriedFor = song.id
+            retryCount = 0
+        }
+        if (retryCount >= MAX_STREAM_RETRIES) return
+        retryCount++
         synchronized(urlCache) { urlCache.remove(song.id) }
+        warmed.remove(song.id)
         onStaleUrl?.invoke(song.id)
         val position = activePlayer.currentPosition.coerceAtLeast(0L)
         playAt(_queueIndex.value, startPositionMs = position)
@@ -662,9 +717,16 @@ class CrossfadeExoPlayerAdapter(
             onRemotePlayAt?.invoke(index)
             return
         }
-        if (song.id != retriedFor) retriedFor = null // a new song gets its own retry
+        if (song.id != retriedFor) {
+            retriedFor = null // a new song gets its own retry
+            retryCount = 0
+        }
         if (startPositionMs == 0L) pendingStart = null
         resolveJob?.cancel()
+        ensureServiceRunning()
+        acquireTransitionLocks()
+        // Keep the media session out of STATE_ENDED while the next song's stream URL is being resolved.
+        forwardingPlayer.suppressPlaybackEnded = true
         advancedFromIndex = -1
         _queueIndex.value = index
         _currentTrack.value = song
@@ -688,7 +750,12 @@ class CrossfadeExoPlayerAdapter(
             if (source == null) {
                 _playbackError.value = "Could not play \"${song.title}\""
                 // Only the automatic advance moves on by itself; a song the user picked is never swapped for another.
-                if (!manual && skipsLeft > 0 && index + 1 < _queue.value.size) playAt(index + 1, skipsLeft - 1, fadeMs = fadeMs)
+                if (!manual && skipsLeft > 0 && index + 1 < _queue.value.size) {
+                    playAt(index + 1, skipsLeft - 1, fadeMs = fadeMs)
+                } else {
+                    forwardingPlayer.suppressPlaybackEnded = false
+                    releaseTransitionLocks()
+                }
                 return@launch
             }
             playStream(song, source, startPositionMs, fadeMs)
@@ -798,7 +865,7 @@ class CrossfadeExoPlayerAdapter(
                 activePlayer.play()
             }
 
-            else -> next()
+            else -> if (hasUpcoming()) next() else releaseTransitionLocks()
         }
     }
 
@@ -964,6 +1031,7 @@ class CrossfadeExoPlayerAdapter(
         }
         activePlayer.pause()
         _isPlaying.value = false
+        releaseTransitionLocks()
     }
 
     override fun resume() {
@@ -972,6 +1040,7 @@ class CrossfadeExoPlayerAdapter(
             _isPlaying.value = true
             return
         }
+        ensureServiceRunning()
         // A queue restored from the last session is loaded only now, at the moment it had reached.
         if (activePlayer.mediaItemCount == 0 && _queueIndex.value in _queue.value.indices) {
             val start = pendingStart ?: 0L
@@ -1010,6 +1079,7 @@ class CrossfadeExoPlayerAdapter(
     fun release() {
         crossfadeJob?.cancel()
         tickerJob?.cancel()
+        releaseTransitionLocks()
         playerA.release()
         playerB.release()
     }
@@ -1019,6 +1089,8 @@ class CrossfadeExoPlayerAdapter(
         const val START_BUFFER_MS = 750
         const val REBUFFER_MS = 1_500
         const val MAX_AUTO_SKIPS = 3
+        const val MAX_STREAM_RETRIES = 2
+        const val TRANSITION_LOCK_TIMEOUT_MS = 30_000L
         const val RESTART_THRESHOLD_MS = 3_000L
         const val END_LEAD_MS = 300L
         const val HANDOFF_TIMEOUT_MS = 10_000L

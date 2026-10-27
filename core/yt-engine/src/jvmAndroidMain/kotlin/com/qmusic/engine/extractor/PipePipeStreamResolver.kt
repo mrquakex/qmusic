@@ -33,6 +33,10 @@ private object PipePipeStreamResolver : ExtractorStreamResolver {
     /** Extracting is the slow part (a few requests), and audio and picture both need it: share the result briefly. */
     private val infoCache = LinkedHashMap<String, Pair<Long, StreamInfo>>()
 
+    override fun invalidate(videoId: String) {
+        synchronized(infoCache) { infoCache.remove(videoId) }
+    }
+
     private fun info(videoId: String): StreamInfo {
         val now = System.currentTimeMillis()
         synchronized(infoCache) { infoCache[videoId] }?.let { (at, cached) -> if (now - at < INFO_TTL_MS) return cached }

@@ -466,6 +466,10 @@ class YouTube(
     /**
      * Resolve playable audio stream URLs with deciphered signatures and deobfuscated n-parameters.
      */
+    fun invalidateStreamCache(videoId: String) {
+        extractor?.invalidate(videoId)
+    }
+
     suspend fun resolveStreamUrls(videoId: String): Result<List<AudioStream>> {
         // The extractor tracks YouTube's PO-token and cipher changes; the Innertube path below is the fallback.
         val extracted = extractor?.let { resolver ->

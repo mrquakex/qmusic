@@ -43,13 +43,19 @@ object PlayerHolder {
             ).also { offlineDownloader = it }
         }
 
+    private val matchedIds = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     fun get(context: Context): CrossfadeExoPlayerAdapter =
         instance ?: synchronized(this) {
             instance ?: store(context).let { CrossfadeExoPlayerAdapter(
                 context = context.applicationContext,
                 streamUrlResolver = { id -> resolveAudioUrl(id, audioQuality) },
                 loudnessResolver = { id -> youtubeIdFor(id)?.let { youTube.loudnessDb(it).getOrNull() } },
-                onStaleUrl = { id -> urlStore?.remove(id) },
+                onStaleUrl = { id ->
+                    urlStore?.remove(id)
+                    youTube.invalidateStreamCache(id)
+                    matchedIds[id]?.let { youTube.invalidateStreamCache(it) }
+                },
                 offline = downloads(context),
                 videoResolver = ::resolveVideo,
             ) }.also { instance = it }
@@ -78,7 +84,7 @@ object PlayerHolder {
     suspend fun youtubeIdFor(id: String): String? {
         if (!SpotifyIds.isSpotify(id)) return id
         val song = SongDirectory.get(id) ?: instance?.queue?.value?.firstOrNull { it.id == id } ?: return null
-        return spotifyMatcher?.invoke(song)
+        return spotifyMatcher?.invoke(song)?.also { matchedIds[id] = it }
     }
 
     /** The quality streamed right now; set from the settings and the kind of connection. */

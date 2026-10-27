@@ -27,6 +27,10 @@ class DelegatingForwardingPlayer(initialPlayer: Player) : ForwardingPlayer(initi
     @Volatile
     var suppressPlaybackEnded: Boolean = false
 
+    /** Invoked synchronously when the underlying player reaches [Player.STATE_ENDED] before listeners are told. */
+    @Volatile
+    var onTrackEnded: (() -> Unit)? = null
+
     /** Source of the queue: each ExoPlayer holds one item, so next/previous are routed to the app's own queue. */
     interface QueueNavigator {
         fun hasNext(): Boolean
@@ -54,8 +58,11 @@ class DelegatingForwardingPlayer(initialPlayer: Player) : ForwardingPlayer(initi
     override fun addListener(listener: Player.Listener) {
         val wrappedListener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED && !suppressPlaybackEnded) {
+                    onTrackEnded?.invoke()
+                }
                 if (suppressPlaybackEnded && playbackState == Player.STATE_ENDED) {
-                    // Suppress STATE_ENDED so notification does not drop
+                    // Suppress STATE_ENDED so notification and foreground state do not drop during track transitions
                     return
                 }
                 listener.onPlaybackStateChanged(playbackState)
@@ -108,6 +115,9 @@ class DelegatingForwardingPlayer(initialPlayer: Player) : ForwardingPlayer(initi
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (!isPlaying && suppressPlaybackEnded && currentDelegate.playbackState == Player.STATE_ENDED) {
+                    return
+                }
                 listener.onIsPlayingChanged(isPlaying)
             }
 
@@ -300,5 +310,12 @@ class DelegatingForwardingPlayer(initialPlayer: Player) : ForwardingPlayer(initi
             return Player.STATE_READY
         }
         return state
+    }
+
+    override fun isPlaying(): Boolean {
+        if (suppressPlaybackEnded && super.getPlaybackState() == Player.STATE_ENDED) {
+            return true
+        }
+        return super.isPlaying()
     }
 }
