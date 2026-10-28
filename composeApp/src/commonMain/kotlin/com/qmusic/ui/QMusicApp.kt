@@ -355,8 +355,8 @@ fun QMusicApp(
             // and interpolated, so it grows and slides continuously with the finger instead of cross-fading.
             val coverSettled = { sheetProgress.value >= COVER_HANDOVER }
 
-            // Tablets and other wide screens: the tabs go down the left side instead of along the bottom.
-            val wide = maxWidth >= com.qmusic.ui.components.RAIL_MIN_WIDTH
+            // Keep the bottom navigation bar identical across mobile and desktop.
+            val wide = false
             val selectTab: (Int) -> Unit = { index ->
                 // Tapping a tab leaves any open page, as in every music app.
                 viewModel.clearRoutes()
@@ -805,8 +805,7 @@ fun QMusicApp(
                             lyricsTranslation = lyricsTranslation,
                             onToggleTranslation = { viewModel.toggleLyricsTranslation() },
                             seekPreview = seekPreview,
-                            landscape = this@BoxWithConstraints.maxWidth > this@BoxWithConstraints.maxHeight &&
-                                this@BoxWithConstraints.maxWidth >= com.qmusic.ui.components.LANDSCAPE_MIN_WIDTH,
+                            landscape = false,
                             lyricsTools = com.qmusic.ui.components.LyricsTools(
                                 offsetMs = lyricsOffset,
                                 onShift = { viewModel.shiftLyrics(it) },

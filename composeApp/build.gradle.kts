@@ -74,7 +74,27 @@ kotlin {
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.currentOs)
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:${libs.versions.coroutines.get()}")
+                implementation(libs.okhttp)
+                implementation("org.openjfx:javafx-base:21.0.5:win")
+                implementation("org.openjfx:javafx-graphics:21.0.5:win")
+                implementation("org.openjfx:javafx-media:21.0.5:win")
             }
+        }
+    }
+}
+
+compose.desktop {
+    application {
+        mainClass = "com.qmusic.MainKt"
+        nativeDistributions {
+            includeAllModules = true
+            targetFormats(
+                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi,
+                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe,
+            )
+            packageName = "QMusic"
+            packageVersion = "2.0.3"
         }
     }
 }
