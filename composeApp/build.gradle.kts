@@ -95,6 +95,12 @@ compose.desktop {
             )
             packageName = "QMusic"
             packageVersion = "2.0.3"
+            windows {
+                shortcut = true
+                menu = true
+                perUserInstall = true
+                dirChooser = true
+            }
         }
     }
 }
