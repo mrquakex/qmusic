@@ -90,6 +90,7 @@ fun main(args: Array<String>) = application {
             val youTubeAuth = YouTubeAuth(cookieString = sessionStore.load())
             val spotifyImporter = SpotifyImporter.create()
             val spotifyLinker = SpotifyLinker(youTube, spotifyImporter, settings)
+            val spotifySession = DesktopSpotifySession(baseDir)
             val playerController = DesktopPlayerController(
                 youTube = youTube,
                 spotifyMatcher = { song -> spotifyLinker.youtubeId(song) },
@@ -105,6 +106,7 @@ fun main(args: Array<String>) = application {
                 onSessionChanged = sessionStore::save,
                 downloads = playerController.downloads,
                 settings = settings,
+                spotifySession = spotifySession,
                 spotifyLinker = spotifyLinker,
             )
         }
