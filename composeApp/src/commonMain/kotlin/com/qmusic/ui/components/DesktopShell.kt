@@ -2,12 +2,15 @@ package com.qmusic.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,15 +55,20 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -101,8 +109,24 @@ private val SIDEBAR_EXPANDED_WIDTH = 240.dp
 private val SIDEBAR_COLLAPSED_WIDTH = 72.dp
 
 /**
+ * Custom dark window chrome callbacks provided on Desktop so the top navigation bar itself
+ * acts as the draggable title bar and renders dark Minimize / Maximize / Close buttons
+ * instead of the white OS Win32 title bar.
+ */
+data class DesktopWindowActions(
+    val isMaximized: Boolean = false,
+    val onMinimize: () -> Unit = {},
+    val onToggleMaximize: () -> Unit = {},
+    val onClose: () -> Unit = {},
+    val dragArea: @Composable (@Composable () -> Unit) -> Unit = { content -> content() },
+)
+
+val LocalDesktopWindowActions = staticCompositionLocalOf<DesktopWindowActions?> { null }
+
+/**
  * YouTube Music Desktop top navigation bar (`ytmusic-nav-bar`):
- * Left hamburger toggle + QMusic logo, centered search box, right quick action icons.
+ * Left hamburger toggle + QMusic logo, centered search box, right quick action icons,
+ * and integrated dark window caption controls (`—`, `□`, `×`).
  */
 @Composable
 fun DesktopTopNavBar(
@@ -120,6 +144,7 @@ fun DesktopTopNavBar(
     modifier: Modifier = Modifier,
 ) {
     val s = LocalStrings.current
+    val windowActions = LocalDesktopWindowActions.current
     var searchFocused by remember { mutableStateOf(false) }
     val barTint by animateColorAsState(
         targetValue = dominantTint?.let { lerp(DarkBackground, it.copy(alpha = 1f), 0.18f) } ?: DarkBackground,
@@ -127,152 +152,289 @@ fun DesktopTopNavBar(
         label = "topBarTint",
     )
 
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(DESKTOP_TOP_BAR_HEIGHT)
-            .background(barTint)
-            .border(width = 1.dp, color = Color.White.copy(alpha = 0.07f))
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // Left section matching sidebar width
+    val barContent: @Composable () -> Unit = {
         Row(
-            modifier = Modifier.width(224.dp),
+            modifier = modifier
+                .fillMaxWidth()
+                .height(DESKTOP_TOP_BAR_HEIGHT)
+                .background(barTint)
+                .border(width = 1.dp, color = Color.White.copy(alpha = 0.07f))
+                .padding(start = 16.dp, end = if (windowActions != null) 6.dp else 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(
-                onClick = onToggleSidebar,
-                modifier = Modifier.size(40.dp),
-            ) {
-                Icon(
-                    imageVector = QMusicIcons.Menu,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            QMusicHeaderLogo(
-                modifier = Modifier.clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onHomeClick,
-                ),
-            )
-        }
-
-        // Centered Search Box (`ytmusic-search-box`)
-        Box(
-            modifier = Modifier.weight(1f),
-            contentAlignment = Alignment.CenterStart,
-        ) {
-            val boxBg = if (searchFocused) DarkSurface else Color.White.copy(alpha = 0.11f)
-            val boxBorder = if (searchFocused) Color.White.copy(alpha = 0.24f) else Color.White.copy(alpha = 0.08f)
+            // Left section matching sidebar width
             Row(
-                modifier = Modifier
-                    .widthIn(max = 480.dp)
-                    .fillMaxWidth()
-                    .height(40.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(boxBg)
-                    .border(1.dp, boxBorder, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 14.dp),
+                modifier = Modifier.width(224.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    imageVector = QMusicIcons.Search,
-                    contentDescription = s.tabSearch,
-                    tint = Color.White.copy(alpha = 0.7f),
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(12.dp))
-                Box(
-                    modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.CenterStart,
+                IconButton(
+                    onClick = onToggleSidebar,
+                    modifier = Modifier.size(40.dp),
                 ) {
-                    if (searchQuery.isEmpty()) {
-                        Text(
-                            text = s.searchFieldPlaceholder,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.52f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    BasicTextField(
-                        value = searchQuery,
-                        onValueChange = onSearchQueryChange,
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White),
-                        cursorBrush = SolidColor(Color.White),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { onSearchSubmit() }),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .onFocusChanged { state -> searchFocused = state.isFocused },
+                    Icon(
+                        imageVector = QMusicIcons.Menu,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp),
                     )
                 }
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(
-                        onClick = { onSearchQueryChange("") },
-                        modifier = Modifier.size(28.dp),
+                Spacer(Modifier.width(12.dp))
+                QMusicHeaderLogo(
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onHomeClick,
+                    ),
+                )
+            }
+
+            // Centered Search Box (`ytmusic-search-box`)
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                val boxBg = if (searchFocused) DarkSurface else Color.White.copy(alpha = 0.11f)
+                val boxBorder = if (searchFocused) Color.White.copy(alpha = 0.24f) else Color.White.copy(alpha = 0.08f)
+                Row(
+                    modifier = Modifier
+                        .widthIn(max = 480.dp)
+                        .fillMaxWidth()
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(boxBg)
+                        .border(1.dp, boxBorder, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = QMusicIcons.Search,
+                        contentDescription = s.tabSearch,
+                        tint = Color.White.copy(alpha = 0.7f),
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.CenterStart,
                     ) {
-                        Icon(
-                            imageVector = QMusicIcons.Close,
-                            contentDescription = s.clearSearch,
-                            tint = Color.White.copy(alpha = 0.7f),
-                            modifier = Modifier.size(16.dp),
+                        if (searchQuery.isEmpty()) {
+                            Text(
+                                text = s.searchFieldPlaceholder,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.White.copy(alpha = 0.52f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = onSearchQueryChange,
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White),
+                            cursorBrush = SolidColor(Color.White),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = { onSearchSubmit() }),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged { state -> searchFocused = state.isFocused },
                         )
                     }
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(
+                            onClick = { onSearchQueryChange("") },
+                            modifier = Modifier.size(28.dp),
+                        ) {
+                            Icon(
+                                imageVector = QMusicIcons.Close,
+                                contentDescription = s.clearSearch,
+                                tint = Color.White.copy(alpha = 0.7f),
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Right Action Icons + Dark Window Controls
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                CastButton(modifier = Modifier.size(40.dp))
+                IconButton(onClick = onOpenStats, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = QMusicIcons.Stats,
+                        contentDescription = s.statsTitle,
+                        tint = Color.White.copy(alpha = 0.85f),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                IconButton(onClick = onOpenEqualizer, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = QMusicIcons.Tune,
+                        contentDescription = s.equalizerTitle,
+                        tint = Color.White.copy(alpha = 0.85f),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                IconButton(onClick = onOpenSettings, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = QMusicIcons.Settings,
+                        contentDescription = s.tabSettings,
+                        tint = Color.White.copy(alpha = 0.85f),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(if (isLoggedIn) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.12f))
+                        .clickable(onClick = onAccountClick),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = QMusicIcons.Account,
+                        contentDescription = s.sectionAccount,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+
+                if (windowActions != null) {
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(22.dp)
+                            .background(Color.White.copy(alpha = 0.12f)),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    DesktopWindowCaptionButtons(windowActions)
+                }
+            }
+        }
+    }
+
+    if (windowActions != null) {
+        windowActions.dragArea(barContent)
+    } else {
+        barContent()
+    }
+}
+
+@Composable
+fun DesktopWindowCaptionButtons(
+    actions: DesktopWindowActions,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        // Minimize (—)
+        val minInteraction = remember { MutableInteractionSource() }
+        val minHovered by minInteraction.collectIsHoveredAsState()
+        Box(
+            modifier = Modifier
+                .size(width = 40.dp, height = 36.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(if (minHovered) Color.White.copy(alpha = 0.10f) else Color.Transparent)
+                .hoverable(minInteraction)
+                .clickable(
+                    interactionSource = minInteraction,
+                    indication = null,
+                    onClick = actions.onMinimize,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(modifier = Modifier.size(12.dp)) {
+                drawLine(
+                    color = Color.White.copy(alpha = 0.88f),
+                    start = Offset(1f, size.height / 2f),
+                    end = Offset(size.width - 1f, size.height / 2f),
+                    strokeWidth = 1.6.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
+
+        // Maximize / Restore (□)
+        val maxInteraction = remember { MutableInteractionSource() }
+        val maxHovered by maxInteraction.collectIsHoveredAsState()
+        Box(
+            modifier = Modifier
+                .size(width = 40.dp, height = 36.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(if (maxHovered) Color.White.copy(alpha = 0.10f) else Color.Transparent)
+                .hoverable(maxInteraction)
+                .clickable(
+                    interactionSource = maxInteraction,
+                    indication = null,
+                    onClick = actions.onToggleMaximize,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(modifier = Modifier.size(11.dp)) {
+                val stroke = 1.5.dp.toPx()
+                if (actions.isMaximized) {
+                    val box = size.width * 0.78f
+                    drawRect(
+                        color = Color.White.copy(alpha = 0.88f),
+                        topLeft = Offset(size.width - box, 0f),
+                        size = Size(box, box),
+                        style = Stroke(width = stroke),
+                    )
+                    drawRect(
+                        color = Color.White.copy(alpha = 0.88f),
+                        topLeft = Offset(0f, size.height - box),
+                        size = Size(box, box),
+                        style = Stroke(width = stroke),
+                    )
+                } else {
+                    drawRect(
+                        color = Color.White.copy(alpha = 0.88f),
+                        topLeft = Offset(0.5f, 0.5f),
+                        size = Size(size.width - 1f, size.height - 1f),
+                        style = Stroke(width = stroke),
+                    )
                 }
             }
         }
 
-        // Right Action Icons
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        // Close (×) with Windows 11 red hover (#E81123)
+        val closeInteraction = remember { MutableInteractionSource() }
+        val closeHovered by closeInteraction.collectIsHoveredAsState()
+        Box(
+            modifier = Modifier
+                .size(width = 40.dp, height = 36.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(if (closeHovered) Color(0xFFE81123) else Color.Transparent)
+                .hoverable(closeInteraction)
+                .clickable(
+                    interactionSource = closeInteraction,
+                    indication = null,
+                    onClick = actions.onClose,
+                ),
+            contentAlignment = Alignment.Center,
         ) {
-            CastButton(modifier = Modifier.size(40.dp))
-            IconButton(onClick = onOpenStats, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    imageVector = QMusicIcons.Stats,
-                    contentDescription = s.statsTitle,
-                    tint = Color.White.copy(alpha = 0.85f),
-                    modifier = Modifier.size(20.dp),
+            Canvas(modifier = Modifier.size(11.dp)) {
+                val stroke = 1.6.dp.toPx()
+                drawLine(
+                    color = Color.White.copy(alpha = if (closeHovered) 1f else 0.88f),
+                    start = Offset(1f, 1f),
+                    end = Offset(size.width - 1f, size.height - 1f),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
                 )
-            }
-            IconButton(onClick = onOpenEqualizer, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    imageVector = QMusicIcons.Tune,
-                    contentDescription = s.equalizerTitle,
-                    tint = Color.White.copy(alpha = 0.85f),
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-            IconButton(onClick = onOpenSettings, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    imageVector = QMusicIcons.Settings,
-                    contentDescription = s.tabSettings,
-                    tint = Color.White.copy(alpha = 0.85f),
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-            Spacer(Modifier.width(4.dp))
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(if (isLoggedIn) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.12f))
-                    .clickable(onClick = onAccountClick),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = QMusicIcons.Account,
-                    contentDescription = s.sectionAccount,
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp),
+                drawLine(
+                    color = Color.White.copy(alpha = if (closeHovered) 1f else 0.88f),
+                    start = Offset(size.width - 1f, 1f),
+                    end = Offset(1f, size.height - 1f),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
                 )
             }
         }

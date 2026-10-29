@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -128,6 +129,7 @@ fun QMusicApp(
             // First launch: which account brings the music (the sign-in pages open over it).
             if (accountMode == com.qmusic.settings.AccountMode.UNSET) {
                 val ytLogin by viewModel.showYouTubeLoginDialog.collectAsState()
+                val desktopActions = com.qmusic.ui.components.LocalDesktopWindowActions.current
                 PlatformBackHandler(enabled = ytLogin) { viewModel.setShowYouTubeLoginDialog(false) }
                 PlatformBackHandler(enabled = showSpotifyLoginDialog) { viewModel.setShowSpotifyLoginDialog(false) }
                 Box(modifier = modifier.fillMaxSize()) {
@@ -147,6 +149,19 @@ fun QMusicApp(
                             onSignedIn = { viewModel.onSpotifySignedIn() },
                             onDismiss = { viewModel.setShowSpotifyLoginDialog(false) },
                         )
+                    }
+                    if (desktopActions != null) {
+                        Box(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
+                            desktopActions.dragArea {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 8.dp),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    com.qmusic.ui.components.DesktopWindowCaptionButtons(desktopActions)
+                                }
+                            }
+                        }
                     }
                 }
                 return@CompositionLocalProvider
