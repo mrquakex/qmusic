@@ -115,6 +115,9 @@ class DesktopPlayerController(
     private var normalizeVolume: Boolean = true
 
     @Volatile
+    private var userVolume: Double = 1.0
+
+    @Volatile
     private var currentTrackGain: Double = 1.0
 
     private val equalizerGains = FloatArray(10) { 0f }
@@ -380,6 +383,12 @@ class DesktopPlayerController(
         runFx { activePlayer?.volume = vol }
     }
 
+    override fun setVolume(volume: Float) {
+        userVolume = volume.coerceIn(0f, 1f).toDouble()
+        val vol = effectiveTargetVolume()
+        runFx { activePlayer?.volume = vol }
+    }
+
     override fun setEqualizerBand(bandIndex: Int, gainDb: Float) {
         if (bandIndex in equalizerGains.indices) {
             equalizerGains[bandIndex] = gainDb.coerceIn(-24f, 12f)
@@ -597,8 +606,10 @@ class DesktopPlayerController(
         }
     }
 
-    private fun effectiveTargetVolume(): Double =
-        if (normalizeVolume) currentTrackGain.coerceIn(0.25, 1.0) else 1.0
+    private fun effectiveTargetVolume(): Double {
+        val base = if (normalizeVolume) currentTrackGain.coerceIn(0.25, 1.0) else 1.0
+        return (base * userVolume).coerceIn(0.0, 1.0)
+    }
 
     private fun applyEqualizer(player: MediaPlayer) {
         runCatching {

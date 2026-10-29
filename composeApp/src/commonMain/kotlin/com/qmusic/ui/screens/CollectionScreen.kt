@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -302,6 +303,7 @@ private fun Header(
                 px = 800,
                 contentDescription = item.title,
                 modifier = Modifier
+                    .widthIn(max = 240.dp)
                     .fillMaxWidth(0.68f)
                     .aspectRatio(1f)
                     .clip(RoundedCornerShape(12.dp))

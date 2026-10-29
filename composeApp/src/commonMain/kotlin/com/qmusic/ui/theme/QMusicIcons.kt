@@ -237,4 +237,14 @@ object QMusicIcons {
     )
 
     val VideoPlay: ImageVector = stroked("VideoPlay", "M4 5h16v14H4z", "M10 9l5 3-5 3z")
+
+    val Menu: ImageVector = stroked("Menu", "M4 6h16M4 12h16M4 18h16")
+
+    val ChevronUp: ImageVector = stroked("ChevronUp", "M6 15l6-6 6 6")
+
+    val VolumeMute: ImageVector = stroked(
+        "VolumeMute",
+        "M11 5L6 9H2v6h4l5 4V5z",
+        "M22 9l-6 6M16 9l6 6",
+    )
 }

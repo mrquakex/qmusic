@@ -167,6 +167,7 @@ fun QMusicApp(
         // Only the players read this: it ticks every 250 ms and must not recompose the whole app.
         val playbackPositionState = viewModel.playbackPosition.collectAsState()
         val bufferedPositionState = viewModel.bufferedPosition.collectAsState()
+        val volume by viewModel.volume.collectAsState()
         val share = rememberShare()
         val playbackSpeed by viewModel.playbackSpeed.collectAsState()
         val lyricsTranslation by viewModel.lyricsTranslation.collectAsState()
@@ -355,482 +356,680 @@ fun QMusicApp(
             // and interpolated, so it grows and slides continuously with the finger instead of cross-fading.
             val coverSettled = { sheetProgress.value >= COVER_HANDOVER }
 
-            // Keep the bottom navigation bar identical across mobile and desktop.
-            val wide = false
+            val wide = maxWidth >= com.qmusic.ui.components.DESKTOP_MIN_WIDTH
             val selectTab: (Int) -> Unit = { index ->
                 // Tapping a tab leaves any open page, as in every music app.
                 viewModel.clearRoutes()
                 viewModel.onTabClicked(navTabs[index].tab)
             }
-            Row(modifier = Modifier.fillMaxSize()) {
-                if (wide) {
-                    com.qmusic.ui.components.QMusicNavigationRail(
-                        items = navTabs.map { NavBarItem(it.title, it.icon) },
-                        selectedIndex = navTabs.indexOfFirst { it.tab == currentTab },
-                        onSelect = selectTab,
+
+            val screenBody: @Composable () -> Unit = {
+                when (currentTab) {
+                    ScreenTab.HOME -> HomeScreen(
+                        sections = homeSections,
+                        isOnline = isOnline,
+                        downloads = downloadedSongs,
+                        onOpenDownloads = { viewModel.openDownloads() },
+                        speedDial = speedDial,
+                        onRandomSong = { viewModel.playRandomSong() },
+                        chips = homeChips,
+                        selectedChip = selectedHomeChip,
+                        isLoading = isLoadingHome,
+                        isLoadingMore = isLoadingMoreHome,
+                        error = homeError,
+                        isLoggedIn = isLoggedInYouTube || (accountMode == com.qmusic.settings.AccountMode.SPOTIFY && spotifySignedIn),
+                        scrollToTop = viewModel.homeScrollToTop,
+                        onSongClick = { song, context -> viewModel.play(song, context) },
+                        onSongMore = { viewModel.showSongMenu(it) },
+                        onPlayAll = { viewModel.playAll(it) },
+                        onChipClick = { viewModel.selectHomeChip(it) },
+                        onSeeAll = { section -> section.moreBrowseId?.let { viewModel.openExplore(it, section.moreParams, section.title) } },
+                        onOpenExplore = { id, title -> viewModel.openExplore(id, null, title) },
+                        showExplore = accountMode != com.qmusic.settings.AccountMode.SPOTIFY,
+                        currentTrack = currentTrack,
+                        onCollectionClick = { viewModel.openCollection(it) },
+                        onSearchClick = { viewModel.selectTab(ScreenTab.SEARCH) },
+                        onSignIn = {
+                            when (accountMode) {
+                                com.qmusic.settings.AccountMode.SPOTIFY -> viewModel.setShowSpotifyLoginDialog(true)
+                                com.qmusic.settings.AccountMode.YOUTUBE -> viewModel.setShowYouTubeLoginDialog(true)
+                                else -> viewModel.changeAccount()
+                            }
+                        },
+                        onRefresh = { viewModel.loadHomeContent() },
+                        desktop = wide,
+                    )
+
+                    ScreenTab.FOR_YOU -> ForYouScreen(
+                        samples = samples,
+                        isFavorite = { it in favoriteIds },
+                        onShown = { viewModel.prepareSamples() },
+                        onSettle = { viewModel.playSample(it) },
+                        onNearEnd = { viewModel.loadMoreSamples() },
+                        onToggleFavorite = { viewModel.toggleFavorite(it) },
+                        onAddToPlaylist = { viewModel.showPlaylistPicker(it) },
+                        onShare = { song ->
+                            share("${song.title} - ${song.artists.joinToString { it.name }}\n${song.shareLink}")
+                        },
+                        onPlayFull = { viewModel.playSampleFully(it) },
+                    )
+
+                    ScreenTab.SEARCH -> SearchScreen(
+                        query = searchQuery,
+                        filter = selectedFilter,
+                        page = searchPage,
+                        isSearching = isSearching,
+                        error = searchError,
+                        showResults = showSearchResults,
+                        suggestions = searchSuggestions,
+                        history = searchHistory,
+                        downloadedIds = downloadedIds,
+                        onQueryChange = { viewModel.setSearchQuery(it) },
+                        onBack = { viewModel.clearSearch() },
+                        onLoadMoreResults = { viewModel.loadMoreSearchResults() },
+                        recentSongs = history,
+                        suggestedSearches = suggestedSearches,
+                        onOpenExplore = { id, title -> viewModel.openExplore(id, null, title) },
+                        showExplore = accountMode != com.qmusic.settings.AccountMode.SPOTIFY,
+                        onVoiceSearch = voiceSearch,
+                        onRecognizeSong = songRecognition,
+                        onFilterChange = { viewModel.setSearchFilter(it) },
+                        onSearch = { viewModel.performSearch() },
+                        onSuggestionClick = { viewModel.selectSuggestion(it) },
+                        onHistoryClick = { viewModel.performSearch(it) },
+                        onHistoryDelete = { viewModel.deleteSearchHistoryEntry(it) },
+                        onClearHistory = { viewModel.clearSearchHistory() },
+                        onSongClick = { song, context -> viewModel.play(song, context) },
+                        onSongMore = { viewModel.showSongMenu(it) },
+                        onCollectionClick = { viewModel.openCollection(it) },
+                        onArtistClick = { viewModel.openArtist(it.browseId, it.name) },
+                        onToggleFavorite = { viewModel.toggleFavorite(it) },
+                        isFavoritePredicate = { it in favoriteIds },
+                    )
+
+                    ScreenTab.LIBRARY -> LibraryScreen(
+                        favorites = favorites,
+                        history = history,
+                        playlists = playlists,
+                        downloads = downloadedSongs,
+                        downloadedIds = downloadedIds,
+                        downloadProgress = downloadProgress,
+                        downloadedBytes = downloadedBytes,
+                        autoDownload = autoDownload,
+                        wifiOnly = wifiOnly,
+                        onAutoDownloadChange = { viewModel.setAutoDownloadLiked(it) },
+                        onWifiOnlyChange = { viewModel.setWifiOnly(it) },
+                        onDownloadAll = { viewModel.downloadAll(it) },
+                        onCancelDownloads = { viewModel.cancelDownloads() },
+                        onRemoveAllDownloads = { viewModel.removeAllDownloads() },
+                        onPlayAll = { viewModel.playAll(it) },
+                        onShuffle = { viewModel.shuffleAll(it) },
+                        onSongMore = { viewModel.showSongMenu(it) },
+                        onOpenPlaylist = { viewModel.openLocalPlaylist(it.id, it.name) },
+                        onSongClick = { song, context -> viewModel.play(song, context) },
+                        onToggleFavorite = { viewModel.toggleFavorite(it) },
+                        isFavoritePredicate = { it in favoriteIds },
+                        onCreatePlaylist = { viewModel.createPlaylist(it) },
+                        startTab = libraryStartTab,
+                        ytPlaylists = ytPlaylists,
+                        ytAlbums = ytAlbums,
+                        ytArtists = ytArtists,
+                        onOpenCollection = { viewModel.openCollection(it) },
+                        onOpenStats = { viewModel.openStats() },
+                    )
+
+                    ScreenTab.SETTINGS -> SettingsScreen(
+                        isLoggedInYouTube = isLoggedInYouTube,
+                        crossfadeSeconds = crossfadeDuration,
+                        isCheckingUpdate = isCheckingUpdate,
+                        updateInfo = updateInfo,
+                        updateMessage = updateMessage,
+                        currentAppVersion = viewModel.currentAppVersion,
+                        onLoginYouTubeClick = { viewModel.setShowYouTubeLoginDialog(true) },
+                        onLogoutYouTubeClick = { viewModel.logoutYouTube() },
+                        onCrossfadeChange = { viewModel.setCrossfadeDuration(it) },
+                        onOpenEqualizerClick = { viewModel.setShowEqualizerDialog(true) },
+                        onCheckUpdateClick = { viewModel.checkForUpdates() },
+                        crashReport = crashReport,
+                        onBackupExport = backupFiles?.save,
+                        onBackupImport = backupFiles?.open,
+                        onShareCrashReport = { crashReport?.let(share) },
+                        onClearCrashReport = { viewModel.clearCrashReport() },
+                        videoByDefault = videoByDefault,
+                        onVideoByDefaultChange = { viewModel.setVideoByDefault(it) },
+                        autoDownload = autoDownload,
+                        onAutoDownloadChange = { viewModel.setAutoDownloadLiked(it) },
+                        wifiOnly = wifiOnly,
+                        onWifiOnlyChange = { viewModel.setWifiOnly(it) },
+                        downloadedBytes = downloadedBytes,
+                        onRemoveAllDownloads = { viewModel.removeAllDownloads() },
+                        autoCheckUpdates = autoCheckUpdates,
+                        updateNotifications = updateNotifications,
+                        autoUpdate = autoUpdate,
+                        audioQualityWifi = audioQualityWifi,
+                        onAudioQualityWifiChange = { viewModel.setAudioQualityWifi(it) },
+                        audioQualityMobile = audioQualityMobile,
+                        onAudioQualityMobileChange = { viewModel.setAudioQualityMobile(it) },
+                        normalizeVolume = normalizeVolume,
+                        onNormalizeVolumeChange = { viewModel.setNormalizeVolume(it) },
+                        onAutoUpdateChange = { viewModel.setAutoUpdate(it) },
+                        onUpdateNotificationsChange = { viewModel.setUpdateNotifications(it) },
+                        onAutoCheckUpdatesChange = { viewModel.setAutoCheckUpdates(it) },
+                        updateProgress = updateProgress,
+                        onInstallUpdate = { viewModel.installUpdate() },
+                        onOpenSpotifyImport = { viewModel.setShowSpotifyImportDialog(true) },
+                        language = language,
+                        onLanguageChange = { viewModel.setLanguage(it) },
+                        more = moreSettings,
+                        onMore = { viewModel.onMoreSettings(it) },
+                        accountMode = accountMode,
+                        spotifySignedIn = spotifySignedIn,
+                        onSpotifySignIn = { viewModel.setShowSpotifyLoginDialog(true) },
+                        onSpotifySignOut = { viewModel.signOutSpotify() },
+                        onChangeAccount = { viewModel.changeAccount() },
+                        onOpenRingtones = if (viewModel.ringtones.available) ({ viewModel.openRingtones() }) else null,
                     )
                 }
-                Scaffold(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-                containerColor = DarkBackground,
-                topBar = {
-                    // Pages bring their own header (and sit under the status bar), so the logo bar steps aside;
-                    // Home draws its own, over its tinted top.
-                    if (topRoute == null && currentTab != ScreenTab.HOME && currentTab != ScreenTab.SEARCH && currentTab != ScreenTab.FOR_YOU) {
-                        Column(modifier = Modifier.fillMaxWidth().background(DarkBackground.copy(alpha = 0.92f))) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .statusBarsPadding()
-                                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                QMusicHeaderLogo(modifier = Modifier.weight(1f))
+
+                // Full-screen pages stacked above the tabs: the last one is on screen
+                when (val route = topRoute) {
+                    is Route.Collection -> CollectionScreen(
+                        item = route.item,
+                        page = collectionPage,
+                        isLoading = isLoadingCollection,
+                        error = collectionError,
+                        onBack = { viewModel.popRoute() },
+                        onSongClick = { song, context -> viewModel.play(song, context, gapless = route.item.kind == CollectionKind.ALBUM) },
+                        onPlayAll = { viewModel.playAll(it, gapless = route.item.kind == CollectionKind.ALBUM) },
+                        onShuffle = { viewModel.shuffleAll(it) },
+                        onSongMore = { viewModel.showSongMenu(it) },
+                        downloadedIds = downloadedIds,
+                        onToggleFavorite = { viewModel.toggleFavorite(it) },
+                        isFavoritePredicate = { it in favoriteIds },
+                        onDownloadAll = { viewModel.downloadAll(it) },
+                        onShare = {
+                            share("${collectionPage?.title ?: route.item.title}\nhttps://music.youtube.com/browse/${route.item.browseId}")
+                        },
+                        onMove = { from, to -> viewModel.moveInYouTubePlaylist(route.item, from, to) },
+                        onDeletePlaylist = { viewModel.deleteYouTubePlaylist(route.item) },
+                    )
+
+                    is Route.Artist -> ArtistScreen(
+                        name = route.name,
+                        page = artistPage,
+                        isLoading = isLoadingArtist,
+                        error = artistError,
+                        downloadedIds = downloadedIds,
+                        onBack = { viewModel.popRoute() },
+                        onPlayAll = { viewModel.playAll(it) },
+                        onShuffle = { viewModel.shuffleAll(it) },
+                        onSongClick = { song, context -> viewModel.play(song, context) },
+                        onSongMore = { viewModel.showSongMenu(it) },
+                        onCollectionClick = { viewModel.openCollection(it) },
+                        onToggleFavorite = { viewModel.toggleFavorite(it) },
+                        isFavoritePredicate = { it in favoriteIds },
+                        onToggleSubscribe = { viewModel.toggleArtistSubscription() },
+                        onStartRadio = { viewModel.startRadio(it) },
+                        onShare = { page ->
+                            share("${page.name}\nhttps://music.youtube.com/channel/${page.channelId ?: route.browseId}")
+                        },
+                        onSeeAll = { section -> section.moreBrowseId?.let { viewModel.openExplore(it, section.moreParams, section.title) } },
+                    )
+
+                    is Route.RingtoneEditor -> com.qmusic.ui.screens.RingtoneEditorScreen(
+                        studio = viewModel.ringtones,
+                        onBack = { viewModel.popRoute() },
+                        onOpenList = { viewModel.openRingtones() },
+                    )
+
+                    Route.Ringtones -> com.qmusic.ui.screens.RingtonesScreen(
+                        studio = viewModel.ringtones,
+                        onBack = { viewModel.popRoute() },
+                    )
+
+                    Route.Stats -> StatsScreen(
+                        stats = listeningStats,
+                        period = statsPeriod,
+                        onPeriodChange = { viewModel.loadStats(it) },
+                        onBack = { viewModel.popRoute() },
+                        onShare = share,
+                        onSongClick = { song, context -> viewModel.play(song, context) },
+                    )
+
+                    is Route.Explore -> ExploreScreen(
+                        title = route.title,
+                        page = explorePage,
+                        isLoading = isLoadingExplore,
+                        error = exploreError,
+                        onBack = { viewModel.popRoute() },
+                        onSongClick = { song, context -> viewModel.play(song, context) },
+                        onSongMore = { viewModel.showSongMenu(it) },
+                        onPlayAll = { viewModel.playAll(it) },
+                        onCollectionClick = { viewModel.openCollection(it) },
+                        onMoodClick = { viewModel.openExplore(it.browseId, it.params, it.text) },
+                        onSeeAll = { section -> section.moreBrowseId?.let { viewModel.openExplore(it, section.moreParams, section.title) } },
+                    )
+
+                    is Route.LocalPlaylist -> {
+                        val songs by remember(route.id) { viewModel.getPlaylistSongs(route.id) }
+                            .collectAsState(initial = emptyList<SongItem>())
+                        LocalPlaylistScreen(
+                            name = route.name,
+                            songs = songs,
+                            downloadedIds = downloadedIds,
+                            onBack = { viewModel.popRoute() },
+                            onPlayAll = { viewModel.playAll(it) },
+                            onShuffle = { viewModel.shuffleAll(it) },
+                            onSongClick = { song, context -> viewModel.play(song, context) },
+                            onSongMore = { viewModel.showSongMenu(it) },
+                            onRemoveSong = { viewModel.removeSongFromPlaylist(route.id, it) },
+                            onRename = { viewModel.renamePlaylist(route.id, it) },
+                            onDelete = { viewModel.deletePlaylist(route.id) },
+                            onToggleFavorite = { viewModel.toggleFavorite(it) },
+                            isFavoritePredicate = { it in favoriteIds },
+                            onReorder = { viewModel.reorderLocalPlaylist(route.id, it) },
+                        )
+                    }
+
+                    null -> Unit
+                }
+            }
+
+            if (wide) {
+                var sidebarExpanded by remember { mutableStateOf(true) }
+                val desktopDominant = rememberDominantColor(
+                    currentTrack?.let { it.thumbnail ?: it.thumbnails.lastOrNull()?.url }
+                )
+
+                Column(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
+                    com.qmusic.ui.components.DesktopTopNavBar(
+                        searchQuery = searchQuery,
+                        onSearchQueryChange = { q ->
+                            viewModel.setSearchQuery(q)
+                            if (currentTab != ScreenTab.SEARCH) {
+                                viewModel.clearRoutes()
+                                viewModel.selectTab(ScreenTab.SEARCH)
+                            }
+                            if (isPlayerExpanded) viewModel.setPlayerExpanded(false)
+                        },
+                        onSearchSubmit = {
+                            if (currentTab != ScreenTab.SEARCH) {
+                                viewModel.clearRoutes()
+                                viewModel.selectTab(ScreenTab.SEARCH)
+                            }
+                            if (isPlayerExpanded) viewModel.setPlayerExpanded(false)
+                            viewModel.performSearch()
+                        },
+                        onToggleSidebar = { sidebarExpanded = !sidebarExpanded },
+                        onHomeClick = {
+                            viewModel.setPlayerExpanded(false)
+                            viewModel.clearRoutes()
+                            viewModel.onTabClicked(ScreenTab.HOME)
+                        },
+                        onOpenEqualizer = { viewModel.setShowEqualizerDialog(true) },
+                        onOpenStats = {
+                            viewModel.setPlayerExpanded(false)
+                            viewModel.openStats()
+                        },
+                        onOpenSettings = {
+                            viewModel.setPlayerExpanded(false)
+                            viewModel.clearRoutes()
+                            viewModel.selectTab(ScreenTab.SETTINGS)
+                        },
+                        isLoggedIn = isLoggedInYouTube || (accountMode == com.qmusic.settings.AccountMode.SPOTIFY && spotifySignedIn),
+                        onAccountClick = {
+                            when (accountMode) {
+                                com.qmusic.settings.AccountMode.SPOTIFY -> viewModel.setShowSpotifyLoginDialog(true)
+                                com.qmusic.settings.AccountMode.YOUTUBE -> viewModel.setShowYouTubeLoginDialog(true)
+                                else -> viewModel.changeAccount()
+                            }
+                        },
+                        dominantTint = desktopDominant,
+                    )
+
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        Row(modifier = Modifier.fillMaxSize()) {
+                            com.qmusic.ui.components.DesktopLeftSidebar(
+                                expanded = sidebarExpanded,
+                                currentTab = currentTab,
+                                onSelectTab = { tab ->
+                                    viewModel.setPlayerExpanded(false)
+                                    viewModel.clearRoutes()
+                                    viewModel.onTabClicked(tab)
+                                },
+                                favoritesCount = favorites.size,
+                                downloadsCount = downloadedSongs.size,
+                                playlists = playlists,
+                                ytPlaylists = ytPlaylists,
+                                onOpenFavorites = {
+                                    viewModel.setPlayerExpanded(false)
+                                    viewModel.clearRoutes()
+                                    viewModel.selectTab(ScreenTab.LIBRARY)
+                                },
+                                onOpenDownloads = {
+                                    viewModel.setPlayerExpanded(false)
+                                    viewModel.openDownloads()
+                                },
+                                onOpenLocalPlaylist = {
+                                    viewModel.setPlayerExpanded(false)
+                                    viewModel.openLocalPlaylist(it.id, it.name)
+                                },
+                                onOpenCollection = {
+                                    viewModel.setPlayerExpanded(false)
+                                    viewModel.openCollection(it)
+                                },
+                                onCreatePlaylist = { viewModel.createPlaylist(it) },
+                                dominantTint = desktopDominant,
+                            )
+
+                            Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                                screenBody()
+                            }
+                        }
+
+                        // Toast / error banner
+                        Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+                            message?.let { text ->
+                                Text(
+                                    text = text,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(BgSurface)
+                                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                                )
+                            }
+                            playbackError?.let { err ->
+                                Text(
+                                    text = err,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(BgSurface)
+                                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                                )
+                            }
+                        }
+
+                        // Desktop Watch Page (`ytmusic-player-page`) slides between Top Bar and Bottom Player Bar
+                        if (sheetVisible) {
+                            currentTrack?.let { track ->
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .offset { IntOffset(0, ((1f - sheetProgress.value) * sheetHeightPx).roundToInt()) },
+                                ) {
+                                    com.qmusic.ui.components.DesktopWatchPage(
+                                        track = track,
+                                        isPlaying = isPlaying,
+                                        positionMs = { playbackPositionState.value },
+                                        durationMs = duration,
+                                        isDownloaded = track.id in downloadedIds,
+                                        downloadProgress = downloadProgress[track.id],
+                                        sleepTimer = sleepTimer,
+                                        queue = queue,
+                                        queueIndex = queueIndex,
+                                        lyrics = lyricsState,
+                                        videoMode = videoMode,
+                                        videoPreferred = videoPreferred,
+                                        onSetVideoPreferred = { viewModel.setVideoPreferred(it) },
+                                        onSeekTo = { viewModel.seekTo(it) },
+                                        onToggleDownload = {
+                                            if (track.id in downloadedIds) viewModel.removeDownload(track) else viewModel.download(track)
+                                        },
+                                        onSetSleepTimer = { viewModel.setSleepTimer(it) },
+                                        onSleepAtEndOfTrack = { viewModel.setSleepAtEndOfTrack() },
+                                        onOpenEqualizer = { viewModel.setShowEqualizerDialog(true) },
+                                        onQueueItemClick = { viewModel.skipToQueueIndex(it) },
+                                        onQueueItemRemove = { viewModel.removeFromQueue(it) },
+                                        onSaveQueue = { viewModel.saveQueueAsPlaylist(it) },
+                                        onClearQueue = { viewModel.clearQueue() },
+                                        onLoadLyrics = { viewModel.loadLyrics() },
+                                        related = related,
+                                        onLoadRelated = { viewModel.loadRelated() },
+                                        onRelatedSongClick = { song, context -> viewModel.play(song, context) },
+                                        onRelatedCollectionClick = {
+                                            viewModel.setPlayerExpanded(false)
+                                            viewModel.openCollection(it)
+                                        },
+                                        onRelatedSongMore = { viewModel.showSongMenu(it) },
+                                        playbackSpeed = playbackSpeed,
+                                        onCycleSpeed = { viewModel.cyclePlaybackSpeed() },
+                                        lyricsTranslation = lyricsTranslation,
+                                        onToggleTranslation = { viewModel.toggleLyricsTranslation() },
+                                    )
+                                }
                             }
                         }
                     }
-                },
-                bottomBar = {
-                    Column(
-                        modifier = Modifier.graphicsLayer { translationY = sheetProgress.value * size.height },
-                    ) {
-                        message?.let { text ->
-                            Text(
-                                text = text,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(BgSurface)
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                            )
-                        }
-                        playbackError?.let { message ->
-                            Text(
-                                text = message,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(BgSurface)
-                                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                            )
-                        }
 
-                        // Mini player and navigation bar share one surface, like YouTube Music
-                        if (currentTrack != null) {
-                            MiniPlayerBar(
-                                currentTrack = currentTrack,
-                                isPlaying = isPlaying,
-                                positionMs = { playbackPositionState.value },
-                                durationMs = duration,
-                                onTogglePlayPause = { viewModel.togglePlayPause() },
-                                onNext = { viewModel.next() },
-                                onPrevious = { viewModel.previous() },
-                                onClick = { viewModel.setPlayerExpanded(true) },
-                                onDragDelta = onSheetDrag,
-                                onDragStopped = onSheetDragStopped,
-                                coverAlpha = { if (sheetProgress.value > 0.001f) 0f else 1f },
-                                contentAlpha = { (1f - sheetProgress.value * 3f).coerceIn(0f, 1f) },
-                                onCoverPositioned = { rect -> if (sheetProgress.value < 0.001f) miniCover = rect },
-                            )
-                        }
-
-                        if (wide) {
-                            // The tabs are on the side rail; only the system bar's room is kept here.
-                            Spacer(Modifier.fillMaxWidth().navigationBarsPadding())
-                        } else {
-                            QMusicNavigationBar(
-                                items = navTabs.map { NavBarItem(it.title, it.icon) },
-                                selectedIndex = navTabs.indexOfFirst { it.tab == currentTab },
-                                onSelect = selectTab,
-                            )
-                        }
-                    }
-                },
-            ) { innerPadding ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        // Pages (artist, album, playlist) start at the very top: their pictures go under the
-                        // status bar and their own headers keep clear of it.
-                        .padding(
-                            if (topRoute == null && currentTab != ScreenTab.HOME && currentTab != ScreenTab.SEARCH && currentTab != ScreenTab.FOR_YOU) {
-                                innerPadding
-                            } else {
-                                PaddingValues(bottom = innerPadding.calculateBottomPadding())
-                            },
-                        ),
-                ) {
-                    when (currentTab) {
-                        ScreenTab.HOME -> HomeScreen(
-                            sections = homeSections,
-                            isOnline = isOnline,
-                            downloads = downloadedSongs,
-                            onOpenDownloads = { viewModel.openDownloads() },
-                            speedDial = speedDial,
-                            onRandomSong = { viewModel.playRandomSong() },
-                            chips = homeChips,
-                            selectedChip = selectedHomeChip,
-                            isLoading = isLoadingHome,
-                            isLoadingMore = isLoadingMoreHome,
-                            error = homeError,
-                            isLoggedIn = isLoggedInYouTube || (accountMode == com.qmusic.settings.AccountMode.SPOTIFY && spotifySignedIn),
-                            scrollToTop = viewModel.homeScrollToTop,
-                            onSongClick = { song, context -> viewModel.play(song, context) },
-                            onSongMore = { viewModel.showSongMenu(it) },
-                            onPlayAll = { viewModel.playAll(it) },
-                            onChipClick = { viewModel.selectHomeChip(it) },
-                            onSeeAll = { section -> section.moreBrowseId?.let { viewModel.openExplore(it, section.moreParams, section.title) } },
-                            onOpenExplore = { id, title -> viewModel.openExplore(id, null, title) },
-                            showExplore = accountMode != com.qmusic.settings.AccountMode.SPOTIFY,
-                            currentTrack = currentTrack,
-                            onCollectionClick = { viewModel.openCollection(it) },
-                            onSearchClick = { viewModel.selectTab(ScreenTab.SEARCH) },
-                            onSignIn = {
-                                when (accountMode) {
-                                    com.qmusic.settings.AccountMode.SPOTIFY -> viewModel.setShowSpotifyLoginDialog(true)
-                                    com.qmusic.settings.AccountMode.YOUTUBE -> viewModel.setShowYouTubeLoginDialog(true)
-                                    else -> viewModel.changeAccount()
-                                }
-                            },
-                            onRefresh = { viewModel.loadHomeContent() },
-                        )
-
-                        ScreenTab.FOR_YOU -> ForYouScreen(
-                            samples = samples,
-                            isFavorite = { it in favoriteIds },
-                            onShown = { viewModel.prepareSamples() },
-                            onSettle = { viewModel.playSample(it) },
-                            onNearEnd = { viewModel.loadMoreSamples() },
-                            onToggleFavorite = { viewModel.toggleFavorite(it) },
-                            onAddToPlaylist = { viewModel.showPlaylistPicker(it) },
-                            onShare = { song ->
-                                share("${song.title} - ${song.artists.joinToString { it.name }}\n${song.shareLink}")
-                            },
-                            onPlayFull = { viewModel.playSampleFully(it) },
-                        )
-
-                        ScreenTab.SEARCH -> SearchScreen(
-                            query = searchQuery,
-                            filter = selectedFilter,
-                            page = searchPage,
-                            isSearching = isSearching,
-                            error = searchError,
-                            showResults = showSearchResults,
-                            suggestions = searchSuggestions,
-                            history = searchHistory,
-                            downloadedIds = downloadedIds,
-                            onQueryChange = { viewModel.setSearchQuery(it) },
-                            onBack = { viewModel.clearSearch() },
-                            onLoadMoreResults = { viewModel.loadMoreSearchResults() },
-                            recentSongs = history,
-                            suggestedSearches = suggestedSearches,
-                            onOpenExplore = { id, title -> viewModel.openExplore(id, null, title) },
-                            showExplore = accountMode != com.qmusic.settings.AccountMode.SPOTIFY,
-                            onVoiceSearch = voiceSearch,
-                            onRecognizeSong = songRecognition,
-                            onFilterChange = { viewModel.setSearchFilter(it) },
-                            onSearch = { viewModel.performSearch() },
-                            onSuggestionClick = { viewModel.selectSuggestion(it) },
-                            onHistoryClick = { viewModel.performSearch(it) },
-                            onHistoryDelete = { viewModel.deleteSearchHistoryEntry(it) },
-                            onClearHistory = { viewModel.clearSearchHistory() },
-                            onSongClick = { song, context -> viewModel.play(song, context) },
-                            onSongMore = { viewModel.showSongMenu(it) },
-                            onCollectionClick = { viewModel.openCollection(it) },
-                            onArtistClick = { viewModel.openArtist(it.browseId, it.name) },
-                            onToggleFavorite = { viewModel.toggleFavorite(it) },
-                            isFavoritePredicate = { it in favoriteIds },
-                        )
-
-                        ScreenTab.LIBRARY -> LibraryScreen(
-                            favorites = favorites,
-                            history = history,
-                            playlists = playlists,
-                            downloads = downloadedSongs,
-                            downloadedIds = downloadedIds,
-                            downloadProgress = downloadProgress,
-                            downloadedBytes = downloadedBytes,
-                            autoDownload = autoDownload,
-                            wifiOnly = wifiOnly,
-                            onAutoDownloadChange = { viewModel.setAutoDownloadLiked(it) },
-                            onWifiOnlyChange = { viewModel.setWifiOnly(it) },
-                            onDownloadAll = { viewModel.downloadAll(it) },
-                            onCancelDownloads = { viewModel.cancelDownloads() },
-                            onRemoveAllDownloads = { viewModel.removeAllDownloads() },
-                            onPlayAll = { viewModel.playAll(it) },
-                            onShuffle = { viewModel.shuffleAll(it) },
-                            onSongMore = { viewModel.showSongMenu(it) },
-                            onOpenPlaylist = { viewModel.openLocalPlaylist(it.id, it.name) },
-                            onSongClick = { song, context -> viewModel.play(song, context) },
-                            onToggleFavorite = { viewModel.toggleFavorite(it) },
-                            isFavoritePredicate = { it in favoriteIds },
-                            onCreatePlaylist = { viewModel.createPlaylist(it) },
-                            startTab = libraryStartTab,
-                            ytPlaylists = ytPlaylists,
-                            ytAlbums = ytAlbums,
-                            ytArtists = ytArtists,
-                            onOpenCollection = { viewModel.openCollection(it) },
-                            onOpenStats = { viewModel.openStats() },
-                        )
-
-                        ScreenTab.SETTINGS -> SettingsScreen(
-                            isLoggedInYouTube = isLoggedInYouTube,
-                            crossfadeSeconds = crossfadeDuration,
-                            isCheckingUpdate = isCheckingUpdate,
-                            updateInfo = updateInfo,
-                            updateMessage = updateMessage,
-                            currentAppVersion = viewModel.currentAppVersion,
-                            onLoginYouTubeClick = { viewModel.setShowYouTubeLoginDialog(true) },
-                            onLogoutYouTubeClick = { viewModel.logoutYouTube() },
-                            onCrossfadeChange = { viewModel.setCrossfadeDuration(it) },
-                            onOpenEqualizerClick = { viewModel.setShowEqualizerDialog(true) },
-                            onCheckUpdateClick = { viewModel.checkForUpdates() },
-                            crashReport = crashReport,
-                            onBackupExport = backupFiles?.save,
-                            onBackupImport = backupFiles?.open,
-                            onShareCrashReport = { crashReport?.let(share) },
-                            onClearCrashReport = { viewModel.clearCrashReport() },
-                            videoByDefault = videoByDefault,
-                            onVideoByDefaultChange = { viewModel.setVideoByDefault(it) },
-                            autoDownload = autoDownload,
-                            onAutoDownloadChange = { viewModel.setAutoDownloadLiked(it) },
-                            wifiOnly = wifiOnly,
-                            onWifiOnlyChange = { viewModel.setWifiOnly(it) },
-                            downloadedBytes = downloadedBytes,
-                            onRemoveAllDownloads = { viewModel.removeAllDownloads() },
-                            autoCheckUpdates = autoCheckUpdates,
-                            updateNotifications = updateNotifications,
-                            autoUpdate = autoUpdate,
-                            audioQualityWifi = audioQualityWifi,
-                            onAudioQualityWifiChange = { viewModel.setAudioQualityWifi(it) },
-                            audioQualityMobile = audioQualityMobile,
-                            onAudioQualityMobileChange = { viewModel.setAudioQualityMobile(it) },
-                            normalizeVolume = normalizeVolume,
-                            onNormalizeVolumeChange = { viewModel.setNormalizeVolume(it) },
-                            onAutoUpdateChange = { viewModel.setAutoUpdate(it) },
-                            onUpdateNotificationsChange = { viewModel.setUpdateNotifications(it) },
-                            onAutoCheckUpdatesChange = { viewModel.setAutoCheckUpdates(it) },
-                            updateProgress = updateProgress,
-                            onInstallUpdate = { viewModel.installUpdate() },
-                            onOpenSpotifyImport = { viewModel.setShowSpotifyImportDialog(true) },
-                            language = language,
-                            onLanguageChange = { viewModel.setLanguage(it) },
-                            more = moreSettings,
-                            onMore = { viewModel.onMoreSettings(it) },
-                            accountMode = accountMode,
-                            spotifySignedIn = spotifySignedIn,
-                            onSpotifySignIn = { viewModel.setShowSpotifyLoginDialog(true) },
-                            onSpotifySignOut = { viewModel.signOutSpotify() },
-                            onChangeAccount = { viewModel.changeAccount() },
-                            onOpenRingtones = if (viewModel.ringtones.available) ({ viewModel.openRingtones() }) else null,
-                        )
-                    }
-
-                    // Full-screen pages stacked above the tabs: the last one is on screen
-                    when (val route = topRoute) {
-                        is Route.Collection -> CollectionScreen(
-                            item = route.item,
-                            page = collectionPage,
-                            isLoading = isLoadingCollection,
-                            error = collectionError,
-                            onBack = { viewModel.popRoute() },
-                            onSongClick = { song, context -> viewModel.play(song, context, gapless = route.item.kind == CollectionKind.ALBUM) },
-                            onPlayAll = { viewModel.playAll(it, gapless = route.item.kind == CollectionKind.ALBUM) },
-                            onShuffle = { viewModel.shuffleAll(it) },
-                            onSongMore = { viewModel.showSongMenu(it) },
-                            downloadedIds = downloadedIds,
-                            onToggleFavorite = { viewModel.toggleFavorite(it) },
-                            isFavoritePredicate = { it in favoriteIds },
-                            onDownloadAll = { viewModel.downloadAll(it) },
-                            onShare = {
-                                share("${collectionPage?.title ?: route.item.title}\nhttps://music.youtube.com/browse/${route.item.browseId}")
-                            },
-                            onMove = { from, to -> viewModel.moveInYouTubePlaylist(route.item, from, to) },
-                            onDeletePlaylist = { viewModel.deleteYouTubePlaylist(route.item) },
-                        )
-
-                        is Route.Artist -> ArtistScreen(
-                            name = route.name,
-                            page = artistPage,
-                            isLoading = isLoadingArtist,
-                            error = artistError,
-                            downloadedIds = downloadedIds,
-                            onBack = { viewModel.popRoute() },
-                            onPlayAll = { viewModel.playAll(it) },
-                            onShuffle = { viewModel.shuffleAll(it) },
-                            onSongClick = { song, context -> viewModel.play(song, context) },
-                            onSongMore = { viewModel.showSongMenu(it) },
-                            onCollectionClick = { viewModel.openCollection(it) },
-                            onToggleFavorite = { viewModel.toggleFavorite(it) },
-                            isFavoritePredicate = { it in favoriteIds },
-                            onToggleSubscribe = { viewModel.toggleArtistSubscription() },
-                            onStartRadio = { viewModel.startRadio(it) },
-                            onShare = { page ->
-                                share("${page.name}\nhttps://music.youtube.com/channel/${page.channelId ?: route.browseId}")
-                            },
-                            onSeeAll = { section -> section.moreBrowseId?.let { viewModel.openExplore(it, section.moreParams, section.title) } },
-                        )
-
-                        is Route.RingtoneEditor -> com.qmusic.ui.screens.RingtoneEditorScreen(
-                            studio = viewModel.ringtones,
-                            onBack = { viewModel.popRoute() },
-                            onOpenList = { viewModel.openRingtones() },
-                        )
-
-                        Route.Ringtones -> com.qmusic.ui.screens.RingtonesScreen(
-                            studio = viewModel.ringtones,
-                            onBack = { viewModel.popRoute() },
-                        )
-
-                        Route.Stats -> StatsScreen(
-                            stats = listeningStats,
-                            period = statsPeriod,
-                            onPeriodChange = { viewModel.loadStats(it) },
-                            onBack = { viewModel.popRoute() },
-                            onShare = share,
-                            onSongClick = { song, context -> viewModel.play(song, context) },
-                        )
-
-                        is Route.Explore -> ExploreScreen(
-                            title = route.title,
-                            page = explorePage,
-                            isLoading = isLoadingExplore,
-                            error = exploreError,
-                            onBack = { viewModel.popRoute() },
-                            onSongClick = { song, context -> viewModel.play(song, context) },
-                            onSongMore = { viewModel.showSongMenu(it) },
-                            onPlayAll = { viewModel.playAll(it) },
-                            onCollectionClick = { viewModel.openCollection(it) },
-                            onMoodClick = { viewModel.openExplore(it.browseId, it.params, it.text) },
-                            onSeeAll = { section -> section.moreBrowseId?.let { viewModel.openExplore(it, section.moreParams, section.title) } },
-                        )
-
-                        is Route.LocalPlaylist -> {
-                            val songs by remember(route.id) { viewModel.getPlaylistSongs(route.id) }
-                                .collectAsState(initial = emptyList<SongItem>())
-                            LocalPlaylistScreen(
-                                name = route.name,
-                                songs = songs,
-                                downloadedIds = downloadedIds,
-                                onBack = { viewModel.popRoute() },
-                                onPlayAll = { viewModel.playAll(it) },
-                                onShuffle = { viewModel.shuffleAll(it) },
-                                onSongClick = { song, context -> viewModel.play(song, context) },
-                                onSongMore = { viewModel.showSongMenu(it) },
-                                onRemoveSong = { viewModel.removeSongFromPlaylist(route.id, it) },
-                                onRename = { viewModel.renamePlaylist(route.id, it) },
-                                onDelete = { viewModel.deletePlaylist(route.id) },
-                                onToggleFavorite = { viewModel.toggleFavorite(it) },
-                                isFavoritePredicate = { it in favoriteIds },
-                                onReorder = { viewModel.reorderLocalPlaylist(route.id, it) },
-                            )
-                        }
-
-                        null -> Unit
-                    }
-                }
-            }
-            }
-
-
-            // Full-screen player: it rises with the drag, over everything including the bottom bar
-            if (sheetVisible) {
-                currentTrack?.let { track ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .offset { IntOffset(0, ((1f - sheetProgress.value) * sheetOriginPx()).roundToInt()) },
-                    ) {
-                        NowPlayingScreen(
-                            track = track,
+                    currentTrack?.let { track ->
+                        com.qmusic.ui.components.DesktopBottomPlayerBar(
+                            currentTrack = track,
                             isPlaying = isPlaying,
                             positionMs = { playbackPositionState.value },
                             bufferedMs = { bufferedPositionState.value },
                             durationMs = duration,
                             isFavorite = isCurrentTrackFavorite,
-                            isDownloaded = track.id in downloadedIds,
-                            downloadProgress = downloadProgress[track.id],
                             shuffle = shuffle,
-                            repeat = repeatMode,
-                            sleepTimer = sleepTimer,
-                            queue = queue,
-                            queueIndex = queueIndex,
-                            lyrics = lyricsState,
-                            crossfadeSeconds = crossfadeDuration,
-                            videoMode = videoMode,
-                            videoPreferred = videoPreferred,
-                            onSetVideoPreferred = { viewModel.setVideoPreferred(it) },
-                            onDismiss = { viewModel.setPlayerExpanded(false) },
-                            onSheetDrag = onSheetDrag,
-                            onSheetDragStopped = onSheetDragStopped,
+                            repeatMode = repeatMode,
+                            volume = volume,
+                            isExpanded = isPlayerExpanded,
+                            dominantTint = desktopDominant,
                             onTogglePlayPause = { viewModel.togglePlayPause() },
-                            onSeekTo = { viewModel.seekTo(it) },
                             onPrevious = { viewModel.previous() },
                             onNext = { viewModel.next() },
+                            onSeekTo = { viewModel.seekTo(it) },
                             onToggleFavorite = { viewModel.toggleFavorite(track) },
-                            onToggleShuffle = { viewModel.toggleShuffle() },
-                            onCycleRepeat = { viewModel.cycleRepeatMode() },
-                            onOpenEqualizer = { viewModel.setShowEqualizerDialog(true) },
-                            onMore = { viewModel.showSongMenu(track) },
                             onAddToPlaylist = { viewModel.showPlaylistPicker(track) },
+                            onMore = { viewModel.showSongMenu(track) },
                             onArtistClick = track.artists.firstOrNull { it.id != null }?.let { artist ->
                                 {
                                     viewModel.setPlayerExpanded(false)
                                     viewModel.openArtist(artist.id!!, artist.name)
                                 }
                             },
-                            onToggleDownload = {
-                                if (track.id in downloadedIds) viewModel.removeDownload(track) else viewModel.download(track)
-                            },
-                            onSetSleepTimer = { viewModel.setSleepTimer(it) },
-                            onSleepAtEndOfTrack = { viewModel.setSleepAtEndOfTrack() },
-                            onQueueItemClick = { viewModel.skipToQueueIndex(it) },
-                            onQueueItemRemove = { viewModel.removeFromQueue(it) },
-                            onQueueItemMove = { from, to -> viewModel.moveInQueue(from, to) },
-                            onLoadLyrics = { viewModel.loadLyrics() },
-                            related = related,
-                            onLoadRelated = { viewModel.loadRelated() },
-                            onRelatedSongClick = { song, context -> viewModel.play(song, context) },
-                            onRelatedCollectionClick = {
-                                viewModel.setPlayerExpanded(false)
-                                viewModel.openCollection(it)
-                            },
-                            onSaveQueue = { viewModel.saveQueueAsPlaylist(it) },
-                            onClearQueue = { viewModel.clearQueue() },
-                            onRelatedSongMore = { viewModel.showSongMenu(it) },
-                            playbackSpeed = playbackSpeed,
-                            onCycleSpeed = { viewModel.cyclePlaybackSpeed() },
-                            lyricsTranslation = lyricsTranslation,
-                            onToggleTranslation = { viewModel.toggleLyricsTranslation() },
-                            seekPreview = seekPreview,
-                            landscape = false,
-                            lyricsTools = com.qmusic.ui.components.LyricsTools(
-                                offsetMs = lyricsOffset,
-                                onShift = { viewModel.shiftLyrics(it) },
-                                matches = lyricsMatches,
-                                onSearch = { viewModel.searchLyrics(it) },
-                                onUse = { viewModel.useLyrics(it) },
-                                onCloseSearch = { viewModel.closeLyricsSearch() },
-                            ),
-                            contentAlpha = { ((sheetProgress.value - 0.55f) / 0.45f).coerceIn(0f, 1f) },
-                            coverAlpha = { if (coverSettled()) 1f else 0f },
-                            backdropAlpha = { (sheetProgress.value * 4f).coerceIn(0f, 1f) },
-                            onCoverPositioned = { rect ->
-                                // Measured inside the sliding sheet, so undo the slide to get the settled position.
-                                fullCover = rect.translate(0f, -(1f - sheetProgress.value) * sheetOriginPx())
-                            },
+                            onVolumeChange = { viewModel.setVolume(it) },
+                            onToggleShuffle = { viewModel.toggleShuffle() },
+                            onCycleRepeat = { viewModel.cycleRepeatMode() },
+                            onOpenEqualizer = { viewModel.setShowEqualizerDialog(true) },
+                            onToggleExpand = { viewModel.setPlayerExpanded(!isPlayerExpanded) },
                         )
                     }
                 }
+            } else {
+                Row(modifier = Modifier.fillMaxSize()) {
+                    Scaffold(
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        containerColor = DarkBackground,
+                        topBar = {
+                            // Pages bring their own header (and sit under the status bar), so the logo bar steps aside;
+                            // Home draws its own, over its tinted top.
+                            if (topRoute == null && currentTab != ScreenTab.HOME && currentTab != ScreenTab.SEARCH && currentTab != ScreenTab.FOR_YOU) {
+                                Column(modifier = Modifier.fillMaxWidth().background(DarkBackground.copy(alpha = 0.92f))) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .statusBarsPadding()
+                                            .padding(horizontal = 20.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        QMusicHeaderLogo(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        },
+                        bottomBar = {
+                            Column(
+                                modifier = Modifier.graphicsLayer { translationY = sheetProgress.value * size.height },
+                            ) {
+                                message?.let { text ->
+                                    Text(
+                                        text = text,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(BgSurface)
+                                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    )
+                                }
+                                playbackError?.let { message ->
+                                    Text(
+                                        text = message,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(BgSurface)
+                                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                                    )
+                                }
 
-                MorphingCover(
-                    model = currentTrack?.let { it.thumbnail ?: it.thumbnails.lastOrNull()?.url },
-                    from = { miniCover },
-                    to = { fullCover },
-                    progress = { sheetProgress.value },
-                )
+                                // Mini player and navigation bar share one surface, like YouTube Music
+                                if (currentTrack != null) {
+                                    MiniPlayerBar(
+                                        currentTrack = currentTrack,
+                                        isPlaying = isPlaying,
+                                        positionMs = { playbackPositionState.value },
+                                        durationMs = duration,
+                                        onTogglePlayPause = { viewModel.togglePlayPause() },
+                                        onNext = { viewModel.next() },
+                                        onPrevious = { viewModel.previous() },
+                                        onClick = { viewModel.setPlayerExpanded(true) },
+                                        onDragDelta = onSheetDrag,
+                                        onDragStopped = onSheetDragStopped,
+                                        coverAlpha = { if (sheetProgress.value > 0.001f) 0f else 1f },
+                                        contentAlpha = { (1f - sheetProgress.value * 3f).coerceIn(0f, 1f) },
+                                        onCoverPositioned = { rect -> if (sheetProgress.value < 0.001f) miniCover = rect },
+                                    )
+                                }
+
+                                QMusicNavigationBar(
+                                    items = navTabs.map { NavBarItem(it.title, it.icon) },
+                                    selectedIndex = navTabs.indexOfFirst { it.tab == currentTab },
+                                    onSelect = selectTab,
+                                )
+                            }
+                        },
+                    ) { innerPadding ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                // Pages (artist, album, playlist) start at the very top: their pictures go under the
+                                // status bar and their own headers keep clear of it.
+                                .padding(
+                                    if (topRoute == null && currentTab != ScreenTab.HOME && currentTab != ScreenTab.SEARCH && currentTab != ScreenTab.FOR_YOU) {
+                                        innerPadding
+                                    } else {
+                                        PaddingValues(bottom = innerPadding.calculateBottomPadding())
+                                    },
+                                ),
+                        ) {
+                            screenBody()
+                        }
+                    }
+                }
+
+                // Full-screen player: it rises with the drag, over everything including the bottom bar
+                if (sheetVisible) {
+                    currentTrack?.let { track ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .offset { IntOffset(0, ((1f - sheetProgress.value) * sheetOriginPx()).roundToInt()) },
+                        ) {
+                            NowPlayingScreen(
+                                track = track,
+                                isPlaying = isPlaying,
+                                positionMs = { playbackPositionState.value },
+                                bufferedMs = { bufferedPositionState.value },
+                                durationMs = duration,
+                                isFavorite = isCurrentTrackFavorite,
+                                isDownloaded = track.id in downloadedIds,
+                                downloadProgress = downloadProgress[track.id],
+                                shuffle = shuffle,
+                                repeat = repeatMode,
+                                sleepTimer = sleepTimer,
+                                queue = queue,
+                                queueIndex = queueIndex,
+                                lyrics = lyricsState,
+                                crossfadeSeconds = crossfadeDuration,
+                                videoMode = videoMode,
+                                videoPreferred = videoPreferred,
+                                onSetVideoPreferred = { viewModel.setVideoPreferred(it) },
+                                onDismiss = { viewModel.setPlayerExpanded(false) },
+                                onSheetDrag = onSheetDrag,
+                                onSheetDragStopped = onSheetDragStopped,
+                                onTogglePlayPause = { viewModel.togglePlayPause() },
+                                onSeekTo = { viewModel.seekTo(it) },
+                                onPrevious = { viewModel.previous() },
+                                onNext = { viewModel.next() },
+                                onToggleFavorite = { viewModel.toggleFavorite(track) },
+                                onToggleShuffle = { viewModel.toggleShuffle() },
+                                onCycleRepeat = { viewModel.cycleRepeatMode() },
+                                onOpenEqualizer = { viewModel.setShowEqualizerDialog(true) },
+                                onMore = { viewModel.showSongMenu(track) },
+                                onAddToPlaylist = { viewModel.showPlaylistPicker(track) },
+                                onArtistClick = track.artists.firstOrNull { it.id != null }?.let { artist ->
+                                    {
+                                        viewModel.setPlayerExpanded(false)
+                                        viewModel.openArtist(artist.id!!, artist.name)
+                                    }
+                                },
+                                onToggleDownload = {
+                                    if (track.id in downloadedIds) viewModel.removeDownload(track) else viewModel.download(track)
+                                },
+                                onSetSleepTimer = { viewModel.setSleepTimer(it) },
+                                onSleepAtEndOfTrack = { viewModel.setSleepAtEndOfTrack() },
+                                onQueueItemClick = { viewModel.skipToQueueIndex(it) },
+                                onQueueItemRemove = { viewModel.removeFromQueue(it) },
+                                onQueueItemMove = { from, to -> viewModel.moveInQueue(from, to) },
+                                onLoadLyrics = { viewModel.loadLyrics() },
+                                related = related,
+                                onLoadRelated = { viewModel.loadRelated() },
+                                onRelatedSongClick = { song, context -> viewModel.play(song, context) },
+                                onRelatedCollectionClick = {
+                                    viewModel.setPlayerExpanded(false)
+                                    viewModel.openCollection(it)
+                                },
+                                onSaveQueue = { viewModel.saveQueueAsPlaylist(it) },
+                                onClearQueue = { viewModel.clearQueue() },
+                                onRelatedSongMore = { viewModel.showSongMenu(it) },
+                                playbackSpeed = playbackSpeed,
+                                onCycleSpeed = { viewModel.cyclePlaybackSpeed() },
+                                lyricsTranslation = lyricsTranslation,
+                                onToggleTranslation = { viewModel.toggleLyricsTranslation() },
+                                seekPreview = seekPreview,
+                                landscape = false,
+                                lyricsTools = com.qmusic.ui.components.LyricsTools(
+                                    offsetMs = lyricsOffset,
+                                    onShift = { viewModel.shiftLyrics(it) },
+                                    matches = lyricsMatches,
+                                    onSearch = { viewModel.searchLyrics(it) },
+                                    onUse = { viewModel.useLyrics(it) },
+                                    onCloseSearch = { viewModel.closeLyricsSearch() },
+                                ),
+                                contentAlpha = { ((sheetProgress.value - 0.55f) / 0.45f).coerceIn(0f, 1f) },
+                                coverAlpha = { if (coverSettled()) 1f else 0f },
+                                backdropAlpha = { (sheetProgress.value * 4f).coerceIn(0f, 1f) },
+                                onCoverPositioned = { rect ->
+                                    // Measured inside the sliding sheet, so undo the slide to get the settled position.
+                                    fullCover = rect.translate(0f, -(1f - sheetProgress.value) * sheetOriginPx())
+                                },
+                            )
+                        }
+                    }
+
+                    MorphingCover(
+                        model = currentTrack?.let { it.thumbnail ?: it.thumbnails.lastOrNull()?.url },
+                        from = { miniCover },
+                        to = { fullCover },
+                        progress = { sheetProgress.value },
+                    )
+                }
             }
 
             // The "more" sheet of any song

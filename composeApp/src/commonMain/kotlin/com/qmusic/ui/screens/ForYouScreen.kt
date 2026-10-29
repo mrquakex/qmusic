@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -131,6 +132,7 @@ private fun SamplePage(
             modifier = Modifier
                 .align(Alignment.Center)
                 .padding(horizontal = 40.dp)
+                .widthIn(max = 360.dp)
                 .fillMaxWidth()
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(16.dp))

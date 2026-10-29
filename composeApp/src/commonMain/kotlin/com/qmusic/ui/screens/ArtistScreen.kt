@@ -100,7 +100,7 @@ fun ArtistScreen(
             .fillMaxSize()
             .background(DarkBackground),
     ) {
-        val heroHeight = maxWidth * HERO_RATIO
+        val heroHeight = (maxWidth * HERO_RATIO).coerceAtMost(320.dp)
         val heroPx = with(LocalDensity.current) { heroHeight.toPx() }
         // How far the photo has scrolled away (0 at rest, the photo's height once it is gone).
         val scrolled by remember {

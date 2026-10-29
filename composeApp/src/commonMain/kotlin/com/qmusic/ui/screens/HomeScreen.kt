@@ -54,7 +54,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
@@ -101,6 +103,7 @@ fun HomeScreen(
     /** YouTube Music's Explore tiles (new releases, charts, moods); not with a Spotify account. */
     showExplore: Boolean = true,
     currentTrack: SongItem? = null,
+    desktop: Boolean = false,
     onSeeAll: (HomeSection) -> Unit = {},
     onSearchClick: () -> Unit,
     onSignIn: () -> Unit,
@@ -110,6 +113,7 @@ fun HomeScreen(
     val s = LocalStrings.current
     val listState = rememberLazyListState()
     val ordered = remember(sections) { sections.sortedBy(::shelfRank) }
+    val horizontalPad = if (desktop) 36.dp else 16.dp
     LaunchedEffect(scrollToTop) {
         scrollToTop.collect { listState.animateScrollToItem(0) }
     }
@@ -150,23 +154,25 @@ fun HomeScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
-            contentPadding = PaddingValues(top = 16.dp, bottom = 120.dp),
+            verticalArrangement = Arrangement.spacedBy(if (desktop) 32.dp else 22.dp),
+            contentPadding = PaddingValues(top = if (desktop) 20.dp else 16.dp, bottom = 120.dp),
         ) {
-            // The logo, as YouTube Music has it: on the tinted top, scrolling away with the page
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(start = 20.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    QMusicHeaderLogo(modifier = Modifier.weight(1f))
-                    // As on YouTube Music: cast and search sit at the right of the logo
-                    com.qmusic.ui.CastButton(modifier = Modifier.size(48.dp))
-                    IconButton(onClick = onSearchClick) {
-                        Icon(QMusicIcons.Search, contentDescription = LocalStrings.current.tabSearch, tint = Color.White)
+            // The logo, as YouTube Music has it on mobile: on the tinted top, scrolling away with the page
+            if (!desktop) {
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(start = 20.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        QMusicHeaderLogo(modifier = Modifier.weight(1f))
+                        // As on YouTube Music: cast and search sit at the right of the logo
+                        com.qmusic.ui.CastButton(modifier = Modifier.size(48.dp))
+                        IconButton(onClick = onSearchClick) {
+                            Icon(QMusicIcons.Search, contentDescription = LocalStrings.current.tabSearch, tint = Color.White)
+                        }
                     }
                 }
             }
@@ -265,22 +271,22 @@ fun HomeScreen(
                         Color.White.copy(alpha = 0.10f)
                     }
                     LazyRow(
-                        contentPadding = PaddingValues(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(horizontal = horizontalPad),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         items(chips) { chip ->
                             val selected = chip.params == selectedChip
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .clip(RoundedCornerShape(8.dp))
                                     .background(if (selected) Color.White else chipContainer)
                                     .border(
                                         width = 1.dp,
                                         color = if (selected) Color.White else chipBorder,
-                                        shape = RoundedCornerShape(10.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                     )
                                     .clickable { onChipClick(chip) }
-                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                    .padding(horizontal = 14.dp, vertical = 8.dp),
                             ) {
                                 Text(
                                     text = chip.text,
@@ -298,14 +304,15 @@ fun HomeScreen(
                 item {
                     // The account's picture and name ride on "Listen again"; they head the speed dial instead.
                     val identity = sections.firstOrNull { it.avatar != null && it.strapline != null }
-                    Column {
-                        SectionHeader(
-                            HomeSection(title = s.speedDial, strapline = identity?.strapline, avatar = identity?.avatar),
-                            onPlayAll = {},
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        SpeedDial(speedDial, onSongClick, onRandomSong)
-                    }
+                    SpeedDialSection(
+                        title = s.speedDial,
+                        strapline = identity?.strapline,
+                        avatar = identity?.avatar,
+                        songs = speedDial,
+                        desktop = desktop,
+                        onSongClick = onSongClick,
+                        onRandomSong = onRandomSong,
+                    )
                 }
             }
 
@@ -332,7 +339,7 @@ fun HomeScreen(
             }
 
             items(ordered) { section ->
-                HomeShelf(section, onSongClick, onSongMore, onPlayAll, onCollectionClick, onSeeAll)
+                HomeShelf(section, onSongClick, onSongMore, onPlayAll, onCollectionClick, onSeeAll, desktop = desktop)
             }
 
             if (isOnline && !isLoadingMore && sections.isNotEmpty() && showExplore) {
@@ -342,10 +349,10 @@ fun HomeScreen(
                             text = s.exploreTitle,
                             style = MaterialTheme.typography.titleLarge,
                             color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(horizontal = 16.dp),
+                            modifier = Modifier.padding(horizontal = horizontalPad),
                         )
                         Spacer(modifier = Modifier.height(12.dp))
-                        ExploreTiles(onOpenExplore, modifier = Modifier.padding(horizontal = 16.dp))
+                        ExploreTiles(onOpenExplore, desktop = desktop, modifier = Modifier.padding(horizontal = horizontalPad))
                     }
                 }
             }
@@ -386,6 +393,67 @@ private fun shelfRank(section: HomeSection): Int {
     )
     tail.forEachIndexed { rank, keys -> if (keys.any { it in title }) return 100 + rank }
     return 50
+}
+
+@Composable
+private fun SpeedDialSection(
+    title: String,
+    strapline: String?,
+    avatar: String?,
+    songs: List<SongItem>,
+    desktop: Boolean,
+    onSongClick: (SongItem, List<SongItem>) -> Unit,
+    onRandomSong: () -> Unit,
+) {
+    val s = LocalStrings.current
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    if (desktop) {
+        Column {
+            SectionHeader(
+                section = HomeSection(title = title, strapline = strapline, avatar = avatar),
+                onPlayAll = {},
+                desktop = true,
+                canScrollBackward = listState.canScrollBackward,
+                canScrollForward = listState.canScrollForward,
+                onScrollBackward = {
+                    scope.launch { listState.animateScrollToItem((listState.firstVisibleItemIndex - 4).coerceAtLeast(0)) }
+                },
+                onScrollForward = {
+                    scope.launch { listState.animateScrollToItem(listState.firstVisibleItemIndex + 4) }
+                },
+            )
+            Spacer(modifier = Modifier.height(14.dp))
+            val tiles: List<SongItem?> = songs.take(8) + listOf(null) + songs.drop(8)
+            LazyRow(
+                state = listState,
+                contentPadding = PaddingValues(horizontal = 36.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                items(tiles.size) { idx ->
+                    val song = tiles[idx]
+                    Box(modifier = Modifier.size(164.dp)) {
+                        if (song == null) {
+                            DiceTile(s.randomSong, onRandomSong)
+                        } else {
+                            SpeedDialTile(song, framed = idx == 0) {
+                                onSongClick(song, songs)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        Column {
+            SectionHeader(
+                HomeSection(title = title, strapline = strapline, avatar = avatar),
+                onPlayAll = {},
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            SpeedDial(songs, onSongClick, onRandomSong)
+        }
+    }
 }
 
 /**
@@ -608,15 +676,34 @@ fun HomeShelf(
     onPlayAll: (List<SongItem>) -> Unit,
     onCollectionClick: (CollectionItem) -> Unit,
     onSeeAll: ((HomeSection) -> Unit)? = null,
+    desktop: Boolean = false,
 ) {
+    val rowState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val horizontalPad = if (desktop) 36.dp else 16.dp
+    val step = if (section.style == SectionStyle.ROWS) 2 else 4
     Column {
-        SectionHeader(section, onPlayAll, onSeeAll)
-        Spacer(modifier = Modifier.height(12.dp))
+        SectionHeader(
+            section = section,
+            onPlayAll = onPlayAll,
+            onSeeAll = onSeeAll,
+            desktop = desktop,
+            canScrollBackward = rowState.canScrollBackward,
+            canScrollForward = rowState.canScrollForward,
+            onScrollBackward = {
+                scope.launch { rowState.animateScrollToItem((rowState.firstVisibleItemIndex - step).coerceAtLeast(0)) }
+            },
+            onScrollForward = {
+                scope.launch { rowState.animateScrollToItem(rowState.firstVisibleItemIndex + step) }
+            },
+        )
+        Spacer(modifier = Modifier.height(if (desktop) 14.dp else 12.dp))
         when (section.style) {
-            SectionStyle.ROWS -> SongColumns(section, onSongClick, onSongMore)
+            SectionStyle.ROWS -> SongColumns(section, onSongClick, onSongMore, desktop = desktop, listState = rowState)
             SectionStyle.VIDEOS -> LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                state = rowState,
+                contentPadding = PaddingValues(horizontal = horizontalPad),
+                horizontalArrangement = Arrangement.spacedBy(if (desktop) 20.dp else 14.dp),
             ) {
                 items(section.songs) { song ->
                     VideoCard(song) { onSongClick(song, section.songs) }
@@ -624,8 +711,9 @@ fun HomeShelf(
             }
 
             SectionStyle.CARDS -> LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                state = rowState,
+                contentPadding = PaddingValues(horizontal = horizontalPad),
+                horizontalArrangement = Arrangement.spacedBy(if (desktop) 20.dp else 14.dp),
             ) {
                 items(section.songs) { song ->
                     ShelfCard(
@@ -633,6 +721,7 @@ fun HomeShelf(
                         subtitle = song.artists.joinToString { it.name }.ifEmpty { LocalStrings.current.unknownArtist },
                         thumbnail = song.thumbnail ?: song.thumbnails.firstOrNull()?.url,
                         onClick = { onSongClick(song, section.songs) },
+                        modifier = if (desktop) Modifier.width(180.dp) else Modifier,
                     )
                 }
                 items(section.collections) { collection ->
@@ -642,6 +731,7 @@ fun HomeShelf(
                             subtitle = collection.subtitle,
                             thumbnail = collection.thumbnail,
                             onClick = { onCollectionClick(collection) },
+                            modifier = if (desktop) Modifier.width(160.dp) else Modifier,
                         )
                     } else {
                         ShelfCard(
@@ -649,6 +739,7 @@ fun HomeShelf(
                             subtitle = collection.subtitle ?: "",
                             thumbnail = collection.thumbnail,
                             onClick = { onCollectionClick(collection) },
+                            modifier = if (desktop) Modifier.width(180.dp) else Modifier,
                         )
                     }
                 }
@@ -659,46 +750,83 @@ fun HomeShelf(
 
 /** YouTube Music's three Explore tiles: new releases, charts, moods & genres. */
 @Composable
-fun ExploreTiles(onOpenExplore: (browseId: String, title: String) -> Unit, modifier: Modifier = Modifier) {
+fun ExploreTiles(
+    onOpenExplore: (browseId: String, title: String) -> Unit,
+    modifier: Modifier = Modifier,
+    desktop: Boolean = false,
+) {
     val s = LocalStrings.current
     val tiles = listOf(
         Triple(QMusicIcons.NewReleases, s.exploreNewReleases, "FEmusic_new_releases"),
         Triple(QMusicIcons.Trending, s.exploreCharts, "FEmusic_charts"),
         Triple(QMusicIcons.Mood, s.exploreMoods, "FEmusic_moods_and_genres"),
     )
-    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if (desktop) 16.dp else 12.dp)) {
         tiles.forEach { (icon, label, browseId) ->
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .aspectRatio(1.05f)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(DarkSurfaceVariant)
-                    .clickable { onOpenExplore(browseId, label) }
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Icon(imageVector = icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp))
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            if (desktop) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(64.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(DarkSurfaceVariant)
+                        .clickable { onOpenExplore(browseId, label) }
+                        .padding(horizontal = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Icon(imageVector = icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp))
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .aspectRatio(1.05f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(DarkSurfaceVariant)
+                        .clickable { onOpenExplore(browseId, label) }
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Icon(imageVector = icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp))
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
 }
 
-/** The shelf title with the small line above it, the round picture beside it and "Play all" at the end. */
+/** The shelf title with the small line above it, the round picture beside it, "Play all" and `<` `>` arrows on desktop. */
 @Composable
-private fun SectionHeader(section: HomeSection, onPlayAll: (List<SongItem>) -> Unit, onSeeAll: ((HomeSection) -> Unit)? = null) {
+private fun SectionHeader(
+    section: HomeSection,
+    onPlayAll: (List<SongItem>) -> Unit,
+    onSeeAll: ((HomeSection) -> Unit)? = null,
+    desktop: Boolean = false,
+    canScrollBackward: Boolean = false,
+    canScrollForward: Boolean = false,
+    onScrollBackward: () -> Unit = {},
+    onScrollForward: () -> Unit = {},
+) {
     val s = LocalStrings.current
+    val horizontalPad = if (desktop) 36.dp else 16.dp
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = horizontalPad),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (section.avatar != null) {
@@ -725,7 +853,7 @@ private fun SectionHeader(section: HomeSection, onPlayAll: (List<SongItem>) -> U
             }
             Text(
                 text = section.title,
-                style = MaterialTheme.typography.titleLarge,
+                style = if (desktop) MaterialTheme.typography.headlineSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) else MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -746,6 +874,43 @@ private fun SectionHeader(section: HomeSection, onPlayAll: (List<SongItem>) -> U
                 Icon(QMusicIcons.ChevronRight, contentDescription = s.seeAll, tint = MaterialTheme.colorScheme.onSurface)
             }
         }
+        if (desktop) {
+            Spacer(modifier = Modifier.width(10.dp))
+            CarouselArrowButton(
+                icon = QMusicIcons.Back,
+                enabled = canScrollBackward,
+                onClick = onScrollBackward,
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            CarouselArrowButton(
+                icon = QMusicIcons.ChevronRight,
+                enabled = canScrollForward,
+                onClick = onScrollForward,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CarouselArrowButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .border(1.dp, Color.White.copy(alpha = if (enabled) 0.24f else 0.08f), CircleShape)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = if (enabled) 0.9f else 0.28f),
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 
@@ -756,31 +921,35 @@ private fun SongColumns(
     section: HomeSection,
     onSongClick: (SongItem, List<SongItem>) -> Unit,
     onSongMore: (SongItem) -> Unit,
+    desktop: Boolean = false,
+    listState: LazyListState = rememberLazyListState(),
 ) {
-    val listState = rememberLazyListState()
     LazyRow(
         state = listState,
         flingBehavior = rememberSnapFlingBehavior(listState),
-        contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = if (desktop) 36.dp else 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (desktop) 24.dp else 8.dp),
     ) {
         items(section.songs.chunked(4)) { column ->
-            Column(modifier = Modifier.fillParentMaxWidth(0.9f)) {
+            Column(
+                modifier = if (desktop) Modifier.width(340.dp) else Modifier.fillParentMaxWidth(0.9f),
+                verticalArrangement = Arrangement.spacedBy(if (desktop) 4.dp else 0.dp),
+            ) {
                 column.forEach { song ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(8.dp))
                             .clickable { onSongClick(song, section.songs) }
-                            .padding(vertical = 6.dp),
+                            .padding(vertical = 6.dp, horizontal = if (desktop) 6.dp else 0.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         AsyncImage(
                             model = song.thumbnail ?: song.thumbnails.firstOrNull()?.url,
                             contentDescription = song.title,
                             modifier = Modifier
-                                .size(52.dp)
-                                .clip(RoundedCornerShape(6.dp))
+                                .size(if (desktop) 48.dp else 52.dp)
+                                .clip(RoundedCornerShape(4.dp))
                                 .background(DarkSurfaceVariant),
                             contentScale = ContentScale.Crop,
                         )

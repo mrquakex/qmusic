@@ -238,6 +238,15 @@ class MainViewModel(
     private val _crossfadeDuration = MutableStateFlow(3)
     val crossfadeDuration: StateFlow<Int> = _crossfadeDuration.asStateFlow()
 
+    private val _volume = MutableStateFlow(1f)
+    val volume: StateFlow<Float> = _volume.asStateFlow()
+
+    fun setVolume(value: Float) {
+        val clamped = value.coerceIn(0f, 1f)
+        _volume.value = clamped
+        playerController.setVolume(clamped)
+    }
+
     // 10-Band Equalizer (-12 to +12 dB)
     private val _equalizerBands = MutableStateFlow(List(10) { 0f })
     val equalizerBands: StateFlow<List<Float>> = _equalizerBands.asStateFlow()

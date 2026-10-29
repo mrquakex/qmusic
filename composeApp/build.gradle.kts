@@ -96,6 +96,7 @@ compose.desktop {
             packageName = "QMusic"
             packageVersion = "2.0.3"
             windows {
+                iconFile.set(project.file("src/desktopMain/resources/qmusic.ico"))
                 shortcut = true
                 menu = true
                 perUserInstall = true

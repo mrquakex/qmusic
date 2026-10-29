@@ -103,6 +103,7 @@ interface PlayerController {
 
     /** Plays every song at the same perceived loudness, using the loudness YouTube measured for it. */
     fun setNormalizeVolume(enabled: Boolean) = Unit
+    fun setVolume(volume: Float) = Unit
     fun setEqualizerBand(bandIndex: Int, gainDb: Float)
     fun setCrossfadeDuration(seconds: Int)
 }
