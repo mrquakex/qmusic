@@ -26,8 +26,9 @@ android {
         applicationId = "com.qmusic.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 34
-        versionName = "2.1.2"
+        // Both come from gradle.properties, which the app's update check reads too.
+        versionCode = providers.gradleProperty("qmusic.versionCode").get().toInt()
+        versionName = providers.gradleProperty("qmusic.versionName").get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "LASTFM_KEY", "\"${localProperties.getProperty("lastfm.key", "")}\"")

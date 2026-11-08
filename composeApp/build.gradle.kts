@@ -8,6 +8,25 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+/** The version in gradle.properties as a constant, so the update check never compares against a stale number. */
+val generateAppVersion = tasks.register("generateAppVersion") {
+    val name = providers.gradleProperty("qmusic.versionName")
+    val out = layout.buildDirectory.dir("generated/appVersion/kotlin")
+    inputs.property("versionName", name)
+    outputs.dir(out)
+    doLast {
+        val file = out.get().file("com/qmusic/ui/AppVersion.kt").asFile
+        file.parentFile.mkdirs()
+        file.writeText(
+            "package com.qmusic.ui\n\n" +
+                "/** Generated from gradle.properties (qmusic.versionName). */\n" +
+                "object AppVersion {\n" +
+                "    const val NAME: String = \"${name.get()}\"\n" +
+                "}\n",
+        )
+    }
+}
+
 kotlin {
     compilerOptions {
         freeCompilerArgs.addAll("-Xskip-metadata-version-check")
@@ -27,6 +46,7 @@ kotlin {
 
     sourceSets {
         val commonMain by getting {
+            kotlin.srcDir(generateAppVersion)
             dependencies {
                 implementation(project(":core:yt-engine"))
                 implementation(project(":core:spotify"))

@@ -577,11 +577,11 @@ class MainViewModel(
     val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
 
     // Update Checker State
-    // Keep equal to versionName in androidApp/build.gradle.kts, or the update check compares against the wrong number.
     /** Whether the connection is Wi-Fi (or another unmetered one) right now. */
     fun isOnUnmetered(): Boolean = isUnmetered()
 
-    val currentAppVersion: String = "2.1.1"
+    /** The installed version, generated from gradle.properties (the same number the APK carries). */
+    val currentAppVersion: String = com.qmusic.ui.AppVersion.NAME
     private val _isCheckingUpdate = MutableStateFlow(false)
     val isCheckingUpdate: StateFlow<Boolean> = _isCheckingUpdate.asStateFlow()
 
