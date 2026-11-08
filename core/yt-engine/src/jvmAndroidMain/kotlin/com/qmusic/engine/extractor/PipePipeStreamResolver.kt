@@ -2,6 +2,7 @@ package com.qmusic.engine.extractor
 
 import com.qmusic.engine.models.AudioStream
 import com.qmusic.engine.models.PreviewFrames
+import com.qmusic.engine.video.VideoQuality
 import com.qmusic.engine.models.VideoSource
 import dev.maxrave.pipepipe.extractor.NewPipe
 import dev.maxrave.pipepipe.extractor.downloader.CancellableCall
@@ -56,6 +57,12 @@ private object PipePipeStreamResolver : ExtractorStreamResolver {
             pickVideoSource(info(videoId), maxHeight)
         }
 
+    override suspend fun videoQualities(videoId: String): List<VideoQuality> =
+        withContext(Dispatchers.IO) {
+            check(initialised)
+            qualitiesOf(info(videoId))
+        }
+
     override suspend fun previewFrames(videoId: String): PreviewFrames? =
         withContext(Dispatchers.IO) {
             check(initialised)
@@ -94,6 +101,40 @@ private object PipePipeStreamResolver : ExtractorStreamResolver {
 private const val INFO_TTL_MS = 4 * 60 * 1000L
 private const val PREVIEW_MAX_WIDTH = 320
 private const val INFO_CACHE_SIZE = 8
+
+/**
+ * Each height the video is offered at, best first. Above 360p picture and sound are separate streams (H.264 where
+ * there is one, since every phone decodes it in hardware; VP9 only for heights that have nothing else); the streams
+ * that carry their own sound are the way to play at 360p and below.
+ */
+private fun qualitiesOf(info: StreamInfo): List<VideoQuality> {
+    val live = info.hlsUrl
+    if (!live.isNullOrBlank() && info.streamType.name.contains("LIVE")) {
+        return listOf(VideoQuality(height = 0, fps = 0, videoUrl = live, audioUrl = null, isLive = true))
+    }
+    val audio = info.audioStreams
+        .filter { it.isUrl }
+        .sortedWith(compareByDescending<dev.maxrave.pipepipe.extractor.stream.AudioStream> { it.format?.mimeType == "audio/mp4" }
+            .thenByDescending { it.averageBitrate })
+        .firstOrNull()
+    val pictures = info.videoOnlyStreams.filter { it.isUrl && it.height > 0 }
+    val separate = if (audio == null) emptyList() else pictures
+        .groupBy { it.height }
+        .map { (_, streams) ->
+            val best = streams.sortedWith(
+                compareByDescending<dev.maxrave.pipepipe.extractor.stream.VideoStream> { it.codec?.startsWith("avc1") == true }
+                    .thenByDescending { it.fps }
+                    .thenByDescending { it.bitrate },
+            ).first()
+            VideoQuality(best.height, best.fps, best.content, audio.content)
+        }
+    val withSound = info.videoStreams
+        .filter { it.isUrl && it.height > 0 }
+        .map { VideoQuality(it.height, it.fps, it.content, null) }
+    // Heights offered both ways keep the separate (sharper, steadier) streams; the rest come from the muxed ones.
+    val heights = separate.mapTo(HashSet()) { it.height }
+    return (separate + withSound.filter { it.height !in heights }).sortedByDescending { it.height }
+}
 
 private fun pickVideoSource(info: StreamInfo, maxHeight: Int): VideoSource? {
     // Picture and sound come separately above 360p: H.264 plays on every phone's hardware decoder, so prefer it.

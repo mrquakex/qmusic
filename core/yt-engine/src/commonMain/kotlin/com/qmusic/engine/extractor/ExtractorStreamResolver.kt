@@ -15,6 +15,9 @@ interface ExtractorStreamResolver {
     /** The best music video of [videoId] up to [maxHeight] pixels tall, or null when there is none. */
     suspend fun videoSource(videoId: String, maxHeight: Int): VideoSource? = null
 
+    /** Every way to watch [videoId], best quality first (empty when none could be found). */
+    suspend fun videoQualities(videoId: String): List<com.qmusic.engine.video.VideoQuality> = emptyList()
+
     /** The video's preview frames (for the seek bar), or null when YouTube has none. */
     suspend fun previewFrames(videoId: String): com.qmusic.engine.models.PreviewFrames? = null
 
