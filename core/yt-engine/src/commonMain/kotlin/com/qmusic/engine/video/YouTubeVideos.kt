@@ -40,56 +40,55 @@ class VideoSignInRequired : IllegalStateException("Sign in to YouTube")
 class YouTubeVideos(
     private val http: HttpClient = Ytmusic.createDefaultHttpClient(),
     private val extractor: ExtractorStreamResolver? = createExtractorStreamResolver(),
-) {
+) : VideoService {
     /** The account whose feed this is; without one, only what needs no account (search, channels, watch pages) works. */
-    var auth: YouTubeAuth? = null
-    var locale: YouTubeLocale = YouTubeLocale()
+    override var auth: YouTubeAuth? = null
+    override var locale: YouTubeLocale = YouTubeLocale()
     private var visitorData: String? = null
 
-    val isSignedIn: Boolean get() = auth?.isLoggedIn == true
+    override val isSignedIn: Boolean get() = auth?.isLoggedIn == true
 
     // ------------------------------------------------------------------ feeds of the account
 
     /** The home feed: what YouTube suggests to the signed-in account (nothing without one). */
-    suspend fun home(): Result<VideoFeed> = feed("browse", "FEwhat_to_watch")
+    override suspend fun home(): Result<VideoFeed> = feed("browse", "FEwhat_to_watch")
 
     /** A chip's feed of the home page, or the next page of any feed. */
-    suspend fun more(continuation: String): Result<VideoFeed> = call("browse", continuation = continuation).map(VideoParser::feed)
+    override suspend fun more(continuation: String): Result<VideoFeed> = call("browse", continuation = continuation).map(VideoParser::feed)
 
-    suspend fun subscriptions(): Result<VideoFeed> = feed("browse", "FEsubscriptions")
+    override suspend fun subscriptions(): Result<VideoFeed> = feed("browse", "FEsubscriptions")
 
-    suspend fun history(): Result<VideoFeed> = feed("browse", "FEhistory")
+    override suspend fun history(): Result<VideoFeed> = feed("browse", "FEhistory")
 
-    suspend fun likedVideos(): Result<VideoFeed> = feed("browse", "VLLL")
+    override suspend fun likedVideos(): Result<VideoFeed> = feed("browse", "VLLL")
 
-    suspend fun watchLater(): Result<VideoFeed> = feed("browse", "VLWL")
+    override suspend fun watchLater(): Result<VideoFeed> = feed("browse", "VLWL")
 
     /** The playlists of the account (and the ones it saved). */
-    suspend fun playlists(): Result<VideoFeed> = feed("browse", "FEplaylist_aggregation")
+    override suspend fun playlists(): Result<VideoFeed> = feed("browse", "FEplaylist_aggregation")
 
     /** The channels the account is subscribed to. */
-    suspend fun subscribedChannels(): Result<VideoFeed> = feed("browse", "FEchannels")
+    override suspend fun subscribedChannels(): Result<VideoFeed> = feed("browse", "FEchannels")
 
     /** The videos of a playlist ([playlistId] without the "VL" in front). */
-    suspend fun playlist(playlistId: String): Result<VideoFeed> = feed("browse", "VL" + playlistId.removePrefix("VL"))
+    override suspend fun playlist(playlistId: String): Result<VideoFeed> = feed("browse", "VL" + playlistId.removePrefix("VL"))
 
     private suspend fun feed(endpoint: String, browseId: String, params: String? = null): Result<VideoFeed> =
         call(endpoint, browseId = browseId, params = params).map(VideoParser::feed)
 
     // ------------------------------------------------------------------ search
 
-    /** [params] picks what is looked for (see [SearchFilter]); null is everything. */
-    suspend fun search(query: String, params: String? = null): Result<VideoFeed> =
+    /** [params] picks what is looked for (see [VideoSearchFilter]); null is everything. */
+    override suspend fun search(query: String, params: String?): Result<VideoFeed> =
         call("search", query = query, params = params).map(VideoParser::feed)
 
     /** The words YouTube suggests as [input] is typed. */
-    suspend fun suggestions(input: String): Result<List<String>> =
+    override suspend fun suggestions(input: String): Result<List<String>> =
         runCatching {
-            val text = http.get("https://suggestqueries-clients6.youtube.com/complete/search") {
+            val text = http.get("https://suggestqueries.google.com/complete/search") {
                 parameter("client", "firefox")
                 parameter("ds", "yt")
                 parameter("hl", locale.hl)
-                parameter("gl", locale.gl)
                 parameter("q", input)
                 userAgent(YouTubeClient.USER_AGENT_WEB)
             }.bodyAsText()
@@ -98,32 +97,32 @@ class YouTubeVideos(
 
     // ------------------------------------------------------------------ the watch page
 
-    suspend fun watch(videoId: String): Result<VideoDetails> =
+    override suspend fun watch(videoId: String): Result<VideoDetails> =
         call("next", videoId = videoId).mapCatching { root ->
             VideoParser.details(root, videoId) ?: error("This video is not available")
         }
 
-    suspend fun comments(token: String): Result<VideoComments> =
+    override suspend fun comments(token: String): Result<VideoComments> =
         call("next", continuation = token).map(VideoParser::comments)
 
     /** Every way to play [videoId] (empty when it cannot be played, e.g. it is private or age-restricted). */
-    suspend fun qualities(videoId: String): Result<List<VideoQuality>> =
+    override suspend fun qualities(videoId: String): Result<List<VideoQuality>> =
         runCatching { extractor?.videoQualities(videoId).orEmpty() }
 
     // ------------------------------------------------------------------ channels
 
     /** A channel's page; [params] opens one of its tabs (see [VideoChannelTab]), none opens its videos. */
-    suspend fun channel(channelId: String, params: String? = null): Result<VideoChannelPage> =
+    override suspend fun channel(channelId: String, params: String?): Result<VideoChannelPage> =
         call("browse", browseId = channelId, params = params ?: VIDEOS_TAB).mapCatching { root ->
             VideoParser.channel(root, channelId) ?: error("This channel is not available")
         }
 
     // ------------------------------------------------------------------ what the account does
 
-    suspend fun setLike(videoId: String, like: Boolean): Result<Unit> =
+    override suspend fun setLike(videoId: String, like: Boolean): Result<Unit> =
         signedIn { action("like/${if (like) "like" else "removelike"}", buildJsonObject { put("target", buildJsonObject { put("videoId", videoId) }) }) }
 
-    suspend fun setSubscribed(channelId: String, subscribed: Boolean): Result<Unit> =
+    override suspend fun setSubscribed(channelId: String, subscribed: Boolean): Result<Unit> =
         signedIn {
             action(
                 "subscription/${if (subscribed) "subscribe" else "unsubscribe"}",
@@ -131,7 +130,7 @@ class YouTubeVideos(
             )
         }
 
-    suspend fun setWatchLater(videoId: String, saved: Boolean): Result<Unit> =
+    override suspend fun setWatchLater(videoId: String, saved: Boolean): Result<Unit> =
         signedIn {
             action(
                 "browse/edit_playlist",
@@ -238,14 +237,6 @@ class YouTubeVideos(
             }.bodyAsText()
             Json.parseToJsonElement(response).jsonObject["responseContext"]?.jsonObject?.get("visitorData")?.jsonPrimitive?.contentOrNull
         }.getOrNull()
-    }
-
-    /** What search can be narrowed to. */
-    object SearchFilter {
-        const val VIDEOS = "EgIQAQ%3D%3D"
-        const val CHANNELS = "EgIQAg%3D%3D"
-        const val PLAYLISTS = "EgIQAw%3D%3D"
-        const val LIVE = "EgJAAQ%3D%3D"
     }
 
     private companion object {

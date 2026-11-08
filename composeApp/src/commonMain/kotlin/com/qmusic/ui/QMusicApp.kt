@@ -176,6 +176,45 @@ fun QMusicApp(
                 )
             }
 
+            // The Videos section (YouTube itself) is entered from the navigation bar and takes the whole screen, like
+            // another app; the music keeps playing underneath (or is paused by the first video).
+            var videosOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+            var videoLogin by remember { mutableStateOf(false) }
+            val videoScope = rememberCoroutineScope()
+            val videosController = remember {
+                com.qmusic.ui.videos.VideosController(
+                    service = com.qmusic.engine.video.YouTubeVideos(),
+                    scope = videoScope,
+                    settings = viewModel.settings,
+                    musicSession = { viewModel.youTubeAuth },
+                )
+            }
+            if (videosOpen) {
+                LaunchedEffect(Unit) { videosController.refreshAccount() }
+                val shareVideo = rememberShare()
+                Box(modifier = modifier.fillMaxSize()) {
+                    com.qmusic.ui.videos.VideosApp(
+                        controller = videosController,
+                        s = if (language == "en") com.qmusic.ui.videos.VideoStrings.English else com.qmusic.ui.videos.VideoStrings.Turkish,
+                        onExit = { videosOpen = false },
+                        onSignIn = { videoLogin = true },
+                        onPauseMusic = { viewModel.playerController.pause() },
+                        onShare = shareVideo,
+                    )
+                    if (videoLogin) {
+                        PlatformBackHandler(enabled = true) { videoLogin = false }
+                        YouTubeLoginView(
+                            onCookiesCaptured = { cookies ->
+                                videosController.signedInWith(cookies)
+                                videoLogin = false
+                            },
+                            onDismiss = { videoLogin = false },
+                        )
+                    }
+                }
+                return@CompositionLocalProvider
+            }
+
             val currentTab by viewModel.currentTab.collectAsState()
         val currentTrack by viewModel.currentTrack.collectAsState()
         val isPlaying by viewModel.isPlaying.collectAsState()
@@ -928,9 +967,10 @@ fun QMusicApp(
                                 }
 
                                 QMusicNavigationBar(
-                                    items = navTabs.map { NavBarItem(it.title, it.icon) },
+                                    items = navTabs.map { NavBarItem(it.title, it.icon) } +
+                                        NavBarItem(if (language == "en") "Videos" else "Videolar", QMusicIcons.VideoPlay),
                                     selectedIndex = navTabs.indexOfFirst { it.tab == currentTab },
-                                    onSelect = selectTab,
+                                    onSelect = { index -> if (index >= navTabs.size) videosOpen = true else selectTab(index) },
                                 )
                             }
                         },
