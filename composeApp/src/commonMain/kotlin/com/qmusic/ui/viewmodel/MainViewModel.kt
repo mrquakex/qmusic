@@ -749,11 +749,17 @@ class MainViewModel(
 
     // --- Playback Controls ---
     /**
-     * Plays [song]. With a [context] list (the shelf, search results or playlist it was tapped in) the whole
-     * list becomes the queue; alone, YouTube Music's radio for the song fills the queue instead.
+     * Plays [song]. With a [context] list (an album, a playlist, the library) the whole list becomes the queue; alone
+     * or with [radio], YouTube Music's radio for the song fills the queue instead.
      */
-    fun play(song: SongItem, context: List<SongItem> = emptyList(), gapless: Boolean = false) {
+    fun play(song: SongItem, context: List<SongItem> = emptyList(), gapless: Boolean = false, radio: Boolean = false) {
         applyGapless(gapless)
+        if (radio) {
+            // As on YouTube Music: a song picked from search or from a suggestion starts its own radio, so what
+            // plays next is like it, not the rest of the list it was tapped in.
+            playerController.play(song)
+            return
+        }
         val index = context.indexOfFirst { it.id == song.id }
         if (index >= 0 && context.size > 1) {
             playerController.playQueue(context, index)
@@ -1838,22 +1844,61 @@ class MainViewModel(
     private var sampleJob: Job? = null
     private var loadingMoreSamples = false
 
-    /** Fills the feed from the home page's songs the first time it is needed. */
-    fun prepareSamples() {
-        if (_samples.value.isNotEmpty()) return
-        _samples.value = _homeSections.value.flatMap { it.songs }.distinctBy { it.id }.shuffled()
+    private val _isLoadingSamples = MutableStateFlow(false)
+    val isLoadingSamples: StateFlow<Boolean> = _isLoadingSamples.asStateFlow()
+    private var samplesJob: Job? = null
+
+    /** Songs already played, liked or saved: "For you" is for finding new ones, so these are left out of it. */
+    private fun knownSongIds(): Set<String> =
+        (history.value + favorites.value + downloadedSongs.value).mapTo(HashSet()) { it.id }
+
+    /** What the feed is grown from: the most played, the latest played and the liked songs, in a changing mix. */
+    private suspend fun sampleSeeds(): List<SongItem> {
+        val top = repository.playCounts(SMART_DAYS).sortedByDescending { it.second }.map { it.first }.take(SAMPLE_SEED_POOL)
+        val recent = history.value.take(SAMPLE_SEED_POOL)
+        val liked = favorites.value.take(SAMPLE_SEED_POOL)
+        return (top + recent + liked).distinctBy { it.id }.shuffled().take(SAMPLE_SEEDS)
     }
 
-    /** Tops the feed up with songs like the last one when the end comes near. */
+    /**
+     * Builds the feed the first time it is needed: songs like the ones listened to (YouTube Music's radio of a few
+     * of them), without the ones already known, mixed. Shown as soon as the first radio answers; the rest joins it.
+     */
+    fun prepareSamples() {
+        if (_samples.value.isNotEmpty() || samplesJob?.isActive == true) return
+        _isLoadingSamples.value = true
+        samplesJob = scope.launch {
+            val known = knownSongIds()
+            val seen = HashSet<String>()
+            for (seed in sampleSeeds()) {
+                val radio = ytId(seed)?.let { youTube.radio(it).getOrDefault(emptyList()) }.orEmpty()
+                val fresh = radio.filter { it.id !in known && seen.add(it.id) }.shuffled()
+                if (fresh.isNotEmpty()) {
+                    _samples.value = _samples.value + fresh
+                    _isLoadingSamples.value = false
+                }
+            }
+            if (_samples.value.isEmpty()) {
+                // Nothing to grow from (a new install, or no connection): the home page's songs, new ones first.
+                val home = _homeSections.value.flatMap { it.songs }.distinctBy { it.id }
+                _samples.value = (home.filter { it.id !in known } + home.filter { it.id in known }).take(SAMPLE_FALLBACK)
+            }
+            _isLoadingSamples.value = false
+        }
+    }
+
+    /** Tops the feed up with songs like the last one (and one more from what is listened to) when the end comes near. */
     fun loadMoreSamples() {
         val last = _samples.value.lastOrNull() ?: return
         if (loadingMoreSamples) return
         loadingMoreSamples = true
         scope.launch {
-            youTube.radio(ytId(last) ?: last.id).onSuccess { more ->
-                val known = _samples.value.mapTo(HashSet()) { it.id }
-                _samples.value = _samples.value + more.filter { it.id !in known }
-            }
+            val known = knownSongIds()
+            val seeds = listOf(last) + sampleSeeds().take(1)
+            val more = seeds.flatMap { seed -> ytId(seed)?.let { youTube.radio(it).getOrDefault(emptyList()) }.orEmpty() }
+            val inFeed = _samples.value.mapTo(HashSet()) { it.id }
+            val fresh = more.filter { it.id !in known && it.id !in inFeed }.distinctBy { it.id }.shuffled()
+            if (fresh.isNotEmpty()) _samples.value = _samples.value + fresh
             loadingMoreSamples = false
         }
     }
@@ -2246,6 +2291,9 @@ class MainViewModel(
     private companion object {
         const val RADIO_REFILL_THRESHOLD = 3
         const val CACHE_REFRESH_MS = 600L
+        const val SAMPLE_SEEDS = 5
+        const val SAMPLE_SEED_POOL = 12
+        const val SAMPLE_FALLBACK = 40
         const val HOME_ROW_SONGS = 20
         const val SMART_REFRESH_MS = 24 * 60 * 60 * 1000L
         const val SMART_COUNT = 50

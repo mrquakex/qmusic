@@ -215,6 +215,7 @@ fun QMusicApp(
             }
         }
         val samples by viewModel.samples.collectAsState()
+        val isLoadingSamples by viewModel.isLoadingSamples.collectAsState()
         val listeningStats by viewModel.stats.collectAsState()
         val statsPeriod by viewModel.statsPeriod.collectAsState()
         val ytPlaylists by viewModel.ytPlaylists.collectAsState()
@@ -394,7 +395,7 @@ fun QMusicApp(
                         error = homeError,
                         isLoggedIn = isLoggedInYouTube || (accountMode == com.qmusic.settings.AccountMode.SPOTIFY && spotifySignedIn),
                         scrollToTop = viewModel.homeScrollToTop,
-                        onSongClick = { song, context -> viewModel.play(song, context) },
+                        onSongClick = { song, context -> viewModel.play(song, context, radio = true) },
                         onSongMore = { viewModel.showSongMenu(it) },
                         onPlayAll = { viewModel.playAll(it) },
                         onChipClick = { viewModel.selectHomeChip(it) },
@@ -417,6 +418,7 @@ fun QMusicApp(
 
                     ScreenTab.FOR_YOU -> ForYouScreen(
                         samples = samples,
+                        isLoading = isLoadingSamples,
                         isFavorite = { it in favoriteIds },
                         onShown = { viewModel.prepareSamples() },
                         onSettle = { viewModel.playSample(it) },
@@ -454,7 +456,7 @@ fun QMusicApp(
                         onHistoryClick = { viewModel.performSearch(it) },
                         onHistoryDelete = { viewModel.deleteSearchHistoryEntry(it) },
                         onClearHistory = { viewModel.clearSearchHistory() },
-                        onSongClick = { song, context -> viewModel.play(song, context) },
+                        onSongClick = { song, context -> viewModel.play(song, context, radio = true) },
                         onSongMore = { viewModel.showSongMenu(it) },
                         onCollectionClick = { viewModel.openCollection(it) },
                         onArtistClick = { viewModel.openArtist(it.browseId, it.name) },
@@ -617,7 +619,7 @@ fun QMusicApp(
                         isLoading = isLoadingExplore,
                         error = exploreError,
                         onBack = { viewModel.popRoute() },
-                        onSongClick = { song, context -> viewModel.play(song, context) },
+                        onSongClick = { song, context -> viewModel.play(song, context, radio = true) },
                         onSongMore = { viewModel.showSongMenu(it) },
                         onPlayAll = { viewModel.playAll(it) },
                         onCollectionClick = { viewModel.openCollection(it) },
@@ -804,7 +806,7 @@ fun QMusicApp(
                                         onLoadLyrics = { viewModel.loadLyrics() },
                                         related = related,
                                         onLoadRelated = { viewModel.loadRelated() },
-                                        onRelatedSongClick = { song, context -> viewModel.play(song, context) },
+                                        onRelatedSongClick = { song, context -> viewModel.play(song, context, radio = true) },
                                         onRelatedCollectionClick = {
                                             viewModel.setPlayerExpanded(false)
                                             viewModel.openCollection(it)
@@ -1005,7 +1007,7 @@ fun QMusicApp(
                                 onLoadLyrics = { viewModel.loadLyrics() },
                                 related = related,
                                 onLoadRelated = { viewModel.loadRelated() },
-                                onRelatedSongClick = { song, context -> viewModel.play(song, context) },
+                                onRelatedSongClick = { song, context -> viewModel.play(song, context, radio = true) },
                                 onRelatedCollectionClick = {
                                     viewModel.setPlayerExpanded(false)
                                     viewModel.openCollection(it)

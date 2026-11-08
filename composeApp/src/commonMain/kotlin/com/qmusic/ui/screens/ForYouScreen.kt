@@ -62,13 +62,18 @@ fun ForYouScreen(
     onShare: (SongItem) -> Unit,
     onPlayFull: (SongItem) -> Unit,
     modifier: Modifier = Modifier,
+    isLoading: Boolean = false,
 ) {
     val s = LocalStrings.current
     LaunchedEffect(Unit) { onShown() }
 
     if (samples.isEmpty()) {
         Box(modifier.fillMaxSize().background(DarkBackground).padding(32.dp), contentAlignment = Alignment.Center) {
-            Text(s.forYouEmpty, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (isLoading) {
+                androidx.compose.material3.CircularProgressIndicator(color = Color.White)
+            } else {
+                Text(s.forYouEmpty, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         return
     }

@@ -53,6 +53,18 @@ class QueueAndSearchTest {
     }
 
     @Test
+    fun aSongPickedFromSearchOrSuggestionsPlaysAloneSoItsRadioCanFollow() = testScope.runTest {
+        val vm = createViewModel(backgroundScope)
+        val results = listOf(song("a"), song("b"), song("c"))
+
+        vm.play(results[1], results, radio = true)
+
+        // Not the rest of the result list: only the song, with the radio topping the queue up behind it.
+        assertEquals("b", vm.currentTrack.value?.id)
+        assertEquals(listOf(results[1]), playerController.queue.value)
+    }
+
+    @Test
     fun nextAndPreviousMoveThroughTheQueue() = testScope.runTest {
         val vm = createViewModel(backgroundScope)
         val songs = listOf(song("a"), song("b"), song("c"))
