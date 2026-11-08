@@ -112,9 +112,9 @@ private class ServicePlayerController(
         delegate.play(song)
     }
 
-    override fun playFrom(song: SongItem, positionMs: Long) {
+    override fun playFrom(song: SongItem, positionMs: Long, video: Boolean) {
         startService()
-        delegate.playFrom(song, positionMs)
+        delegate.playFrom(song, positionMs, video)
     }
 
     override fun playQueue(songs: List<SongItem>, startIndex: Int) {

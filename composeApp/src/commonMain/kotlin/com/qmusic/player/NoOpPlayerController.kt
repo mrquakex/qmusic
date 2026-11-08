@@ -86,6 +86,20 @@ class NoOpPlayerController : PlayerController {
         _playbackPosition.value = positionMs
     }
 
+    override fun stopAndRestore(songs: List<SongItem>, index: Int, positionMs: Long, play: Boolean) {
+        _queue.value = songs
+        _isPlaying.value = play && songs.isNotEmpty()
+        if (songs.isEmpty() || index !in songs.indices) {
+            _queueIndex.value = -1
+            _currentTrack.value = null
+            _playbackPosition.value = 0L
+            return
+        }
+        _queueIndex.value = index
+        _currentTrack.value = songs[index]
+        _playbackPosition.value = positionMs
+    }
+
     override fun clearQueue() {
         val current = _queue.value.getOrNull(_queueIndex.value) ?: return
         _queue.value = listOf(current)

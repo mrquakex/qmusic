@@ -19,7 +19,7 @@ import com.qmusic.player.PlayerHolder
 import kotlinx.coroutines.delay
 
 @Composable
-actual fun VideoSurface(trackKey: String, modifier: Modifier) {
+actual fun VideoSurface(trackKey: String, modifier: Modifier, fill: Boolean) {
     // The active player changes on a crossfade and on a picture <-> audio hand-off: follow it.
     val flow = remember { PlayerHolder.peek()?.activePlayerFlow }
     val player = flow?.collectAsState()?.value
@@ -46,7 +46,7 @@ actual fun VideoSurface(trackKey: String, modifier: Modifier) {
         factory = { context ->
             PlayerView(context).apply {
                 useController = false
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                resizeMode = if (fill) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
                 setShutterBackgroundColor(Color.TRANSPARENT)
                 setKeepContentOnPlayerReset(true)
                 this.player = player

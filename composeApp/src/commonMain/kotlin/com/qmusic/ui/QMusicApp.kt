@@ -419,6 +419,8 @@ fun QMusicApp(
                     ScreenTab.FOR_YOU -> ForYouScreen(
                         samples = samples,
                         isLoading = isLoadingSamples,
+                        isPlaying = isPlaying,
+                        onTogglePlayback = { viewModel.toggleSamplePlayback() },
                         isFavorite = { it in favoriteIds },
                         onShown = { viewModel.prepareSamples() },
                         onSettle = { viewModel.playSample(it) },
@@ -906,7 +908,8 @@ fun QMusicApp(
                                 }
 
                                 // Mini player and navigation bar share one surface, like YouTube Music
-                                if (currentTrack != null) {
+                                // Not on "For you": its preview is full screen there, and is not what the player keeps.
+                                if (currentTrack != null && currentTab != ScreenTab.FOR_YOU) {
                                     MiniPlayerBar(
                                         currentTrack = currentTrack,
                                         isPlaying = isPlaying,

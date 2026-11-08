@@ -405,9 +405,11 @@ class CrossfadeExoPlayerAdapter(
 
     override fun play(song: SongItem) = playQueue(listOf(song), 0)
 
-    override fun playFrom(song: SongItem, positionMs: Long) {
+    override fun playFrom(song: SongItem, positionMs: Long, video: Boolean) {
         orderedQueue = null
         pendingStart = null
+        // The mode is set here and not through setVideoMode: that would restart the song that is playing now.
+        _videoMode.value = video && song.hasVideo
         _queue.value = listOf(song)
         // A start past 0 is a clean cut (no crossfade from the previous song) and skips the rapid-skip wait.
         playAt(0, startPositionMs = positionMs.coerceAtLeast(1L))
@@ -475,6 +477,39 @@ class CrossfadeExoPlayerAdapter(
         this.speed = speed
         playerA.setPlaybackSpeed(speed)
         playerB.setPlaybackSpeed(speed)
+    }
+
+    override fun stopAndRestore(songs: List<SongItem>, index: Int, positionMs: Long, play: Boolean) {
+        resolveJob?.cancel()
+        crossfadeJob?.cancel()
+        handOffJob?.cancel()
+        forwardingPlayer.suppressPlaybackEnded = false
+        for (player in listOf(playerA, playerB)) {
+            player.stop()
+            player.clearMediaItems()
+        }
+        _videoMode.value = false
+        advancedFromIndex = -1
+        pendingStart = null
+        orderedQueue = null
+        _queue.value = songs
+        _isPlaying.value = false
+        if (songs.isEmpty() || index !in songs.indices) {
+            _queueIndex.value = -1
+            _currentTrack.value = null
+            _playbackPosition.value = 0L
+            _buffered.value = 0L
+            _duration.value = 0L
+            return
+        }
+        _queueIndex.value = index
+        _currentTrack.value = songs[index]
+        _playbackPosition.value = positionMs
+        _buffered.value = positionMs
+        _duration.value = (songs[index].duration?.toLong() ?: 0L) * 1000L
+        // Loaded when it is played (as after a restart of the app), so a paused queue costs nothing.
+        pendingStart = positionMs
+        if (play) resume()
     }
 
     override fun clearQueue() {

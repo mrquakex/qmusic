@@ -578,7 +578,7 @@ class MainViewModel(
 
     // Update Checker State
     // Keep equal to versionName in androidApp/build.gradle.kts, or the update check compares against the wrong number.
-    val currentAppVersion: String = "2.0.3"
+    val currentAppVersion: String = "2.0.4"
     private val _isCheckingUpdate = MutableStateFlow(false)
     val isCheckingUpdate: StateFlow<Boolean> = _isCheckingUpdate.asStateFlow()
 
@@ -1219,6 +1219,8 @@ class MainViewModel(
 
     // --- Carrying on where the last session stopped ---
     private fun saveSession() {
+        // A preview on "For you" is not something to carry on from: what was playing before it is.
+        if (inSampleSession) return
         val queue = playerController.queue.value
         val index = playerController.queueIndex.value
         if (queue.isEmpty() || index !in queue.indices) return
@@ -1872,7 +1874,8 @@ class MainViewModel(
             val seen = HashSet<String>()
             for (seed in sampleSeeds()) {
                 val radio = ytId(seed)?.let { youTube.radio(it).getOrDefault(emptyList()) }.orEmpty()
-                val fresh = radio.filter { it.id !in known && seen.add(it.id) }.shuffled()
+                // Clips only: "For you" is full-screen video.
+                val fresh = radio.filter { it.hasVideo && it.id !in known && seen.add(it.id) }.shuffled()
                 if (fresh.isNotEmpty()) {
                     _samples.value = _samples.value + fresh
                     _isLoadingSamples.value = false
@@ -1881,7 +1884,9 @@ class MainViewModel(
             if (_samples.value.isEmpty()) {
                 // Nothing to grow from (a new install, or no connection): the home page's songs, new ones first.
                 val home = _homeSections.value.flatMap { it.songs }.distinctBy { it.id }
-                _samples.value = (home.filter { it.id !in known } + home.filter { it.id in known }).take(SAMPLE_FALLBACK)
+                val clips = home.filter { it.hasVideo }
+                _samples.value = (clips.filter { it.id !in known } + clips.filter { it.id in known }).take(SAMPLE_FALLBACK)
+                    .ifEmpty { home.filter { it.id !in known }.take(SAMPLE_FALLBACK) }
             }
             _isLoadingSamples.value = false
         }
@@ -1897,21 +1902,47 @@ class MainViewModel(
             val seeds = listOf(last) + sampleSeeds().take(1)
             val more = seeds.flatMap { seed -> ytId(seed)?.let { youTube.radio(it).getOrDefault(emptyList()) }.orEmpty() }
             val inFeed = _samples.value.mapTo(HashSet()) { it.id }
-            val fresh = more.filter { it.id !in known && it.id !in inFeed }.distinctBy { it.id }.shuffled()
+            val fresh = more.filter { it.hasVideo && it.id !in known && it.id !in inFeed }.distinctBy { it.id }.shuffled()
             if (fresh.isNotEmpty()) _samples.value = _samples.value + fresh
             loadingMoreSamples = false
         }
     }
 
+    /** What was playing when "For you" took over, to put back when it is left (kept for the visit only). */
+    private class PriorMusic(val queue: List<SongItem>, val index: Int, val positionMs: Long, val wasPlaying: Boolean)
+
+    private var prior: PriorMusic? = null
+
+    /** True from the first preview until "For you" is left (or a song is played in full). */
+    private var inSampleSession = false
+
     /** Plays [song] from about a third of the way in: the part that tells what it is like. */
     fun playSample(song: SongItem) {
         if (sampleId == song.id) return
+        if (!inSampleSession) {
+            inSampleSession = true
+            val queue = playerController.queue.value
+            val index = playerController.queueIndex.value
+            prior = if (playerController.currentTrack.value != null && index in queue.indices) {
+                // Around the current song only, as the session saved for the next launch does.
+                val from = (index - SESSION_BEHIND).coerceAtLeast(0)
+                PriorMusic(
+                    queue.subList(from, (index + SESSION_AHEAD).coerceAtMost(queue.size)),
+                    index - from,
+                    playerController.playbackPosition.value,
+                    playerController.isPlaying.value,
+                )
+            } else {
+                null
+            }
+        }
         sampleId = song.id
         sampleJob?.cancel()
         // The stream is opened right at that point: starting at 0 and jumping later loaded the song twice, and the
         // jump could land before the new song was there (so the preview began at the start, and late).
         val length = (song.duration ?: 0) * 1000L
-        playerController.playFrom(song, if (length > 0) (length * SAMPLE_START).toLong() else SAMPLE_FALLBACK_MS)
+        // A clip plays full screen (picture and sound); the feed holds clips only, but a song without one still plays.
+        playerController.playFrom(song, if (length > 0) (length * SAMPLE_START).toLong() else SAMPLE_FALLBACK_MS, video = song.hasVideo)
         // The next previews are looked up now, so swiping to them does not wait for that.
         val next = _samples.value.dropWhile { it.id != song.id }.drop(1).take(SAMPLE_WARM_AHEAD)
         playerController.warmUp(next)
@@ -1921,15 +1952,31 @@ class MainViewModel(
     fun playSampleFully(song: SongItem) {
         sampleJob?.cancel()
         sampleId = null
+        // The song is the music now: nothing is put back when "For you" is left.
+        inSampleSession = false
+        prior = null
         if (playerController.currentTrack.value?.id == song.id) playerController.seekTo(0L) else playerController.play(song)
+        // The full player takes over (picture or cover, as chosen there); the preview's full-screen mode ends with it.
+        setPlayerExpanded(true)
     }
 
+    /** "For you" was left: the preview stops and the music that was playing before it comes back, as it was. */
     private fun stopSample() {
-        val id = sampleId ?: return
+        if (!inSampleSession) return
         sampleJob?.cancel()
         sampleId = null
-        if (playerController.currentTrack.value?.id == id) playerController.pause()
+        inSampleSession = false
+        val before = prior
+        prior = null
+        if (before == null) {
+            playerController.stopAndRestore(emptyList(), -1, 0L, play = false)
+        } else {
+            playerController.stopAndRestore(before.queue, before.index, before.positionMs, before.wasPlaying)
+        }
     }
+
+    /** Pauses or resumes the preview on screen (a tap on its picture). */
+    fun toggleSamplePlayback() = togglePlayPause()
 
     // --- Listening statistics ---
     private val _statsPeriod = MutableStateFlow(StatsPeriod.MONTH)

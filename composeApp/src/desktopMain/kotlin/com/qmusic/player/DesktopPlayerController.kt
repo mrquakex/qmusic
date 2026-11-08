@@ -138,7 +138,7 @@ class DesktopPlayerController(
         playAt(0, startPositionMs = 0L, useCrossfade = false)
     }
 
-    override fun playFrom(song: SongItem, positionMs: Long) {
+    override fun playFrom(song: SongItem, positionMs: Long, video: Boolean) {
         rememberSongs(listOf(song))
         originalQueue = listOf(song)
         _queue.value = listOf(song)
@@ -237,6 +237,23 @@ class DesktopPlayerController(
         _queue.value = listOf(cur)
         originalQueue = listOf(cur)
         _queueIndex.value = 0
+    }
+
+    override fun stopAndRestore(songs: List<SongItem>, index: Int, positionMs: Long, play: Boolean) {
+        stopAllPlayers()
+        restoredPendingPlay = false
+        _isPlaying.value = false
+        if (songs.isEmpty() || index !in songs.indices) {
+            originalQueue = emptyList()
+            _queue.value = emptyList()
+            _queueIndex.value = -1
+            _currentTrack.value = null
+            _playbackPosition.value = 0L
+            _duration.value = 0L
+            return
+        }
+        restoreQueue(songs, index, positionMs)
+        if (play) resume()
     }
 
     override fun restoreQueue(songs: List<SongItem>, index: Int, positionMs: Long) {

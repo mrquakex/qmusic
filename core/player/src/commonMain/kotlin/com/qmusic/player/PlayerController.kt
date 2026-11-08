@@ -40,11 +40,20 @@ interface PlayerController {
     /** Plays a single song; the queue becomes just that song. */
     fun play(song: SongItem)
 
-    /** Plays [song] on its own starting at [positionMs] (loaded there directly, not from the start and then moved). */
-    fun playFrom(song: SongItem, positionMs: Long) {
+    /**
+     * Plays [song] on its own starting at [positionMs] (loaded there directly, not from the start and then moved);
+     * with [video] a song that has a clip plays it (picture and sound) from the start.
+     */
+    fun playFrom(song: SongItem, positionMs: Long, video: Boolean = false) {
         play(song)
         seekTo(positionMs)
     }
+
+    /**
+     * Stops what plays and puts [songs] back as the queue at [index] and [positionMs], paused or, with [play],
+     * playing; an empty list leaves nothing queued. Picture playback ends too.
+     */
+    fun stopAndRestore(songs: List<SongItem>, index: Int, positionMs: Long, play: Boolean) = Unit
 
     /** Replaces the queue with [songs] and starts playing at [startIndex]. */
     fun playQueue(songs: List<SongItem>, startIndex: Int = 0)
