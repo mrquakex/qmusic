@@ -408,6 +408,13 @@ class VideosController(
         )
     }
 
+    /** When a video ends: the first video of "up next" plays, as on YouTube's autoplay. */
+    fun playNext() {
+        val w = _watch.value ?: return
+        val next = w.related.firstNotNullOfOrNull { (it as? VideoEntry.Video)?.item } ?: return
+        if (_routes.value.lastOrNull() is VideoRoute.Watch) push(VideoRoute.Watch(next)) else startWatching(next)
+    }
+
     fun retryStream() {
         val id = _watch.value?.video?.id ?: return
         _watch.update { it?.copy(streamLoading = true, streamError = false) }

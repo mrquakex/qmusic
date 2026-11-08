@@ -103,6 +103,8 @@ fun VideosApp(
         p.load(q, start)
     }
     val playing by (playback?.isPlaying ?: NotPlaying).collectAsState()
+    val ended by (playback?.ended ?: NotPlaying).collectAsState()
+    LaunchedEffect(ended) { if (ended) controller.playNext() }
     FullscreenEffect(fullscreen && top is VideoRoute.Watch)
     PictureInPictureEffect(watch != null && top is VideoRoute.Watch && playing)
 

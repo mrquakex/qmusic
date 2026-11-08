@@ -55,6 +55,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -79,14 +80,32 @@ fun WatchPage(
         pip -> Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
             if (playback != null) VideoPlaybackSurface(playback, Modifier.fillMaxSize())
         }
-        fullscreen -> Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
-            PlayerBox(w, playback, s, controller, true, Modifier.fillMaxSize())
+        fullscreen -> {
+            var total by remember { mutableStateOf(0f) }
+            Box(
+                modifier = modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .pointerInput(Unit) {
+                        detectVerticalDragGestures(
+                            onDragStart = { total = 0f },
+                            onVerticalDrag = { change, dy ->
+                                change.consume()
+                                total += dy
+                            },
+                            onDragEnd = { if (total > SWIPE_PX) controller.setFullscreen(false) },
+                        )
+                    },
+            ) {
+                PlayerBox(w, playback, s, controller, true, Modifier.fillMaxSize())
+            }
         }
         else -> {
             // Dragging the picture down shrinks the video into the small player, as on YouTube.
             val offset = remember { Animatable(0f) }
             val scope = rememberCoroutineScope()
             var height by remember { mutableStateOf(1f) }
+            var total by remember { mutableStateOf(0f) }
             Column(
                 modifier = modifier
                     .fillMaxSize()
@@ -104,13 +123,19 @@ fun WatchPage(
                         .statusBarsPadding()
                         .pointerInput(Unit) {
                             detectVerticalDragGestures(
+                                onDragStart = { total = 0f },
                                 onVerticalDrag = { change, dy ->
                                     change.consume()
-                                    scope.launch { offset.snapTo((offset.value + dy).coerceAtLeast(0f)) }
+                                    total += dy
+                                    scope.launch { offset.snapTo(total.coerceAtLeast(0f)) }
                                 },
                                 onDragEnd = {
                                     scope.launch {
-                                        if (offset.value > height * 0.18f) {
+                                        // Up opens full screen, down shrinks the video into the small player.
+                                        if (total < -SWIPE_PX) {
+                                            offset.snapTo(0f)
+                                            controller.setFullscreen(true)
+                                        } else if (offset.value > height * 0.18f) {
                                             offset.animateTo(height, tween(150))
                                             controller.pop()
                                             offset.snapTo(0f)
@@ -195,11 +220,52 @@ private fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStrin
         }
     }
 
+    var seekHint by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(seekHint) {
+        if (seekHint != null) {
+            delay(700)
+            seekHint = null
+        }
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { visible = !visible },
+            .pointerInput(w.video.id) {
+                detectTapGestures(
+                    onTap = { visible = !visible },
+                    // Double tap on the left or right side jumps 10 seconds, the middle plays or pauses.
+                    onDoubleTap = { at ->
+                        val live = w.isLive()
+                        when {
+                            live -> playback.togglePlay()
+                            at.x < size.width / 3f -> {
+                                playback.seekTo((playback.positionMs.value - SEEK_STEP_MS).coerceAtLeast(0))
+                                seekHint = "-10"
+                            }
+                            at.x > size.width * 2f / 3f -> {
+                                playback.seekTo(playback.positionMs.value + SEEK_STEP_MS)
+                                seekHint = "+10"
+                            }
+                            else -> playback.togglePlay()
+                        }
+                    },
+                )
+            },
     ) {
+        seekHint?.let { hint ->
+            Text(
+                hint,
+                color = Color.White,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(if (hint.startsWith("-")) Alignment.CenterStart else Alignment.CenterEnd)
+                    .padding(horizontal = 40.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            )
+        }
         if (visible || ended) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)))
             IconButton(onClick = { playback.togglePlay() }, modifier = Modifier.align(Alignment.Center).size(64.dp)) {
@@ -279,6 +345,8 @@ private fun ControlText(text: String, onClick: () -> Unit) {
 }
 
 private const val HIDE_CONTROLS_MS = 3_000L
+private const val SWIPE_PX = 120f
+private const val SEEK_STEP_MS = 10_000L
 
 private fun speedLabel(v: Float) = if (v == v.toInt().toFloat()) "${v.toInt()}x" else "${v}x"
 

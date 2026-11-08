@@ -26,7 +26,7 @@ import kotlin.test.assertTrue
 private fun video(id: String) = VideoEntry.Video(VideoItem(id = id, title = "t$id"))
 
 /** A service that answers from lists, so the section's own logic can be checked without the network. */
-private class FakeVideos : VideoService {
+private open class FakeVideos : VideoService {
     override var auth: YouTubeAuth? = null
     override var locale: YouTubeLocale = YouTubeLocale()
     override val isSignedIn: Boolean get() = auth?.isLoggedIn == true
@@ -60,7 +60,7 @@ private class FakeVideos : VideoService {
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class VideosControllerTest {
-    private fun controller(service: FakeVideos, scope: TestScope) =
+    private fun controller(service: VideoService, scope: TestScope) =
         VideosController(service, scope.backgroundScope, InMemoryAppSettings(), musicSession = { null })
 
     @Test
@@ -112,6 +112,18 @@ class VideosControllerTest {
         assertTrue(!c.pop())
         c.closeWatch()
         assertNull(c.watch.value)
+    }
+
+    @Test
+    fun whenAVideoEndsTheFirstOfUpNextPlays() = runTest(UnconfinedTestDispatcher()) {
+        val c = controller(object : VideoService by FakeVideos() {
+            override suspend fun watch(videoId: String) =
+                Result.success(VideoDetails(id = videoId, title = "T", related = VideoFeed(listOf(video("n1"), video("n2")))))
+        }, this)
+        c.open(VideoItem("one", "One"))
+        c.playNext()
+        assertEquals("n1", c.watch.value?.video?.id)
+        assertEquals(1, c.routes.value.size)
     }
 
     @Test
