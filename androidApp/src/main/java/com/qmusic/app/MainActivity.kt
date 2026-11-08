@@ -109,6 +109,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var viewModel: MainViewModel? = null
+
+    /** A video that is playing shrinks into a floating window when the person leaves the app. */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (com.qmusic.ui.videos.VideoPip.armed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            runCatching {
+                enterPictureInPictureMode(
+                    android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build(),
+                )
+            }
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        com.qmusic.ui.videos.VideoPip.active.value = isInPictureInPictureMode
+    }
     private val likeWatcher = MainScope()
 
     /** What the ringtone feature needs from the screen in front (see [RingtoneBridge]). */

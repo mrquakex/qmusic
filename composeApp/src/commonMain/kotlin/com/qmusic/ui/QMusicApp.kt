@@ -193,9 +193,10 @@ fun QMusicApp(
                 LaunchedEffect(Unit) { videosController.refreshAccount() }
                 val shareVideo = rememberShare()
                 Box(modifier = modifier.fillMaxSize()) {
+                    val videoStrings = if (language == "en") com.qmusic.ui.videos.VideoStrings.English else com.qmusic.ui.videos.VideoStrings.Turkish
                     com.qmusic.ui.videos.VideosApp(
                         controller = videosController,
-                        s = if (language == "en") com.qmusic.ui.videos.VideoStrings.English else com.qmusic.ui.videos.VideoStrings.Turkish,
+                        s = videoStrings,
                         onExit = { videosOpen = false },
                         onSignIn = { videoLogin = true },
                         onPauseMusic = { viewModel.playerController.pause() },
@@ -209,6 +210,7 @@ fun QMusicApp(
                                 videoLogin = false
                             },
                             onDismiss = { videoLogin = false },
+                            title = videoStrings.signInPageTitle,
                         )
                     }
                 }

@@ -69,7 +69,8 @@ class VideosControllerTest {
         c.home.load()
         val state = c.home.state.value
         assertTrue(state.loaded)
-        assertTrue(state.signInNeeded)
+        // No account: a search stands in for the empty home, so there is something to watch.
+        assertEquals(listOf("s1"), state.entries.map { (it as VideoEntry.Video).item.id })
     }
 
     @Test
@@ -106,8 +107,11 @@ class VideosControllerTest {
         assertEquals("two", c.watch.value?.video?.id)
         assertEquals(720, c.watch.value?.quality?.height)
         assertTrue(c.pop())
-        assertNull(c.watch.value)
+        // Back leaves the page but the video goes on small, until it is closed.
+        assertEquals("two", c.watch.value?.video?.id)
         assertTrue(!c.pop())
+        c.closeWatch()
+        assertNull(c.watch.value)
     }
 
     @Test

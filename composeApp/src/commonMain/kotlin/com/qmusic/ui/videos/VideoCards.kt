@@ -239,6 +239,17 @@ fun MessageBlock(title: String, body: String? = null, action: String? = null, on
 }
 
 @Composable
+fun SignInBanner(s: VideoStrings, onSignIn: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).clip(RoundedCornerShape(12.dp)).background(VideoColors.Surface).padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(s.signInBar, color = VideoColors.Text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Text(s.signIn, color = VideoColors.Red, fontWeight = FontWeight.Bold, modifier = Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onSignIn).padding(horizontal = 12.dp, vertical = 8.dp))
+    }
+}
+
+@Composable
 fun Loading(modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
         CircularProgressIndicator(color = VideoColors.Red, strokeWidth = 3.dp, modifier = Modifier.size(32.dp))

@@ -35,6 +35,7 @@ actual fun YouTubeLoginView(
     onCookiesCaptured: (String) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier,
+    title: String?,
 ) {
     val s = LocalStrings.current
     Box(
@@ -59,7 +60,7 @@ actual fun YouTubeLoginView(
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = s.signInYouTubeMusic,
+                    text = title ?: s.signInYouTubeMusic,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )

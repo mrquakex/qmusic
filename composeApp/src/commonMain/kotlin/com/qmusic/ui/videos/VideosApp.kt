@@ -55,6 +55,9 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.qmusic.ui.PlatformBackHandler
 import com.qmusic.ui.theme.QMusicIcons
+import androidx.compose.foundation.layout.aspectRatio
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * The Videos section: YouTube itself, entered from the navigation bar and shaped like its own app (own top bar, own
@@ -76,14 +79,46 @@ fun VideosApp(
     val searching by controller.searching.collectAsState()
     var accountDialog by remember { mutableStateOf(false) }
     val top = routes.lastOrNull()
+    val watch by controller.watch.collectAsState()
+    val fullscreen by controller.fullscreen.collectAsState()
+    val pip = rememberInPictureInPicture()
 
-    // Back closes, in order: the search box, the topmost page, a tab that is not home, and then the section.
+    // The player belongs to the section, not to the page of a video: leaving the page leaves the video playing small.
+    val playback = rememberVideoPlayback()
+    var loadedId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(watch?.video?.id, watch?.quality, playback) {
+        val w = watch
+        val p = playback
+        if (w == null) {
+            p?.pause()
+            loadedId = null
+            return@LaunchedEffect
+        }
+        val q = w.quality ?: return@LaunchedEffect
+        if (p == null) return@LaunchedEffect
+        // Another quality of the same video carries on from where it was.
+        val start = if (loadedId == w.video.id) p.positionMs.value else 0L
+        loadedId = w.video.id
+        onPauseMusic()
+        p.load(q, start)
+    }
+    val playing by (playback?.isPlaying ?: NotPlaying).collectAsState()
+    FullscreenEffect(fullscreen && top is VideoRoute.Watch)
+    PictureInPictureEffect(watch != null && top is VideoRoute.Watch && playing)
+
+    val exit: () -> Unit = {
+        controller.closeWatch()
+        onExit()
+    }
+
+    // Back closes, in order: full screen, the search box, the topmost page, a tab that is not home, and then the section.
     PlatformBackHandler(enabled = true) {
         when {
+            fullscreen -> controller.setFullscreen(false)
             searching -> controller.closeSearchBox()
             controller.pop() -> Unit
             tab != VideoTab.HOME -> controller.selectTab(VideoTab.HOME)
-            else -> onExit()
+            else -> exit()
         }
     }
 
@@ -93,13 +128,17 @@ fun VideosApp(
                 when (top) {
                     null -> TabContent(controller, tab, s, signedIn, onSignIn, onAccount = { accountDialog = true })
                     is VideoRoute.Search -> SearchResultsPage(controller, s, onSignIn)
-                    is VideoRoute.Watch -> WatchPage(controller, s, onPauseMusic, onShare, onSignIn)
+                    is VideoRoute.Watch -> WatchPage(controller, playback, s, onShare, onSignIn)
                     is VideoRoute.Channel -> ChannelPage(controller, s, onSignIn)
                     is VideoRoute.Playlist -> PlaylistPage(controller, top.title, s, onSignIn)
                 }
             }
-            if (top !is VideoRoute.Watch) {
-                VideoBottomBar(tab = tab.takeIf { routes.isEmpty() }, s = s, onTab = { controller.selectTab(it) }, onMusic = onExit)
+            val w = watch
+            if (w != null && top !is VideoRoute.Watch && !pip) {
+                MiniWatchBar(w, playback, onOpen = { controller.push(VideoRoute.Watch(w.video)) }, onClose = { controller.closeWatch() })
+            }
+            if (top !is VideoRoute.Watch && !pip) {
+                VideoBottomBar(tab = tab.takeIf { routes.isEmpty() }, s = s, onTab = { controller.selectTab(it) }, onMusic = exit)
             }
         }
         if (searching) SearchBox(controller, s)
@@ -122,6 +161,37 @@ fun VideosApp(
 }
 
 // ---------------------------------------------------------------------- bars
+
+private val NotPlaying: StateFlow<Boolean> = MutableStateFlow(false)
+private val NoPosition: StateFlow<Long> = MutableStateFlow(0L)
+
+/** The video that is playing small, above the bottom bar: tap to open it again, play/pause, close. */
+@Composable
+private fun MiniWatchBar(w: WatchState, playback: VideoPlayback?, onOpen: () -> Unit, onClose: () -> Unit) {
+    val playing by (playback?.isPlaying ?: NotPlaying).collectAsState()
+    val position by (playback?.positionMs ?: NoPosition).collectAsState()
+    val duration by (playback?.durationMs ?: NoPosition).collectAsState()
+    Column(modifier = Modifier.fillMaxWidth().background(VideoColors.Surface).clickable(onClick = onOpen)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.width(104.dp).aspectRatio(16f / 9f).background(Color.Black)) {
+                if (w.video.thumbnail != null) AsyncImage(model = w.video.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                if (playback != null && w.quality != null) VideoPlaybackSurface(playback, Modifier.fillMaxSize())
+            }
+            Column(modifier = Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                Text(w.details?.title ?: w.video.title, color = VideoColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                (w.details?.channelName ?: w.video.channelName)?.let { Text(it, color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+            IconButton(onClick = { playback?.togglePlay() }) {
+                Icon(if (playing) QMusicIcons.Pause else QMusicIcons.Play, null, tint = VideoColors.Text, modifier = Modifier.size(24.dp))
+            }
+            IconButton(onClick = onClose) { Icon(QMusicIcons.Close, null, tint = VideoColors.Text, modifier = Modifier.size(22.dp)) }
+        }
+        val fraction = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
+        Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(VideoColors.Chip)) {
+            Box(modifier = Modifier.fillMaxWidth(fraction).height(2.dp).background(VideoColors.Red))
+        }
+    }
+}
 
 @Composable
 private fun TopBar(s: VideoStrings, onSearch: () -> Unit, onAccount: () -> Unit) {
@@ -196,8 +266,11 @@ private fun TabContent(controller: VideosController, tab: VideoTab, s: VideoStri
                     onRetry = { controller.home.load(force = true) },
                     signInMessage = s.signInTitle to s.signInBody,
                     onSignIn = onSignIn,
-                    header = if (state.chips.isNotEmpty()) {
-                        { item(key = "chips") { ChipRow(state.chips) { controller.home.selectChip(it) } } }
+                    header = if (state.chips.isNotEmpty() || (!signedIn && state.entries.isNotEmpty())) {
+                        {
+                            if (!signedIn && state.entries.isNotEmpty()) item(key = "banner") { SignInBanner(s, onSignIn) }
+                            if (state.chips.isNotEmpty()) item(key = "chips") { ChipRow(state.chips) { controller.home.selectChip(it) } }
+                        }
                     } else null,
                 )
             }

@@ -191,7 +191,14 @@ class VideosController(
     private val _routes = MutableStateFlow<List<VideoRoute>>(emptyList())
     val routes: StateFlow<List<VideoRoute>> = _routes.asStateFlow()
 
-    val home = FeedLoader(scope, service) { service.home() }
+    /** Without an account YouTube's own home is empty: a search of what people watch fills it instead. */
+    var fallbackQuery: String = "popüler videolar"
+
+    val home = FeedLoader(scope, service) {
+        service.home().let { r ->
+            if (!service.isSignedIn && r.getOrNull()?.isEmpty == true) service.search(fallbackQuery, VideoSearchFilter.VIDEOS) else r
+        }
+    }
     val subscriptions = FeedLoader(scope, service) { service.subscriptions() }
     val subscribedChannels = FeedLoader(scope, service) { service.subscribedChannels() }
     private val library = LibrarySection.entries.associateWith { section ->
@@ -252,7 +259,7 @@ class VideosController(
 
     fun selectTab(tab: VideoTab) {
         _routes.value = emptyList()
-        stopWatching()
+        _fullscreen.value = false
         _tab.value = tab
     }
 
@@ -261,7 +268,8 @@ class VideosController(
         _routes.update { stack -> (if (route is VideoRoute.Watch && stack.lastOrNull() is VideoRoute.Watch) stack.dropLast(1) else stack) + route }
         when (route) {
             is VideoRoute.Search -> search(route.query)
-            is VideoRoute.Watch -> startWatching(route.video)
+            // The same video that is playing small just opens big again, where it was.
+            is VideoRoute.Watch -> if (_watch.value?.video?.id != route.video.id) startWatching(route.video)
             is VideoRoute.Channel -> loadChannel(route.id, null)
             is VideoRoute.Playlist -> openPlaylist(route.id)
         }
@@ -273,8 +281,8 @@ class VideosController(
         if (stack.isEmpty()) return false
         val gone = stack.last()
         _routes.value = stack.dropLast(1)
-        if (gone is VideoRoute.Watch) stopWatching()
-        // Back to a search or a channel that was under a video: the video is not playing there any more.
+        // Leaving the page of a video does not stop it: it goes on in the small player above the bottom bar.
+        if (gone is VideoRoute.Watch) _fullscreen.value = false
         return true
     }
 
@@ -413,6 +421,20 @@ class VideosController(
     private fun stopWatching() {
         watchJob?.cancel()
         _watch.value = null
+        _fullscreen.value = false
+    }
+
+    /** Ends the video for good (the small player's close button, or leaving the section). */
+    fun closeWatch() {
+        _routes.update { stack -> stack.filter { it !is VideoRoute.Watch } }
+        stopWatching()
+    }
+
+    private val _fullscreen = MutableStateFlow(false)
+    val fullscreen: StateFlow<Boolean> = _fullscreen.asStateFlow()
+
+    fun setFullscreen(on: Boolean) {
+        _fullscreen.value = on && _watch.value != null
     }
 
     fun loadMoreRelated() {

@@ -8,4 +8,6 @@ expect fun YouTubeLoginView(
     onCookiesCaptured: (String) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The page title; the YouTube Music one by default. */
+    title: String? = null,
 )

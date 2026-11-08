@@ -51,44 +51,89 @@ import com.qmusic.engine.video.VideoEntry
 import com.qmusic.engine.video.VideoQuality
 import com.qmusic.ui.theme.QMusicIcons
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 
 /** The page of one video: the picture on top, then what it is, what the account can do with it, comments, what's next. */
 @Composable
 fun WatchPage(
     controller: VideosController,
+    playback: VideoPlayback?,
     s: VideoStrings,
-    onPauseMusic: () -> Unit,
     onShare: (String) -> Unit,
     onSignIn: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val watch by controller.watch.collectAsState()
+    val fullscreen by controller.fullscreen.collectAsState()
+    val pip = rememberInPictureInPicture()
     val w = watch ?: return
-    key(w.video.id) {
-        val playback = rememberVideoPlayback()
-        Column(modifier = modifier.fillMaxSize().background(VideoColors.Background)) {
-            Box(modifier = Modifier.fillMaxWidth().background(Color.Black).statusBarsPadding()) {
-                PlayerBox(w, playback, s, controller, onPauseMusic)
+    when {
+        // The floating window shows the picture and nothing else.
+        pip -> Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
+            if (playback != null) VideoPlaybackSurface(playback, Modifier.fillMaxSize())
+        }
+        fullscreen -> Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
+            PlayerBox(w, playback, s, controller, true, Modifier.fillMaxSize())
+        }
+        else -> {
+            // Dragging the picture down shrinks the video into the small player, as on YouTube.
+            val offset = remember { Animatable(0f) }
+            val scope = rememberCoroutineScope()
+            var height by remember { mutableStateOf(1f) }
+            Column(
+                modifier = modifier
+                    .fillMaxSize()
+                    .onSizeChanged { height = it.height.toFloat().coerceAtLeast(1f) }
+                    .graphicsLayer {
+                        translationY = offset.value
+                        alpha = 1f - (offset.value / height).coerceIn(0f, 1f) * 0.6f
+                    }
+                    .background(VideoColors.Background),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.Black)
+                        .statusBarsPadding()
+                        .pointerInput(Unit) {
+                            detectVerticalDragGestures(
+                                onVerticalDrag = { change, dy ->
+                                    change.consume()
+                                    scope.launch { offset.snapTo((offset.value + dy).coerceAtLeast(0f)) }
+                                },
+                                onDragEnd = {
+                                    scope.launch {
+                                        if (offset.value > height * 0.18f) {
+                                            offset.animateTo(height, tween(150))
+                                            controller.pop()
+                                            offset.snapTo(0f)
+                                        } else {
+                                            offset.animateTo(0f, tween(150))
+                                        }
+                                    }
+                                },
+                                onDragCancel = { scope.launch { offset.animateTo(0f, tween(150)) } },
+                            )
+                        },
+                ) {
+                    PlayerBox(w, playback, s, controller, false, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+                }
+                WatchDetails(controller, w, s, onShare, onSignIn)
             }
-            WatchDetails(controller, w, s, onShare, onSignIn)
         }
     }
 }
 
 @Composable
-private fun PlayerBox(w: WatchState, playback: VideoPlayback?, s: VideoStrings, controller: VideosController, onPauseMusic: () -> Unit) {
-    var loadedFor by remember { mutableStateOf<VideoQuality?>(null) }
-    LaunchedEffect(w.quality, playback) {
-        val q = w.quality ?: return@LaunchedEffect
-        val p = playback ?: return@LaunchedEffect
-        // Another quality of the same video carries on from where it was.
-        val start = if (loadedFor != null) p.positionMs.value else 0L
-        loadedFor = q
-        onPauseMusic()
-        p.load(q, start)
-    }
-
-    Box(modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)) {
+private fun PlayerBox(w: WatchState, playback: VideoPlayback?, s: VideoStrings, controller: VideosController, fullscreen: Boolean, modifier: Modifier) {
+    Box(modifier = modifier.background(Color.Black)) {
         val isPlaying = playback?.isPlaying?.collectAsState()?.value ?: false
         val buffering = playback?.buffering?.collectAsState()?.value ?: false
         val playError = playback?.error?.collectAsState()?.value
@@ -104,7 +149,7 @@ private fun PlayerBox(w: WatchState, playback: VideoPlayback?, s: VideoStrings, 
             w.streamLoading || (buffering && !isPlaying) -> Box(Modifier.fillMaxSize(), Alignment.Center) { Loading(Modifier.size(64.dp)) }
         }
         if (playback != null && w.quality != null && !w.streamError) {
-            PlayerControls(playback, w, s, controller)
+            PlayerControls(playback, w, s, controller, fullscreen)
         }
     }
 }
@@ -131,7 +176,7 @@ private fun Overlay(text: String, action: String? = null, onAction: (() -> Unit)
 private val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 
 @Composable
-private fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStrings, controller: VideosController) {
+private fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStrings, controller: VideosController, fullscreen: Boolean) {
     var visible by remember { mutableStateOf(true) }
     var qualityMenu by remember { mutableStateOf(false) }
     var speedMenu by remember { mutableStateOf(false) }
@@ -166,6 +211,7 @@ private fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStrin
                 )
             }
             Row(modifier = Modifier.align(Alignment.TopEnd).padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                ControlText(if (fullscreen) s.exitFullscreen else s.fullscreen) { controller.setFullscreen(!fullscreen) }
                 Box {
                     ControlText(speedLabel(speed)) { speedMenu = true }
                     DropdownMenu(expanded = speedMenu, onDismissRequest = { speedMenu = false }) {

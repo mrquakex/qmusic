@@ -49,6 +49,7 @@ actual fun YouTubeLoginView(
     onCookiesCaptured: (String) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier,
+    title: String?,
 ) {
     val s = LocalStrings.current
     var attempt by remember { mutableIntStateOf(0) }
