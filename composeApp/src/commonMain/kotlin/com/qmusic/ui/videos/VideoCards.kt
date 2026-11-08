@@ -284,11 +284,47 @@ fun Loading(modifier: Modifier = Modifier) {
 }
 
 /**
+ * Any list of the section, and pull down at the top to load it afresh when [onRefresh] is given.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun FeedColumn(
+    state: FeedState,
+    s: VideoStrings,
+    onVideo: (VideoItem) -> Unit,
+    onChannel: (id: String, name: String?) -> Unit,
+    onPlaylist: (VideoPlaylist) -> Unit,
+    onShort: (items: List<VideoItem>, index: Int) -> Unit,
+    onLoadMore: () -> Unit,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
+    compact: Boolean = false,
+    signInMessage: Pair<String, String>? = null,
+    onSignIn: (() -> Unit)? = null,
+    resetKey: Int? = null,
+    onRefresh: (() -> Unit)? = null,
+    header: (LazyListScope.() -> Unit)? = null,
+) {
+    if (onRefresh == null) {
+        FeedList(state, s, onVideo, onChannel, onPlaylist, onShort, onLoadMore, onRetry, modifier, listState, compact, signInMessage, onSignIn, resetKey, header)
+    } else {
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = state.loading && state.entries.isNotEmpty(),
+            onRefresh = onRefresh,
+            modifier = modifier.fillMaxSize(),
+        ) {
+            FeedList(state, s, onVideo, onChannel, onPlaylist, onShort, onLoadMore, onRetry, Modifier, listState, compact, signInMessage, onSignIn, resetKey, header)
+        }
+    }
+}
+
+/**
  * Any list of the section: cards in the order YouTube gave them, more as the end nears, and the states a list has
  * (loading, failed, empty, needs an account).
  */
 @Composable
-fun FeedColumn(
+private fun FeedList(
     state: FeedState,
     s: VideoStrings,
     onVideo: (VideoItem) -> Unit,

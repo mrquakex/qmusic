@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 
 /** What a list of the Videos section shows right now. */
 data class FeedState(
@@ -410,14 +411,22 @@ class VideosController(
 
     private val qualityCache = LinkedHashMap<String, Cached>()
 
+    private val inFlight = HashMap<String, kotlinx.coroutines.Deferred<Result<List<VideoQuality>>>>()
+
+    /** One lookup per video at a time: asking ahead and asking for real share the same answer. */
     private suspend fun qualitiesOf(id: String): Result<List<VideoQuality>> {
         qualityCache[id]?.takeIf { it.at.elapsedNow() < CACHE_LIFETIME }?.let { return Result.success(it.qualities) }
-        return service.qualities(id).onSuccess { list ->
-            if (list.isNotEmpty()) {
-                qualityCache[id] = Cached(kotlin.time.TimeSource.Monotonic.markNow(), list)
-                while (qualityCache.size > CACHE_SIZE) qualityCache.remove(qualityCache.keys.first())
-            }
+        val lookup = inFlight.getOrPut(id) {
+            scope.async {
+                service.qualities(id).onSuccess { list ->
+                    if (list.isNotEmpty()) {
+                        qualityCache[id] = Cached(kotlin.time.TimeSource.Monotonic.markNow(), list)
+                        while (qualityCache.size > CACHE_SIZE) qualityCache.remove(qualityCache.keys.first())
+                    }
+                }
+            }.also { it.invokeOnCompletion { inFlight.remove(id) } }
         }
+        return lookup.await()
     }
 
     /** While one video plays, the one after it is made ready, so "up next" and autoplay start at once. */
@@ -697,6 +706,7 @@ class VideosController(
         closeWatch()
         _shorts.value = ShortsState(items, index)
         _routes.update { it + VideoRoute.Shorts }
+        prepareShorts(index)
     }
 
     private fun loadShortsTab() {
@@ -707,6 +717,7 @@ class VideosController(
                 onSuccess = { feed ->
                     shortsContinuation = feed.continuation
                     _shorts.value = ShortsState(feed.shortItems())
+                    prepareShorts(0)
                 },
                 onFailure = { e ->
                     if (e is CancellationException) throw e
@@ -718,7 +729,42 @@ class VideosController(
 
     fun setShortIndex(index: Int) {
         _shorts.update { it.copy(index = index) }
+        prepareShorts(index)
         if (index >= _shorts.value.items.size - 3) loadMoreShorts()
+    }
+
+    /**
+     * Gets the clip on screen and the next two ready: their ways to play are worked out ahead (that is what made a
+     * swipe wait for seconds), and the channel that search results do not name is looked up.
+     */
+    private fun prepareShorts(from: Int) {
+        val items = _shorts.value.items
+        for (i in from..from + 2) {
+            val item = items.getOrNull(i) ?: continue
+            scope.launch { qualitiesOf(item.id) }
+            if (item.channelAvatar == null || item.channelId == null) enrichShort(item.id)
+        }
+    }
+
+    private val enriching = HashSet<String>()
+
+    private fun enrichShort(id: String) {
+        if (!enriching.add(id)) return
+        scope.launch {
+            service.watch(id).onSuccess { d ->
+                _shorts.update { cur ->
+                    cur.copy(
+                        items = cur.items.map {
+                            if (it.id != id) it else it.copy(
+                                channelId = d.channelId ?: it.channelId,
+                                channelName = d.channelName ?: it.channelName,
+                                channelAvatar = d.channelAvatar ?: it.channelAvatar,
+                            )
+                        },
+                    )
+                }
+            }
+        }
     }
 
     /** More clips: the ones YouTube relates to the last, then the next page of the search. */
@@ -732,6 +778,7 @@ class VideosController(
                     val seen = cur.items.mapTo(HashSet()) { it.id }
                     cur.copy(items = cur.items + list.filter { it.id !in seen })
                 }
+                prepareShorts(_shorts.value.index)
                 return _shorts.value.items.size - before
             }
             val related = service.watch(last.id).getOrNull()?.related?.shortItems().orEmpty()
@@ -745,11 +792,11 @@ class VideosController(
         }
     }
 
-    /** The way to play a Short: the sharpest upright picture up to 720 wide, since it fills a phone's screen. */
+    /** The way to play a Short: a sharp upright picture (up to about 480 wide), light enough to start at once. */
     suspend fun streamFor(id: String): VideoQuality? =
         qualitiesOf(id).getOrNull()?.let { list ->
             list.firstOrNull { it.isLive }
-                ?: list.filter { it.height in 1..1300 }.maxByOrNull { it.height * 100 + it.fps }
+                ?: list.filter { it.height in 1..900 }.maxByOrNull { it.height * 100 + it.fps }
                 ?: list.minByOrNull { it.height }
         }
 

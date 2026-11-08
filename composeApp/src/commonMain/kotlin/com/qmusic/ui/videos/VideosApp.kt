@@ -285,6 +285,7 @@ private fun TabContent(
                     onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
                     onLoadMore = { controller.home.loadMore() },
                     onRetry = { controller.home.load(force = true) },
+                    onRefresh = { controller.home.load(force = true) },
                     signInMessage = s.signInTitle to s.signInBody,
                     onSignIn = onSignIn,
                     resetKey = refresh,
@@ -318,6 +319,7 @@ private fun SubscriptionsTab(controller: VideosController, s: VideoStrings, sign
         onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
         onLoadMore = { loader.loadMore() },
         onRetry = { loader.load(force = true) },
+        onRefresh = { loader.load(force = true) },
         signInMessage = s.tabSubscriptions to s.signInSubscriptions,
         onSignIn = onSignIn,
         header = {
@@ -346,6 +348,7 @@ private fun LibraryTab(controller: VideosController, s: VideoStrings, signedIn: 
         onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
         onLoadMore = { loader.loadMore() },
         onRetry = { loader.load(force = true) },
+        onRefresh = { loader.load(force = true) },
         signInMessage = s.tabLibrary to s.signInLibrary,
         onSignIn = onSignIn,
         compact = section != LibrarySection.PLAYLISTS,
@@ -472,6 +475,7 @@ private fun SearchResultsPage(controller: VideosController, s: VideoStrings, onS
                 onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
                 onLoadMore = { current.loadMore() },
                 onRetry = { current.load(force = true) },
+                onRefresh = { current.load(force = true) },
                 onSignIn = onSignIn,
             )
         }
