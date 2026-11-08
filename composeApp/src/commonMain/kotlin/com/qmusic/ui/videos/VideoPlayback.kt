@@ -14,6 +14,9 @@ interface VideoPlayback {
     val buffering: StateFlow<Boolean>
     val ended: StateFlow<Boolean>
 
+    /** How many times playing stopped to wait for data (not counting the wait right after a start or a seek). */
+    val rebuffers: StateFlow<Int>
+
     /** Why it cannot play (null while it can). */
     val error: StateFlow<String?>
 
@@ -26,6 +29,9 @@ interface VideoPlayback {
 
     /** Plays the same clip again and again (a Short). */
     fun setLooping(loop: Boolean)
+
+    /** Reads the start of [quality] ahead, so that it opens at once later (the next Shorts). */
+    fun preload(quality: VideoQuality) {}
     fun release()
 }
 

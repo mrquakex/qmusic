@@ -15,7 +15,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -30,21 +29,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-
 /** The video section's own ExoPlayer, with the audio focus of a video (it takes the sound from the music). */
+@androidx.media3.common.util.UnstableApi
 internal class ExoVideoPlayback(context: Context) : VideoPlayback {
+    private val appContext = context.applicationContext
     val player: ExoPlayer = ExoPlayer.Builder(context.applicationContext)
         .setAudioAttributes(
             AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
             true,
         )
         .setHandleAudioBecomingNoisy(true)
-        // Starts after one second of picture instead of two and a half, and keeps a minute ahead on a good line.
+        // Starts after under a second of picture, keeps up to a minute and a half ahead, and keeps the last fifteen
+        // seconds so a short seek back needs nothing new.
         .setLoadControl(
             DefaultLoadControl.Builder()
-                .setBufferDurationsMs(15_000, 60_000, 1_000, 2_000)
+                .setBufferDurationsMs(20_000, 90_000, 800, 2_000)
                 .setPrioritizeTimeOverSizeThresholds(true)
+                .setBackBuffer(15_000, true)
                 .build(),
         )
         .build()
@@ -61,6 +62,12 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
     override val ended: StateFlow<Boolean> = _ended.asStateFlow()
     private val _error = MutableStateFlow<String?>(null)
     override val error: StateFlow<String?> = _error.asStateFlow()
+    private val _rebuffers = MutableStateFlow(0)
+    override val rebuffers: StateFlow<Int> = _rebuffers.asStateFlow()
+
+    /** Playing had started since the last load, and when the last seek was: a wait after either is not a stall. */
+    private var wasReady = false
+    private var lastSeekAt = 0L
 
     /** What was loaded last: the quality, where it started, and whether it carried subtitles. */
     private var lastLoad: Triple<VideoQuality, Long, Boolean>? = null
@@ -75,11 +82,9 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
         }
     }
 
-    private val dataSources = DefaultHttpDataSource.Factory()
-        .setUserAgent(USER_AGENT)
-        .setAllowCrossProtocolRedirects(true)
-        .setConnectTimeoutMs(15_000)
-        .setReadTimeoutMs(15_000)
+    /** Videos come through the cache, in bounded pieces (full speed); live streams only in pieces. */
+    private val dataSources = VideoStreaming.cached(appContext)
+    private val liveSources = VideoStreaming.network()
 
     init {
         player.addListener(object : Player.Listener {
@@ -89,8 +94,20 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
 
             override fun onPlaybackStateChanged(state: Int) {
                 _buffering.value = state == Player.STATE_BUFFERING
+                if (state == Player.STATE_BUFFERING && wasReady && player.playWhenReady &&
+                    android.os.SystemClock.elapsedRealtime() - lastSeekAt > SEEK_GRACE_MS
+                ) {
+                    _rebuffers.value++
+                }
+                if (state == Player.STATE_READY) wasReady = true
                 _ended.value = state == Player.STATE_ENDED
                 if (state == Player.STATE_READY) _error.value = null
+            }
+
+            override fun onPositionDiscontinuity(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) {
+                if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) {
+                    lastSeekAt = android.os.SystemClock.elapsedRealtime()
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -110,6 +127,7 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
     override fun load(quality: VideoQuality, startMs: Long, autoPlay: Boolean, caption: VideoCaption?) {
         _error.value = null
         _ended.value = false
+        wasReady = false
         // Subtitles go in the picture's own media item: the player then converts them the way its text renderer needs
         // (a hand-built subtitle source is refused with a runtime error).
         val track = caption?.takeIf { !quality.isLive }?.let {
@@ -120,7 +138,7 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
                 .build()
         }
         val pictureItem = MediaItem.Builder().setUri(quality.videoUrl).apply { if (track != null) setSubtitleConfigurations(listOf(track)) }.build()
-        val picture: MediaSource = DefaultMediaSourceFactory(dataSources).createMediaSource(pictureItem)
+        val picture: MediaSource = DefaultMediaSourceFactory(if (quality.isLive) liveSources else dataSources).createMediaSource(pictureItem)
         val source: MediaSource = if (quality.audioUrl != null && !quality.isLive) {
             MergingMediaSource(picture, ProgressiveMediaSource.Factory(dataSources).createMediaSource(MediaItem.fromUri(quality.audioUrl!!)))
         } else {
@@ -145,6 +163,7 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
     }
 
     override fun seekTo(ms: Long) {
+        lastSeekAt = android.os.SystemClock.elapsedRealtime()
         player.seekTo(ms.coerceAtLeast(0))
         _position.value = ms.coerceAtLeast(0)
     }
@@ -157,6 +176,8 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
         player.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
     }
 
+    override fun preload(quality: VideoQuality) = VideoStreaming.preload(appContext, quality)
+
     override fun release() {
         handler.removeCallbacks(ticker)
         player.release()
@@ -164,6 +185,7 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
 
     private companion object {
         const val TICK_MS = 400L
+        const val SEEK_GRACE_MS = 2_500L
     }
 }
 

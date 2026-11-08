@@ -26,8 +26,8 @@ android {
         applicationId = "com.qmusic.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 33
-        versionName = "2.1.1"
+        versionCode = 34
+        versionName = "2.1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "LASTFM_KEY", "\"${localProperties.getProperty("lastfm.key", "")}\"")

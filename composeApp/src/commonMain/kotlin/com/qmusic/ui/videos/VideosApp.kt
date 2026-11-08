@@ -126,10 +126,11 @@ fun VideosApp(
         controller.reportWatch(id)
     }
     // Playback that keeps stalling steps down a quality by itself.
-    val buffering by (playback?.buffering ?: NotPlaying).collectAsState()
+    // Only real stalls count: the wait after opening or seeking is not one.
+    val rebuffers by (playback?.rebuffers ?: NoStalls).collectAsState()
     var stalls by remember { mutableStateOf(emptyList<kotlin.time.TimeMark>()) }
-    LaunchedEffect(buffering) {
-        if (buffering && (playback?.positionMs?.value ?: 0L) > 3_000L) {
+    LaunchedEffect(rebuffers) {
+        if (rebuffers > 0) {
             val recent = stalls.filter { it.elapsedNow() < 45.seconds } + kotlin.time.TimeSource.Monotonic.markNow()
             stalls = recent
             if (recent.size >= 3) {
@@ -213,6 +214,7 @@ fun VideosApp(
 // ---------------------------------------------------------------------- bars
 
 private val NotPlaying: StateFlow<Boolean> = MutableStateFlow(false)
+private val NoStalls: StateFlow<Int> = MutableStateFlow(0)
 private val NoPosition: StateFlow<Long> = MutableStateFlow(0L)
 
 /** The video that is playing small, above the bottom bar: tap to open it again, play/pause, close. */

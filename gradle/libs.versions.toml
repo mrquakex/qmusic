@@ -46,6 +46,7 @@ media3-ui = { module = "androidx.media3:media3-ui", version.ref = "media3" }
 media3-exoplayer-hls = { module = "androidx.media3:media3-exoplayer-hls", version.ref = "media3" }
 media3-datasource-okhttp = { module = "androidx.media3:media3-datasource-okhttp", version.ref = "media3" }
 media3-datasource = { module = "androidx.media3:media3-datasource", version.ref = "media3" }
+media3-database = { module = "androidx.media3:media3-database", version.ref = "media3" }
 
 # Ktor 3.x
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }

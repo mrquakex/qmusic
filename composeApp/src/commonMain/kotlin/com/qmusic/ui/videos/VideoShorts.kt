@@ -79,6 +79,14 @@ fun ShortsPage(
     }
     val pager = rememberPagerState(initialPage = state.index.coerceIn(0, state.items.lastIndex)) { state.items.size }
     LaunchedEffect(pager) { snapshotFlow { pager.currentPage }.collect { controller.setShortIndex(it) } }
+    // The first seconds of the next two clips are read ahead: a swipe then shows the picture at once.
+    LaunchedEffect(pager.currentPage, state.items.size) {
+        val from = pager.currentPage
+        for (i in from + 1..from + 2) {
+            val next = state.items.getOrNull(i) ?: continue
+            controller.streamFor(next.id)?.let { playback?.preload(it) }
+        }
+    }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         VerticalPager(state = pager, modifier = Modifier.fillMaxSize(), key = { state.items[it].id }) { page ->
