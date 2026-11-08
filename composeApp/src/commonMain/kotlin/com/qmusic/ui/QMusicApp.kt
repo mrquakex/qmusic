@@ -970,7 +970,7 @@ fun QMusicApp(
 
                                 QMusicNavigationBar(
                                     items = navTabs.map { NavBarItem(it.title, it.icon) } +
-                                        NavBarItem(if (language == "en") "Videos" else "Videolar", QMusicIcons.VideoPlay),
+                                        NavBarItem("QVideo", QMusicIcons.VideoPlay),
                                     selectedIndex = navTabs.indexOfFirst { it.tab == currentTab },
                                     onSelect = { index -> if (index >= navTabs.size) videosOpen = true else selectTab(index) },
                                 )

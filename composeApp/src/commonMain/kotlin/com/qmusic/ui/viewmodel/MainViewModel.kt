@@ -578,7 +578,7 @@ class MainViewModel(
 
     // Update Checker State
     // Keep equal to versionName in androidApp/build.gradle.kts, or the update check compares against the wrong number.
-    val currentAppVersion: String = "2.0.7"
+    val currentAppVersion: String = "2.0.8"
     private val _isCheckingUpdate = MutableStateFlow(false)
     val isCheckingUpdate: StateFlow<Boolean> = _isCheckingUpdate.asStateFlow()
 
