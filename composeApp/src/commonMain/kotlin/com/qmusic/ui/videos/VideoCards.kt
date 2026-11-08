@@ -31,6 +31,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import com.qmusic.ui.theme.QMusicIcons
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -64,6 +66,7 @@ object VideoColors {
     val Text = Color(0xFFF1F1F1)
     val TextSecondary = Color(0xFFAAAAAA)
     val Divider = Color(0xFF303030)
+    val Link = Color(0xFF3EA6FF)
 }
 
 @Composable
@@ -103,7 +106,7 @@ internal fun VideoItem.subtitle(): String =
 
 /** The big card of a feed: picture across the width, then avatar, title and who/how many/when. */
 @Composable
-fun VideoCard(item: VideoItem, s: VideoStrings, onClick: () -> Unit, onChannel: (() -> Unit)?, modifier: Modifier = Modifier) {
+fun VideoCard(item: VideoItem, s: VideoStrings, onClick: () -> Unit, onChannel: (() -> Unit)?, modifier: Modifier = Modifier, onMore: (() -> Unit)? = null) {
     Column(modifier = modifier.fillMaxWidth().clickable(onClick = onClick).padding(bottom = 16.dp)) {
         VideoThumbnail(item, s, Modifier.fillMaxWidth())
         Row(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp)) {
@@ -122,13 +125,23 @@ fun VideoCard(item: VideoItem, s: VideoStrings, onClick: () -> Unit, onChannel: 
                     Text(sub, color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
                 }
             }
+            if (onMore != null) MoreButton(onMore)
         }
     }
 }
 
+/** The ⋮ at the end of a card. */
+@Composable
+fun MoreButton(onClick: () -> Unit) {
+    Icon(
+        QMusicIcons.More, null, tint = VideoColors.TextSecondary,
+        modifier = Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onClick).padding(4.dp),
+    )
+}
+
 /** The small card of "up next" and channel lists: picture on the left, text on the right. */
 @Composable
-fun VideoRowCard(item: VideoItem, s: VideoStrings, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun VideoRowCard(item: VideoItem, s: VideoStrings, onClick: () -> Unit, modifier: Modifier = Modifier, onMore: (() -> Unit)? = null) {
     Row(modifier = modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp)) {
         VideoThumbnail(item, s, Modifier.width(168.dp).clip(RoundedCornerShape(8.dp)))
         Spacer(Modifier.width(10.dp))
@@ -139,6 +152,7 @@ fun VideoRowCard(item: VideoItem, s: VideoStrings, onClick: () -> Unit, modifier
                 Text(sub, color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
             }
         }
+        if (onMore != null) MoreButton(onMore)
     }
 }
 
@@ -304,17 +318,18 @@ fun FeedColumn(
     onSignIn: (() -> Unit)? = null,
     resetKey: Int? = null,
     onRefresh: (() -> Unit)? = null,
+    onMore: ((VideoItem) -> Unit)? = null,
     header: (LazyListScope.() -> Unit)? = null,
 ) {
     if (onRefresh == null) {
-        FeedList(state, s, onVideo, onChannel, onPlaylist, onShort, onLoadMore, onRetry, modifier, listState, compact, signInMessage, onSignIn, resetKey, header)
+        FeedList(state, s, onVideo, onChannel, onPlaylist, onShort, onLoadMore, onRetry, modifier, listState, compact, signInMessage, onSignIn, resetKey, onMore, header)
     } else {
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
             isRefreshing = state.loading && state.entries.isNotEmpty(),
             onRefresh = onRefresh,
             modifier = modifier.fillMaxSize(),
         ) {
-            FeedList(state, s, onVideo, onChannel, onPlaylist, onShort, onLoadMore, onRetry, Modifier, listState, compact, signInMessage, onSignIn, resetKey, header)
+            FeedList(state, s, onVideo, onChannel, onPlaylist, onShort, onLoadMore, onRetry, Modifier, listState, compact, signInMessage, onSignIn, resetKey, onMore, header)
         }
     }
 }
@@ -339,6 +354,7 @@ private fun FeedList(
     signInMessage: Pair<String, String>? = null,
     onSignIn: (() -> Unit)? = null,
     resetKey: Int? = null,
+    onMore: ((VideoItem) -> Unit)? = null,
     header: (LazyListScope.() -> Unit)? = null,
 ) {
     LaunchedEffect(resetKey) { if (resetKey != null && resetKey > 0) listState.scrollToItem(0) }
@@ -361,12 +377,13 @@ private fun FeedList(
         items(state.entries.size, key = { i -> state.entries[i].let { e -> (e.ids().firstOrNull() ?: "e") + "#" + i } }) { index ->
             when (val entry = state.entries[index]) {
                 is VideoEntry.Video -> if (compact) {
-                    VideoRowCard(entry.item, s, onClick = { onVideo(entry.item) })
+                    VideoRowCard(entry.item, s, onClick = { onVideo(entry.item) }, onMore = onMore?.let { m -> { m(entry.item) } })
                 } else {
                     VideoCard(
                         entry.item, s,
                         onClick = { onVideo(entry.item) },
                         onChannel = entry.item.channelId?.let { id -> { onChannel(id, entry.item.channelName) } },
+                        onMore = onMore?.let { m -> { m(entry.item) } },
                     )
                 }
                 is VideoEntry.Channel -> ChannelResultRow(entry.item) { onChannel(entry.item.id, entry.item.name) }

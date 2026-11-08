@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -114,6 +115,7 @@ private fun ShortItem(
     var quality by remember(item.id) { mutableStateOf<VideoQuality?>(null) }
     var failed by remember(item.id) { mutableStateOf(false) }
     val liked by controller.likedIds.collectAsState()
+    val subscribedIds by controller.subscribedChannelIds.collectAsState()
     if (active && playback != null) {
         LaunchedEffect(item.id) {
             failed = false
@@ -171,7 +173,22 @@ private fun ShortItem(
             ) {
                 Avatar(item.channelAvatar, 32.dp)
                 Spacer(Modifier.width(8.dp))
-                Text(item.channelName ?: "", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(item.channelName ?: "", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                item.channelId?.let { channelId ->
+                    val subscribed = channelId in subscribedIds
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        if (subscribed) s.subscribed else s.subscribe,
+                        color = if (subscribed) Color.White else Color.Black,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(if (subscribed) Color.White.copy(alpha = 0.25f) else Color.White)
+                            .clickable { if (!controller.toggleSubscribeChannel(channelId)) onSignIn() }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
             }
             Text(item.title, color = Color.White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
@@ -183,6 +200,7 @@ private fun ShortItem(
             ShortAction(if (item.id in liked) QMusicIcons.HeartFilled else QMusicIcons.Heart, s.like, tint = if (item.id in liked) VideoColors.Red else Color.White) {
                 if (!controller.toggleLikeId(item.id)) onSignIn()
             }
+            ShortAction(VideoIcons.Comment, s.comments) { controller.openShortComments(item) }
             ShortAction(QMusicIcons.Share, s.share) { onShare("https://youtube.com/shorts/${item.id}") }
         }
         if (active && duration > 0) {

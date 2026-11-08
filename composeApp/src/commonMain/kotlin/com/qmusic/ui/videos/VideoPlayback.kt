@@ -2,6 +2,7 @@ package com.qmusic.ui.videos
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import com.qmusic.engine.video.VideoCaption
 import com.qmusic.engine.video.VideoQuality
 import kotlinx.coroutines.flow.StateFlow
 
@@ -17,7 +18,7 @@ interface VideoPlayback {
     val error: StateFlow<String?>
 
     /** Plays [quality] from [startMs]; picture and sound are merged when they are separate streams. */
-    fun load(quality: VideoQuality, startMs: Long = 0, autoPlay: Boolean = true)
+    fun load(quality: VideoQuality, startMs: Long = 0, autoPlay: Boolean = true, caption: VideoCaption? = null)
     fun togglePlay()
     fun pause()
     fun seekTo(ms: Long)

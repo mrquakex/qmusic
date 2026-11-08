@@ -56,6 +56,10 @@ private open class FakeVideos : VideoService {
     override suspend fun setLike(videoId: String, like: Boolean) = Result.success(Unit)
     override suspend fun setSubscribed(channelId: String, subscribed: Boolean) = Result.success(Unit)
     override suspend fun setWatchLater(videoId: String, saved: Boolean) = Result.success(Unit)
+    override suspend fun setInPlaylist(playlistId: String, videoId: String, add: Boolean) = Result.success(Unit)
+    override suspend fun captions(videoId: String) = Result.success(emptyList<com.qmusic.engine.video.VideoCaption>())
+    override suspend fun postComment(createToken: String, text: String) = Result.success(Unit)
+    override suspend fun reportWatch(videoId: String) {}
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -148,6 +152,50 @@ class VideosControllerTest {
         assertNull(c.watch.value)
         assertEquals(1, c.shorts.value.index)
         assertEquals(listOf<VideoRoute>(VideoRoute.Shorts), c.routes.value)
+    }
+
+    @Test
+    fun aListOpenedInOrderGoesThroughItsVideos() = runTest(UnconfinedTestDispatcher()) {
+        val c = controller(FakeVideos(), this)
+        val list = listOf(VideoItem("a", "A"), VideoItem("b", "B"), VideoItem("c", "C"))
+        c.openFrom(list, 0)
+        assertEquals("a", c.watch.value?.video?.id)
+        c.playNext()
+        assertEquals("b", c.watch.value?.video?.id)
+        assertEquals(1, c.watch.value?.queueIndex)
+        c.playNext()
+        assertEquals("c", c.watch.value?.video?.id)
+        assertTrue(c.playPrevious())
+        assertEquals("b", c.watch.value?.video?.id)
+        assertEquals(1, c.routes.value.size)
+    }
+
+    @Test
+    fun aVideoLeftHalfWayIsPickedUpAgainButNotAShortOneOrAnAlmostFinishedOne() = runTest(UnconfinedTestDispatcher()) {
+        val c = controller(FakeVideos(), this)
+        c.savePosition("long", 300_000, 1_200_000)
+        assertEquals(300_000, c.resumeFor("long"))
+        c.savePosition("short", 30_000, 60_000)
+        assertEquals(0, c.resumeFor("short"))
+        c.savePosition("long", 1_190_000, 1_200_000)
+        assertEquals(0, c.resumeFor("long"))
+    }
+
+    @Test
+    fun theQualityStartsAtWhatTheConnectionAllowsAndStepsDownWhenAsked() = runTest(UnconfinedTestDispatcher()) {
+        val settings = InMemoryAppSettings()
+        var wifi = true
+        val c = VideosController(FakeVideos(), backgroundScope, settings, musicSession = { null }, isUnmetered = { wifi })
+        c.setWifiQuality("1080")
+        c.setMobileQuality("360")
+        c.open(VideoItem("one", "One"))
+        assertEquals(1080, c.watch.value?.quality?.height)
+        c.stepDownQuality()
+        assertEquals(720, c.watch.value?.quality?.height)
+        wifi = false
+        c.open(VideoItem("two", "Two"))
+        // Nothing is as low as 360 here: the lowest there is plays.
+        assertEquals(720, c.watch.value?.quality?.height)
     }
 
     @Test

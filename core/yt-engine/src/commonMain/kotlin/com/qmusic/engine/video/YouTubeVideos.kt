@@ -132,12 +132,15 @@ class YouTubeVideos(
             )
         }
 
-    override suspend fun setWatchLater(videoId: String, saved: Boolean): Result<Unit> =
-        signedIn {
+    override suspend fun setWatchLater(videoId: String, saved: Boolean): Result<Unit> = setInPlaylist("WL", videoId, saved)
+
+    override suspend fun setInPlaylist(playlistId: String, videoId: String, add: Boolean): Result<Unit> {
+        val saved = add
+        return signedIn {
             action(
                 "browse/edit_playlist",
                 buildJsonObject {
-                    put("playlistId", "WL")
+                    put("playlistId", playlistId.removePrefix("VL"))
                     put(
                         "actions",
                         buildJsonArray {
@@ -157,12 +160,52 @@ class YouTubeVideos(
                 },
             )
         }
+    }
+
+    override suspend fun captions(videoId: String): Result<List<VideoCaption>> =
+        runCatching { extractor?.videoCaptions(videoId).orEmpty() }
+
+    override suspend fun postComment(createToken: String, text: String): Result<Unit> =
+        signedIn {
+            action("comment/create_comment", buildJsonObject {
+                put("createCommentParams", createToken)
+                put("commentText", text)
+            })
+        }
+
+    override suspend fun reportWatch(videoId: String) {
+        if (!isSignedIn) return
+        runCatching {
+            ensureVisitorData()
+            val answer = post("player", buildJsonObject {
+                put("context", context())
+                put("videoId", videoId)
+                put("contentCheckOk", true)
+                put("racyCheckOk", true)
+            }).bodyAsText()
+            val base = Json.parseToJsonElement(answer).jsonObject["playbackTracking"]?.jsonObject
+                ?.get("videostatsPlaybackUrl")?.jsonObject?.get("baseUrl")?.jsonPrimitive?.contentOrNull ?: return
+            val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+            val cpn = (1..16).map { chars[kotlin.random.Random.nextInt(chars.length)] }.joinToString("")
+            http.get("$base&ver=2&cpn=$cpn&cmt=0&el=detailpage&c=WEB&cver=$CLIENT_VERSION") {
+                userAgent(YouTubeClient.USER_AGENT_WEB)
+                header("Referer", "$ORIGIN/")
+                auth?.takeIf { it.isLoggedIn }?.rawCookies?.let { header("Cookie", it) }
+            }
+        }
+    }
 
     private suspend fun signedIn(block: suspend () -> Unit): Result<Unit> =
         if (!isSignedIn) Result.failure(VideoSignInRequired()) else runCatching { block() }
 
     private suspend fun action(path: String, body: JsonObject) {
-        val response = post(path, body)
+        ensureVisitorData()
+        // Every Innertube call names the client it comes from; without it YouTube refuses with a 400.
+        val full = buildJsonObject {
+            put("context", context())
+            body.forEach { (key, value) -> put(key, value) }
+        }
+        val response = post(path, full)
         check(response.status.value in 200..299) { "YouTube answered ${response.status.value}" }
     }
 

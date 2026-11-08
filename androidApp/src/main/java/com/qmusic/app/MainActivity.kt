@@ -103,6 +103,17 @@ class MainActivity : AppCompatActivity() {
                 }
         }
 
+        // QVideo: a video that is playing keeps going with the screen off (see VideoKeepAliveService).
+        com.qmusic.ui.videos.VideoBackground.onState = { active, title ->
+            val service = Intent(this, VideoKeepAliveService::class.java)
+            if (active) {
+                service.putExtra(VideoKeepAliveService.EXTRA_TITLE, title)
+                ContextCompat.startForegroundService(this, service)
+            } else {
+                stopService(service)
+            }
+        }
+
         setContent {
             QMusicApp(viewModel = viewModel)
         }

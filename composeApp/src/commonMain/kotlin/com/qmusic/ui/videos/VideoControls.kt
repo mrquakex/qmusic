@@ -3,6 +3,7 @@ package com.qmusic.ui.videos
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -66,6 +67,7 @@ object VideoIcons {
 
     val Fullscreen: ImageVector = stroked("Fullscreen", "M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5")
     val FullscreenExit: ImageVector = stroked("FullscreenExit", "M9 4v5H4M15 4v5h5M20 15h-5v5M4 15h5v5")
+    val Comment: ImageVector = stroked("Comment", "M5 4h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-4 4v-4H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z")
     val Shorts: ImageVector = stroked("Shorts", "M8 3h8a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z", "M10.5 9.5v5l4-2.5z")
 }
 
@@ -95,6 +97,15 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
     val duration by playback.durationMs.collectAsState()
     val ended by playback.ended.collectAsState()
     val live = w.isLive()
+    val device = rememberDeviceControls()
+    // The brightness or volume being changed, and how far: shown for a moment.
+    var hud by remember { mutableStateOf<Pair<String, Float>?>(null) }
+    LaunchedEffect(hud) {
+        if (hud != null) {
+            delay(900)
+            hud = null
+        }
+    }
 
     // The controls fade away while playing, and stay while paused, while a menu is open or while seeking.
     LaunchedEffect(visible, isPlaying, menu, scrubbing) {
@@ -113,6 +124,30 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
     Box(
         modifier = Modifier
             .fillMaxSize()
+            // Full screen only: drag up and down on the left third for brightness, on the right third for volume.
+            .pointerInput(fullscreen, device) {
+                if (!fullscreen || device == null) return@pointerInput
+                var area = 0
+                var value = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { o ->
+                        area = when {
+                            o.x < size.width / 3f -> 1
+                            o.x > size.width * 2f / 3f -> 2
+                            else -> 0
+                        }
+                        value = if (area == 1) device.brightness else if (area == 2) device.volume else 0f
+                    },
+                    onVerticalDrag = { change, dy ->
+                        if (area != 0) {
+                            change.consume()
+                            value = (value - dy / size.height * 1.3f).coerceIn(0f, 1f)
+                            if (area == 1) device.brightness = value else device.volume = value
+                            hud = (if (area == 1) s.brightness else s.volumeLabel) to value
+                        }
+                    },
+                )
+            }
             .pointerInput(w.video.id, live) {
                 detectTapGestures(
                     onPress = {
@@ -152,6 +187,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
             Pill(hint, Modifier.align(if (hint.startsWith("-")) Alignment.CenterStart else Alignment.CenterEnd).padding(horizontal = 40.dp))
         }
         if (fast) Pill("2x  ▶▶", Modifier.align(Alignment.TopCenter).padding(top = 12.dp))
+        hud?.let { (label, value) -> Pill("$label  ${(value * 100).toInt()}%", Modifier.align(Alignment.Center)) }
 
         if (visible || ended) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)))
@@ -177,6 +213,27 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                                 )
                             }
                         }
+                        if (w.captions.isNotEmpty()) {
+                            DropdownMenuItem(text = { Text(s.captions, fontWeight = FontWeight.Bold) }, onClick = {}, enabled = false)
+                            DropdownMenuItem(
+                                text = { Text(if (w.caption == null) "${s.captionsOff}  ✓" else s.captionsOff) },
+                                onClick = {
+                                    menu = false
+                                    controller.selectCaption(null)
+                                },
+                            )
+                            // The person's own words first, then the machine's, a handful of each.
+                            (w.captions.filter { !it.auto }.take(6) + w.captions.filter { it.auto }.take(2)).forEach { track ->
+                                val name = if (track.auto) "${track.label} (auto)" else track.label
+                                DropdownMenuItem(
+                                    text = { Text(if (track == w.caption) "$name  ✓" else name) },
+                                    onClick = {
+                                        menu = false
+                                        controller.selectCaption(track)
+                                    },
+                                )
+                            }
+                        }
                         DropdownMenuItem(text = { Text(s.speed, fontWeight = FontWeight.Bold) }, onClick = {}, enabled = false)
                         SPEEDS.forEach { value ->
                             DropdownMenuItem(
@@ -198,7 +255,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(28.dp),
             ) {
-                IconButton(onClick = { playback.seekTo(0) }, enabled = !live, modifier = Modifier.size(48.dp)) {
+                IconButton(onClick = { if (!controller.playPrevious()) playback.seekTo(0) }, enabled = !live, modifier = Modifier.size(48.dp)) {
                     Icon(QMusicIcons.Previous, null, tint = Color.White.copy(alpha = if (live) 0.35f else 1f), modifier = Modifier.size(30.dp))
                 }
                 IconButton(
@@ -216,10 +273,14 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
             // Bottom: time and full screen, with the seek bar under them.
             Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val chapters = remember(w.details?.description) { chaptersOf(w.details?.description) }
+                    val chapter = currentChapter(chapters, scrubbing?.toLong() ?: position)
                     Text(
-                        if (live) s.live else "${clock(scrubbing?.toLong() ?: position)} / ${clock(duration)}",
+                        if (live) s.live else "${clock(scrubbing?.toLong() ?: position)} / ${clock(duration)}" + (chapter?.let { "  •  ${it.title}" } ?: ""),
                         color = Color.White,
                         fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
                     IconButton(onClick = { controller.setFullscreen(!fullscreen) }, modifier = Modifier.size(40.dp)) {

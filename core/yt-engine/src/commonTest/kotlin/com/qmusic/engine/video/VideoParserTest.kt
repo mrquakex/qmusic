@@ -111,10 +111,30 @@ class VideoParserTest {
         assertEquals("351 B", first.likes)
         assertEquals("928", first.replies)
         assertNotNull(first.avatar)
+        // The comment knows where its replies are asked for.
+        assertEquals("Eg0SC1hiR3NfcUsyUFFBGAYygwEaUBIaVWd3T2hm", first.repliesToken)
         assertTrue(page.comments.all { it.text.isNotBlank() })
         // The page's own "more" entry, not one of a comment's replies.
         assertNotNull(page.continuation)
         assertTrue(page.continuation != "")
+    }
+
+    @Test
+    fun aPageOfRepliesIsReadWithoutThreads() {
+        val replies = VideoParser.comments(parse("""{"frameworkUpdates":{"entityBatchUpdate":{"mutations":[{"payload":{"commentEntityPayload":{"key":"K1","properties":{"commentId":"r1","content":{"content":"a reply"},"publishedTime":"1 gün önce"},"author":{"displayName":"@someone"},"toolbar":{"likeCountNotliked":"3"}}}}]}},"onResponseReceivedEndpoints":[{"appendContinuationItemsAction":{"continuationItems":[{"commentViewModel":{"commentId":"r1","commentKey":"K1"}},{"continuationItemRenderer":{"continuationEndpoint":{"continuationCommand":{"token":"MORE_REPLIES"}}}}]}}]}"""))
+        assertEquals(1, replies.comments.size)
+        assertEquals("a reply", replies.comments.first().text)
+        assertEquals("@someone", replies.comments.first().author)
+        assertEquals("MORE_REPLIES", replies.continuation)
+    }
+
+    @Test
+    fun aRealPageOfRepliesIsRead() {
+        val page = VideoParser.comments(parse(VideoFixtures.REPLIES))
+        assertEquals(3, page.comments.size)
+        assertEquals("@bloopbag", page.comments.first().author)
+        assertEquals("😂😂", page.comments.first().text)
+        assertTrue(page.comments.all { it.id.startsWith("UgwKvFGBScBFAlNH7Yl4AaABAg.") && it.avatar != null })
     }
 
     @Test

@@ -187,6 +187,7 @@ fun QMusicApp(
                     scope = videoScope,
                     settings = viewModel.settings,
                     musicSession = { viewModel.youTubeAuth },
+                    isUnmetered = { viewModel.isOnUnmetered() },
                 )
             }
             if (videosOpen) {

@@ -2,7 +2,9 @@ package com.qmusic.ui.videos
 
 import com.qmusic.engine.auth.YouTubeAuth
 import com.qmusic.engine.video.VideoChannelPage
+import com.qmusic.engine.video.VideoCaption
 import com.qmusic.engine.video.VideoChip
+import com.qmusic.engine.video.VideoPlaylist
 import com.qmusic.engine.video.VideoComment
 import com.qmusic.engine.video.VideoDetails
 import com.qmusic.engine.video.VideoEntry
@@ -159,7 +161,28 @@ data class WatchState(
     val commentsLoading: Boolean = false,
     val commentsLoaded: Boolean = false,
     val signInPrompt: Boolean = false,
+    val captions: List<VideoCaption> = emptyList(),
+    val caption: VideoCaption? = null,
+    /** The list this video was opened from (a playlist, the history...), and where in it it is. */
+    val queue: List<VideoItem> = emptyList(),
+    val queueIndex: Int = 0,
+    val createToken: String? = null,
+    val posting: Boolean = false,
+    val replies: Map<String, List<VideoComment>> = emptyMap(),
+    val repliesNext: Map<String, String?> = emptyMap(),
+    val repliesLoading: Set<String> = emptySet(),
 )
+
+/** The "save to" sheet: the account's playlists, with the ones this video is already in ticked. */
+data class SaveSheetState(
+    val videoId: String,
+    val playlists: List<VideoPlaylist> = emptyList(),
+    val loading: Boolean = true,
+    val saved: Set<String> = emptySet(),
+)
+
+/** The comments of a Short, in the sheet over it. */
+data class ShortCommentsState(val video: VideoItem, val comments: List<VideoComment> = emptyList(), val loading: Boolean = true)
 
 /** The upright clips being swiped through, and the one on screen. */
 data class ShortsState(val items: List<VideoItem> = emptyList(), val index: Int = 0, val loading: Boolean = false)
@@ -184,6 +207,8 @@ class VideosController(
     private val settings: AppSettings,
     /** The YouTube Music session, when YouTube is the music account. */
     private val musicSession: () -> YouTubeAuth?,
+    /** Whether the connection is Wi-Fi (or another unmetered one): the quality to start at depends on it. */
+    private val isUnmetered: () -> Boolean = { true },
 ) {
     private val cookies = settings.string(KEY_COOKIES, "")
 
@@ -280,7 +305,11 @@ class VideosController(
         when (route) {
             is VideoRoute.Search -> search(route.query)
             // The same video that is playing small just opens big again, where it was.
-            is VideoRoute.Watch -> if (_watch.value?.video?.id != route.video.id) startWatching(route.video)
+            is VideoRoute.Watch -> {
+                val list = pendingQueue
+                pendingQueue = null
+                if (_watch.value?.video?.id != route.video.id) startWatching(route.video, list?.first.orEmpty(), list?.second ?: 0)
+            }
             is VideoRoute.Channel -> loadChannel(route.id, null)
             is VideoRoute.Playlist -> openPlaylist(route.id)
             is VideoRoute.Shorts -> Unit
@@ -379,13 +408,14 @@ class VideosController(
     val watch: StateFlow<WatchState?> = _watch.asStateFlow()
     private var watchJob: Job? = null
 
-    private fun startWatching(video: VideoItem) {
+    private fun startWatching(video: VideoItem, queue: List<VideoItem> = emptyList(), queueIndex: Int = 0) {
         watchJob?.cancel()
-        _watch.value = WatchState(video = video)
+        _watch.value = WatchState(video = video, queue = queue, queueIndex = queueIndex)
         val id = video.id
         watchJob = scope.launch {
             // The stream and the page load side by side: the picture should not wait for the comments' address.
             launch { loadStream(id) }
+            launch { loadCaptions(id) }
             service.watch(id).fold(
                 onSuccess = { d ->
                     _watch.update { w ->
@@ -444,7 +474,7 @@ class VideosController(
                 _watch.update { w ->
                     if (w?.video?.id != id) w else w.copy(
                         qualities = list,
-                        quality = list.pickDefault(),
+                        quality = list.pickDefault(maxHeight()),
                         streamLoading = false,
                         streamError = list.isEmpty(),
                     )
@@ -460,8 +490,31 @@ class VideosController(
     /** When a video ends: the first video of "up next" plays, as on YouTube's autoplay. */
     fun playNext() {
         val w = _watch.value ?: return
-        val next = w.related.firstNotNullOfOrNull { (it as? VideoEntry.Video)?.item } ?: return
-        if (_routes.value.lastOrNull() is VideoRoute.Watch) push(VideoRoute.Watch(next)) else startWatching(next)
+        val inList = w.queue.getOrNull(w.queueIndex + 1)
+        val next = inList ?: w.related.firstNotNullOfOrNull { (it as? VideoEntry.Video)?.item } ?: return
+        switchTo(next, if (inList != null) w.queue else emptyList(), if (inList != null) w.queueIndex + 1 else 0)
+    }
+
+    /** The video before this one in the list it was opened from (false when there is none). */
+    fun playPrevious(): Boolean {
+        val w = _watch.value ?: return false
+        val before = w.queue.getOrNull(w.queueIndex - 1) ?: return false
+        switchTo(before, w.queue, w.queueIndex - 1)
+        return true
+    }
+
+    private fun switchTo(video: VideoItem, queue: List<VideoItem>, index: Int) {
+        if (_routes.value.lastOrNull() is VideoRoute.Watch) _routes.update { it.dropLast(1) + VideoRoute.Watch(video) }
+        startWatching(video, queue, index)
+    }
+
+    private var pendingQueue: Pair<List<VideoItem>, Int>? = null
+
+    /** Opens [items] at [index] as a list: next and previous go through it in order. */
+    fun openFrom(items: List<VideoItem>, index: Int) {
+        val item = items.getOrNull(index) ?: return
+        pendingQueue = items to index
+        push(VideoRoute.Watch(item))
     }
 
     fun retryStream() {
@@ -522,6 +575,7 @@ class VideosController(
                         if (cur?.video?.id != w.video.id) cur else cur.copy(
                             comments = cur.comments + page.comments.filter { c -> cur.comments.none { it.id == c.id } },
                             commentsTotal = page.total ?: cur.commentsTotal,
+                            createToken = page.createToken ?: cur.createToken,
                             commentsContinuation = page.continuation,
                             commentsLoading = false,
                             commentsLoaded = true,
@@ -713,10 +767,12 @@ class VideosController(
         if (_shorts.value.items.isNotEmpty() || _shorts.value.loading) return
         _shorts.value = ShortsState(loading = true)
         scope.launch {
+            // With an account, the Shorts YouTube put on the home page come first: they are the account's own.
+            val personal = if (service.isSignedIn) service.home().getOrNull()?.shortItems().orEmpty() else emptyList()
             service.search(SHORTS_QUERY).fold(
                 onSuccess = { feed ->
                     shortsContinuation = feed.continuation
-                    _shorts.value = ShortsState(feed.shortItems())
+                    _shorts.value = ShortsState((personal + feed.shortItems()).distinctBy { it.id })
                     prepareShorts(0)
                 },
                 onFailure = { e ->
@@ -814,6 +870,226 @@ class VideosController(
         return true
     }
 
+    // ------------------------------------------------------------------ settings, resume, history
+
+    val wifiQuality = settings.string(KEY_Q_WIFI, "720")
+    val mobileQuality = settings.string(KEY_Q_MOBILE, "480")
+    private val captionsSetting = settings.string(KEY_CAPTIONS, "0")
+
+    fun setWifiQuality(height: String) = settings.setString(KEY_Q_WIFI, height)
+
+    fun setMobileQuality(height: String) = settings.setString(KEY_Q_MOBILE, height)
+
+    /** The tallest picture to start a video at: what the person allowed for the connection they are on. */
+    private fun maxHeight(): Int = (if (isUnmetered()) wifiQuality.value else mobileQuality.value).toIntOrNull() ?: 720
+
+    /** Playback keeps stalling: the next quality down, and the video carries on from where it was. */
+    fun stepDownQuality() {
+        val w = _watch.value ?: return
+        val current = w.quality ?: return
+        val lower = w.qualities.filter { !it.isLive && it.height < current.height }.maxByOrNull { it.height * 100 + it.fps } ?: return
+        _watch.update { it?.copy(quality = lower) }
+    }
+
+    private val resumeSetting = settings.string(KEY_RESUME, "")
+    private val resume = LinkedHashMap<String, Long>().also { map ->
+        resumeSetting.value.split(',').forEach { entry ->
+            val parts = entry.split(':')
+            if (parts.size == 2) parts[1].toLongOrNull()?.let { map[parts[0]] = it }
+        }
+    }
+
+    /** Where this video was left (0 when it was not, or was nearly over). */
+    fun resumeFor(id: String): Long = resume[id] ?: 0L
+
+    fun savePosition(id: String, positionMs: Long, durationMs: Long) {
+        if (durationMs < RESUME_MIN_LENGTH_MS) return
+        resume.remove(id)
+        if (positionMs > RESUME_MIN_POSITION_MS && positionMs < durationMs - RESUME_END_MARGIN_MS) resume[id] = positionMs
+        while (resume.size > RESUME_KEPT) resume.remove(resume.keys.first())
+        settings.setString(KEY_RESUME, resume.entries.joinToString(",") { "${it.key}:${it.value}" })
+    }
+
+    /** Tells YouTube this video was watched, so it is in the account's history and the suggestions learn from it. */
+    fun reportWatch(id: String) {
+        scope.launch { service.reportWatch(id) }
+    }
+
+    // ------------------------------------------------------------------ subtitles
+
+    private suspend fun loadCaptions(id: String) {
+        service.captions(id).onSuccess { list ->
+            val preferred = if (captionsSetting.value == "1") pickCaption(list) else null
+            _watch.update { w -> if (w?.video?.id != id) w else w.copy(captions = list, caption = preferred) }
+        }
+    }
+
+    /** The track in the language of the app, the person's own words before the machine's. */
+    private fun pickCaption(list: List<VideoCaption>): VideoCaption? {
+        val lang = service.locale.hl.substringBefore('-')
+        return list.firstOrNull { it.language.startsWith(lang) && !it.auto }
+            ?: list.firstOrNull { it.language.startsWith(lang) }
+            ?: list.firstOrNull { !it.auto }
+            ?: list.firstOrNull()
+    }
+
+    fun selectCaption(caption: VideoCaption?) {
+        _watch.update { it?.copy(caption = caption) }
+        settings.setString(KEY_CAPTIONS, if (caption != null) "1" else "0")
+    }
+
+    // ------------------------------------------------------------------ comments: replies and posting
+
+    fun loadReplies(comment: VideoComment) {
+        val w = _watch.value ?: return
+        val id = comment.id
+        val token = if (w.replies.containsKey(id)) w.repliesNext[id] else comment.repliesToken
+        if (token == null || id in w.repliesLoading) return
+        _watch.update { it?.copy(repliesLoading = it.repliesLoading + id) }
+        scope.launch {
+            service.comments(token).fold(
+                onSuccess = { page ->
+                    _watch.update { cur ->
+                        if (cur?.video?.id != w.video.id) cur else cur.copy(
+                            replies = cur.replies + (id to (cur.replies[id].orEmpty() + page.comments)),
+                            repliesNext = cur.repliesNext + (id to page.continuation),
+                            repliesLoading = cur.repliesLoading - id,
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    if (e is CancellationException) throw e
+                    _watch.update { it?.copy(repliesLoading = it.repliesLoading - id) }
+                },
+            )
+        }
+    }
+
+    fun hideReplies(commentId: String) {
+        _watch.update { it?.copy(replies = it.replies - commentId, repliesNext = it.repliesNext - commentId) }
+    }
+
+    /** Posts a comment; false when it cannot be (no account, comments off, nothing written). */
+    fun postComment(text: String): Boolean {
+        val w = _watch.value ?: return false
+        if (!service.isSignedIn) {
+            _watch.update { it?.copy(signInPrompt = true) }
+            return false
+        }
+        val token = w.createToken ?: return false
+        if (text.isBlank() || w.posting) return false
+        _watch.update { it?.copy(posting = true) }
+        scope.launch {
+            service.postComment(token, text.trim()).fold(
+                onSuccess = {
+                    // The page of comments is asked for again, with the new one in it.
+                    _watch.update { cur ->
+                        cur?.copy(posting = false, comments = emptyList(), commentsContinuation = null, commentsLoaded = false, replies = emptyMap(), repliesNext = emptyMap())
+                    }
+                    loadComments()
+                },
+                onFailure = { e ->
+                    if (e is CancellationException) throw e
+                    _watch.update { it?.copy(posting = false) }
+                },
+            )
+        }
+        return true
+    }
+
+    // ------------------------------------------------------------------ save to a playlist, the card menu
+
+    private val _saveSheet = MutableStateFlow<SaveSheetState?>(null)
+    val saveSheet: StateFlow<SaveSheetState?> = _saveSheet.asStateFlow()
+
+    /** Opens the "save to" sheet for [videoId]; false when there is no account to save with. */
+    fun openSaveSheet(videoId: String): Boolean {
+        if (!service.isSignedIn) return false
+        _saveSheet.value = SaveSheetState(videoId, saved = if (_watch.value?.takeIf { it.video.id == videoId }?.saved == true) setOf("WL") else emptySet())
+        scope.launch {
+            val lists = service.playlists().getOrNull()?.entries.orEmpty().filterIsInstance<VideoEntry.Playlist>().map { it.item }
+            _saveSheet.update { cur ->
+                cur?.takeIf { it.videoId == videoId }?.copy(
+                    playlists = listOf(VideoPlaylist("WL", WATCH_LATER_TITLE)) + lists.filter { it.id != "WL" },
+                    loading = false,
+                )
+            }
+        }
+        return true
+    }
+
+    fun closeSaveSheet() {
+        _saveSheet.value = null
+    }
+
+    fun toggleInPlaylist(playlistId: String) {
+        val sheet = _saveSheet.value ?: return
+        val add = playlistId !in sheet.saved
+        _saveSheet.value = sheet.copy(saved = if (add) sheet.saved + playlistId else sheet.saved - playlistId)
+        if (playlistId == "WL") _watch.update { w -> if (w?.video?.id == sheet.videoId) w.copy(saved = add) else w }
+        scope.launch {
+            service.setInPlaylist(playlistId, sheet.videoId, add).onFailure { e ->
+                if (e is CancellationException) throw e
+                _saveSheet.update { cur -> cur?.copy(saved = if (add) cur.saved - playlistId else cur.saved + playlistId) }
+            }
+        }
+    }
+
+    private val _menu = MutableStateFlow<VideoItem?>(null)
+
+    /** The video whose ⋮ menu is open. */
+    val menu: StateFlow<VideoItem?> = _menu.asStateFlow()
+
+    fun openMenu(item: VideoItem) {
+        _menu.value = item
+    }
+
+    fun closeMenu() {
+        _menu.value = null
+    }
+
+    /** "Watch later" from a card's menu; false when there is no account. */
+    fun saveForLater(item: VideoItem): Boolean {
+        if (!service.isSignedIn) return false
+        scope.launch { service.setWatchLater(item.id, true) }
+        return true
+    }
+
+    // ------------------------------------------------------------------ shorts: subscribing, comments
+
+    private val _subscribedChannels = MutableStateFlow<Set<String>>(emptySet())
+    val subscribedChannelIds: StateFlow<Set<String>> = _subscribedChannels.asStateFlow()
+
+    /** Subscribes to (or leaves) the channel of a clip; false when there is no account to do it with. */
+    fun toggleSubscribeChannel(channelId: String): Boolean {
+        if (!service.isSignedIn) return false
+        val now = channelId !in _subscribedChannels.value
+        _subscribedChannels.update { if (now) it + channelId else it - channelId }
+        scope.launch {
+            service.setSubscribed(channelId, now).onFailure { e ->
+                if (e is CancellationException) throw e
+                _subscribedChannels.update { if (now) it - channelId else it + channelId }
+            }
+        }
+        return true
+    }
+
+    private val _shortComments = MutableStateFlow<ShortCommentsState?>(null)
+    val shortComments: StateFlow<ShortCommentsState?> = _shortComments.asStateFlow()
+
+    fun openShortComments(item: VideoItem) {
+        _shortComments.value = ShortCommentsState(item)
+        scope.launch {
+            val token = service.watch(item.id).getOrNull()?.commentsToken
+            val page = token?.let { service.comments(it).getOrNull() }
+            _shortComments.update { cur -> cur?.takeIf { it.video.id == item.id }?.copy(comments = page?.comments.orEmpty(), loading = false) }
+        }
+    }
+
+    fun closeShortComments() {
+        _shortComments.value = null
+    }
+
     // ------------------------------------------------------------------ playlists
 
     private var playlist = FeedLoader(scope, service) { Result.success(VideoFeed()) }
@@ -829,6 +1105,15 @@ class VideosController(
     companion object {
         const val KEY_COOKIES = "video_cookies"
         const val KEY_SEARCHES = "video_searches"
+        const val KEY_Q_WIFI = "video_quality_wifi"
+        const val KEY_Q_MOBILE = "video_quality_mobile"
+        const val KEY_CAPTIONS = "video_captions"
+        const val KEY_RESUME = "video_resume"
+        private const val RESUME_MIN_LENGTH_MS = 120_000L
+        private const val RESUME_MIN_POSITION_MS = 10_000L
+        private const val RESUME_END_MARGIN_MS = 20_000L
+        private const val RESUME_KEPT = 80
+        private const val WATCH_LATER_TITLE = "Watch later"
         private const val MAX_SEARCHES = 20
         private const val SHORTS_QUERY = "#shorts"
         private val CACHE_LIFETIME = kotlin.time.Duration.parse("30m")
@@ -848,7 +1133,7 @@ class VideosController(
 }
 
 /** Plays at 720p when it can (a phone screen gains little from more), else the best below it, else whatever there is. */
-internal fun List<VideoQuality>.pickDefault(): VideoQuality? =
+internal fun List<VideoQuality>.pickDefault(maxHeight: Int = 720): VideoQuality? =
     firstOrNull { it.isLive }
-        ?: filter { it.height in 1..720 }.maxByOrNull { it.height * 100 + it.fps }
+        ?: filter { it.height in 1..maxHeight }.maxByOrNull { it.height * 100 + it.fps }
         ?: minByOrNull { it.height }

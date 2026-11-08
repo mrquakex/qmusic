@@ -104,12 +104,25 @@ data class VideoComment(
     val likes: String?,
     val replies: String? = null,
     val isPinned: Boolean = false,
+    /** Asks for the replies; null when there are none. */
+    val repliesToken: String? = null,
 )
 
 data class VideoComments(
     val total: String? = null,
     val comments: List<VideoComment> = emptyList(),
     val continuation: String? = null,
+    /** What posting a comment on this video needs (null when comments are off or nobody is signed in). */
+    val createToken: String? = null,
+)
+
+/** One subtitle track a video offers. */
+data class VideoCaption(
+    val language: String,
+    val label: String,
+    val url: String,
+    val auto: Boolean,
+    val mimeType: String,
 )
 
 /**

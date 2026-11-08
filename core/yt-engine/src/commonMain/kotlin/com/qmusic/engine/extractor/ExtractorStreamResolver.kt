@@ -18,6 +18,9 @@ interface ExtractorStreamResolver {
     /** Every way to watch [videoId], best quality first (empty when none could be found). */
     suspend fun videoQualities(videoId: String): List<com.qmusic.engine.video.VideoQuality> = emptyList()
 
+    /** The subtitle tracks of [videoId] (empty when it has none). */
+    suspend fun videoCaptions(videoId: String): List<com.qmusic.engine.video.VideoCaption> = emptyList()
+
     /** The video's preview frames (for the seek bar), or null when YouTube has none. */
     suspend fun previewFrames(videoId: String): com.qmusic.engine.models.PreviewFrames? = null
 

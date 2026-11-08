@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.layout.BoxWithConstraints
+import com.qmusic.engine.video.VideoComment
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -75,6 +78,7 @@ fun WatchPage(
     val fullscreen by controller.fullscreen.collectAsState()
     val pip = rememberInPictureInPicture()
     val w = watch ?: return
+    val seek: (Long) -> Unit = { playback?.seekTo(it) }
     when {
         // The floating window shows the picture and nothing else.
         pip -> Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
@@ -100,22 +104,14 @@ fun WatchPage(
                 PlayerBox(w, playback, s, controller, true, Modifier.fillMaxSize())
             }
         }
-        else -> {
+        else -> BoxWithConstraints(modifier = modifier.fillMaxSize()) {
             // Dragging the picture down shrinks the video into the small player, as on YouTube.
             val offset = remember { Animatable(0f) }
             val scope = rememberCoroutineScope()
             var height by remember { mutableStateOf(1f) }
             var total by remember { mutableStateOf(0f) }
-            Column(
-                modifier = modifier
-                    .fillMaxSize()
-                    .onSizeChanged { height = it.height.toFloat().coerceAtLeast(1f) }
-                    .graphicsLayer {
-                        translationY = offset.value
-                        alpha = 1f - (offset.value / height).coerceIn(0f, 1f) * 0.6f
-                    }
-                    .background(VideoColors.Background),
-            ) {
+            val wide = maxWidth >= WIDE_WATCH && maxHeight >= 600.dp
+            val player: @Composable () -> Unit = {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -150,7 +146,29 @@ fun WatchPage(
                 ) {
                     PlayerBox(w, playback, s, controller, false, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
                 }
-                WatchDetails(controller, w, s, onShare, onSignIn)
+            }
+            val layer = Modifier
+                .fillMaxSize()
+                .onSizeChanged { height = it.height.toFloat().coerceAtLeast(1f) }
+                .graphicsLayer {
+                    translationY = offset.value
+                    alpha = 1f - (offset.value / height).coerceIn(0f, 1f) * 0.6f
+                }
+                .background(VideoColors.Background)
+            if (wide) {
+                // A tablet: the video and what is about it on the left, what comes next down the right.
+                Row(modifier = layer) {
+                    Column(modifier = Modifier.weight(1.7f)) {
+                        player()
+                        WatchDetails(controller, w, s, onShare, onSignIn, seek, showRelated = false)
+                    }
+                    RelatedColumn(controller, w, s, Modifier.weight(1f).statusBarsPadding())
+                }
+            } else {
+                Column(modifier = layer) {
+                    player()
+                    WatchDetails(controller, w, s, onShare, onSignIn, seek, showRelated = true)
+                }
             }
         }
     }
@@ -211,20 +229,33 @@ internal fun clock(ms: Long): String {
     return if (h > 0) "$h:${two(m)}:${two(sec)}" else "$m:${two(sec)}"
 }
 
+private val WIDE_WATCH = 840.dp
+
 @Composable
-private fun WatchDetails(controller: VideosController, w: WatchState, s: VideoStrings, onShare: (String) -> Unit, onSignIn: () -> Unit) {
+private fun WatchDetails(
+    controller: VideosController,
+    w: WatchState,
+    s: VideoStrings,
+    onShare: (String) -> Unit,
+    onSignIn: () -> Unit,
+    onSeek: (Long) -> Unit,
+    showRelated: Boolean,
+) {
     var descriptionOpen by remember { mutableStateOf(false) }
     var commentsOpen by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val details = w.details
     val title = details?.title ?: w.video.title
+    val signedIn by controller.signedIn.collectAsState()
 
-    LaunchedEffect(listState, w.relatedContinuation) {
-        if (w.relatedContinuation == null) return@LaunchedEffect
-        androidx.compose.runtime.snapshotFlow {
-            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= listState.layoutInfo.totalItemsCount - 4
-        }.collect { near -> if (near) controller.loadMoreRelated() }
+    if (showRelated) {
+        LaunchedEffect(listState, w.relatedContinuation) {
+            if (w.relatedContinuation == null) return@LaunchedEffect
+            androidx.compose.runtime.snapshotFlow {
+                val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                last >= listState.layoutInfo.totalItemsCount - 4
+            }.collect { near -> if (near) controller.loadMoreRelated() }
+        }
     }
     LaunchedEffect(commentsOpen) { if (commentsOpen) controller.loadComments() }
 
@@ -237,8 +268,30 @@ private fun WatchDetails(controller: VideosController, w: WatchState, s: VideoSt
                     Text(meta, color = VideoColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.weight(1f))
                     Text(if (descriptionOpen) s.showLess else s.showMore, color = VideoColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
-                if (descriptionOpen && !details?.description.isNullOrBlank()) {
-                    Text(details!!.description!!, color = VideoColors.Text, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 10.dp))
+            }
+        }
+        if (descriptionOpen && !details?.description.isNullOrBlank()) {
+            item(key = "description") {
+                val description = details!!.description!!
+                Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
+                    val chapters = remember(description) { chaptersOf(description) }
+                    if (chapters.isNotEmpty()) {
+                        Text(s.chapters, color = VideoColors.Text, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 4.dp))
+                        chapters.forEach { chapter ->
+                            Row(modifier = Modifier.fillMaxWidth().clickable { onSeek(chapter.timeMs) }.padding(vertical = 5.dp)) {
+                                Text(clock(chapter.timeMs), color = VideoColors.Link, fontSize = 13.sp, modifier = Modifier.width(56.dp))
+                                Text(chapter.title, color = VideoColors.Text, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                    }
+                    // Every time in the description is a link that jumps there.
+                    val linked = remember(description) { linkedDescription(description, VideoColors.Link) }
+                    androidx.compose.foundation.text.ClickableText(
+                        text = linked,
+                        style = androidx.compose.ui.text.TextStyle(color = VideoColors.Text, fontSize = 13.sp, lineHeight = 19.sp),
+                        onClick = { offset -> linked.timeAt(offset)?.let(onSeek) },
+                    )
                 }
             }
         }
@@ -280,7 +333,9 @@ private fun WatchDetails(controller: VideosController, w: WatchState, s: VideoSt
                     icon = if (w.liked) QMusicIcons.HeartFilled else QMusicIcons.Heart,
                     active = w.liked,
                 ) { controller.toggleLike() }
-                ActionPill(label = if (w.saved) s.saved else s.save, icon = QMusicIcons.PlaylistAdd, active = w.saved) { controller.toggleSaved() }
+                ActionPill(label = if (w.saved) s.saved else s.save, icon = QMusicIcons.PlaylistAdd, active = w.saved) {
+                    if (!controller.openSaveSheet(w.video.id)) onSignIn()
+                }
                 ActionPill(label = s.share, icon = QMusicIcons.Share, active = false) { onShare("https://youtu.be/${w.video.id}") }
             }
             if (w.signInPrompt) {
@@ -309,22 +364,12 @@ private fun WatchDetails(controller: VideosController, w: WatchState, s: VideoSt
             }
         }
         if (commentsOpen) {
+            item(key = "comment-input") { CommentInput(w, s, signedIn, onSignIn) { controller.postComment(it) } }
             if (w.comments.isEmpty() && w.commentsLoading) item(key = "comments-loading") { Loading() }
             if (w.comments.isEmpty() && w.commentsLoaded && !w.commentsLoading) {
                 item(key = "comments-none") { Text(s.noComments, color = VideoColors.TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(16.dp)) }
             }
-            items(w.comments, key = { "c" + it.id }) { c ->
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    Avatar(c.avatar, 32.dp)
-                    Spacer(Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(listOfNotNull(c.author, c.published).joinToString(" · "), color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(c.text, color = VideoColors.Text, fontSize = 14.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 2.dp))
-                        val line = listOfNotNull(c.likes?.let { "♥ $it" }, c.replies?.let { "↳ $it" }).joinToString("   ")
-                        if (line.isNotEmpty()) Text(line, color = VideoColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
-                    }
-                }
-            }
+            items(w.comments, key = { "c" + it.id }) { c -> CommentRow(c, w, controller, s, small = false) }
             if (w.commentsContinuation != null) {
                 item(key = "comments-more") {
                     Text(
@@ -335,20 +380,121 @@ private fun WatchDetails(controller: VideosController, w: WatchState, s: VideoSt
                     )
                 }
             }
-        } else {
-            item(key = "related-title") {
-                Text(s.related, color = VideoColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 4.dp))
+        } else if (showRelated) {
+            relatedItems(controller, w, s)
+        }
+    }
+}
+
+/** What comes next down the side of a wide screen. */
+@Composable
+private fun RelatedColumn(controller: VideosController, w: WatchState, s: VideoStrings, modifier: Modifier) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState, w.relatedContinuation) {
+        if (w.relatedContinuation == null) return@LaunchedEffect
+        androidx.compose.runtime.snapshotFlow {
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            last >= listState.layoutInfo.totalItemsCount - 4
+        }.collect { near -> if (near) controller.loadMoreRelated() }
+    }
+    LazyColumn(state = listState, modifier = modifier.fillMaxSize()) { relatedItems(controller, w, s) }
+}
+
+/** The rest of the list the video was opened from, then what YouTube suggests next. */
+private fun LazyListScope.relatedItems(controller: VideosController, w: WatchState, s: VideoStrings) {
+    if (w.queue.isNotEmpty()) {
+        item(key = "queue-title") {
+            Text(
+                "${s.queueTitle} · ${w.queueIndex + 1}/${w.queue.size}",
+                color = VideoColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 4.dp),
+            )
+        }
+        items(w.queue.size - (w.queueIndex + 1).coerceAtMost(w.queue.size), key = { "q" + w.queue[w.queueIndex + 1 + it].id }) { i ->
+            val index = w.queueIndex + 1 + i
+            VideoRowCard(w.queue[index], s, onClick = { controller.openFrom(w.queue, index) })
+        }
+    }
+    item(key = "related-title") {
+        Text(s.related, color = VideoColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 4.dp))
+    }
+    if (w.details == null && !w.detailsError) item(key = "related-loading") { Loading() }
+    items(w.related.size, key = { i -> (w.related[i].ids().firstOrNull() ?: "r") + "#" + i }) { i ->
+        when (val e = w.related[i]) {
+            is VideoEntry.Video -> VideoRowCard(e.item, s, onClick = { controller.open(e.item) }, onMore = { controller.openMenu(e.item) })
+            is VideoEntry.Shorts -> ShortsRow(e.items, s) { items, index -> controller.openShorts(items, index) }
+            is VideoEntry.Channel -> ChannelResultRow(e.item) { controller.push(VideoRoute.Channel(e.item.id, e.item.name)) }
+            is VideoEntry.Playlist -> PlaylistResultRow(e.item, s) { controller.push(VideoRoute.Playlist(e.item.id, e.item.title)) }
+        }
+    }
+}
+
+/** The box that takes a comment: it asks for a sign-in when there is no account. */
+@Composable
+private fun CommentInput(w: WatchState, s: VideoStrings, signedIn: Boolean, onSignIn: () -> Unit, onPost: (String) -> Boolean) {
+    var text by remember { mutableStateOf("") }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(24.dp)).background(VideoColors.Chip).padding(start = 16.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.weight(1f).padding(vertical = 12.dp).then(if (signedIn) Modifier else Modifier.clickable(onClick = onSignIn)),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            if (text.isEmpty()) Text(s.writeComment, color = VideoColors.TextSecondary, fontSize = 14.sp)
+            if (signedIn) {
+                androidx.compose.foundation.text.BasicTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    textStyle = androidx.compose.ui.text.TextStyle(color = VideoColors.Text, fontSize = 14.sp),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(VideoColors.Text),
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
-            if (details == null && !w.detailsError) item(key = "related-loading") { Loading() }
-            items(w.related.size, key = { i -> (w.related[i].ids().firstOrNull() ?: "r") + "#" + i }) { i ->
-                when (val e = w.related[i]) {
-                    is VideoEntry.Video -> VideoRowCard(e.item, s, onClick = { controller.open(e.item) })
-                    is VideoEntry.Shorts -> ShortsRow(e.items, s) { items, i -> controller.openShorts(items, i) }
-                    is VideoEntry.Channel -> ChannelResultRow(e.item) { controller.push(VideoRoute.Channel(e.item.id, e.item.name)) }
-                    is VideoEntry.Playlist -> PlaylistResultRow(e.item, s) { controller.push(VideoRoute.Playlist(e.item.id, e.item.title)) }
+        }
+        if (signedIn && text.isNotBlank()) {
+            Text(
+                if (w.posting) "…" else s.post,
+                color = VideoColors.Link, fontWeight = FontWeight.Bold, fontSize = 14.sp,
+                modifier = Modifier.clip(RoundedCornerShape(50)).clickable(enabled = !w.posting) { if (onPost(text)) text = "" }.padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
+    }
+}
+
+/** One comment, with its replies opened under it when they were asked for. */
+@Composable
+private fun CommentRow(c: VideoComment, w: WatchState, controller: VideosController, s: VideoStrings, small: Boolean) {
+    Row(modifier = Modifier.fillMaxWidth().padding(start = if (small) 56.dp else 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)) {
+        Avatar(c.avatar, if (small) 24.dp else 32.dp)
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(listOfNotNull(c.author, c.published).joinToString(" · "), color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(c.text, color = VideoColors.Text, fontSize = 14.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 2.dp))
+            Row(modifier = Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                c.likes?.let { Text("♥ $it", color = VideoColors.TextSecondary, fontSize = 12.sp) }
+                val opened = w.replies.containsKey(c.id)
+                if (c.replies != null && c.repliesToken != null) {
+                    Text(
+                        text = when {
+                            c.id in w.repliesLoading -> "…"
+                            opened -> s.hideReplies
+                            else -> "↳ " + s.repliesLabel(c.replies!!)
+                        },
+                        color = VideoColors.Link, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clickable { if (opened) controller.hideReplies(c.id) else controller.loadReplies(c) },
+                    )
                 }
             }
         }
+    }
+    w.replies[c.id]?.forEach { reply -> CommentRow(reply, w, controller, s, small = true) }
+    if (w.replies.containsKey(c.id) && w.repliesNext[c.id] != null) {
+        Text(
+            if (c.id in w.repliesLoading) "…" else s.loadMore,
+            color = VideoColors.Link, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 56.dp, bottom = 8.dp).clickable { controller.loadReplies(c) },
+        )
     }
 }
 

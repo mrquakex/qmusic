@@ -61,4 +61,16 @@ interface VideoService {
     suspend fun setLike(videoId: String, like: Boolean): Result<Unit>
     suspend fun setSubscribed(channelId: String, subscribed: Boolean): Result<Unit>
     suspend fun setWatchLater(videoId: String, saved: Boolean): Result<Unit>
+
+    /** Puts a video in (or takes it out of) one of the account's playlists. */
+    suspend fun setInPlaylist(playlistId: String, videoId: String, add: Boolean): Result<Unit>
+
+    /** The subtitle tracks of [videoId]. */
+    suspend fun captions(videoId: String): Result<List<VideoCaption>>
+
+    /** Posts a comment; [createToken] comes with the comments' page. */
+    suspend fun postComment(createToken: String, text: String): Result<Unit>
+
+    /** Tells YouTube the account watched [videoId], so it shows in the history and the suggestions learn from it. */
+    suspend fun reportWatch(videoId: String)
 }

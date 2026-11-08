@@ -24,6 +24,7 @@ import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import com.qmusic.engine.video.VideoCaption
 import com.qmusic.engine.video.VideoQuality
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -61,6 +62,9 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
     private val _error = MutableStateFlow<String?>(null)
     override val error: StateFlow<String?> = _error.asStateFlow()
 
+    /** What was loaded last: the quality, where it started, and whether it carried subtitles. */
+    private var lastLoad: Triple<VideoQuality, Long, Boolean>? = null
+
     private val handler = Handler(Looper.getMainLooper())
     private val ticker = object : Runnable {
         override fun run() {
@@ -90,23 +94,42 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                // A subtitle track that cannot be read must not take the video with it: play again without it.
+                val last = lastLoad
+                if (last != null && last.third) {
+                    lastLoad = null
+                    load(last.first, player.currentPosition, true, null)
+                    return
+                }
                 _error.value = error.errorCodeName
             }
         })
         handler.post(ticker)
     }
 
-    override fun load(quality: VideoQuality, startMs: Long, autoPlay: Boolean) {
+    override fun load(quality: VideoQuality, startMs: Long, autoPlay: Boolean, caption: VideoCaption?) {
         _error.value = null
         _ended.value = false
-        val source: MediaSource = if (quality.audioUrl != null && !quality.isLive) {
-            MergingMediaSource(
-                ProgressiveMediaSource.Factory(dataSources).createMediaSource(MediaItem.fromUri(quality.videoUrl)),
-                ProgressiveMediaSource.Factory(dataSources).createMediaSource(MediaItem.fromUri(quality.audioUrl!!)),
-            )
-        } else {
-            DefaultMediaSourceFactory(dataSources).createMediaSource(MediaItem.fromUri(quality.videoUrl))
+        // Subtitles go in the picture's own media item: the player then converts them the way its text renderer needs
+        // (a hand-built subtitle source is refused with a runtime error).
+        val track = caption?.takeIf { !quality.isLive }?.let {
+            MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(it.url))
+                .setMimeType(it.mimeType)
+                .setLanguage(it.language)
+                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                .build()
         }
+        val pictureItem = MediaItem.Builder().setUri(quality.videoUrl).apply { if (track != null) setSubtitleConfigurations(listOf(track)) }.build()
+        val picture: MediaSource = DefaultMediaSourceFactory(dataSources).createMediaSource(pictureItem)
+        val source: MediaSource = if (quality.audioUrl != null && !quality.isLive) {
+            MergingMediaSource(picture, ProgressiveMediaSource.Factory(dataSources).createMediaSource(MediaItem.fromUri(quality.audioUrl!!)))
+        } else {
+            picture
+        }
+        lastLoad = Triple(quality, startMs, track != null)
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, track == null)
+            .build()
         player.setMediaSource(source, startMs)
         player.prepare()
         player.playWhenReady = autoPlay

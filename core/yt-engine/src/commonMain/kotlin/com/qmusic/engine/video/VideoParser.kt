@@ -373,23 +373,36 @@ internal object VideoParser {
                 payload["key"].str()?.let { payloads[it] = payload }
             }
         }
-        val comments = root.all("commentThreadRenderer").mapNotNull { thread ->
-            val view = thread.path("commentViewModel", "commentViewModel").obj() ?: return@mapNotNull null
-            val payload = view["commentKey"].str()?.let(payloads::get) ?: return@mapNotNull null
+        fun build(wrapper: JsonObject, repliesToken: String?): VideoComment? {
+            // Inside a thread the view model is wrapped twice; in a page of replies the comment comes on its own.
+            val view = wrapper.takeIf { it["commentKey"] != null } ?: wrapper["commentViewModel"].obj() ?: return null
+            val payload = view["commentKey"].str()?.let(payloads::get) ?: return null
             val properties = payload["properties"].obj()
-            VideoComment(
-                id = properties?.get("commentId").str() ?: view["commentId"].str() ?: return@mapNotNull null,
+            return VideoComment(
+                id = properties?.get("commentId").str() ?: view["commentId"].str() ?: return null,
                 author = payload.path("author", "displayName").str().orEmpty(),
                 avatar = payload.path("author", "avatarThumbnailUrl").str(),
                 text = properties?.get("content").text().orEmpty(),
                 published = properties?.get("publishedTime").str(),
                 likes = payload.path("toolbar", "likeCountNotliked").str()?.takeIf { it.isNotBlank() && it != "0" },
                 replies = payload.path("toolbar", "replyCount").str()?.takeIf { it.isNotBlank() && it != "0" },
-                isPinned = thread["commentViewModel"].firstString("pinnedText") != null,
+                isPinned = wrapper.firstString("pinnedText") != null,
+                repliesToken = repliesToken,
             )
         }
+        val threads = root.all("commentThreadRenderer")
+        val comments = if (threads.isNotEmpty()) {
+            threads.mapNotNull { thread ->
+                val wrapper = thread["commentViewModel"].obj() ?: return@mapNotNull null
+                val more = thread.path("replies", "commentRepliesRenderer").obj()?.all("continuationCommand")?.firstOrNull()?.get("token").str()
+                build(wrapper, more)
+            }
+        } else {
+            // A page of replies: the comments come on their own, each wrapped once.
+            root.all("commentViewModel").filter { it["commentKey"] != null }.mapNotNull { build(it, null) }
+        }
         val total = root.all("commentsHeaderRenderer").firstOrNull()?.get("countText").text()
-        return VideoComments(total = total, comments = comments, continuation = continuation(root))
+        return VideoComments(total = total, comments = comments, continuation = continuation(root), createToken = root.firstString("createCommentParams"))
     }
 
     // ------------------------------------------------------------------ channels

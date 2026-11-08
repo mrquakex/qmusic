@@ -56,9 +56,13 @@ import coil3.compose.AsyncImage
 import com.qmusic.ui.PlatformBackHandler
 import com.qmusic.ui.theme.QMusicIcons
 import androidx.compose.foundation.layout.BoxWithConstraints
+import com.qmusic.engine.video.VideoEntry
 import androidx.compose.foundation.layout.aspectRatio
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * The Videos section: YouTube itself, entered from the navigation bar and shaped like its own app (own top bar, own
@@ -87,7 +91,7 @@ fun VideosApp(
     // The player belongs to the section, not to the page of a video: leaving the page leaves the video playing small.
     val playback = rememberVideoPlayback()
     var loadedId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(watch?.video?.id, watch?.quality, playback) {
+    LaunchedEffect(watch?.video?.id, watch?.quality, watch?.caption, playback) {
         val w = watch
         val p = playback
         if (w == null) {
@@ -98,11 +102,47 @@ fun VideosApp(
         val q = w.quality ?: return@LaunchedEffect
         if (p == null) return@LaunchedEffect
         // Another quality of the same video carries on from where it was.
-        val start = if (loadedId == w.video.id) p.positionMs.value else 0L
+        // A video that was left half way starts there again.
+        val start = if (loadedId == w.video.id) p.positionMs.value else controller.resumeFor(w.video.id)
         loadedId = w.video.id
         onPauseMusic()
-        p.load(q, start)
+        p.load(q, start, caption = w.caption)
     }
+    // Where the video is, kept every few seconds so it can be picked up again.
+    LaunchedEffect(watch?.video?.id, playback) {
+        val id = watch?.video?.id ?: return@LaunchedEffect
+        val p = playback ?: return@LaunchedEffect
+        while (true) {
+            delay(5_000)
+            controller.savePosition(id, p.positionMs.value, p.durationMs.value)
+        }
+    }
+    // A few seconds of playing count as watched: YouTube puts it in the account's history.
+    LaunchedEffect(watch?.video?.id, playback) {
+        val id = watch?.video?.id ?: return@LaunchedEffect
+        val p = playback ?: return@LaunchedEffect
+        p.isPlaying.first { it }
+        delay(3_000)
+        controller.reportWatch(id)
+    }
+    // Playback that keeps stalling steps down a quality by itself.
+    val buffering by (playback?.buffering ?: NotPlaying).collectAsState()
+    var stalls by remember { mutableStateOf(emptyList<kotlin.time.TimeMark>()) }
+    LaunchedEffect(buffering) {
+        if (buffering && (playback?.positionMs?.value ?: 0L) > 3_000L) {
+            val recent = stalls.filter { it.elapsedNow() < 45.seconds } + kotlin.time.TimeSource.Monotonic.markNow()
+            stalls = recent
+            if (recent.size >= 3) {
+                controller.stepDownQuality()
+                stalls = emptyList()
+            }
+        }
+    }
+    VideoBackgroundEffect(
+        active = watch != null,
+        title = watch?.details?.title ?: watch?.video?.title,
+        onToggle = { playback?.togglePlay() },
+    )
     val playing by (playback?.isPlaying ?: NotPlaying).collectAsState()
     val ended by (playback?.ended ?: NotPlaying).collectAsState()
     LaunchedEffect(ended) { if (ended) controller.playNext() }
@@ -127,7 +167,7 @@ fun VideosApp(
 
     BoxWithConstraints(modifier = modifier.fillMaxSize().background(VideoColors.Background)) {
         // Turning the phone sideways while a video is open makes it full screen, and turning it back leaves it.
-        val landscape = maxWidth > maxHeight
+        val landscape = maxWidth > maxHeight && minOf(maxWidth, maxHeight) < 600.dp
         LaunchedEffect(landscape, top is VideoRoute.Watch) {
             if (top is VideoRoute.Watch) controller.setFullscreen(landscape)
         }
@@ -151,12 +191,13 @@ fun VideosApp(
             }
         }
         if (searching) SearchBox(controller, s)
+        VideoSheets(controller, s, onShare, onSignIn)
         if (accountDialog) {
             AlertDialog(
                 onDismissRequest = { accountDialog = false },
                 containerColor = VideoColors.Surface,
-                title = { Text(s.account, color = VideoColors.Text) },
-                text = if (signedIn) null else { { Text(s.signInBody, color = VideoColors.TextSecondary) } },
+                title = { Text(s.settingsTitle, color = VideoColors.Text) },
+                text = { SettingsBody(controller, s, signedIn) },
                 confirmButton = {
                     TextButton(onClick = {
                         accountDialog = false
@@ -281,6 +322,7 @@ private fun TabContent(
                     state = state, s = s,
                     onVideo = { controller.open(it) },
                     onShort = { items, i -> controller.openShorts(items, i) },
+                    onMore = { controller.openMenu(it) },
                     onChannel = { id, name -> controller.push(VideoRoute.Channel(id, name)) },
                     onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
                     onLoadMore = { controller.home.loadMore() },
@@ -315,6 +357,7 @@ private fun SubscriptionsTab(controller: VideosController, s: VideoStrings, sign
         s = s,
         onVideo = { controller.open(it) },
         onShort = { items, i -> controller.openShorts(items, i) },
+        onMore = { controller.openMenu(it) },
         onChannel = { id, name -> controller.push(VideoRoute.Channel(id, name)) },
         onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
         onLoadMore = { loader.loadMore() },
@@ -342,8 +385,9 @@ private fun LibraryTab(controller: VideosController, s: VideoStrings, signedIn: 
     FeedColumn(
         state = if (signedIn) state else state.copy(signInNeeded = true, entries = emptyList()),
         s = s,
-        onVideo = { controller.open(it) },
+        onVideo = { item -> val items = state.entries.filterIsInstance<VideoEntry.Video>().map { it.item }; controller.openFrom(items, items.indexOfFirst { it.id == item.id }.coerceAtLeast(0)) },
         onShort = { items, i -> controller.openShorts(items, i) },
+        onMore = { controller.openMenu(it) },
         onChannel = { id, name -> controller.push(VideoRoute.Channel(id, name)) },
         onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
         onLoadMore = { loader.loadMore() },
@@ -471,6 +515,7 @@ private fun SearchResultsPage(controller: VideosController, s: VideoStrings, onS
                 state = state, s = s,
                 onVideo = { controller.open(it) },
                 onShort = { items, i -> controller.openShorts(items, i) },
+                onMore = { controller.openMenu(it) },
                 onChannel = { id, name -> controller.push(VideoRoute.Channel(id, name)) },
                 onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
                 onLoadMore = { current.loadMore() },
@@ -495,6 +540,7 @@ private fun ChannelPage(controller: VideosController, s: VideoStrings, onSignIn:
             state = c.feed, s = s,
             onVideo = { controller.open(it) },
             onShort = { items, i -> controller.openShorts(items, i) },
+            onMore = { controller.openMenu(it) },
             onChannel = { id, name -> controller.push(VideoRoute.Channel(id, name)) },
             onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
             onLoadMore = { controller.loadMoreChannel() },
@@ -553,8 +599,9 @@ private fun PlaylistPage(controller: VideosController, title: String, s: VideoSt
             FeedColumn(
                 state = state, s = s,
                 compact = true,
-                onVideo = { controller.open(it) },
+                onVideo = { item -> val items = state.entries.filterIsInstance<VideoEntry.Video>().map { it.item }; controller.openFrom(items, items.indexOfFirst { it.id == item.id }.coerceAtLeast(0)) },
                 onShort = { items, i -> controller.openShorts(items, i) },
+                onMore = { controller.openMenu(it) },
                 onChannel = { id, name -> controller.push(VideoRoute.Channel(id, name)) },
                 onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
                 onLoadMore = { current.loadMore() },
@@ -562,5 +609,112 @@ private fun PlaylistPage(controller: VideosController, title: String, s: VideoSt
                 onSignIn = onSignIn,
             )
         }
+    }
+}
+
+// ---------------------------------------------------------------------- settings and sheets
+
+private val QUALITY_CHOICES = listOf("360", "480", "720", "1080")
+
+@Composable
+private fun SettingsBody(controller: VideosController, s: VideoStrings, signedIn: Boolean) {
+    val wifi by controller.wifiQuality.collectAsState()
+    val mobile by controller.mobileQuality.collectAsState()
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (!signedIn) Text(s.signInBody, color = VideoColors.TextSecondary, fontSize = 14.sp)
+        Text(s.qualityWifi, color = VideoColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(QUALITY_CHOICES) { h -> LabelChip("${h}p", wifi == h) { controller.setWifiQuality(h) } }
+        }
+        Text(s.qualityMobile, color = VideoColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(QUALITY_CHOICES) { h -> LabelChip("${h}p", mobile == h) { controller.setMobileQuality(h) } }
+        }
+    }
+}
+
+/** The bottom sheets: a card's ⋮ menu, "save to a playlist", and the comments of a Short. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun VideoSheets(controller: VideosController, s: VideoStrings, onShare: (String) -> Unit, onSignIn: () -> Unit) {
+    val menu by controller.menu.collectAsState()
+    val save by controller.saveSheet.collectAsState()
+    val comments by controller.shortComments.collectAsState()
+
+    menu?.let { item ->
+        androidx.compose.material3.ModalBottomSheet(onDismissRequest = { controller.closeMenu() }, containerColor = VideoColors.Surface) {
+            Column(modifier = Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
+                Text(item.title, color = VideoColors.TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                SheetRow(QMusicIcons.History, s.menuWatchLater) {
+                    controller.closeMenu()
+                    if (!controller.saveForLater(item)) onSignIn()
+                }
+                SheetRow(QMusicIcons.PlaylistAdd, s.menuSave) {
+                    controller.closeMenu()
+                    if (!controller.openSaveSheet(item.id)) onSignIn()
+                }
+                SheetRow(QMusicIcons.Share, s.share) {
+                    controller.closeMenu()
+                    onShare("https://youtu.be/${item.id}")
+                }
+                item.channelId?.let { id ->
+                    SheetRow(QMusicIcons.Account, s.menuChannel) {
+                        controller.closeMenu()
+                        controller.push(VideoRoute.Channel(id, item.channelName))
+                    }
+                }
+            }
+        }
+    }
+
+    save?.let { sheet ->
+        androidx.compose.material3.ModalBottomSheet(onDismissRequest = { controller.closeSaveSheet() }, containerColor = VideoColors.Surface) {
+            Column(modifier = Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
+                Text(s.saveTo, color = VideoColors.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                if (sheet.loading) Loading()
+                LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                    items(sheet.playlists, key = { it.id }) { list ->
+                        val saved = list.id in sheet.saved
+                        SheetRow(if (saved) QMusicIcons.Check else QMusicIcons.PlaylistAdd, if (list.id == "WL") s.menuWatchLater else list.title, active = saved) {
+                            controller.toggleInPlaylist(list.id)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    comments?.let { state ->
+        androidx.compose.material3.ModalBottomSheet(onDismissRequest = { controller.closeShortComments() }, containerColor = VideoColors.Surface) {
+            Column(modifier = Modifier.navigationBarsPadding().fillMaxHeight(0.7f)) {
+                Text(s.comments, color = VideoColors.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                if (state.loading) Loading()
+                if (!state.loading && state.comments.isEmpty()) Text(s.noComments, color = VideoColors.TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(20.dp))
+                LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                    items(state.comments, key = { it.id }) { c ->
+                        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            Avatar(c.avatar, 32.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(listOfNotNull(c.author, c.published).joinToString(" · "), color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(c.text, color = VideoColors.Text, fontSize = 14.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 2.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetRow(icon: ImageVector, label: String, active: Boolean = false, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = if (active) VideoColors.Red else VideoColors.Text, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(18.dp))
+        Text(label, color = VideoColors.Text, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
