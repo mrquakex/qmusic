@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,6 +21,13 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -135,12 +143,13 @@ fun VideoRowCard(item: VideoItem, s: VideoStrings, onClick: () -> Unit, modifier
 }
 
 @Composable
-fun ShortsRow(items: List<VideoItem>, s: VideoStrings, onClick: (VideoItem) -> Unit) {
+fun ShortsRow(items: List<VideoItem>, s: VideoStrings, onClick: (items: List<VideoItem>, index: Int) -> Unit) {
     Column(modifier = Modifier.padding(bottom = 12.dp)) {
         Text(s.shorts, color = VideoColors.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
         LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(items, key = { it.id }) { item ->
-                Column(modifier = Modifier.width(150.dp).clickable { onClick(item) }) {
+            items(items.size, key = { items[it].id }) { index ->
+                val item = items[index]
+                Column(modifier = Modifier.width(150.dp).clickable { onClick(items, index) }) {
                     Box(modifier = Modifier.fillMaxWidth().aspectRatio(9f / 16f).clip(RoundedCornerShape(12.dp)).background(VideoColors.Surface)) {
                         if (item.thumbnail != null) AsyncImage(model = item.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                     }
@@ -249,6 +258,24 @@ fun SignInBanner(s: VideoStrings, onSignIn: () -> Unit) {
     }
 }
 
+/** A grey stand-in for a card while a list loads: the page keeps its shape instead of jumping when the cards arrive. */
+@Composable
+fun SkeletonCard() {
+    val pulse by rememberInfiniteTransition().animateFloat(0.35f, 0.7f, infiniteRepeatable(tween(800), RepeatMode.Reverse))
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp).graphicsLayer { alpha = pulse }) {
+        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(VideoColors.Surface))
+        Row(modifier = Modifier.padding(12.dp)) {
+            Box(Modifier.size(36.dp).clip(CircleShape).background(VideoColors.Surface))
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Box(Modifier.fillMaxWidth(0.8f).height(14.dp).clip(RoundedCornerShape(4.dp)).background(VideoColors.Surface))
+                Spacer(Modifier.height(8.dp))
+                Box(Modifier.fillMaxWidth(0.5f).height(12.dp).clip(RoundedCornerShape(4.dp)).background(VideoColors.Surface))
+            }
+        }
+    }
+}
+
 @Composable
 fun Loading(modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
@@ -267,6 +294,7 @@ fun FeedColumn(
     onVideo: (VideoItem) -> Unit,
     onChannel: (id: String, name: String?) -> Unit,
     onPlaylist: (VideoPlaylist) -> Unit,
+    onShort: (items: List<VideoItem>, index: Int) -> Unit,
     onLoadMore: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
@@ -274,8 +302,10 @@ fun FeedColumn(
     compact: Boolean = false,
     signInMessage: Pair<String, String>? = null,
     onSignIn: (() -> Unit)? = null,
+    resetKey: Int? = null,
     header: (LazyListScope.() -> Unit)? = null,
 ) {
+    LaunchedEffect(resetKey) { if (resetKey != null && resetKey > 0) listState.scrollToItem(0) }
     LaunchedEffect(listState, state.continuation) {
         if (state.continuation == null) return@LaunchedEffect
         snapshotFlow {
@@ -288,7 +318,7 @@ fun FeedColumn(
         when {
             state.signInNeeded && state.entries.isEmpty() && signInMessage != null ->
                 item(key = "signin") { MessageBlock(signInMessage.first, signInMessage.second, s.signIn, onSignIn) }
-            state.loading && state.entries.isEmpty() -> item(key = "loading") { Loading() }
+            state.loading && state.entries.isEmpty() -> items(3, key = { "skeleton$it" }) { SkeletonCard() }
             state.error && state.entries.isEmpty() -> item(key = "error") { MessageBlock(s.loadError, action = s.retry, onAction = onRetry) }
             state.loaded && state.entries.isEmpty() -> item(key = "empty") { MessageBlock(s.nothingHere) }
         }
@@ -305,7 +335,7 @@ fun FeedColumn(
                 }
                 is VideoEntry.Channel -> ChannelResultRow(entry.item) { onChannel(entry.item.id, entry.item.name) }
                 is VideoEntry.Playlist -> PlaylistResultRow(entry.item, s) { onPlaylist(entry.item) }
-                is VideoEntry.Shorts -> ShortsRow(entry.items, s, onClick = onVideo)
+                is VideoEntry.Shorts -> ShortsRow(entry.items, s, onClick = onShort)
             }
         }
         if (state.loadingMore) item(key = "more") { Loading() }

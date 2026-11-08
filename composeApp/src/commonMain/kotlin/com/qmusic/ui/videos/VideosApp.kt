@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.qmusic.ui.PlatformBackHandler
 import com.qmusic.ui.theme.QMusicIcons
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.aspectRatio
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -124,15 +125,21 @@ fun VideosApp(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize().background(VideoColors.Background)) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize().background(VideoColors.Background)) {
+        // Turning the phone sideways while a video is open makes it full screen, and turning it back leaves it.
+        val landscape = maxWidth > maxHeight
+        LaunchedEffect(landscape, top is VideoRoute.Watch) {
+            if (top is VideoRoute.Watch) controller.setFullscreen(landscape)
+        }
         Column(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when (top) {
-                    null -> TabContent(controller, tab, s, signedIn, onSignIn, onAccount = { accountDialog = true })
+                    null -> TabContent(controller, tab, s, signedIn, onSignIn, playback, onPauseMusic, onShare, onAccount = { accountDialog = true })
                     is VideoRoute.Search -> SearchResultsPage(controller, s, onSignIn)
                     is VideoRoute.Watch -> WatchPage(controller, playback, s, onShare, onSignIn)
                     is VideoRoute.Channel -> ChannelPage(controller, s, onSignIn)
                     is VideoRoute.Playlist -> PlaylistPage(controller, top.title, s, onSignIn)
+                    is VideoRoute.Shorts -> ShortsPage(controller, playback, s, true, onPauseMusic, onShare, onSignIn)
                 }
             }
             val w = watch
@@ -140,7 +147,7 @@ fun VideosApp(
                 MiniWatchBar(w, playback, onOpen = { controller.push(VideoRoute.Watch(w.video)) }, onClose = { controller.closeWatch() })
             }
             if (top !is VideoRoute.Watch && !pip) {
-                VideoBottomBar(tab = tab.takeIf { routes.isEmpty() }, s = s, onTab = { controller.selectTab(it) }, onMusic = exit)
+                VideoBottomBar(tab = tab.takeIf { routes.isEmpty() }, s = s, onTab = { t -> if (t == tab && routes.isEmpty()) controller.refreshCurrent() else controller.selectTab(t) }, onMusic = exit)
             }
         }
         if (searching) SearchBox(controller, s)
@@ -201,13 +208,8 @@ private fun TopBar(s: VideoStrings, onSearch: () -> Unit, onAccount: () -> Unit)
         modifier = Modifier.fillMaxWidth().background(VideoColors.Background).statusBarsPadding().padding(start = 12.dp, end = 4.dp).height(52.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier.size(width = 30.dp, height = 22.dp).clip(RoundedCornerShape(6.dp)).background(VideoColors.Red),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(QMusicIcons.Play, null, tint = Color.White, modifier = Modifier.size(12.dp))
-        }
-        Spacer(Modifier.width(6.dp))
+        com.qmusic.ui.theme.QMusicLogo(size = 30.dp, tint = Color.White)
+        Spacer(Modifier.width(8.dp))
         Text(s.section, color = VideoColors.Text, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         IconButton(onClick = onSearch) { Icon(QMusicIcons.Search, s.searchHint, tint = VideoColors.Text) }
         IconButton(onClick = onAccount) { Icon(QMusicIcons.Account, s.account, tint = VideoColors.Text) }
@@ -220,6 +222,7 @@ private fun VideoBottomBar(tab: VideoTab?, s: VideoStrings, onTab: (VideoTab) ->
         modifier = Modifier.fillMaxWidth().background(VideoColors.Background).navigationBarsPadding().padding(top = 6.dp, bottom = 4.dp),
     ) {
         BarItem(QMusicIcons.Home, s.tabHome, tab == VideoTab.HOME, Modifier.weight(1f)) { onTab(VideoTab.HOME) }
+        BarItem(VideoIcons.Shorts, s.shorts, tab == VideoTab.SHORTS, Modifier.weight(1f)) { onTab(VideoTab.SHORTS) }
         BarItem(QMusicIcons.VideoPlay, s.tabSubscriptions, tab == VideoTab.SUBSCRIPTIONS, Modifier.weight(1f)) { onTab(VideoTab.SUBSCRIPTIONS) }
         BarItem(QMusicIcons.Library, s.tabLibrary, tab == VideoTab.LIBRARY, Modifier.weight(1f)) { onTab(VideoTab.LIBRARY) }
         BarItem(QMusicIcons.Headphones, s.backToMusic, false, Modifier.weight(1f), onMusic)
@@ -252,7 +255,22 @@ private fun PageBar(title: String, onBack: () -> Unit, trailing: (@Composable ()
 // ---------------------------------------------------------------------- tabs
 
 @Composable
-private fun TabContent(controller: VideosController, tab: VideoTab, s: VideoStrings, signedIn: Boolean, onSignIn: () -> Unit, onAccount: () -> Unit) {
+private fun TabContent(
+    controller: VideosController,
+    tab: VideoTab,
+    s: VideoStrings,
+    signedIn: Boolean,
+    onSignIn: () -> Unit,
+    playback: VideoPlayback?,
+    onPauseMusic: () -> Unit,
+    onShare: (String) -> Unit,
+    onAccount: () -> Unit,
+) {
+    if (tab == VideoTab.SHORTS) {
+        ShortsPage(controller, playback, s, false, onPauseMusic, onShare, onSignIn)
+        return
+    }
+    val refresh by controller.refresh.collectAsState()
     Column(modifier = Modifier.fillMaxSize()) {
         TopBar(s, onSearch = { controller.openSearchBox() }, onAccount = onAccount)
         when (tab) {
@@ -262,12 +280,14 @@ private fun TabContent(controller: VideosController, tab: VideoTab, s: VideoStri
                 FeedColumn(
                     state = state, s = s,
                     onVideo = { controller.open(it) },
+                    onShort = { items, i -> controller.openShorts(items, i) },
                     onChannel = { id, name -> controller.push(VideoRoute.Channel(id, name)) },
                     onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
                     onLoadMore = { controller.home.loadMore() },
                     onRetry = { controller.home.load(force = true) },
                     signInMessage = s.signInTitle to s.signInBody,
                     onSignIn = onSignIn,
+                    resetKey = refresh,
                     header = if (state.chips.isNotEmpty() || (!signedIn && state.entries.isNotEmpty())) {
                         {
                             if (!signedIn && state.entries.isNotEmpty()) item(key = "banner") { SignInBanner(s, onSignIn) }
@@ -276,6 +296,7 @@ private fun TabContent(controller: VideosController, tab: VideoTab, s: VideoStri
                     } else null,
                 )
             }
+            VideoTab.SHORTS -> Unit
             VideoTab.SUBSCRIPTIONS -> SubscriptionsTab(controller, s, signedIn, onSignIn)
             VideoTab.LIBRARY -> LibraryTab(controller, s, signedIn, onSignIn)
         }
@@ -292,6 +313,7 @@ private fun SubscriptionsTab(controller: VideosController, s: VideoStrings, sign
         state = if (signedIn) state else state.copy(signInNeeded = true, entries = emptyList()),
         s = s,
         onVideo = { controller.open(it) },
+        onShort = { items, i -> controller.openShorts(items, i) },
         onChannel = { id, name -> controller.push(VideoRoute.Channel(id, name)) },
         onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
         onLoadMore = { loader.loadMore() },
@@ -319,6 +341,7 @@ private fun LibraryTab(controller: VideosController, s: VideoStrings, signedIn: 
         state = if (signedIn) state else state.copy(signInNeeded = true, entries = emptyList()),
         s = s,
         onVideo = { controller.open(it) },
+        onShort = { items, i -> controller.openShorts(items, i) },
         onChannel = { id, name -> controller.push(VideoRoute.Channel(id, name)) },
         onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
         onLoadMore = { loader.loadMore() },
@@ -350,6 +373,7 @@ private fun LibraryTab(controller: VideosController, s: VideoStrings, signedIn: 
 private fun SearchBox(controller: VideosController, s: VideoStrings) {
     val query by controller.query.collectAsState()
     val suggestions by controller.suggestions.collectAsState()
+    val history by controller.searchHistory.collectAsState()
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     Column(modifier = Modifier.fillMaxSize().background(VideoColors.Background)) {
@@ -381,7 +405,30 @@ private fun SearchBox(controller: VideosController, s: VideoStrings) {
             }
         }
         LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(suggestions) { text ->
+            if (query.isBlank() && history.isNotEmpty()) {
+                item(key = "history-header") {
+                    Row(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(s.recentSearches, color = VideoColors.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Text(
+                            s.clearSearches, color = VideoColors.Red, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clip(RoundedCornerShape(50)).clickable { controller.clearSearches() }.padding(horizontal = 10.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+                items(history, key = { "h$it" }) { text ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { controller.submitSearch(text) }.padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(QMusicIcons.History, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(16.dp))
+                        Text(text, color = VideoColors.Text, fontSize = 16.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        IconButton(onClick = { controller.typeQuery(text) }) { Icon(QMusicIcons.FillQuery, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp)) }
+                        IconButton(onClick = { controller.forgetSearch(text) }) { Icon(QMusicIcons.Close, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(18.dp)) }
+                    }
+                }
+            }
+            items(if (query.isBlank()) emptyList() else suggestions) { text ->
                 Row(
                     modifier = Modifier.fillMaxWidth().clickable { controller.submitSearch(text) }.padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -401,7 +448,8 @@ private fun SearchBox(controller: VideosController, s: VideoStrings) {
 
 @Composable
 private fun SearchResultsPage(controller: VideosController, s: VideoStrings, onSignIn: () -> Unit) {
-    val query by controller.query.collectAsState()
+    val routes by controller.routes.collectAsState()
+    val query = (routes.lastOrNull() as? VideoRoute.Search)?.query.orEmpty()
     val filter by controller.filter.collectAsState()
     val loader by controller.searchResults.collectAsState()
     Column(modifier = Modifier.fillMaxSize()) {
@@ -419,6 +467,7 @@ private fun SearchResultsPage(controller: VideosController, s: VideoStrings, onS
             FeedColumn(
                 state = state, s = s,
                 onVideo = { controller.open(it) },
+                onShort = { items, i -> controller.openShorts(items, i) },
                 onChannel = { id, name -> controller.push(VideoRoute.Channel(id, name)) },
                 onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
                 onLoadMore = { current.loadMore() },
@@ -441,6 +490,7 @@ private fun ChannelPage(controller: VideosController, s: VideoStrings, onSignIn:
         FeedColumn(
             state = c.feed, s = s,
             onVideo = { controller.open(it) },
+            onShort = { items, i -> controller.openShorts(items, i) },
             onChannel = { id, name -> controller.push(VideoRoute.Channel(id, name)) },
             onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
             onLoadMore = { controller.loadMoreChannel() },
@@ -500,6 +550,7 @@ private fun PlaylistPage(controller: VideosController, title: String, s: VideoSt
                 state = state, s = s,
                 compact = true,
                 onVideo = { controller.open(it) },
+                onShort = { items, i -> controller.openShorts(items, i) },
                 onChannel = { id, name -> controller.push(VideoRoute.Channel(id, name)) },
                 onPlaylist = { controller.push(VideoRoute.Playlist(it.id, it.title)) },
                 onLoadMore = { current.loadMore() },

@@ -17,6 +17,8 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.content.TextContent
 import io.ktor.http.userAgent
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -54,7 +56,7 @@ class YouTubeVideos(
     override suspend fun home(): Result<VideoFeed> = feed("browse", "FEwhat_to_watch")
 
     /** A chip's feed of the home page, or the next page of any feed. */
-    override suspend fun more(continuation: String): Result<VideoFeed> = call("browse", continuation = continuation).map(VideoParser::feed)
+    override suspend fun more(continuation: String): Result<VideoFeed> = call("browse", continuation = continuation, parse = VideoParser::feed)
 
     override suspend fun subscriptions(): Result<VideoFeed> = feed("browse", "FEsubscriptions")
 
@@ -74,13 +76,13 @@ class YouTubeVideos(
     override suspend fun playlist(playlistId: String): Result<VideoFeed> = feed("browse", "VL" + playlistId.removePrefix("VL"))
 
     private suspend fun feed(endpoint: String, browseId: String, params: String? = null): Result<VideoFeed> =
-        call(endpoint, browseId = browseId, params = params).map(VideoParser::feed)
+        call(endpoint, browseId = browseId, params = params, parse = VideoParser::feed)
 
     // ------------------------------------------------------------------ search
 
     /** [params] picks what is looked for (see [VideoSearchFilter]); null is everything. */
     override suspend fun search(query: String, params: String?): Result<VideoFeed> =
-        call("search", query = query, params = params).map(VideoParser::feed)
+        call("search", query = query, params = params, parse = VideoParser::feed)
 
     /** The words YouTube suggests as [input] is typed. */
     override suspend fun suggestions(input: String): Result<List<String>> =
@@ -98,12 +100,12 @@ class YouTubeVideos(
     // ------------------------------------------------------------------ the watch page
 
     override suspend fun watch(videoId: String): Result<VideoDetails> =
-        call("next", videoId = videoId).mapCatching { root ->
+        call("next", videoId = videoId, parse = { root ->
             VideoParser.details(root, videoId) ?: error("This video is not available")
-        }
+        })
 
     override suspend fun comments(token: String): Result<VideoComments> =
-        call("next", continuation = token).map(VideoParser::comments)
+        call("next", continuation = token, parse = VideoParser::comments)
 
     /** Every way to play [videoId] (empty when it cannot be played, e.g. it is private or age-restricted). */
     override suspend fun qualities(videoId: String): Result<List<VideoQuality>> =
@@ -113,9 +115,9 @@ class YouTubeVideos(
 
     /** A channel's page; [params] opens one of its tabs (see [VideoChannelTab]), none opens its videos. */
     override suspend fun channel(channelId: String, params: String?): Result<VideoChannelPage> =
-        call("browse", browseId = channelId, params = params ?: VIDEOS_TAB).mapCatching { root ->
+        call("browse", browseId = channelId, params = params ?: VIDEOS_TAB, parse = { root ->
             VideoParser.channel(root, channelId) ?: error("This channel is not available")
-        }
+        })
 
     // ------------------------------------------------------------------ what the account does
 
@@ -166,14 +168,19 @@ class YouTubeVideos(
 
     // ------------------------------------------------------------------ plumbing
 
-    private suspend fun call(
+    /**
+     * Asks YouTube and reads the answer with [parse]. The answer is a big JSON document (up to a megabyte), so reading
+     * it happens off the main thread: done on the screen's thread it froze the picture for a moment at every list.
+     */
+    private suspend fun <T> call(
         endpoint: String,
         browseId: String? = null,
         params: String? = null,
         query: String? = null,
         videoId: String? = null,
         continuation: String? = null,
-    ): Result<JsonObject> =
+        parse: (JsonObject) -> T,
+    ): Result<T> =
         runCatching {
             ensureVisitorData()
             val body = buildJsonObject {
@@ -189,8 +196,13 @@ class YouTubeVideos(
             check(response.status.value in 200..299) {
                 if (response.status.value == 401 || response.status.value == 403) "Sign in to YouTube" else "YouTube answered ${response.status.value}"
             }
-            Json.parseToJsonElement(text).jsonObject
+            withContext(Dispatchers.Default) { parse(Json.parseToJsonElement(text).jsonObject) }
         }
+
+    /** Gets the anonymous visitor id ready, so the first list does not wait for it. */
+    override suspend fun warmUp() {
+        withContext(Dispatchers.Default) { ensureVisitorData() }
+    }
 
     private suspend fun post(path: String, body: JsonObject): HttpResponse =
         http.post("$BASE/$path") {

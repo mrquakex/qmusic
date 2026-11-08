@@ -20,6 +20,9 @@ interface VideoService {
     var locale: YouTubeLocale
     val isSignedIn: Boolean
 
+    /** Gets what the first request needs ready (a no-op for stand-ins). */
+    suspend fun warmUp() {}
+
     /** The home feed: what YouTube suggests to the signed-in account (nothing without one). */
     suspend fun home(): Result<VideoFeed>
 

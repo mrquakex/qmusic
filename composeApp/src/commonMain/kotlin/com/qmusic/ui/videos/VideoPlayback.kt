@@ -22,6 +22,9 @@ interface VideoPlayback {
     fun pause()
     fun seekTo(ms: Long)
     fun setSpeed(speed: Float)
+
+    /** Plays the same clip again and again (a Short). */
+    fun setLooping(loop: Boolean)
     fun release()
 }
 
@@ -29,6 +32,6 @@ interface VideoPlayback {
 @Composable
 expect fun rememberVideoPlayback(): VideoPlayback?
 
-/** Draws what [playback] plays. */
+/** Draws what [playback] plays; [fill] crops the picture to fill the space (upright clips), else it fits inside. */
 @Composable
-expect fun VideoPlaybackSurface(playback: VideoPlayback, modifier: Modifier)
+expect fun VideoPlaybackSurface(playback: VideoPlayback, modifier: Modifier, fill: Boolean = false)

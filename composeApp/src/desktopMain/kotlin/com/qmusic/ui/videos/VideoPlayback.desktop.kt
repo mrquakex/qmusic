@@ -8,4 +8,4 @@ import androidx.compose.ui.Modifier
 actual fun rememberVideoPlayback(): VideoPlayback? = null
 
 @Composable
-actual fun VideoPlaybackSurface(playback: VideoPlayback, modifier: Modifier) = Unit
+actual fun VideoPlaybackSurface(playback: VideoPlayback, modifier: Modifier, fill: Boolean) = Unit

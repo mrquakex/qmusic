@@ -131,9 +131,10 @@ sealed interface VideoRoute {
     data class Watch(val video: VideoItem) : VideoRoute
     data class Channel(val id: String, val name: String?) : VideoRoute
     data class Playlist(val id: String, val title: String) : VideoRoute
+    data object Shorts : VideoRoute
 }
 
-enum class VideoTab { HOME, SUBSCRIPTIONS, LIBRARY }
+enum class VideoTab { HOME, SHORTS, SUBSCRIPTIONS, LIBRARY }
 
 enum class LibrarySection { HISTORY, LIKED, WATCH_LATER, PLAYLISTS }
 
@@ -158,6 +159,9 @@ data class WatchState(
     val commentsLoaded: Boolean = false,
     val signInPrompt: Boolean = false,
 )
+
+/** The upright clips being swiped through, and the one on screen. */
+data class ShortsState(val items: List<VideoItem> = emptyList(), val index: Int = 0, val loading: Boolean = false)
 
 data class ChannelState(
     val id: String,
@@ -218,6 +222,11 @@ class VideosController(
         refreshAccount()
     }
 
+    /** Called when the section opens: the first list is asked for with everything ready. */
+    fun warmUp() {
+        scope.launch { service.warmUp() }
+    }
+
     // ------------------------------------------------------------------ the account
 
     /** Picks the session to use: the section's own when it has one, else the music account's. */
@@ -261,6 +270,7 @@ class VideosController(
         _routes.value = emptyList()
         _fullscreen.value = false
         _tab.value = tab
+        if (tab == VideoTab.SHORTS) loadShortsTab()
     }
 
     fun push(route: VideoRoute) {
@@ -272,6 +282,7 @@ class VideosController(
             is VideoRoute.Watch -> if (_watch.value?.video?.id != route.video.id) startWatching(route.video)
             is VideoRoute.Channel -> loadChannel(route.id, null)
             is VideoRoute.Playlist -> openPlaylist(route.id)
+            is VideoRoute.Shorts -> Unit
         }
     }
 
@@ -309,6 +320,9 @@ class VideosController(
     val searching: StateFlow<Boolean> = _searching.asStateFlow()
 
     fun openSearchBox() {
+        // Opens empty, so the recent searches show; the page behind keeps its own query.
+        _query.value = ""
+        _suggestions.value = emptyList()
         _searching.value = true
     }
 
@@ -335,6 +349,7 @@ class VideosController(
         val q = text.trim()
         if (q.isEmpty()) return
         _query.value = q
+        rememberSearch(q)
         _searching.value = false
         _suggestions.value = emptyList()
         // A search made from the results page replaces it instead of piling up.
@@ -345,7 +360,7 @@ class VideosController(
     fun setFilter(params: String?) {
         if (_filter.value == params) return
         _filter.value = params
-        search(_query.value)
+        (_routes.value.lastOrNull() as? VideoRoute.Search)?.let { search(it.query) }
     }
 
     private fun newResults(q: String) = FeedLoader(scope, service) { service.search(q, _filter.value) }
@@ -380,6 +395,7 @@ class VideosController(
                             subscribed = d.subscribed == true,
                         )
                     }
+                    _watch.value?.takeIf { it.video.id == id }?.let(::prefetchNext)
                 },
                 onFailure = { e ->
                     if (e is CancellationException) throw e
@@ -389,8 +405,32 @@ class VideosController(
         }
     }
 
+    /** The ways to play recent videos: working them out takes seconds, so a video asked for twice (or ahead) is instant. */
+    private class Cached(val at: kotlin.time.TimeMark, val qualities: List<VideoQuality>)
+
+    private val qualityCache = LinkedHashMap<String, Cached>()
+
+    private suspend fun qualitiesOf(id: String): Result<List<VideoQuality>> {
+        qualityCache[id]?.takeIf { it.at.elapsedNow() < CACHE_LIFETIME }?.let { return Result.success(it.qualities) }
+        return service.qualities(id).onSuccess { list ->
+            if (list.isNotEmpty()) {
+                qualityCache[id] = Cached(kotlin.time.TimeSource.Monotonic.markNow(), list)
+                while (qualityCache.size > CACHE_SIZE) qualityCache.remove(qualityCache.keys.first())
+            }
+        }
+    }
+
+    /** While one video plays, the one after it is made ready, so "up next" and autoplay start at once. */
+    private fun prefetchNext(w: WatchState) {
+        val next = w.related.firstNotNullOfOrNull { (it as? VideoEntry.Video)?.item } ?: return
+        scope.launch {
+            delay(PREFETCH_DELAY_MS)
+            qualitiesOf(next.id)
+        }
+    }
+
     private suspend fun loadStream(id: String) {
-        service.qualities(id).fold(
+        qualitiesOf(id).fold(
             onSuccess = { list ->
                 _watch.update { w ->
                     if (w?.video?.id != id) w else w.copy(
@@ -602,6 +642,131 @@ class VideosController(
         }
     }
 
+    // ------------------------------------------------------------------ search history, refresh
+
+    private val searches = settings.string(KEY_SEARCHES, "")
+    private val _searchHistory = MutableStateFlow(searches.value.split('\n').filter { it.isNotBlank() })
+    val searchHistory: StateFlow<List<String>> = _searchHistory.asStateFlow()
+
+    private fun saveSearches(list: List<String>) {
+        _searchHistory.value = list
+        settings.setString(KEY_SEARCHES, list.joinToString("\n"))
+    }
+
+    private fun rememberSearch(q: String) = saveSearches((listOf(q) + _searchHistory.value.filterNot { it.equals(q, ignoreCase = true) }).take(MAX_SEARCHES))
+
+    fun forgetSearch(q: String) = saveSearches(_searchHistory.value - q)
+
+    fun clearSearches() = saveSearches(emptyList())
+
+    private val _refresh = MutableStateFlow(0)
+
+    /** Ticks when the tab that is open is tapped again: its list reloads and goes back to the top. */
+    val refresh: StateFlow<Int> = _refresh.asStateFlow()
+
+    fun refreshCurrent() {
+        when (_tab.value) {
+            VideoTab.HOME -> home.load(force = true)
+            VideoTab.SUBSCRIPTIONS -> subscriptions.load(force = true)
+            else -> Unit
+        }
+        _refresh.update { it + 1 }
+    }
+
+    // ------------------------------------------------------------------ shorts
+
+    private val _shorts = MutableStateFlow(ShortsState())
+    val shorts: StateFlow<ShortsState> = _shorts.asStateFlow()
+    private var shortsContinuation: String? = null
+    private var shortsMore: Job? = null
+    private val _liked = MutableStateFlow<Set<String>>(emptySet())
+
+    /** The clips the person liked in this session (the page cannot tell which were liked before). */
+    val likedIds: StateFlow<Set<String>> = _liked.asStateFlow()
+
+    private fun VideoFeed.shortItems(): List<VideoItem> = entries.flatMap { e ->
+        when (e) {
+            is VideoEntry.Shorts -> e.items
+            is VideoEntry.Video -> if (e.item.isShort) listOf(e.item) else emptyList()
+            else -> emptyList()
+        }
+    }.distinctBy { it.id }
+
+    /** Opens the clips full screen, starting at [index] of [items] (the row of Shorts that was tapped). */
+    fun openShorts(items: List<VideoItem>, index: Int) {
+        closeWatch()
+        _shorts.value = ShortsState(items, index)
+        _routes.update { it + VideoRoute.Shorts }
+    }
+
+    private fun loadShortsTab() {
+        if (_shorts.value.items.isNotEmpty() || _shorts.value.loading) return
+        _shorts.value = ShortsState(loading = true)
+        scope.launch {
+            service.search(SHORTS_QUERY).fold(
+                onSuccess = { feed ->
+                    shortsContinuation = feed.continuation
+                    _shorts.value = ShortsState(feed.shortItems())
+                },
+                onFailure = { e ->
+                    if (e is CancellationException) throw e
+                    _shorts.value = ShortsState()
+                },
+            )
+        }
+    }
+
+    fun setShortIndex(index: Int) {
+        _shorts.update { it.copy(index = index) }
+        if (index >= _shorts.value.items.size - 3) loadMoreShorts()
+    }
+
+    /** More clips: the ones YouTube relates to the last, then the next page of the search. */
+    private fun loadMoreShorts() {
+        if (shortsMore?.isActive == true) return
+        val last = _shorts.value.items.lastOrNull() ?: return
+        shortsMore = scope.launch {
+            fun add(list: List<VideoItem>): Int {
+                val before = _shorts.value.items.size
+                _shorts.update { cur ->
+                    val seen = cur.items.mapTo(HashSet()) { it.id }
+                    cur.copy(items = cur.items + list.filter { it.id !in seen })
+                }
+                return _shorts.value.items.size - before
+            }
+            val related = service.watch(last.id).getOrNull()?.related?.shortItems().orEmpty()
+            if (add(related) == 0) {
+                val token = shortsContinuation ?: return@launch
+                service.more(token).onSuccess { feed ->
+                    shortsContinuation = feed.continuation
+                    add(feed.shortItems())
+                }
+            }
+        }
+    }
+
+    /** The way to play a Short: the sharpest upright picture up to 720 wide, since it fills a phone's screen. */
+    suspend fun streamFor(id: String): VideoQuality? =
+        qualitiesOf(id).getOrNull()?.let { list ->
+            list.firstOrNull { it.isLive }
+                ?: list.filter { it.height in 1..1300 }.maxByOrNull { it.height * 100 + it.fps }
+                ?: list.minByOrNull { it.height }
+        }
+
+    /** Likes (or unlikes) a clip; false when there is no account to do it with. */
+    fun toggleLikeId(id: String): Boolean {
+        if (!service.isSignedIn) return false
+        val now = id !in _liked.value
+        _liked.update { if (now) it + id else it - id }
+        scope.launch {
+            service.setLike(id, now).onFailure { e ->
+                if (e is CancellationException) throw e
+                _liked.update { if (now) it - id else it + id }
+            }
+        }
+        return true
+    }
+
     // ------------------------------------------------------------------ playlists
 
     private var playlist = FeedLoader(scope, service) { Result.success(VideoFeed()) }
@@ -616,6 +781,12 @@ class VideosController(
 
     companion object {
         const val KEY_COOKIES = "video_cookies"
+        const val KEY_SEARCHES = "video_searches"
+        private const val MAX_SEARCHES = 20
+        private const val SHORTS_QUERY = "#shorts"
+        private val CACHE_LIFETIME = kotlin.time.Duration.parse("30m")
+        private const val CACHE_SIZE = 12
+        private const val PREFETCH_DELAY_MS = 2_500L
         private const val SUGGEST_DELAY_MS = 180L
         private const val MAX_SUGGESTIONS = 8
 

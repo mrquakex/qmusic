@@ -16,6 +16,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
@@ -38,6 +39,13 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
             true,
         )
         .setHandleAudioBecomingNoisy(true)
+        // Starts after one second of picture instead of two and a half, and keeps a minute ahead on a good line.
+        .setLoadControl(
+            DefaultLoadControl.Builder()
+                .setBufferDurationsMs(15_000, 60_000, 1_000, 2_000)
+                .setPrioritizeTimeOverSizeThresholds(true)
+                .build(),
+        )
         .build()
 
     private val _isPlaying = MutableStateFlow(false)
@@ -122,6 +130,10 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
         player.playbackParameters = PlaybackParameters(speed)
     }
 
+    override fun setLooping(loop: Boolean) {
+        player.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+    }
+
     override fun release() {
         handler.removeCallbacks(ticker)
         player.release()
@@ -141,19 +153,24 @@ actual fun rememberVideoPlayback(): VideoPlayback? {
 }
 
 @Composable
-actual fun VideoPlaybackSurface(playback: VideoPlayback, modifier: Modifier) {
+actual fun VideoPlaybackSurface(playback: VideoPlayback, modifier: Modifier, fill: Boolean) {
     val exo = (playback as? ExoVideoPlayback)?.player
     AndroidView(
         modifier = modifier,
         factory = { context ->
             PlayerView(context).apply {
                 useController = false
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                resizeMode = if (fill) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
                 setShutterBackgroundColor(android.graphics.Color.BLACK)
+                // The screen stays on while a video plays.
+                keepScreenOn = true
                 player = exo
             }
         },
-        update = { it.player = exo },
+        update = {
+            it.player = exo
+            it.resizeMode = if (fill) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+        },
         onRelease = { it.player = null },
     )
 }

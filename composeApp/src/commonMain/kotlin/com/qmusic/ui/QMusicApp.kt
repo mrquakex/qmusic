@@ -190,7 +190,10 @@ fun QMusicApp(
                 )
             }
             if (videosOpen) {
-                LaunchedEffect(Unit) { videosController.refreshAccount() }
+                LaunchedEffect(Unit) {
+                    videosController.refreshAccount()
+                    videosController.warmUp()
+                }
                 val shareVideo = rememberShare()
                 Box(modifier = modifier.fillMaxSize()) {
                     val videoStrings = if (language == "en") com.qmusic.ui.videos.VideoStrings.English else com.qmusic.ui.videos.VideoStrings.Turkish

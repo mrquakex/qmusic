@@ -198,157 +198,9 @@ private fun Overlay(text: String, action: String? = null, onAction: (() -> Unit)
     }
 }
 
-private val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
+internal fun WatchState.isLive() = quality?.isLive == true || video.isLive || details?.isLive == true
 
-@Composable
-private fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStrings, controller: VideosController, fullscreen: Boolean) {
-    var visible by remember { mutableStateOf(true) }
-    var qualityMenu by remember { mutableStateOf(false) }
-    var speedMenu by remember { mutableStateOf(false) }
-    var speed by remember { mutableStateOf(1f) }
-    var scrubbing by remember { mutableStateOf<Float?>(null) }
-    val isPlaying by playback.isPlaying.collectAsState()
-    val position by playback.positionMs.collectAsState()
-    val duration by playback.durationMs.collectAsState()
-    val ended by playback.ended.collectAsState()
-
-    // Controls fade away while playing, and stay while paused or while a menu is open.
-    LaunchedEffect(visible, isPlaying, qualityMenu, speedMenu, scrubbing) {
-        if (visible && isPlaying && !qualityMenu && !speedMenu && scrubbing == null) {
-            delay(HIDE_CONTROLS_MS)
-            visible = false
-        }
-    }
-
-    var seekHint by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(seekHint) {
-        if (seekHint != null) {
-            delay(700)
-            seekHint = null
-        }
-    }
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(w.video.id) {
-                detectTapGestures(
-                    onTap = { visible = !visible },
-                    // Double tap on the left or right side jumps 10 seconds, the middle plays or pauses.
-                    onDoubleTap = { at ->
-                        val live = w.isLive()
-                        when {
-                            live -> playback.togglePlay()
-                            at.x < size.width / 3f -> {
-                                playback.seekTo((playback.positionMs.value - SEEK_STEP_MS).coerceAtLeast(0))
-                                seekHint = "-10"
-                            }
-                            at.x > size.width * 2f / 3f -> {
-                                playback.seekTo(playback.positionMs.value + SEEK_STEP_MS)
-                                seekHint = "+10"
-                            }
-                            else -> playback.togglePlay()
-                        }
-                    },
-                )
-            },
-    ) {
-        seekHint?.let { hint ->
-            Text(
-                hint,
-                color = Color.White,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .align(if (hint.startsWith("-")) Alignment.CenterStart else Alignment.CenterEnd)
-                    .padding(horizontal = 40.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-            )
-        }
-        if (visible || ended) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)))
-            IconButton(onClick = { playback.togglePlay() }, modifier = Modifier.align(Alignment.Center).size(64.dp)) {
-                Icon(
-                    imageVector = if (isPlaying) QMusicIcons.Pause else QMusicIcons.Play,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(44.dp),
-                )
-            }
-            Row(modifier = Modifier.align(Alignment.TopEnd).padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                ControlText(if (fullscreen) s.exitFullscreen else s.fullscreen) { controller.setFullscreen(!fullscreen) }
-                Box {
-                    ControlText(speedLabel(speed)) { speedMenu = true }
-                    DropdownMenu(expanded = speedMenu, onDismissRequest = { speedMenu = false }) {
-                        SPEEDS.forEach { value ->
-                            DropdownMenuItem(text = { Text(speedLabel(value)) }, onClick = {
-                                speed = value
-                                playback.setSpeed(value)
-                                speedMenu = false
-                            })
-                        }
-                    }
-                }
-                if (w.qualities.size > 1) {
-                    Box {
-                        ControlText(w.quality?.label ?: s.quality) { qualityMenu = true }
-                        DropdownMenu(expanded = qualityMenu, onDismissRequest = { qualityMenu = false }) {
-                            w.qualities.forEach { q ->
-                                DropdownMenuItem(
-                                    text = { Text(if (q == w.quality) "${q.label}  ✓" else q.label) },
-                                    onClick = {
-                                        qualityMenu = false
-                                        controller.selectQuality(q)
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            if (!w.isLive()) {
-                Row(
-                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(clock(scrubbing?.toLong() ?: position), color = Color.White, fontSize = 12.sp)
-                    Slider(
-                        value = (scrubbing ?: position.toFloat()).coerceIn(0f, duration.coerceAtLeast(1L).toFloat()),
-                        onValueChange = { scrubbing = it },
-                        onValueChangeFinished = {
-                            scrubbing?.let { playback.seekTo(it.toLong()) }
-                            scrubbing = null
-                        },
-                        valueRange = 0f..duration.coerceAtLeast(1L).toFloat(),
-                        colors = SliderDefaults.colors(thumbColor = VideoColors.Red, activeTrackColor = VideoColors.Red, inactiveTrackColor = Color.White.copy(alpha = 0.3f)),
-                        modifier = Modifier.weight(1f).height(32.dp).padding(horizontal = 8.dp),
-                    )
-                    Text(clock(duration), color = Color.White, fontSize = 12.sp)
-                }
-            }
-        }
-    }
-}
-
-private fun WatchState.isLive() = quality?.isLive == true || video.isLive || details?.isLive == true
-
-@Composable
-private fun ControlText(text: String, onClick: () -> Unit) {
-    Text(
-        text,
-        color = Color.White,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp),
-    )
-}
-
-private const val HIDE_CONTROLS_MS = 3_000L
 private const val SWIPE_PX = 120f
-private const val SEEK_STEP_MS = 10_000L
-
-private fun speedLabel(v: Float) = if (v == v.toInt().toFloat()) "${v.toInt()}x" else "${v}x"
 
 internal fun clock(ms: Long): String {
     val total = (ms / 1000).coerceAtLeast(0)
@@ -491,7 +343,7 @@ private fun WatchDetails(controller: VideosController, w: WatchState, s: VideoSt
             items(w.related.size, key = { i -> (w.related[i].ids().firstOrNull() ?: "r") + "#" + i }) { i ->
                 when (val e = w.related[i]) {
                     is VideoEntry.Video -> VideoRowCard(e.item, s, onClick = { controller.open(e.item) })
-                    is VideoEntry.Shorts -> ShortsRow(e.items, s) { controller.open(it) }
+                    is VideoEntry.Shorts -> ShortsRow(e.items, s) { items, i -> controller.openShorts(items, i) }
                     is VideoEntry.Channel -> ChannelResultRow(e.item) { controller.push(VideoRoute.Channel(e.item.id, e.item.name)) }
                     is VideoEntry.Playlist -> PlaylistResultRow(e.item, s) { controller.push(VideoRoute.Playlist(e.item.id, e.item.title)) }
                 }

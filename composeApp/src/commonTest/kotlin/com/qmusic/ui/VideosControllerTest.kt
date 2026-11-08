@@ -127,6 +127,30 @@ class VideosControllerTest {
     }
 
     @Test
+    fun searchesAreRememberedNewestFirstWithoutRepeats() = runTest(UnconfinedTestDispatcher()) {
+        val c = controller(FakeVideos(), this)
+        c.submitSearch("one")
+        c.submitSearch("two")
+        c.submitSearch("ONE")
+        assertEquals(listOf("ONE", "two"), c.searchHistory.value)
+        c.forgetSearch("two")
+        assertEquals(listOf("ONE"), c.searchHistory.value)
+        c.clearSearches()
+        assertTrue(c.searchHistory.value.isEmpty())
+    }
+
+    @Test
+    fun shortsOpenFullScreenAtTheTappedClipAndStopAnyVideo() = runTest(UnconfinedTestDispatcher()) {
+        val c = controller(FakeVideos(), this)
+        c.open(VideoItem("v", "V"))
+        val clips = listOf(VideoItem("a", "A", isShort = true), VideoItem("b", "B", isShort = true))
+        c.openShorts(clips, 1)
+        assertNull(c.watch.value)
+        assertEquals(1, c.shorts.value.index)
+        assertEquals(listOf<VideoRoute>(VideoRoute.Shorts), c.routes.value)
+    }
+
+    @Test
     fun likingNeedsAnAccountAndAsksForOne() = runTest(UnconfinedTestDispatcher()) {
         val c = controller(FakeVideos(), this)
         c.open(VideoItem("one", "One"))

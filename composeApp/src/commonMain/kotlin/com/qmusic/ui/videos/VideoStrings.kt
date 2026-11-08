@@ -55,6 +55,8 @@ data class VideoStrings(
     val exitFullscreen: String,
     val signInBar: String,
     val signInPageTitle: String,
+    val recentSearches: String,
+    val clearSearches: String,
 ) {
     fun filter(key: String): String = when (key) {
         "videos" -> filterVideos
@@ -119,6 +121,8 @@ data class VideoStrings(
             exitFullscreen = "Küçült",
             signInBar = "Kendi önerilerin için giriş yap",
             signInPageTitle = "YouTube'a giriş yap",
+            recentSearches = "Son aramalar",
+            clearSearches = "Geçmişi temizle",
         )
 
         val English = VideoStrings(
@@ -175,6 +179,8 @@ data class VideoStrings(
             exitFullscreen = "Exit",
             signInBar = "Sign in for your own recommendations",
             signInPageTitle = "Sign in to YouTube",
+            recentSearches = "Recent searches",
+            clearSearches = "Clear history",
         )
     }
 }
