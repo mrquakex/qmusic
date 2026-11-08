@@ -581,7 +581,7 @@ class MainViewModel(
     /** Whether the connection is Wi-Fi (or another unmetered one) right now. */
     fun isOnUnmetered(): Boolean = isUnmetered()
 
-    val currentAppVersion: String = "2.1.0"
+    val currentAppVersion: String = "2.1.1"
     private val _isCheckingUpdate = MutableStateFlow(false)
     val isCheckingUpdate: StateFlow<Boolean> = _isCheckingUpdate.asStateFlow()
 

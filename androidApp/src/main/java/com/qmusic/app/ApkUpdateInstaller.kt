@@ -38,7 +38,7 @@ class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
             )
             error(getString(R.string.update_allow_permission))
         }
-        commit(download(info.downloadUrl))
+        commit(download(info))
     }.also { _progress.value = null }
 
     /**
@@ -71,15 +71,44 @@ class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
         }
     }
 
-    private suspend fun download(url: String): File = withContext(Dispatchers.IO) {
+    /**
+     * The normal download address first; when GitHub's file servers are down (a 5xx, or no answer) the same file is
+     * asked for through GitHub's API address, which is served from elsewhere. Each is tried twice.
+     */
+    private suspend fun download(info: UpdateInfo): File = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }
         val target = File(dir, "qmusic-update.apk")
+        _progress.value = 0f
+        val sources = listOfNotNull(
+            info.downloadUrl to null,
+            info.fallbackUrl.takeIf { it.isNotBlank() }?.let { it to "application/octet-stream" },
+        )
+        var failure: Throwable? = null
+        for ((url, accept) in sources) {
+            repeat(2) {
+                try {
+                    fetch(url, accept, target)
+                    return@withContext target
+                } catch (e: java.io.IOException) {
+                    failure = e
+                } catch (e: IllegalStateException) {
+                    failure = e
+                }
+            }
+        }
+        throw failure ?: IllegalStateException(getString(R.string.update_download_failed, 0))
+    }
+
+    private fun fetch(url: String, accept: String?, target: File) {
+        target.delete()
         _progress.value = 0f
         val connection = URL(url).openConnection() as HttpURLConnection
         connection.connectTimeout = 15_000
         connection.readTimeout = 20_000
         connection.instanceFollowRedirects = true
+        connection.setRequestProperty("User-Agent", "QMusic-App")
+        accept?.let { connection.setRequestProperty("Accept", it) }
         try {
             if (connection.responseCode !in 200..299) error(getString(R.string.update_download_failed, connection.responseCode))
             val total = connection.contentLengthLong
@@ -99,7 +128,6 @@ class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
         } finally {
             connection.disconnect()
         }
-        target
     }
 
     /**

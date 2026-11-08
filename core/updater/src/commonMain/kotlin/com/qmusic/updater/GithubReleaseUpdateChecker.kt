@@ -32,6 +32,8 @@ internal data class GithubReleaseDto(
 internal data class GithubAssetDto(
     val name: String = "",
     @SerialName("browser_download_url") val browserDownloadUrl: String = "",
+    /** The API address of the asset (api.github.com/.../releases/assets/ID). */
+    val url: String = "",
     @SerialName("content_type") val contentType: String? = null,
     val size: Long = 0L,
 )
@@ -116,17 +118,18 @@ class GithubReleaseUpdateChecker(
     fun isNewerVersion(candidate: String, current: String): Boolean =
         Companion.isNewerVersion(candidate, current)
 
-    private fun resolveDownloadUrl(assets: List<GithubAssetDto>, releaseHtmlUrl: String?): String? {
+    private fun bestApk(assets: List<GithubAssetDto>): GithubAssetDto? {
         val apkAssets = assets.filter { it.name.endsWith(".apk", ignoreCase = true) }
         val universalApk = apkAssets.firstOrNull { it.name.contains("universal", ignoreCase = true) }
         val prefixApk = if (config.apkNamePrefix.isNotBlank()) {
             apkAssets.firstOrNull { it.name.contains(config.apkNamePrefix, ignoreCase = true) }
         } else null
-        val bestApk = universalApk ?: prefixApk ?: apkAssets.firstOrNull()
-
-        return bestApk?.browserDownloadUrl?.takeIf { it.isNotBlank() }
-            ?: releaseHtmlUrl?.takeIf { it.isNotBlank() }
+        return universalApk ?: prefixApk ?: apkAssets.firstOrNull()
     }
+
+    private fun resolveDownloadUrl(assets: List<GithubAssetDto>, releaseHtmlUrl: String?): String? =
+        bestApk(assets)?.browserDownloadUrl?.takeIf { it.isNotBlank() }
+            ?: releaseHtmlUrl?.takeIf { it.isNotBlank() }
 
     override suspend fun checkForUpdate(currentVersion: String): Result<UpdateInfo?> = runCatching {
         val response: HttpResponse = httpClient.get(config.endpointUrl) {
@@ -167,6 +170,7 @@ class GithubReleaseUpdateChecker(
             versionCode = vCode,
             changelog = changelog,
             downloadUrl = downloadUrl,
+            fallbackUrl = bestApk(releaseDto.assets)?.url.orEmpty(),
             isMandatory = isMandatory,
         )
     }

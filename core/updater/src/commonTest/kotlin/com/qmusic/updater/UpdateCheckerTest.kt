@@ -100,6 +100,7 @@ class UpdateCheckerTest {
                 },
                 {
                   "name": "qmusic-v2.1.0.apk",
+                  "url": "https://api.github.com/repos/qmusic/qmusic-app/releases/assets/42",
                   "browser_download_url": "https://github.com/qmusic/qmusic-app/releases/download/v2.1.0/qmusic-v2.1.0.apk"
                 }
               ]
@@ -121,6 +122,8 @@ class UpdateCheckerTest {
         assertNotNull(info)
         assertEquals("2.1.0", info.versionName)
         assertEquals("https://github.com/qmusic/qmusic-app/releases/download/v2.1.0/qmusic-v2.1.0.apk", info.downloadUrl)
+        // The same file through GitHub's API address, for when the download address is down.
+        assertEquals("https://api.github.com/repos/qmusic/qmusic-app/releases/assets/42", info.fallbackUrl)
         assertTrue(info.changelog.contains("High-res audio support"))
         assertFalse(info.isMandatory)
     }
