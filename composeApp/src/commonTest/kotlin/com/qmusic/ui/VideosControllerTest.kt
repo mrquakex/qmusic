@@ -82,7 +82,8 @@ class VideosControllerTest {
         val c = controller(FakeVideos(), this)
         c.home.load()
         c.home.loadMore()
-        assertEquals(3, c.home.state.value.entries.size)
+        // a, b and c, plus one search result: a home with few new videos is topped up from a search.
+        assertEquals(4, c.home.state.value.entries.size)
         assertEquals("more", c.home.state.value.continuation)
         c.home.loadMore()
         // A page with nothing new ends the list instead of asking again and again.

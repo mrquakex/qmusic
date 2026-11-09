@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 /** What a list of the Videos section shows right now. */
 data class FeedState(
@@ -224,11 +226,78 @@ class VideosController(
     /** Without an account YouTube's own home is empty: a search of what people watch fills it instead. */
     var fallbackQuery: String = "popüler videolar"
 
+    /**
+     * The home page. Every load (a pull down, a tap on the tab) puts what was not shown before first; without an account
+     * (YouTube's own home is then empty) it is made of a few searches picked at random, so it is different each time.
+     */
     val home = FeedLoader(scope, service) {
-        service.home().let { r ->
-            if (!service.isSignedIn && r.getOrNull()?.isEmpty == true) service.search(fallbackQuery, VideoSearchFilter.VIDEOS) else r
+        val r = service.home()
+        val feed = r.getOrNull()
+        when {
+            feed != null && !feed.isEmpty -> {
+                var entries = freshFirst(feed.entries)
+                // The account's home barely changed: a few searches fill the top with something new.
+                if (entries.count { e -> e.ids().any { it !in seen } } < FRESH_MIN) {
+                    discoverFeed(DISCOVER_TOPICS, 2).getOrNull()?.let { extra ->
+                        val known = entries.flatMap { it.ids() }.toHashSet()
+                        entries = freshFirst(extra.entries.filter { e -> e.ids().none { it in known } } + entries)
+                    }
+                }
+                markSeen(entries)
+                Result.success(feed.copy(entries = entries))
+            }
+            !service.isSignedIn || feed != null ->
+                discoverFeed(listOf(fallbackQuery) + DISCOVER_TOPICS, 3).onSuccess { markSeen(it.entries) }
+            else -> r
         }
     }
+
+    /** Videos shown lately (kept across launches): a reload puts the others first. */
+    private val seenSetting = settings.string(KEY_SEEN, "")
+    private val seen = LinkedHashSet(seenSetting.value.split(',').filter { it.isNotBlank() })
+
+    private fun markSeen(entries: List<VideoEntry>) = markSeenIds(entries.flatMap { it.ids() })
+
+    private fun markSeenIds(ids: List<String>) {
+        ids.forEach {
+            seen.remove(it)
+            seen.add(it)
+        }
+        while (seen.size > SEEN_KEPT) seen.remove(seen.first())
+        settings.setString(KEY_SEEN, seen.joinToString(","))
+    }
+
+    /** What was not shown lately first, in its own order; then the rest. */
+    private fun freshFirst(entries: List<VideoEntry>): List<VideoEntry> {
+        val (fresh, old) = entries.partition { e -> e.ids().let { ids -> ids.isEmpty() || ids.any { it !in seen } } }
+        return fresh + old
+    }
+
+    /**
+     * A few searches at once ([count] picked at random from [pool], one of them the person's own when there are any),
+     * their videos mixed and the ones not shown lately first: a different page each time it is asked for.
+     */
+    private suspend fun discoverFeed(pool: List<String>, count: Int, filter: String = VideoSearchFilter.VIDEOS): Result<VideoFeed> =
+        coroutineScope {
+            val own = _searchHistory.value.take(RECENT_SEARCHES_USED).shuffled().take(1)
+            val queries = (own + pool.shuffled()).distinct().take(count)
+            val results = queries.map { q -> async { service.search(q, filter) } }.awaitAll()
+            val feeds = results.mapNotNull { it.getOrNull() }.filter { !it.isEmpty }
+            if (feeds.isEmpty()) return@coroutineScope results.firstOrNull { it.isFailure } ?: Result.success(VideoFeed())
+            val mixed = ArrayList<VideoEntry>()
+            val ids = HashSet<String>()
+            val lists = feeds.map { it.entries }
+            for (i in 0 until lists.maxOf { it.size }) {
+                for (list in lists) {
+                    val e = list.getOrNull(i) ?: continue
+                    val eIds = e.ids()
+                    if (eIds.isNotEmpty() && eIds.all { it in ids }) continue
+                    ids += eIds
+                    mixed += e
+                }
+            }
+            Result.success(VideoFeed(entries = freshFirst(mixed), continuation = feeds.first().continuation))
+        }
     val subscriptions = FeedLoader(scope, service) { service.subscriptions() }
     val subscribedChannels = FeedLoader(scope, service) { service.subscribedChannels() }
     private val library = LibrarySection.entries.associateWith { section ->
@@ -731,6 +800,7 @@ class VideosController(
         when (_tab.value) {
             VideoTab.HOME -> home.load(force = true)
             VideoTab.SUBSCRIPTIONS -> subscriptions.load(force = true)
+            VideoTab.SHORTS -> reloadShorts()
             else -> Unit
         }
         _refresh.update { it + 1 }
@@ -763,16 +833,31 @@ class VideosController(
         prepareShorts(index)
     }
 
+    /** The Shorts tab tapped again: a new set of clips. */
+    private fun reloadShorts() {
+        if (_shorts.value.loading) return
+        _shorts.value = ShortsState()
+        loadShortsTab()
+    }
+
+    /**
+     * The clips of the Shorts tab: a few Shorts searches picked at random (one of them the person's own), the ones not
+     * shown lately first and shuffled, so each opening brings new ones.
+     */
     private fun loadShortsTab() {
         if (_shorts.value.items.isNotEmpty() || _shorts.value.loading) return
         _shorts.value = ShortsState(loading = true)
         scope.launch {
             // With an account, the Shorts YouTube put on the home page come first: they are the account's own.
             val personal = if (service.isSignedIn) service.home().getOrNull()?.shortItems().orEmpty() else emptyList()
-            service.search(SHORTS_QUERY).fold(
+            discoverFeed(listOf(SHORTS_QUERY) + SHORTS_TOPICS, 3, VideoSearchFilter.SHORTS).fold(
                 onSuccess = { feed ->
                     shortsContinuation = feed.continuation
-                    _shorts.value = ShortsState((personal + feed.shortItems()).distinctBy { it.id })
+                    val all = (personal + feed.shortItems()).distinctBy { it.id }
+                    val (fresh, old) = all.partition { it.id !in seen }
+                    val items = if (fresh.size >= SHORTS_FRESH_ENOUGH) fresh.shuffled() else fresh.shuffled() + old.shuffled()
+                    markSeenIds(items.map { it.id })
+                    _shorts.value = ShortsState(items)
                     prepareShorts(0)
                 },
                 onFailure = { e ->
@@ -1105,6 +1190,24 @@ class VideosController(
     companion object {
         const val KEY_COOKIES = "video_cookies"
         const val KEY_SEARCHES = "video_searches"
+        const val KEY_SEEN = "video_seen"
+        private const val SEEN_KEPT = 600
+        private const val FRESH_MIN = 8
+        private const val RECENT_SEARCHES_USED = 6
+        private const val SHORTS_FRESH_ENOUGH = 12
+
+        /** What a home without an account is made of: a few of these at a time. */
+        private val DISCOVER_TOPICS = listOf(
+            "popüler videolar", "trend videolar", "komik videolar", "müzik klipleri", "oyun videoları", "vlog",
+            "yemek tarifleri", "teknoloji inceleme", "futbol özetleri", "belgesel", "podcast", "eğlence",
+            "sokak röportajı", "araba inceleme", "film fragmanı", "seyahat vlog",
+        )
+
+        /** And the Shorts tab of these. */
+        private val SHORTS_TOPICS = listOf(
+            "komik", "trend", "futbol", "yemek", "oyun", "hayvanlar", "müzik", "dans", "spor", "teknoloji",
+            "sokak röportajı", "araba", "makyaj", "fitness", "kedi", "meme",
+        )
         const val KEY_Q_WIFI = "video_quality_wifi"
         const val KEY_Q_MOBILE = "video_quality_mobile"
         const val KEY_CAPTIONS = "video_captions"

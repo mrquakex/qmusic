@@ -9,6 +9,8 @@ object VideoSearchFilter {
     const val CHANNELS = "EgIQAg%3D%3D"
     const val PLAYLISTS = "EgIQAw%3D%3D"
     const val LIVE = "EgJAAQ%3D%3D"
+    /** Shorts only. */
+    const val SHORTS = "EgIQCQ%3D%3D"
 }
 
 /**

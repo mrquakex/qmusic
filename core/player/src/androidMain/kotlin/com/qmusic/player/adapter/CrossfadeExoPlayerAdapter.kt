@@ -31,6 +31,7 @@ import com.qmusic.player.offline.OfflineDownloader
 import com.qmusic.player.cache.CacheProvider
 import com.qmusic.player.dsp.CrossfadeFilterAudioProcessor
 import com.qmusic.player.dsp.EqualizerAudioProcessor
+import com.qmusic.player.source.ChunkedDataSource
 import com.qmusic.player.source.ResolvingDataSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -70,7 +71,11 @@ class CrossfadeExoPlayerAdapter(
             .setReadTimeoutMs(15000)
         val streamCacheFactory = CacheDataSource.Factory()
             .setCache(CacheProvider.getPlayerCache(context))
-            .setUpstreamDataSourceFactory(ResolvingDataSource.Factory(httpDataSourceFactory))
+            // Resolved first (a qmusic: address or an expired one becomes a real address), then asked for in bounded
+            // pieces: YouTube serves a request with no range at about real-time speed.
+            .setUpstreamDataSourceFactory(
+                ResolvingDataSource.Factory(ChunkedDataSource.Factory(httpDataSourceFactory, ChunkedDataSource.DEFAULT_CHUNK_BYTES)),
+            )
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         CacheDataSource.Factory()
             .setCache(CacheProvider.getDownloadCache(context))
