@@ -1,5 +1,5 @@
 [Unit]
-Description=QMusic: the owner's Claude in the app's messages (Claude Code, no tools)
+Description=QMusic: the owner's Claude in the app's messages (Claude Code, all tools, sandboxed)
 After=network-online.target qmusic-push.service
 Wants=network-online.target
 
@@ -17,7 +17,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/var/lib/qmusic-claude
 PrivateTmp=true
-MemoryMax=1G
+MemoryMax=2G
 
 [Install]
 WantedBy=multi-user.target
