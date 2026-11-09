@@ -71,7 +71,7 @@
     "notify": {
       "$id": {
         ".write": "auth != null && !data.exists() && newData.child('from').val() === auth.uid",
-        ".validate": "newData.hasChildren(['from', 'to', 'chatId', 'type', 'at']) && newData.child('at').val() === now && newData.child('to').isString() && newData.child('chatId').isString() && (newData.child('type').val() === 'chat' || newData.child('type').val() === 'call')"
+        ".validate": "newData.hasChildren(['from', 'to', 'chatId', 'type', 'at']) && newData.child('at').val() === now && newData.child('to').isString() && newData.child('chatId').isString() && (newData.child('type').val() === 'chat' || newData.child('type').val() === 'call' || newData.child('type').val() === 'friend')"
       }
     },
     "turn": {
@@ -115,6 +115,42 @@
     "assist": {
       "$chatId": {
         ".read": "auth != null && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid))"
+      }
+    },
+    "claudeSettings": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "claudeState": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid"
+      }
+    },
+    "friendRequests": {
+      "$to": {
+        ".read": "auth != null && auth.uid === $to",
+        "$from": {
+          ".write": "auth != null && ((auth.uid === $from && root.child('blocked').child($to).child(auth.uid).val() !== true) || auth.uid === $to || (!newData.exists() && auth.uid === $from))",
+          ".validate": "!newData.exists() || (newData.child('name').isString() && newData.child('username').isString())"
+        }
+      }
+    },
+    "sentRequests": {
+      "$from": {
+        ".read": "auth != null && auth.uid === $from",
+        "$to": {
+          ".write": "auth != null && (auth.uid === $from || auth.uid === $to)"
+        }
+      }
+    },
+    "friends": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        "$other": {
+          ".write": "auth != null && (auth.uid === $uid || (auth.uid === $other && (!newData.exists() || root.child('sentRequests').child($uid).child(auth.uid).exists())))"
+        }
       }
     }
   }

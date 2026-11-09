@@ -24,7 +24,7 @@ const CLAUDE = `${HOME}/.local/bin/claude`;
 const WORK_DIR = `${HOME}/chat`;
 const STATE_FILE = `${HOME}/bot-state.json`;
 const ANSWER_TIMEOUT_MS = 5 * 60 * 1000;
-const FLUSH_MS = 350;
+const FLUSH_MS = 100;
 const CONTEXT_MESSAGES = 16;
 const TRIGGER = /^\s*@?claude\b[\s,:;.!?-]*/i;
 const SYSTEM = [
@@ -44,7 +44,7 @@ const dmChatId = [OWNER_UID, BOT_UID].sort().join("_");
 const log = (...args) => console.log(new Date().toISOString(), ...args);
 
 fs.mkdirSync(WORK_DIR, { recursive: true });
-let state = { model: "sonnet", fresh: true };
+let state = { model: "sonnet", fresh: true, labels: {} };
 try {
   state = { ...state, ...JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) };
 } catch (_) {}
@@ -154,6 +154,14 @@ async function say(chatId, text) {
   });
 }
 
+/** The photos of a message: an album ("images") or one photo as the first app version wrote it ("image"). */
+const photosOf = (m) => (m && (m.images || (m.image ? [m.image] : []))) || [];
+
+async function imageBlocks(chatId, message) {
+  const blocks = await Promise.all(photosOf(message).map((image) => imageBlock(chatId, image)));
+  return blocks.filter(Boolean);
+}
+
 async function imageBlock(chatId, image) {
   if (!image || !image.id) return null;
   const media = (await db.ref(`media/${chatId}/${image.id}`).get()).val();
@@ -168,23 +176,22 @@ function describe(message) {
     const what = share.kind === "SONG" ? "a song" : "a video";
     text = `[shared ${what} from QMusic: "${share.title}"${share.subtitle ? " by " + share.subtitle : ""}] ${text}`;
   }
-  if (message.image) text = `[photo] ${text}`;
+  const photos = photosOf(message).length;
+  if (photos > 0) text = `[${photos > 1 ? photos + " photos" : "photo"}] ${text}`;
   return text.trim();
 }
 
 /** What Claude gets: the photos involved, the conversation around it (outside its own chat), and the request. */
 async function contentOf(chatId, message, ownChat) {
   const blocks = [];
-  let request = describe(message).replace(/^\[photo\]\s*/, "");
+  let request = describe(message).replace(/^\[(photo|\d+ photos)\]\s*/, "");
   if (!ownChat) request = request.replace(TRIGGER, "");
-  const own = await imageBlock(chatId, message.image);
-  if (own) blocks.push(own);
+  blocks.push(...(await imageBlocks(chatId, message)));
 
   let replied = null;
   if (message.replyTo && message.replyTo.id) {
     replied = (await db.ref(`chats/${chatId}/messages/${message.replyTo.id}`).get()).val();
-    const repliedImage = replied ? await imageBlock(chatId, replied.image) : null;
-    if (repliedImage) blocks.push(repliedImage);
+    if (replied) blocks.push(...(await imageBlocks(chatId, replied)));
   }
 
   let text = "";
@@ -225,6 +232,7 @@ async function handle(chatId, messageId, message) {
   if (command) {
     state.model = command[1].toLowerCase();
     saveState();
+    publishState();
     return say(chatId, `Bundan sonra ${state.model} cevap verecek.`);
   }
   const content = await contentOf(chatId, message, ownChat);
@@ -265,10 +273,10 @@ async function handle(chatId, messageId, message) {
       },
     });
     if (flushTimer) clearTimeout(flushTimer);
-    if (ownChat) {
-      state.fresh = false;
-      saveState();
-    }
+    state.labels[state.model] = answer.model;
+    if (ownChat) state.fresh = false;
+    saveState();
+    publishState();
     const final = (answer.text || "…").slice(0, 4000);
     await db.ref().update({
       [`chats/${chatId}/messages/${key}`]: {
@@ -289,6 +297,32 @@ async function handle(chatId, messageId, message) {
   } finally {
     assistRef.remove().catch(() => {});
   }
+}
+
+/** What the app shows in Claude's header: the model picked, as it calls itself. */
+function publishState() {
+  const fallback = "Claude " + state.model.charAt(0).toUpperCase() + state.model.slice(1);
+  db.ref(`claudeState/${OWNER_UID}`).set({ model: state.model, label: state.labels[state.model] || fallback }).catch(() => {});
+}
+
+/** The model picker and "new conversation" from the app (no message in the conversation for them). */
+function watchSettings() {
+  let lastReset = null;
+  db.ref(`claudeSettings/${OWNER_UID}`).on("value", (snap) => {
+    const v = snap.val() || {};
+    if (v.model && ["opus", "sonnet", "haiku"].includes(v.model) && v.model !== state.model) {
+      state.model = v.model;
+      saveState();
+      publishState();
+      log("model", state.model);
+    }
+    if (v.reset && lastReset !== null && v.reset !== lastReset) {
+      state.fresh = true;
+      saveState();
+      say(dmChatId, "— Yeni sohbet —").catch(() => {});
+    }
+    lastReset = v.reset || 0;
+  });
 }
 
 const watched = new Set();
@@ -323,6 +357,8 @@ async function start() {
         "/yeni → yeni sohbet · /model sonnet | opus | haiku → model seç",
     );
   }
+  publishState();
+  watchSettings();
   watch(dmChatId);
   // Every conversation of the owner, the new ones too.
   db.ref(`userChats/${OWNER_UID}`).on("child_added", (snap) => watch(snap.key));

@@ -28,6 +28,7 @@ import com.google.firebase.database.ValueEventListener
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -303,21 +304,22 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val reply = replySnap.child("id").getValue(String::class.java)?.let { replyId ->
             ChatReply(replyId, replySnap.child("from").getValue(String::class.java).orEmpty(), replySnap.child("text").getValue(String::class.java).orEmpty())
         }
-        val imageSnap = child("image")
-        val image = imageSnap.child("id").getValue(String::class.java)?.let { imageId ->
+        fun DataSnapshot.toImage(): ChatImage? = child("id").getValue(String::class.java)?.let { imageId ->
             ChatImage(
                 id = imageId,
-                width = imageSnap.child("w").getValue(Int::class.java) ?: 0,
-                height = imageSnap.child("h").getValue(Int::class.java) ?: 0,
-                thumb = imageSnap.child("thumb").getValue(String::class.java).orEmpty(),
+                width = child("w").getValue(Int::class.java) ?: 0,
+                height = child("h").getValue(Int::class.java) ?: 0,
+                thumb = child("thumb").getValue(String::class.java).orEmpty(),
             )
         }
+        // An album ("images"), or one photo as the first version wrote it ("image").
+        val images = child("images").children.mapNotNull { it.toImage() }.ifEmpty { listOfNotNull(child("image").toImage()) }
         return ChatMessage(
             id = id,
             from = from,
             text = child("text").getValue(String::class.java).orEmpty(),
             replyTo = reply,
-            image = image,
+            images = images,
             model = child("model").getValue(String::class.java),
             streaming = child("streaming").getValue(Boolean::class.java) == true,
             at = child("at").getValue(Long::class.java) ?: System.currentTimeMillis(),
@@ -334,7 +336,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     }
 
     override suspend fun send(other: ChatUser, text: String, share: SharedItem?, replyTo: ChatReply?): Result<Unit> = runCatching {
-        sendMessage(other, text, share, replyTo, image = null, preview = null)
+        sendMessage(other, text, share, replyTo, images = null, preview = null)
     }
 
     private fun sendMessage(
@@ -342,7 +344,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         text: String,
         share: SharedItem?,
         replyTo: ChatReply?,
-        image: Map<String, Any>?,
+        images: List<Map<String, Any>>?,
         preview: String?,
     ) {
         val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
@@ -353,7 +355,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             put("text", text)
             put("at", ServerValue.TIMESTAMP)
             if (replyTo != null) put("replyTo", mapOf("id" to replyTo.id, "from" to replyTo.from, "text" to replyTo.text.take(PREVIEW_LENGTH)))
-            if (image != null) put("image", image)
+            if (!images.isNullOrEmpty()) put("images", images)
             if (share != null) {
                 put(
                     "share",
@@ -406,23 +408,154 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         root.updateChildren(updates).addOnCompleteListener { pendingIds.update { it - messageId } }
     }
 
-    override suspend fun sendImage(other: ChatUser, image: PickedImage, caption: String, replyTo: ChatReply?): Result<Unit> = runCatching {
+    override suspend fun sendImages(other: ChatUser, images: List<PickedImage>, caption: String, replyTo: ChatReply?): Result<Unit> = runCatching {
         val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
         val chatId = chatIdOf(me.uid, other.uid)
-        val mediaId = root.child("media").child(chatId).push().key ?: error("no id")
-        val data = android.util.Base64.encodeToString(image.jpeg, android.util.Base64.NO_WRAP)
-        require(data.length < MEDIA_MAX_CHARS) { "photo too large" }
-        // Kept here at once, so our own photo shows without downloading it back.
-        imageCache.put("$chatId/$mediaId", image.jpeg)
-        root.child("media").child(chatId).child(mediaId).setValue(mapOf("data" to data, "mime" to "image/jpeg")).await()
+        // The photos go up side by side; the message follows once all are there, so it never points at a missing one.
+        val entries = kotlinx.coroutines.coroutineScope {
+            images.map { image ->
+                async(Dispatchers.IO) {
+                    val mediaId = root.child("media").child(chatId).push().key ?: error("no id")
+                    val data = android.util.Base64.encodeToString(image.jpeg, android.util.Base64.NO_WRAP)
+                    require(data.length < MEDIA_MAX_CHARS) { "photo too large" }
+                    // Kept here at once, so our own photos show without downloading them back.
+                    imageCache.put("$chatId/$mediaId", image.jpeg)
+                    root.child("media").child(chatId).child(mediaId).setValue(mapOf("data" to data, "mime" to "image/jpeg")).await()
+                    mapOf("id" to mediaId, "w" to image.width, "h" to image.height, "thumb" to image.thumb)
+                }
+            }.map { it.await() }
+        }
+        val label = if (entries.size == 1) "📷" else "📷 ×${entries.size}"
         sendMessage(
             other = other,
             text = caption,
             share = null,
             replyTo = replyTo,
-            image = mapOf("id" to mediaId, "w" to image.width, "h" to image.height, "thumb" to image.thumb),
-            preview = if (caption.isBlank()) "📷" else "📷 $caption",
+            images = entries,
+            preview = if (caption.isBlank()) label else "$label $caption",
         )
+    }
+
+    // ------------------------------------------------------------------ friends
+    //
+    //   friendRequests/{to}/{from} = {name, username, photo, at}   (what {to} sees)
+    //   sentRequests/{from}/{to}   = true                          (what {from} sees)
+    //   friends/{uid}/{other}      = {name, username, photo, since}
+
+    private fun DataSnapshot.toPerson(): ChatUser? {
+        val uid = key ?: return null
+        return ChatUser(
+            uid = uid,
+            name = child("name").getValue(String::class.java) ?: return null,
+            username = child("username").getValue(String::class.java).orEmpty(),
+            photo = child("photo").getValue(String::class.java),
+        )
+    }
+
+    private fun ChatUser.card(time: String) = mapOf("name" to name, "username" to username, "photo" to photo, time to ServerValue.TIMESTAMP)
+
+    override fun friends(): Flow<List<ChatUser>> = callbackFlow {
+        val job = launch {
+            listen(root.child("friends").child(me())).collect { snap ->
+                trySend(snap.children.mapNotNull { it.toPerson() }.sortedBy { it.name.lowercase() })
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override fun friendRequests(): Flow<List<ChatUser>> = callbackFlow {
+        val job = launch {
+            listen(root.child("friendRequests").child(me())).collect { snap ->
+                trySend(snap.children.sortedByDescending { it.child("at").getValue(Long::class.java) ?: 0L }.mapNotNull { it.toPerson() })
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override fun sentRequests(): Flow<Set<String>> = callbackFlow {
+        val job = launch {
+            listen(root.child("sentRequests").child(me())).collect { snap -> trySend(snap.children.mapNotNull { it.key }.toSet()) }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    private fun friendNotify(from: String, to: String, action: String) =
+        "notify/${root.child("notify").push().key}" to mapOf(
+            "from" to from, "to" to to, "chatId" to chatIdOf(from, to), "type" to "friend", "action" to action, "at" to ServerValue.TIMESTAMP,
+        )
+
+    override suspend fun requestFriend(user: ChatUser): Result<Unit> = runCatching {
+        val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
+        // They asked first: this is a yes.
+        if (root.child("friendRequests").child(me.uid).child(user.uid).get().await().exists()) {
+            acceptFriend(user).getOrThrow()
+            return@runCatching
+        }
+        root.updateChildren(
+            mapOf(
+                "friendRequests/${user.uid}/${me.uid}" to me.card("at"),
+                "sentRequests/${me.uid}/${user.uid}" to true,
+                friendNotify(me.uid, user.uid, "request"),
+            ),
+        ).await()
+    }
+
+    override suspend fun acceptFriend(user: ChatUser): Result<Unit> = runCatching {
+        val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
+        root.updateChildren(
+            mapOf(
+                "friends/${me.uid}/${user.uid}" to user.card("since"),
+                "friends/${user.uid}/${me.uid}" to me.card("since"),
+                "friendRequests/${me.uid}/${user.uid}" to null,
+                "sentRequests/${user.uid}/${me.uid}" to null,
+                friendNotify(me.uid, user.uid, "accepted"),
+            ),
+        ).await()
+    }
+
+    override suspend fun unfriend(user: ChatUser): Result<Unit> = runCatching {
+        val uid = me()
+        root.updateChildren(
+            mapOf(
+                "friendRequests/$uid/${user.uid}" to null,
+                "sentRequests/${user.uid}/$uid" to null,
+                "friendRequests/${user.uid}/$uid" to null,
+                "sentRequests/$uid/${user.uid}" to null,
+                "friends/$uid/${user.uid}" to null,
+                "friends/${user.uid}/$uid" to null,
+            ),
+        ).await()
+    }
+
+    override suspend fun user(uid: String): ChatUser? {
+        val snap = runCatching { root.child("users").child(uid).get().await() }.getOrNull() ?: return null
+        return ChatUser(
+            uid = uid,
+            name = snap.child("name").getValue(String::class.java) ?: return null,
+            username = snap.child("username").getValue(String::class.java).orEmpty(),
+            photo = snap.child("photo").getValue(String::class.java),
+        )
+    }
+
+    // ------------------------------------------------------------------ the owner's Claude
+
+    override fun claudeState(): Flow<ClaudeState?> = callbackFlow {
+        val uid = me()
+        val job = launch {
+            listen(root.child("claudeState").child(uid)).collect { snap ->
+                val model = snap.child("model").getValue(String::class.java)
+                trySend(model?.let { ClaudeState(it, snap.child("label").getValue(String::class.java) ?: "Claude") })
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override suspend fun setClaudeModel(model: String) {
+        root.child("claudeSettings").child(me()).child("model").setValue(model)
+    }
+
+    override suspend fun resetClaude() {
+        root.child("claudeSettings").child(me()).child("reset").setValue(ServerValue.TIMESTAMP)
     }
 
     /** Photos already fetched: memory first, then the app's cache folder. */

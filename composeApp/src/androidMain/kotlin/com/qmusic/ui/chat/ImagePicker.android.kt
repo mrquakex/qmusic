@@ -14,27 +14,63 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-/** The system photo picker (no storage permission needed); the photo comes back shrunk and compressed. */
+/** The system photo picker, up to ten at once (no storage permission needed); they come back shrunk and compressed. */
 @Composable
-actual fun rememberImagePicker(onPicked: (PickedImage?) -> Unit): () -> Unit {
+actual fun rememberImagePicker(onPicked: (List<PickedImage>) -> Unit): () -> Unit {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(MAX_PICK)) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
         scope.launch {
-            val picked = withContext(Dispatchers.Default) { runCatching { prepare(context, uri) }.getOrNull() }
+            // Prepared side by side (each on its own core), in the order picked.
+            val picked = withContext(Dispatchers.Default) {
+                uris.map { uri -> async { runCatching { prepare(context, uri) }.getOrNull() } }.mapNotNull { it.await() }
+            }
             onPicked(picked)
         }
     }
     return { launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
 }
 
+/** The camera app takes the photo into the app's cache; it comes back like a picked one. Asks for the camera first. */
+@Composable
+actual fun rememberCamera(onPicked: (PickedImage?) -> Unit): () -> Unit {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val target = androidx.compose.runtime.remember { arrayOfNulls<Uri>(1) }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
+        val uri = target[0]
+        if (!taken || uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            onPicked(withContext(Dispatchers.Default) { runCatching { prepare(context, uri) }.getOrNull() })
+        }
+    }
+    fun open() {
+        val dir = java.io.File(context.cacheDir, "camera").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        val file = java.io.File(dir, "photo_${System.currentTimeMillis()}.jpg")
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".updates", file)
+        target[0] = uri
+        camera.launch(uri)
+    }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) open() }
+    return {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            open()
+        } else {
+            permission.launch(android.Manifest.permission.CAMERA)
+        }
+    }
+}
+
+private const val MAX_PICK = 10
 private const val MAX_SIDE = 1600
 private const val MAX_BYTES = 1_000_000
 private const val THUMB_SIDE = 24

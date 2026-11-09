@@ -12,4 +12,7 @@ actual fun CallVideo(service: CallService, remote: Boolean, modifier: androidx.c
 actual fun rememberCallPermissions(): (video: Boolean, onResult: (Boolean) -> Unit) -> Unit = { _, onResult -> onResult(false) }
 
 @Composable
-actual fun rememberImagePicker(onPicked: (PickedImage?) -> Unit): () -> Unit = {}
+actual fun rememberImagePicker(onPicked: (List<PickedImage>) -> Unit): () -> Unit = {}
+
+@Composable
+actual fun rememberCamera(onPicked: (PickedImage?) -> Unit): () -> Unit = {}

@@ -26,6 +26,53 @@ object ChatPush {
     private const val EXTRA_NAME = "chat_name"
     private const val EXTRA_USERNAME = "chat_username"
     private const val EXTRA_PHOTO = "chat_photo"
+    private const val EXTRA_PROFILE = "chat_profile"
+    private const val FRIEND_CHANNEL = "qmusic_friends"
+
+    /** "X wants to be your friend" / "X accepted": tapping it opens their profile. */
+    fun onFriend(context: Context, data: Map<String, String>) {
+        val from = data["from"] ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+        val tr = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                NotificationChannel(FRIEND_CHANNEL, if (tr) "Arkadaşlık" else "Friends", NotificationManager.IMPORTANCE_DEFAULT),
+            )
+        }
+        val name = data["name"].orEmpty().ifBlank { "QMusic" }
+        val accepted = data["action"] == "accepted"
+        val text = when {
+            accepted && tr -> "$name arkadaşlık isteğini kabul etti"
+            accepted -> "$name accepted your friend request"
+            tr -> "$name seni arkadaş olarak eklemek istiyor"
+            else -> "$name wants to be your friend"
+        }
+        val open = PendingIntent.getActivity(
+            context,
+            ("friend$from").hashCode(),
+            Intent(context, MainActivity::class.java)
+                .putExtra(EXTRA_UID, from)
+                .putExtra(EXTRA_NAME, name)
+                .putExtra(EXTRA_USERNAME, data["username"].orEmpty())
+                .putExtra(EXTRA_PHOTO, data["photo"].orEmpty())
+                .putExtra(EXTRA_PROFILE, true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        manager.notify(
+            ("friend$from").hashCode(),
+            NotificationCompat.Builder(context, FRIEND_CHANNEL)
+                .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
+                .setContentTitle(if (accepted) (if (tr) "Yeni arkadaş" else "New friend") else (if (tr) "Arkadaşlık isteği" else "Friend request"))
+                .setContentText(text)
+                .setAutoCancel(true)
+                .setContentIntent(open)
+                .build(),
+        )
+    }
 
     /** A call's push: the app wakes and hears the call itself (and rings); a cancelled call stops ringing. */
     fun onCall(context: Context, data: Map<String, String>) {
@@ -99,7 +146,9 @@ object ChatPush {
             username = intent.getStringExtra(EXTRA_USERNAME).orEmpty(),
             photo = intent.getStringExtra(EXTRA_PHOTO)?.ifBlank { null },
         )
+        val profile = intent.getBooleanExtra(EXTRA_PROFILE, false)
         intent.removeExtra(EXTRA_UID)
-        ChatLaunch.request.value = ChatLaunchRequest(user)
+        intent.removeExtra(EXTRA_PROFILE)
+        ChatLaunch.request.value = ChatLaunchRequest(user, profile)
     }
 }

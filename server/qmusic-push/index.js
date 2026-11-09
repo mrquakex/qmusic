@@ -63,6 +63,7 @@ async function handle(n) {
   // The owner's Claude speaks in the owner's conversations without being a member of them.
   if (n.from !== "claudebot" && !isMember(n.chatId, n.from)) return;
   const call = n.type === "call";
+  const friend = n.type === "friend";
   const age = Date.now() - (Number(n.at) || 0);
   if (age > (call ? CALL_MAX_AGE_MS : MESSAGE_MAX_AGE_MS)) return;
   if ((await db.ref(`blocked/${n.to}/${n.from}`).get()).val() === true) return;
@@ -80,7 +81,7 @@ async function handle(n) {
   if (viaClaude) n.body = "Claude: " + String(n.body || "").replace(/^Claude: /, "");
 
   const data = {
-    type: call ? "call" : "chat",
+    type: call ? "call" : friend ? "friend" : "chat",
     chatId: n.chatId,
     from: shownFrom,
     name: String(sender.name || ""),
@@ -88,6 +89,7 @@ async function handle(n) {
     photo: String(sender.photo || ""),
     body: String(n.body || "").slice(0, 300),
   };
+  if (friend) data.action = n.action === "accepted" ? "accepted" : "request";
   if (call) {
     data.callId = String(n.callId || "");
     data.video = n.video ? "1" : "0";

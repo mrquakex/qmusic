@@ -22,6 +22,10 @@ import com.google.firebase.messaging.RemoteMessage
 class UpdateMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
+        if (message.data["type"] == "friend") {
+            ChatPush.onFriend(applicationContext, message.data)
+            return
+        }
         if (message.data["type"] == "call") {
             ChatPush.onCall(applicationContext, message.data)
             return

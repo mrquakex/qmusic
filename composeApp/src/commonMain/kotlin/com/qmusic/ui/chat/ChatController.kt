@@ -22,6 +22,8 @@ import kotlinx.coroutines.launch
 /** The pages of the messages section, the last one on screen. */
 sealed interface ChatRoute {
     data object NewChat : ChatRoute
+    data object Friends : ChatRoute
+    data class Profile(val user: ChatUser) : ChatRoute
     data class Conversation(val other: ChatUser) : ChatRoute
 }
 
@@ -116,6 +118,52 @@ class ChatController(
 
     fun openNewChat() = _routes.update { it + ChatRoute.NewChat }
 
+    fun openFriends() = _routes.update { list -> list.filter { it !is ChatRoute.Friends } + ChatRoute.Friends }
+
+    fun openProfile(user: ChatUser) = _routes.update { list -> list.filterNot { it is ChatRoute.Profile && it.user.uid == user.uid } + ChatRoute.Profile(user) }
+
+    // ------------------------------------------------------------------ friends
+
+    val friends: StateFlow<List<ChatUser>> = ready
+        .flatMapLatest { if (it == null) flowOf(emptyList()) else backend.friends().catch { emit(emptyList()) } }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    val friendRequests: StateFlow<List<ChatUser>> = ready
+        .flatMapLatest { if (it == null) flowOf(emptyList()) else backend.friendRequests().catch { emit(emptyList()) } }
+        .combine(blockedIds) { list, blocked -> list.filter { it.uid !in blocked } }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    private val sent: StateFlow<Set<String>> = ready
+        .flatMapLatest { if (it == null) flowOf(emptySet()) else backend.sentRequests().catch { emit(emptySet()) } }
+        .stateIn(scope, SharingStarted.Eagerly, emptySet())
+
+    /** Where the person stands with [uid], kept up to date. */
+    fun friendStatus(uid: String) = combine(friends, friendRequests, sent) { f, incoming, out ->
+        when {
+            f.any { it.uid == uid } -> FriendStatus.FRIENDS
+            incoming.any { it.uid == uid } -> FriendStatus.INCOMING
+            uid in out -> FriendStatus.REQUESTED
+            else -> FriendStatus.NONE
+        }
+    }
+
+    fun requestFriend(user: ChatUser) {
+        scope.launch { backend.requestFriend(user).onFailure { _error.value = it.message } }
+    }
+
+    fun acceptFriend(user: ChatUser) {
+        scope.launch { backend.acceptFriend(user).onFailure { _error.value = it.message } }
+    }
+
+    fun unfriend(user: ChatUser) {
+        scope.launch { backend.unfriend(user).onFailure { _error.value = it.message } }
+    }
+
+    /** Opens someone's profile by id (a tapped friend notification). */
+    fun openProfileOf(uid: String, fallback: ChatUser) {
+        scope.launch { openProfile(runCatching { backend.user(uid) }.getOrNull() ?: fallback) }
+    }
+
     fun openConversation(other: ChatUser) {
         // Opened from the people search: the search page is done.
         _routes.update { list -> list.filter { it !is ChatRoute.NewChat && !(it is ChatRoute.Conversation && it.other.uid == other.uid) } + ChatRoute.Conversation(other) }
@@ -177,10 +225,24 @@ class ChatController(
         return true
     }
 
-    fun sendImage(other: ChatUser, image: PickedImage, caption: String, replyTo: ChatReply? = null) {
+    fun sendImages(other: ChatUser, images: List<PickedImage>, caption: String, replyTo: ChatReply? = null) {
+        if (images.isEmpty()) return
         scope.launch {
-            backend.sendImage(other, image, caption.trim(), replyTo).onFailure { e -> if (e !is CancellationException) _error.value = e.message }
+            backend.sendImages(other, images.take(MAX_PHOTOS), caption.trim(), replyTo).onFailure { e -> if (e !is CancellationException) _error.value = e.message }
         }
+    }
+
+    /** The owner's Claude: the model answering now. */
+    val claudeState: StateFlow<ClaudeState?> = ready
+        .flatMapLatest { if (it?.me?.uid == CLAUDE_OWNER_UID) backend.claudeState().catch { emit(null) } else flowOf(null) }
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
+    fun setClaudeModel(model: String) {
+        scope.launch { runCatching { backend.setClaudeModel(model) } }
+    }
+
+    fun resetClaude() {
+        scope.launch { runCatching { backend.resetClaude() } }
     }
 
     suspend fun imageBytes(other: ChatUser, id: String): ByteArray? = chatIdWith(other)?.let { backend.imageBytes(it, id) }
@@ -236,6 +298,7 @@ class ChatController(
 
     companion object {
         const val MAX_LENGTH = 4000
+        const val MAX_PHOTOS = 10
         private const val TYPING_EVERY_MS = 3_000L
         private const val TYPING_IDLE_MS = 5_000L
         private const val SEARCH_DELAY_MS = 300L

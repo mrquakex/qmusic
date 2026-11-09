@@ -69,6 +69,10 @@ expect fun CallVideo(service: CallService, remote: Boolean, modifier: Modifier)
 @Composable
 expect fun rememberCallPermissions(): (video: Boolean, onResult: (Boolean) -> Unit) -> Unit
 
-/** Opens the photo picker; [onPicked] gets the photo ready to send (null when it could not be read). */
+/** Opens the photo picker (up to ten); [onPicked] gets them ready to send. */
 @Composable
-expect fun rememberImagePicker(onPicked: (PickedImage?) -> Unit): () -> Unit
+expect fun rememberImagePicker(onPicked: (List<PickedImage>) -> Unit): () -> Unit
+
+/** Opens the camera; [onPicked] gets the photo ready to send (null when none was taken). */
+@Composable
+expect fun rememberCamera(onPicked: (PickedImage?) -> Unit): () -> Unit

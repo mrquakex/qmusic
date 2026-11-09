@@ -123,6 +123,8 @@ fun ChatApp(
             is ChatAccount.Ready -> when (val top = routes.lastOrNull()) {
                 is ChatRoute.Conversation -> ConversationPage(controller, s, a.me, top.other, shareables, onOpenShare, onCall)
                 ChatRoute.NewChat -> NewChatPage(controller, s)
+                ChatRoute.Friends -> FriendsPage(controller, s)
+                is ChatRoute.Profile -> ProfilePage(controller, s, a.me, top.user, onCall)
                 null -> ThreadListPage(controller, s, a.me, onExit)
             }
         }
@@ -347,6 +349,18 @@ private fun ThreadListPage(controller: ChatController, s: ChatStrings, me: ChatU
             title = s.title,
             onBack = onExit,
             actions = {
+                val incoming by controller.friendRequests.collectAsState()
+                IconButton(onClick = { controller.openFriends() }) {
+                    Box {
+                        Icon(QMusicIcons.Account, contentDescription = s.friends, tint = Color.White)
+                        if (incoming.isNotEmpty()) {
+                            Box(
+                                Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-6).dp).size(16.dp).clip(CircleShape).background(ClaudeCoral),
+                                contentAlignment = Alignment.Center,
+                            ) { Text(incoming.size.coerceAtMost(9).toString(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                        }
+                    }
+                }
                 IconButton(onClick = { controller.openNewChat() }) { Icon(QMusicIcons.Edit, contentDescription = s.newChat, tint = Color.White) }
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Color.White) }
@@ -373,7 +387,7 @@ private fun ThreadListPage(controller: ChatController, s: ChatStrings, me: ChatU
                 Box(Modifier.width(220.dp)) { WhiteButton(s.newChat) { controller.openNewChat() } }
             }
             else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp)) {
-                items(list, key = { it.id }) { t -> ThreadRow(t, me, s) { controller.openConversation(t.other) } }
+                items(list, key = { it.id }) { t -> ThreadRow(t, me, s, onAvatar = { controller.openProfile(t.other) }) { controller.openConversation(t.other) } }
             }
         }
     }
@@ -390,12 +404,12 @@ private fun ThreadListPage(controller: ChatController, s: ChatStrings, me: ChatU
 }
 
 @Composable
-private fun ThreadRow(t: ChatThread, me: ChatUser, s: ChatStrings, onClick: () -> Unit) {
+private fun ThreadRow(t: ChatThread, me: ChatUser, s: ChatStrings, onAvatar: () -> Unit, onClick: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ChatAvatar(t.other, 52.dp)
+        Box(Modifier.clip(CircleShape).clickable(onClick = onAvatar)) { ChatAvatar(t.other, 52.dp) }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -446,17 +460,7 @@ private fun NewChatPage(controller: ChatController, s: ChatStrings) {
             list.isEmpty() -> Text(s.noPeople, color = TextSecondary, fontSize = 15.sp, modifier = Modifier.padding(24.dp))
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(list, key = { it.uid }) { user ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clickable { controller.openConversation(user) }.padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        ChatAvatar(user, 48.dp)
-                        Spacer(Modifier.width(14.dp))
-                        Column {
-                            Text(user.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                            Text("@${user.username}", color = TextSecondary, fontSize = 14.sp)
-                        }
-                    }
+                    PersonRow(user, onClick = { controller.openProfile(user) }) { FriendButton(controller, user, s) }
                 }
             }
         }
@@ -484,15 +488,19 @@ private fun ConversationPage(
     var menu by remember { mutableStateOf(false) }
     var attach by remember { mutableStateOf(false) }
     var replyTo by remember(other.uid) { mutableStateOf<ChatMessage?>(null) }
-    var viewing by remember { mutableStateOf<ByteArray?>(null) }
+    var viewing by remember { mutableStateOf<Pair<List<ChatImage>, Int>?>(null) }
+    val claudeState by controller.claudeState.collectAsState()
+    var modelMenu by remember { mutableStateOf(false) }
     val isClaude = other.uid == CLAUDE_BOT_UID
-    val pickPhoto = rememberImagePicker { picked ->
-        if (picked != null) {
-            controller.sendImage(other, picked, text, replyTo?.let { ChatReply(it.id, it.from, quoteText(it)) })
+    val sendPhotos: (List<PickedImage>) -> Unit = { photos ->
+        if (photos.isNotEmpty()) {
+            controller.sendImages(other, photos, text, replyTo?.let { ChatReply(it.id, it.from, quoteText(it)) })
             text = ""
             replyTo = null
         }
     }
+    val pickPhoto = rememberImagePicker { sendPhotos(it) }
+    val takePhoto = rememberCamera { photo -> photo?.let { sendPhotos(listOf(it)) } }
     val presence by remember(other.uid) { controller.presence(other) }.collectAsState(initial = null)
     val typing by remember(other.uid) { controller.typing(other) }.collectAsState(initial = false)
     val reactions by remember(other.uid) { controller.reactions(other) }.collectAsState(initial = emptyMap())
@@ -512,7 +520,10 @@ private fun ConversationPage(
             title = other.name,
             onBack = { controller.pop() },
             leading = {
-                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { controller.openProfile(other) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     ChatAvatar(other, 38.dp)
                     Spacer(Modifier.width(10.dp))
                     Column {
@@ -524,7 +535,41 @@ private fun ConversationPage(
                             seen != null && seen.lastSeen > 0 -> s.lastSeen + " " + seenLabel(seen.lastSeen, s)
                             else -> "@" + other.username
                         }
-                        Text(status, color = if (typing || seen?.online == true) TextPrimary else TextSecondary, fontSize = 12.sp, maxLines = 1)
+                        if (isClaude && claudeState != null && !typing) {
+                            // The model answering now; a tap picks another.
+                            Box {
+                                Row(
+                                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { modelMenu = true }.padding(vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(claudeState!!.label, color = ClaudeCoral, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    Icon(QMusicIcons.ChevronDown, contentDescription = null, tint = ClaudeCoral, modifier = Modifier.size(14.dp))
+                                }
+                                DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }, containerColor = DarkSurfaceVariant) {
+                                    CLAUDE_MODELS.forEach { model ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Column {
+                                                    Text(
+                                                        "Claude " + model.replaceFirstChar { it.uppercase() },
+                                                        color = if (claudeState?.model == model) ClaudeCoral else TextPrimary,
+                                                        fontSize = 14.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                    )
+                                                    Text(modelBlurb(model, s), color = TextSecondary, fontSize = 12.sp)
+                                                }
+                                            },
+                                            onClick = {
+                                                modelMenu = false
+                                                controller.setClaudeModel(model)
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            Text(status, color = if (typing || seen?.online == true) TextPrimary else TextSecondary, fontSize = 12.sp, maxLines = 1)
+                        }
                     }
                 }
             },
@@ -582,7 +627,7 @@ private fun ConversationPage(
                                 onReply = { replyTo = row.m },
                                 onReact = { emoji -> controller.react(other, row.m, emoji) },
                                 loadImage = { id -> controller.imageBytes(other, id) },
-                                onOpenImage = { viewing = it },
+                                onOpenImages = { images, index -> viewing = images to index },
                                 assisting = assist?.takeIf { it.target == row.m.id }?.phase,
                                 inClaudeChat = isClaude,
                             ) }
@@ -594,6 +639,21 @@ private fun ConversationPage(
         if (isBlocked) {
             Text(s.blockedNote, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp))
         } else {
+            if (isClaude && text.startsWith("/")) {
+                SlashCommands(
+                    query = text,
+                    current = claudeState?.model,
+                    s = s,
+                    onNew = {
+                        text = ""
+                        controller.resetClaude()
+                    },
+                    onModel = { model ->
+                        text = ""
+                        controller.setClaudeModel(model)
+                    },
+                )
+            }
             if (!isClaude && me.uid == CLAUDE_OWNER_UID && callsClaude(text)) {
                 Row(
                     modifier = Modifier
@@ -636,6 +696,14 @@ private fun ConversationPage(
                             onClick = {
                                 attach = false
                                 pickPhoto()
+                            },
+                        )
+                        DropdownMenuItem(
+                            leadingIcon = { Icon(QMusicIcons.Camera, null, tint = Color.White) },
+                            text = { Text(s.camera, color = TextPrimary, fontSize = 14.sp) },
+                            onClick = {
+                                attach = false
+                                takePhoto()
                             },
                         )
                         options.forEach { item ->
@@ -699,24 +767,54 @@ private fun ConversationPage(
             }
         }
     }
-    viewing?.let { PhotoViewer(it) { viewing = null } }
+    viewing?.let { (images, index) ->
+        PhotoViewer(images, index, load = { id -> controller.imageBytes(other, id) }) { viewing = null }
+    }
 }
 
 /** A photo in a message: its blurred preview at once, the photo itself when it has come; a tap opens it full. */
 @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
 @Composable
-private fun ChatPhoto(image: ChatImage, load: suspend (String) -> ByteArray?, onOpen: (ByteArray) -> Unit, scanning: Boolean = false) {
+private fun ChatAlbum(images: List<ChatImage>, load: suspend (String) -> ByteArray?, onOpen: (Int) -> Unit, scanning: Boolean) {
+    if (images.size == 1) {
+        val image = images[0]
+        val ratio = if (image.width > 0 && image.height > 0) (image.width.toFloat() / image.height).coerceIn(0.56f, 1.9f) else 1f
+        PhotoCell(image, load, { onOpen(0) }, scanning, Modifier.width(260.dp).aspectRatio(ratio).clip(RoundedCornerShape(14.dp)))
+        return
+    }
+    // An album: two columns of squares; past four, the last square says how many more.
+    val shown = images.take(4)
+    Column(Modifier.width(260.dp).clip(RoundedCornerShape(14.dp)), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        shown.chunked(2).forEachIndexed { row, pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                pair.forEachIndexed { col, image ->
+                    val index = row * 2 + col
+                    val wide = pair.size == 1
+                    Box(Modifier.weight(1f).aspectRatio(if (wide) 2f else 1f)) {
+                        PhotoCell(image, load, { onOpen(index) }, scanning, Modifier.fillMaxSize())
+                        if (index == 3 && images.size > 4) {
+                            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)).clickable { onOpen(3) }, contentAlignment = Alignment.Center) {
+                                Text("+" + (images.size - 4), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** One photo: its blurred preview at once, the photo itself when it has come. */
+@OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
+@Composable
+private fun PhotoCell(image: ChatImage, load: suspend (String) -> ByteArray?, onOpen: () -> Unit, scanning: Boolean, modifier: Modifier) {
     var bytes by remember(image.id) { mutableStateOf<ByteArray?>(null) }
     LaunchedEffect(image.id) { bytes = load(image.id) }
     val thumb = remember(image.thumb) { runCatching { kotlin.io.encoding.Base64.decode(image.thumb) }.getOrNull() }
-    val ratio = if (image.width > 0 && image.height > 0) (image.width.toFloat() / image.height).coerceIn(0.56f, 1.9f) else 1f
     Box(
-        modifier = Modifier
-            .width(260.dp)
-            .aspectRatio(ratio)
-            .clip(RoundedCornerShape(14.dp))
+        modifier = modifier
             .background(DarkSurface)
-            .clickable(enabled = bytes != null) { bytes?.let(onOpen) },
+            .clickable(enabled = bytes != null, onClick = onOpen),
     ) {
         if (thumb != null) {
             AsyncImage(model = thumb, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(16.dp))
@@ -785,15 +883,286 @@ private fun nameOf(uid: String, myUid: String, otherName: String, s: ChatStrings
     else -> otherName
 }
 
-/** A photo, full screen; a tap or back closes it. */
+/** The photos of a message, full screen: swipe between them; a tap or back closes it. */
 @Composable
-private fun PhotoViewer(bytes: ByteArray, onClose: () -> Unit) {
+private fun PhotoViewer(images: List<ChatImage>, start: Int, load: suspend (String) -> ByteArray?, onClose: () -> Unit) {
     PlatformBackHandler(enabled = true) { onClose() }
-    Box(
-        modifier = Modifier.fillMaxSize().background(Color.Black).clickable(onClick = onClose),
-        contentAlignment = Alignment.Center,
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = start.coerceIn(0, images.lastIndex)) { images.size }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
+            var bytes by remember(images[page].id) { mutableStateOf<ByteArray?>(null) }
+            LaunchedEffect(images[page].id) { bytes = load(images[page].id) }
+            Box(Modifier.fillMaxSize().clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                val b = bytes
+                if (b != null) {
+                    AsyncImage(model = b, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                } else {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp)
+                }
+            }
+        }
+        if (images.size > 1) {
+            Text(
+                "${pager.currentPage + 1} / ${images.size}",
+                color = Color.White,
+                fontSize = 14.sp,
+                modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(12.dp)
+                    .clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.5f)).padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
+/** What "/" offers in Claude's conversation: a new conversation, and the models. */
+@Composable
+private fun SlashCommands(query: String, current: String?, s: ChatStrings, onNew: () -> Unit, onModel: (String) -> Unit) {
+    val q = query.lowercase().trim()
+    val rows = buildList {
+        add(Triple("/yeni", s.cmdNew) { onNew() })
+        CLAUDE_MODELS.forEach { model -> add(Triple("/model $model", modelBlurb(model, s)) { onModel(model) }) }
+    }.filter { (command, _, _) -> command.startsWith(q) || q == "/" || (q.startsWith("/m") && command.startsWith("/model")) }
+    if (rows.isEmpty()) return
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(DarkSurfaceVariant)
+            .padding(vertical = 6.dp),
     ) {
-        AsyncImage(model = bytes, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+        rows.forEach { (command, blurb, run) ->
+            val chosen = current != null && command == "/model $current"
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable(onClick = run).padding(horizontal = 14.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(command, color = if (chosen) ClaudeCoral else TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                Spacer(Modifier.width(12.dp))
+                Text(blurb, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                if (chosen) Icon(QMusicIcons.Check, contentDescription = null, tint = ClaudeCoral, modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+}
+
+private fun modelBlurb(model: String, s: ChatStrings): String = when (model) {
+    "opus" -> s.modelOpus
+    "haiku" -> s.modelHaiku
+    else -> s.modelSonnet
+}
+
+/** Claude's answer as Markdown (bold, lists, code with colours), drawn as it streams in. */
+@Composable
+private fun ClaudeMarkdown(text: String, streaming: Boolean, modifier: Modifier) {
+    val body = TextStyle(color = TextPrimary, fontSize = 16.sp, lineHeight = 22.sp)
+    com.mikepenz.markdown.m3.Markdown(
+        content = if (streaming) "$text ▍" else text,
+        colors = com.mikepenz.markdown.m3.markdownColor(
+            text = TextPrimary,
+            codeText = TextPrimary,
+            codeBackground = Color(0xFF15100E),
+            inlineCodeBackground = Color(0xFF15100E),
+            linkText = ClaudeCoral,
+        ),
+        typography = com.mikepenz.markdown.m3.markdownTypography(
+            text = body,
+            paragraph = body,
+            code = body.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 13.sp, lineHeight = 18.sp),
+            h1 = body.copy(fontSize = 19.sp, fontWeight = FontWeight.Bold),
+            h2 = body.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold),
+            h3 = body.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold),
+            h4 = body.copy(fontWeight = FontWeight.Bold),
+            h5 = body.copy(fontWeight = FontWeight.Bold),
+            h6 = body.copy(fontWeight = FontWeight.Bold),
+            bullet = body,
+            list = body,
+            ordered = body,
+        ),
+        components = com.mikepenz.markdown.compose.components.markdownComponents(
+            codeBlock = { com.mikepenz.markdown.compose.elements.MarkdownHighlightedCodeBlock(it.content, it.node) },
+            codeFence = { com.mikepenz.markdown.compose.elements.MarkdownHighlightedCodeFence(it.content, it.node) },
+        ),
+        modifier = modifier,
+    )
+}
+
+/** A person in a list: picture, name, @username, and what can be done ([trailing]). */
+@Composable
+private fun PersonRow(user: ChatUser, onClick: () -> Unit, trailing: @Composable () -> Unit = {}) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ChatAvatar(user, 48.dp)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(user.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (user.username.isNotEmpty()) Text("@" + user.username, color = TextSecondary, fontSize = 14.sp, maxLines = 1)
+        }
+        trailing()
+    }
+}
+
+/** A small pill button (white when it is the thing to do, grey otherwise). */
+@Composable
+private fun Pill(text: String, primary: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (primary) Color.White else DarkSurfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) { Text(text, color = if (primary) Color.Black else TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+}
+
+/** Add / requested (tap to take back) / accept / friends, as fits. */
+@Composable
+private fun FriendButton(controller: ChatController, user: ChatUser, s: ChatStrings) {
+    if (user.uid == CLAUDE_BOT_UID) return
+    val status by remember(user.uid) { controller.friendStatus(user.uid) }.collectAsState(initial = FriendStatus.NONE)
+    when (status) {
+        FriendStatus.NONE -> Pill(s.addFriend, primary = true) { controller.requestFriend(user) }
+        FriendStatus.REQUESTED -> Pill(s.requested, primary = false) { controller.unfriend(user) }
+        FriendStatus.INCOMING -> Pill(s.accept, primary = true) { controller.acceptFriend(user) }
+        FriendStatus.FRIENDS -> Pill("✓ " + s.friendsBadge, primary = false) {}
+    }
+}
+
+/** Friend requests to answer, then the friends; a tap opens a profile. */
+@Composable
+private fun FriendsPage(controller: ChatController, s: ChatStrings) {
+    val friends by controller.friends.collectAsState()
+    val incoming by controller.friendRequests.collectAsState()
+    Column(Modifier.fillMaxSize()) {
+        TopBar(s.friends, { controller.pop() }, actions = {
+            IconButton(onClick = { controller.openNewChat() }) { Icon(QMusicIcons.Search, contentDescription = s.findFriends, tint = Color.White) }
+        })
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp)) {
+            if (incoming.isNotEmpty()) {
+                item { SectionTitle(s.requests + " · " + incoming.size) }
+                items(incoming, key = { "r" + it.uid }) { user ->
+                    PersonRow(user, onClick = { controller.openProfile(user) }) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Pill(s.decline, primary = false) { controller.unfriend(user) }
+                            Pill(s.accept, primary = true) { controller.acceptFriend(user) }
+                        }
+                    }
+                }
+            }
+            item { SectionTitle(s.friends + if (friends.isNotEmpty()) " · " + friends.size else "") }
+            if (friends.isEmpty()) {
+                item {
+                    Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(s.noFriends, color = TextSecondary, fontSize = 15.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        Spacer(Modifier.height(16.dp))
+                        Box(Modifier.width(220.dp)) { WhiteButton(s.findFriends) { controller.openNewChat() } }
+                    }
+                }
+            }
+            items(friends, key = { "f" + it.uid }) { user ->
+                PersonRow(user, onClick = { controller.openProfile(user) }) {
+                    IconButton(onClick = { controller.openConversation(user) }) { Icon(QMusicIcons.Chat, contentDescription = s.message, tint = Color.White) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(text, color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 6.dp))
+}
+
+/**
+ * Someone's page: the big picture (a tap shows it full screen), name, @username, whether they are online, what can
+ * be done with them, and the photos shared in the conversation.
+ */
+@Composable
+private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser, user: ChatUser, onCall: ((ChatUser, Boolean) -> Unit)?) {
+    val presence by remember(user.uid) { controller.presence(user) }.collectAsState(initial = null)
+    val blocked by controller.blocked.collectAsState()
+    val messages by remember(user.uid) { controller.messages(user) }.collectAsState(initial = null)
+    val photos = remember(messages) { messages.orEmpty().flatMap { it.images }.asReversed() }
+    var bigPhoto by remember { mutableStateOf(false) }
+    var viewing by remember { mutableStateOf<Int?>(null) }
+    val isClaude = user.uid == CLAUDE_BOT_UID
+    val isBlocked = user.uid in blocked
+    val friendStatus by remember(user.uid) { controller.friendStatus(user.uid) }.collectAsState(initial = FriendStatus.NONE)
+
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp)) {
+            item { TopBar("", { controller.pop() }) }
+            item {
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.clip(CircleShape).clickable(enabled = user.photo != null) { bigPhoto = true }) { ChatAvatar(user, 132.dp) }
+                    Spacer(Modifier.height(16.dp))
+                    Text(user.name, color = TextPrimary, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                    if (user.username.isNotEmpty() && !isClaude) Text("@" + user.username, color = TextSecondary, fontSize = 15.sp)
+                    val seen = presence
+                    val status = when {
+                        seen?.online == true -> s.online
+                        seen != null && seen.lastSeen > 0 -> s.lastSeen + " " + seenLabel(seen.lastSeen, s)
+                        else -> null
+                    }
+                    if (status != null) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(status, color = if (seen?.online == true) TextPrimary else TextMuted, fontSize = 13.sp)
+                    }
+                    Spacer(Modifier.height(22.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        ProfileAction(QMusicIcons.Chat, s.message) { controller.openConversation(user) }
+                        if (onCall != null && !isClaude && !isBlocked) {
+                            ProfileAction(QMusicIcons.Phone, s.callVoice) { onCall(user, false) }
+                            ProfileAction(QMusicIcons.Camera, s.callVideo) { onCall(user, true) }
+                        }
+                    }
+                    if (!isClaude && user.uid != me.uid) {
+                        Spacer(Modifier.height(18.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            FriendButton(controller, user, s)
+                            if (friendStatus == FriendStatus.FRIENDS) Pill(s.removeFriend, primary = false) { controller.unfriend(user) }
+                            Pill(if (isBlocked) s.unblock else s.block, primary = false) { controller.setBlocked(user, !isBlocked) }
+                        }
+                    }
+                }
+            }
+            if (photos.isNotEmpty()) {
+                item { SectionTitle(s.sharedPhotos + " · " + photos.size) }
+                // Three to a row.
+                photos.chunked(3).forEachIndexed { row, three ->
+                    item(key = "p$row") {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 1.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            three.forEachIndexed { col, image ->
+                                Box(Modifier.weight(1f).aspectRatio(1f)) {
+                                    PhotoCell(image, { id -> controller.imageBytes(user, id) }, { viewing = row * 3 + col }, false, Modifier.fillMaxSize())
+                                }
+                            }
+                            repeat(3 - three.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                }
+            }
+        }
+        if (bigPhoto && user.photo != null) {
+            PlatformBackHandler(enabled = true) { bigPhoto = false }
+            Box(Modifier.fillMaxSize().background(Color.Black).clickable { bigPhoto = false }, contentAlignment = Alignment.Center) {
+                AsyncImage(model = user.photo.replace("=s96-c", "=s1024-c"), contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth())
+            }
+        }
+        viewing?.let { index ->
+            PhotoViewer(photos, index, load = { id -> controller.imageBytes(user, id) }) { viewing = null }
+        }
+    }
+}
+
+@Composable
+private fun ProfileAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(76.dp).clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 8.dp)) {
+        Box(Modifier.size(52.dp).clip(CircleShape).background(DarkSurfaceVariant), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(label, color = TextSecondary, fontSize = 12.sp, maxLines = 1)
     }
 }
 
@@ -839,7 +1208,7 @@ private fun Bubble(
     onReply: () -> Unit,
     onReact: (String?) -> Unit,
     loadImage: suspend (String) -> ByteArray?,
-    onOpenImage: (ByteArray) -> Unit,
+    onOpenImages: (List<ChatImage>, Int) -> Unit,
     /** Claude is answering this message: looking, thinking or writing. */
     assisting: String? = null,
     inClaudeChat: Boolean = false,
@@ -905,7 +1274,7 @@ private fun Bubble(
                     onClick = { m.share?.let(onOpenShare) },
                     onLongClick = { menu = true },
                 )
-                .padding(if (m.share != null || m.image != null) 4.dp else 0.dp),
+                .padding(if (m.share != null || m.images.isNotEmpty()) 4.dp else 0.dp),
         ) {
             val fg = if (mine) Color.Black else TextPrimary
             val fgSoft = if (mine) Color.Black.copy(alpha = 0.55f) else TextSecondary
@@ -940,16 +1309,15 @@ private fun Bubble(
             } else if (!mine && m.model != null) {
                 Text(m.model, color = fgSoft, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp))
             }
-            m.image?.let { ChatPhoto(it, loadImage, onOpenImage, scanning = assisting != null) }
+            if (m.images.isNotEmpty()) ChatAlbum(m.images, loadImage, { index -> onOpenImages(m.images, index) }, scanning = assisting != null)
             m.share?.let { ShareCard(it, mine, s) }
             if (m.text.isNotEmpty()) {
-                Text(
-                    text = if (m.streaming) m.text + " ▍" else m.text,
-                    color = fg,
-                    fontSize = 16.sp,
-                    lineHeight = 21.sp,
-                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = if (!mine && m.model != null) 2.dp else 8.dp),
-                )
+                val textModifier = Modifier.padding(start = 12.dp, end = 12.dp, top = if (!mine && m.model != null) 2.dp else 8.dp)
+                if (fromClaude) {
+                    ClaudeMarkdown(m.text, m.streaming, textModifier)
+                } else {
+                    Text(text = m.text, color = fg, fontSize = 16.sp, lineHeight = 21.sp, modifier = textModifier)
+                }
             }
             Row(
                 modifier = Modifier.align(Alignment.End).padding(start = 12.dp, end = 10.dp, bottom = 6.dp, top = 2.dp),
@@ -1026,8 +1394,13 @@ private fun Bubble(
 }
 
 /** A message as a quote: its text, or what it shared. */
-private fun quoteText(m: ChatMessage): String =
-    m.text.ifBlank { m.share?.let { (if (it.kind == ShareKind.SONG) "🎵 " else "🎬 ") + it.title }.orEmpty() }
+private fun quoteText(m: ChatMessage): String = m.text.ifBlank {
+    when {
+        m.images.isNotEmpty() -> if (m.images.size == 1) "📷" else "📷 ×" + m.images.size
+        m.share != null -> (if (m.share.kind == ShareKind.SONG) "🎵 " else "🎬 ") + m.share.title
+        else -> ""
+    }
+}
 
 /** "today 14:32", "yesterday 09:10", "08.11 21:05". */
 private fun seenLabel(ms: Long, s: ChatStrings): String = when (daysAgo(ms)) {

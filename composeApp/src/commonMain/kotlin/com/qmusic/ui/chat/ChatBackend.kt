@@ -41,6 +41,15 @@ const val CLAUDE_OWNER_UID = "2hxOw0dRcwUwsW7N6ogH4fRcqXo1"
 /** A message that calls Claude into a conversation: it starts with "claude" or "@claude". */
 fun callsClaude(text: String): Boolean = Regex("^\\s*@?claude\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)
 
+/** Where two people stand: nothing yet, a request one way or the other, or friends. */
+enum class FriendStatus { NONE, REQUESTED, INCOMING, FRIENDS }
+
+/** The owner's Claude: the model picked ("opus") and how it calls itself ("Claude Opus 5.5"). */
+data class ClaudeState(val model: String, val label: String)
+
+/** The models the owner can pick, with a word about each. */
+val CLAUDE_MODELS = listOf("opus", "sonnet", "haiku")
+
 /** Claude at work on a message: [phase] is looking (at a photo), thinking or writing. */
 data class ClaudeAssist(val target: String, val phase: String)
 
@@ -58,7 +67,8 @@ data class ChatMessage(
     val from: String,
     val text: String,
     val replyTo: ChatReply? = null,
-    val image: ChatImage? = null,
+    /** The photos of the message (one, or an album of up to ten). */
+    val images: List<ChatImage> = emptyList(),
     /** The model that wrote it ("Claude Sonnet 5.5"), for Claude's answers. */
     val model: String? = null,
     /** Still being written (Claude's answer as it streams in). */
@@ -137,9 +147,37 @@ interface ChatBackend {
     /** Removes the person's profile, @username and every message they sent. */
     suspend fun deleteAccount(): Result<Unit>
 
-    /** Sends a photo (with an optional caption). */
-    suspend fun sendImage(other: ChatUser, image: PickedImage, caption: String, replyTo: ChatReply?): Result<Unit> =
+    /** Sends photos (one, or an album) with an optional caption. */
+    suspend fun sendImages(other: ChatUser, images: List<PickedImage>, caption: String, replyTo: ChatReply?): Result<Unit> =
         Result.failure(UnsupportedOperationException())
+
+    /** The person's friends. */
+    fun friends(): Flow<List<ChatUser>> = kotlinx.coroutines.flow.flowOf(emptyList())
+
+    /** People asking to be friends with the person. */
+    fun friendRequests(): Flow<List<ChatUser>> = kotlinx.coroutines.flow.flowOf(emptyList())
+
+    /** The people the person asked to be friends with (and who have not answered). */
+    fun sentRequests(): Flow<Set<String>> = kotlinx.coroutines.flow.flowOf(emptySet())
+
+    /** Asks [user] to be friends (or accepts at once when they asked first). */
+    suspend fun requestFriend(user: ChatUser): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun acceptFriend(user: ChatUser): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    /** Declines their request, takes back ours, or ends a friendship. */
+    suspend fun unfriend(user: ChatUser): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    /** Someone's profile, read fresh. */
+    suspend fun user(uid: String): ChatUser? = null
+
+    /** The owner's Claude: which model answers now (null where there is none). */
+    fun claudeState(): Flow<ClaudeState?> = kotlinx.coroutines.flow.flowOf(null)
+
+    /** Picks the model of the owner's Claude ("opus", "sonnet", "haiku"). */
+    suspend fun setClaudeModel(model: String) {}
+
+    /** Starts the owner's conversation with Claude afresh. */
+    suspend fun resetClaude() {}
 
     /** The photo [id] of [chatId] (kept on the phone after the first time). */
     suspend fun imageBytes(chatId: String, id: String): ByteArray? = null
@@ -171,7 +209,7 @@ fun chatIdOf(a: String, b: String): String = if (a < b) "${a}_$b" else "${b}_$a"
 fun isValidUsername(name: String): Boolean = name.length in 3..20 && name.all { it in 'a'..'z' || it in '0'..'9' || it == '.' || it == '_' }
 
 /** Asks the app to open the messages section (a tapped notification); [user] opens their conversation. */
-data class ChatLaunchRequest(val user: ChatUser?)
+data class ChatLaunchRequest(val user: ChatUser?, val profile: Boolean = false)
 
 object ChatLaunch {
     val request = kotlinx.coroutines.flow.MutableStateFlow<ChatLaunchRequest?>(null)

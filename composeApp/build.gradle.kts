@@ -70,6 +70,9 @@ kotlin {
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.kotlinx.serialization.json)
                 implementation(libs.kotlinx.datetime)
+                // Claude's answers: Markdown with highlighted code.
+                implementation(libs.markdown.m3)
+                implementation(libs.markdown.code)
             }
         }
         val commonTest by getting {

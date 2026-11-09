@@ -202,7 +202,9 @@ fun QMusicApp(
                 com.qmusic.ui.chat.ChatLaunch.request.value = null
                 videosOpen = false
                 chatOpen = true
-                request.user?.let { chatController.openConversation(it) }
+                request.user?.let { user ->
+                    if (request.profile) chatController.openProfileOf(user.uid, user) else chatController.openConversation(user)
+                }
             }
             // A call (ringing, going on or just over) takes the whole screen, over any section.
             val callService = chatController?.calls
