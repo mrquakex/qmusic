@@ -22,10 +22,19 @@ import com.google.firebase.messaging.RemoteMessage
 class UpdateMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
+        if (message.data["type"] == "chat") {
+            ChatPush.notify(applicationContext, message.data)
+            return
+        }
         if (message.data["type"] != "update") return
         val version = message.data["version"] ?: return
         val summary = message.data["body"] ?: message.notification?.body
         UpdatePush.notify(applicationContext, version, summary)
+    }
+
+    /** The phone's push address changed: the messages account keeps the new one. */
+    override fun onNewToken(token: String) {
+        com.qmusic.ui.chat.FirebaseChatPushTokens.refresh()
     }
 }
 

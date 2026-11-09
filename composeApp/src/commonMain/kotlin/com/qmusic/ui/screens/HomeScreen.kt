@@ -26,6 +26,7 @@ import com.qmusic.ui.theme.QMusicIcons
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -63,6 +64,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.qmusic.engine.models.CollectionItem
 import com.qmusic.engine.models.CollectionKind
@@ -106,6 +108,9 @@ fun HomeScreen(
     desktop: Boolean = false,
     onSeeAll: (HomeSection) -> Unit = {},
     onSearchClick: () -> Unit,
+    /** Opens the messages; null where there are none. */
+    onChatClick: (() -> Unit)? = null,
+    chatUnread: Int = 0,
     onSignIn: () -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
@@ -170,6 +175,31 @@ fun HomeScreen(
                         QMusicHeaderLogo(modifier = Modifier.weight(1f))
                         // As on YouTube Music: cast and search sit at the right of the logo
                         com.qmusic.ui.CastButton(modifier = Modifier.size(48.dp))
+                        if (onChatClick != null) {
+                            IconButton(onClick = onChatClick) {
+                                Box {
+                                    Icon(QMusicIcons.Chat, contentDescription = null, tint = Color.White)
+                                    if (chatUnread > 0) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .offset(x = 6.dp, y = (-6).dp)
+                                                .size(16.dp)
+                                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                                .background(Color.White),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Text(
+                                                if (chatUnread > 9) "9+" else chatUnread.toString(),
+                                                color = Color.Black,
+                                                fontSize = 10.sp,
+                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         IconButton(onClick = onSearchClick) {
                             Icon(QMusicIcons.Search, contentDescription = LocalStrings.current.tabSearch, tint = Color.White)
                         }

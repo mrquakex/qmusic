@@ -79,6 +79,7 @@ class MainActivity : AppCompatActivity() {
         this.viewModel = viewModel
         hookRingtones()
         openUpdatesIfAsked(intent)
+        ChatPush.openIfAsked(intent)
         // A rotation recreates the activity with the same intent: the link was opened the first time already.
         if (savedInstanceState == null) {
             openLinkIfAny(intent)
@@ -181,6 +182,7 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         openUpdatesIfAsked(intent)
+        ChatPush.openIfAsked(intent)
         openLinkIfAny(intent)
         openShortcutIfAny(intent)
     }

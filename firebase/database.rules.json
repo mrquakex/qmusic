@@ -1,0 +1,59 @@
+{
+  "rules": {
+    "users": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "!newData.exists() || (newData.child('name').isString() && newData.child('name').val().length > 0 && newData.child('name').val().length <= 40 && newData.child('username').isString() && newData.child('username').val().matches(/^[a-z0-9._]{3,20}$/))"
+      }
+    },
+    "usernames": {
+      ".read": "auth != null",
+      "$name": {
+        ".write": "auth != null && ((!data.exists() && newData.val() === auth.uid) || (data.val() === auth.uid && (!newData.exists() || newData.val() === auth.uid)))",
+        ".validate": "!newData.exists() || $name.matches(/^[a-z0-9._]{3,20}$/)"
+      }
+    },
+    "userChats": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".indexOn": ["lastAt"],
+        "$chatId": {
+          ".write": "auth != null && $chatId.matches(/^[A-Za-z0-9]+_[A-Za-z0-9]+$/) && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) && ($chatId.beginsWith($uid + '_') || $chatId.endsWith('_' + $uid)) && (auth.uid === $uid || root.child('blocked').child($uid).child(auth.uid).val() !== true)",
+          "read": {
+            ".validate": "auth.uid === $uid"
+          }
+        }
+      }
+    },
+    "chats": {
+      "$chatId": {
+        ".read": "auth != null && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid))",
+        "messages": {
+          ".indexOn": ["at", "from"],
+          "$messageId": {
+            ".write": "auth != null && $chatId.matches(/^[A-Za-z0-9]+_[A-Za-z0-9]+$/) && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) && ((!data.exists() && newData.child('from').val() === auth.uid && root.child('blocked').child($chatId.replace(auth.uid, '').replace('_', '')).child(auth.uid).val() !== true) || (data.exists() && !newData.exists() && data.child('from').val() === auth.uid))",
+            ".validate": "!newData.exists() || (newData.child('text').isString() && newData.child('text').val().length <= 4000 && newData.child('at').val() === now)"
+          }
+        },
+        "read": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid))"
+          }
+        }
+      }
+    },
+    "blocked": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "pushTokens": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    }
+  }
+}

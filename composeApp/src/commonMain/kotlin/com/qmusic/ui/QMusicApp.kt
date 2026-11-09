@@ -190,6 +190,87 @@ fun QMusicApp(
                     isUnmetered = { viewModel.isOnUnmetered() },
                 )
             }
+            // Messages: full screen like the videos, entered from the button on the home page (or a notification).
+            var chatOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+            val chatBackend = com.qmusic.ui.chat.rememberChatBackend()
+            val chatScope = rememberCoroutineScope()
+            val chatController = remember(chatBackend) { chatBackend?.let { com.qmusic.ui.chat.ChatController(it, chatScope) } }
+            val chatLaunch by com.qmusic.ui.chat.ChatLaunch.request.collectAsState()
+            LaunchedEffect(chatLaunch, chatController) {
+                val request = chatLaunch ?: return@LaunchedEffect
+                if (chatController == null) return@LaunchedEffect
+                com.qmusic.ui.chat.ChatLaunch.request.value = null
+                videosOpen = false
+                chatOpen = true
+                request.user?.let { chatController.openConversation(it) }
+            }
+            if (chatOpen && chatController != null) {
+                val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
+                com.qmusic.ui.chat.ChatApp(
+                    controller = chatController,
+                    s = chatStrings,
+                    shareables = {
+                        listOfNotNull(
+                            viewModel.currentTrack.value?.let { song ->
+                                com.qmusic.ui.chat.SharedItem(
+                                    kind = com.qmusic.ui.chat.ShareKind.SONG,
+                                    id = song.id,
+                                    title = song.title,
+                                    subtitle = song.artists.joinToString(", ") { it.name },
+                                    thumbnail = song.thumbnail,
+                                )
+                            },
+                            videosController.watch.value?.video?.let { v ->
+                                com.qmusic.ui.chat.SharedItem(
+                                    kind = com.qmusic.ui.chat.ShareKind.VIDEO,
+                                    id = v.id,
+                                    title = v.title,
+                                    subtitle = v.channelName.orEmpty(),
+                                    thumbnail = v.thumbnail,
+                                )
+                            },
+                        )
+                    },
+                    onOpenShare = { item ->
+                        when (item.kind) {
+                            com.qmusic.ui.chat.ShareKind.SONG -> {
+                                viewModel.play(
+                                    com.qmusic.engine.models.SongItem(
+                                        id = item.id,
+                                        title = item.title,
+                                        artists = item.subtitle.takeIf { it.isNotBlank() }
+                                            ?.let { listOf(com.qmusic.engine.models.Artist(it)) }.orEmpty(),
+                                        thumbnail = item.thumbnail,
+                                    ),
+                                    radio = true,
+                                )
+                                chatOpen = false
+                                viewModel.setPlayerExpanded(true)
+                            }
+                            com.qmusic.ui.chat.ShareKind.VIDEO -> {
+                                chatOpen = false
+                                videosOpen = true
+                                videosController.open(
+                                    com.qmusic.engine.video.VideoItem(
+                                        id = item.id,
+                                        title = item.title,
+                                        channelName = item.subtitle.ifBlank { null },
+                                        thumbnail = item.thumbnail,
+                                    ),
+                                )
+                            }
+                        }
+                    },
+                    onExit = { chatOpen = false },
+                    modifier = modifier,
+                )
+                return@CompositionLocalProvider
+            }
+            val chatUnread by (chatController?.unreadCount ?: kotlinx.coroutines.flow.MutableStateFlow(0)).collectAsState()
+            // Until Google sign-in is set up for the app, the button is not shown at all.
+            val chatAccount by (chatController?.account ?: kotlinx.coroutines.flow.MutableStateFlow(com.qmusic.ui.chat.ChatAccount.Unavailable())).collectAsState()
+            val chatAvailable = chatController != null && chatAccount !is com.qmusic.ui.chat.ChatAccount.Unavailable
+
             if (videosOpen) {
                 LaunchedEffect(Unit) {
                     videosController.refreshAccount()
@@ -450,6 +531,8 @@ fun QMusicApp(
                         currentTrack = currentTrack,
                         onCollectionClick = { viewModel.openCollection(it) },
                         onSearchClick = { viewModel.selectTab(ScreenTab.SEARCH) },
+                        onChatClick = if (chatAvailable) ({ chatOpen = true }) else null,
+                        chatUnread = chatUnread,
                         onSignIn = {
                             when (accountMode) {
                                 com.qmusic.settings.AccountMode.SPOTIFY -> viewModel.setShowSpotifyLoginDialog(true)
