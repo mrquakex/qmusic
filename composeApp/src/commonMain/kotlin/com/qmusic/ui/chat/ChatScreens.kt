@@ -488,6 +488,16 @@ private fun ConversationPage(
     var menu by remember { mutableStateOf(false) }
     var attach by remember { mutableStateOf(false) }
     var replyTo by remember(other.uid) { mutableStateOf<ChatMessage?>(null) }
+    // Answering a message (pulled to the right, or from its menu) puts the cursor in the box and opens the keyboard.
+    val inputFocus = remember { FocusRequester() }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    LaunchedEffect(replyTo?.id) {
+        if (replyTo != null) {
+            runCatching { inputFocus.requestFocus() }
+            keyboard?.show()
+        }
+    }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     var viewing by remember { mutableStateOf<Pair<List<ChatImage>, Int>?>(null) }
     val claudeState by controller.claudeState.collectAsState()
     var modelMenu by remember { mutableStateOf(false) }
@@ -599,7 +609,14 @@ private fun ConversationPage(
                 Centered { CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp) }
             } else {
                 val rows = remember(list) { withDays(list) }
+                // A new message: ours always comes into view; theirs only when we are at the bottom already (reading
+                // further up, the place is kept).
+                val newest = list.lastOrNull()
+                LaunchedEffect(newest?.id) {
+                    if (newest != null && (newest.from == me.uid || listState.firstVisibleItemIndex <= 1)) listState.animateScrollToItem(0)
+                }
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     reverseLayout = true,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 10.dp),
@@ -742,7 +759,7 @@ private fun ConversationPage(
                         cursorBrush = SolidColor(Color.White),
                         maxLines = 6,
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().focusRequester(inputFocus),
                     )
                 }
                 Spacer(Modifier.width(6.dp))
