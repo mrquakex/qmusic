@@ -98,13 +98,29 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     private val webClientId: String? = app.resources.getIdentifier("default_web_client_id", "string", app.packageName)
         .takeIf { it != 0 }?.let { app.getString(it) }
 
-    init {
-        auth.addAuthStateListener { onUser(it.currentUser) }
+    /** Voice and video calls, ringing for this account while it is signed in. */
+    override val calls: FirebaseCallService by lazy {
+        FirebaseCallService(
+            app = app,
+            root = root,
+            me = { (_account.value as? ChatAccount.Ready)?.me },
+            logCall = { peer, video, seconds ->
+                val tr = app.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+                val text = when {
+                    seconds == null -> if (tr) "📞 Cevapsız arama" else "📞 Missed call"
+                    video -> (if (tr) "🎥 Görüntülü arama · " else "🎥 Video call · ") + duration(seconds)
+                    else -> (if (tr) "📞 Sesli arama · " else "📞 Voice call · ") + duration(seconds)
+                }
+                scope.launch { send(peer, text, null, null) }
+            },
+        )
     }
 
     private fun onUser(user: FirebaseUser?) {
         profileListener?.let { profileRef?.removeEventListener(it) }
         profileListener = null
+        runCatching { calls.listenFor(user?.uid) }
+        trackPresence(user?.uid)
         if (user == null) {
             _account.value = if (webClientId == null) ChatAccount.Unavailable(SETUP_NEEDED) else ChatAccount.SignedOut
             return
@@ -158,6 +174,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         scope.launch {
             // This phone stops getting the account's notifications.
             if (uid != null) runCatching { removePushToken(uid) }
+            if (uid != null) runCatching { root.child("presence").child(uid).setValue(mapOf("online" to false, "lastSeen" to ServerValue.TIMESTAMP)) }
             auth.signOut()
             runCatching { CredentialManager.create(app).clearCredentialState(ClearCredentialStateRequest()) }
         }
@@ -246,7 +263,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             lastText = child("lastText").getValue(String::class.java).orEmpty(),
             lastAt = lastAt,
             lastFrom = lastFrom,
-            unread = lastFrom == otherUid && lastAt > read,
+            // From them, or from Claude speaking in this conversation: anything not ours that came after our last look.
+            unread = lastFrom != null && lastFrom != auth.currentUser?.uid && lastAt > read,
             otherReadAt = 0L,
         )
     }
@@ -281,10 +299,27 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 )
             }
         }
+        val replySnap = child("replyTo")
+        val reply = replySnap.child("id").getValue(String::class.java)?.let { replyId ->
+            ChatReply(replyId, replySnap.child("from").getValue(String::class.java).orEmpty(), replySnap.child("text").getValue(String::class.java).orEmpty())
+        }
+        val imageSnap = child("image")
+        val image = imageSnap.child("id").getValue(String::class.java)?.let { imageId ->
+            ChatImage(
+                id = imageId,
+                width = imageSnap.child("w").getValue(Int::class.java) ?: 0,
+                height = imageSnap.child("h").getValue(Int::class.java) ?: 0,
+                thumb = imageSnap.child("thumb").getValue(String::class.java).orEmpty(),
+            )
+        }
         return ChatMessage(
             id = id,
             from = from,
             text = child("text").getValue(String::class.java).orEmpty(),
+            replyTo = reply,
+            image = image,
+            model = child("model").getValue(String::class.java),
+            streaming = child("streaming").getValue(Boolean::class.java) == true,
             at = child("at").getValue(Long::class.java) ?: System.currentTimeMillis(),
             share = share,
             pending = id in pending,
@@ -298,7 +333,18 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         awaitClose { job.cancel() }
     }
 
-    override suspend fun send(other: ChatUser, text: String, share: SharedItem?): Result<Unit> = runCatching {
+    override suspend fun send(other: ChatUser, text: String, share: SharedItem?, replyTo: ChatReply?): Result<Unit> = runCatching {
+        sendMessage(other, text, share, replyTo, image = null, preview = null)
+    }
+
+    private fun sendMessage(
+        other: ChatUser,
+        text: String,
+        share: SharedItem?,
+        replyTo: ChatReply?,
+        image: Map<String, Any>?,
+        preview: String?,
+    ) {
         val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
         val chatId = chatIdOf(me.uid, other.uid)
         val messageId = root.child("chats").child(chatId).child("messages").push().key ?: error("no id")
@@ -306,6 +352,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             put("from", me.uid)
             put("text", text)
             put("at", ServerValue.TIMESTAMP)
+            if (replyTo != null) put("replyTo", mapOf("id" to replyTo.id, "from" to replyTo.from, "text" to replyTo.text.take(PREVIEW_LENGTH)))
+            if (image != null) put("image", image)
             if (share != null) {
                 put(
                     "share",
@@ -319,12 +367,15 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 )
             }
         }
-        val preview = text.ifBlank { share?.let { (if (it.kind == ShareKind.SONG) "🎵 " else "🎬 ") + it.title }.orEmpty() }.take(PREVIEW_LENGTH)
+        val shown = preview ?: text.ifBlank { share?.let { (if (it.kind == ShareKind.SONG) "🎵 " else "🎬 ") + it.title }.orEmpty() }
+        val preview = shown.take(PREVIEW_LENGTH)
         val mine = "userChats/${me.uid}/$chatId"
         val theirs = "userChats/${other.uid}/$chatId"
         val updates = mapOf<String, Any?>(
             "chats/$chatId/messages/$messageId" to message,
             "chats/$chatId/read/${me.uid}" to ServerValue.TIMESTAMP,
+            // Sent: no longer typing.
+            "typing/$chatId/${me.uid}" to null,
             "$mine/other" to other.uid,
             "$mine/name" to other.name,
             "$mine/username" to other.username,
@@ -340,11 +391,54 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             "$theirs/lastText" to preview,
             "$theirs/lastAt" to ServerValue.TIMESTAMP,
             "$theirs/lastFrom" to me.uid,
+            // The push to the other person's phones (sent by QMusic's server, see server/qmusic-push).
+            "notify/${root.child("notify").push().key}" to mapOf(
+                "from" to me.uid,
+                "to" to other.uid,
+                "chatId" to chatId,
+                "type" to "chat",
+                "body" to preview,
+                "at" to ServerValue.TIMESTAMP,
+            ),
         )
         // Not awaited: without a connection it waits on the phone (shown with a clock) and goes when there is one.
         pendingIds.update { it + messageId }
         root.updateChildren(updates).addOnCompleteListener { pendingIds.update { it - messageId } }
-        Unit
+    }
+
+    override suspend fun sendImage(other: ChatUser, image: PickedImage, caption: String, replyTo: ChatReply?): Result<Unit> = runCatching {
+        val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
+        val chatId = chatIdOf(me.uid, other.uid)
+        val mediaId = root.child("media").child(chatId).push().key ?: error("no id")
+        val data = android.util.Base64.encodeToString(image.jpeg, android.util.Base64.NO_WRAP)
+        require(data.length < MEDIA_MAX_CHARS) { "photo too large" }
+        // Kept here at once, so our own photo shows without downloading it back.
+        imageCache.put("$chatId/$mediaId", image.jpeg)
+        root.child("media").child(chatId).child(mediaId).setValue(mapOf("data" to data, "mime" to "image/jpeg")).await()
+        sendMessage(
+            other = other,
+            text = caption,
+            share = null,
+            replyTo = replyTo,
+            image = mapOf("id" to mediaId, "w" to image.width, "h" to image.height, "thumb" to image.thumb),
+            preview = if (caption.isBlank()) "📷" else "📷 $caption",
+        )
+    }
+
+    /** Photos already fetched: memory first, then the app's cache folder. */
+    private val imageCache = android.util.LruCache<String, ByteArray>(24)
+
+    override suspend fun imageBytes(chatId: String, id: String): ByteArray? {
+        val key = "$chatId/$id"
+        imageCache.get(key)?.let { return it }
+        val file = java.io.File(java.io.File(app.cacheDir, "chat_media").apply { mkdirs() }, key.replace('/', '_') + ".jpg")
+        if (file.exists()) return file.readBytes().also { imageCache.put(key, it) }
+        val snap = runCatching { root.child("media").child(chatId).child(id).get().await() }.getOrNull() ?: return null
+        val data = snap.child("data").getValue(String::class.java) ?: return null
+        val bytes = runCatching { android.util.Base64.decode(data, android.util.Base64.DEFAULT) }.getOrNull() ?: return null
+        runCatching { file.writeBytes(bytes) }
+        imageCache.put(key, bytes)
+        return bytes
     }
 
     override suspend fun markRead(chatId: String) {
@@ -360,6 +454,99 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     override suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit> = runCatching {
         root.child("chats").child(chatId).child("messages").child(messageId).removeValue()
         Unit
+    }
+
+    // ------------------------------------------------------------------ online, typing, reactions
+
+    private var presenceListener: ValueEventListener? = null
+
+    /**
+     * Online while the app is connected: the database itself marks the person offline (with the time) when the
+     * connection drops, even if the phone dies or the app is killed.
+     */
+    private fun trackPresence(uid: String?) {
+        val connected = db.getReference(".info/connected")
+        presenceListener?.let { connected.removeEventListener(it) }
+        presenceListener = null
+        if (uid == null) return
+        val ref = root.child("presence").child(uid)
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snap: DataSnapshot) {
+                if (snap.getValue(Boolean::class.java) != true) return
+                ref.onDisconnect().setValue(mapOf("online" to false, "lastSeen" to ServerValue.TIMESTAMP))
+                ref.setValue(mapOf("online" to true, "lastSeen" to ServerValue.TIMESTAMP))
+            }
+
+            override fun onCancelled(error: DatabaseError) {}
+        }
+        connected.addValueEventListener(listener)
+        presenceListener = listener
+    }
+
+    override fun presence(uid: String): Flow<Presence?> = callbackFlow {
+        val job = launch {
+            listen(root.child("presence").child(uid)).collect { snap ->
+                trySend(
+                    if (!snap.exists()) null else Presence(
+                        online = snap.child("online").getValue(Boolean::class.java) == true,
+                        lastSeen = snap.child("lastSeen").getValue(Long::class.java) ?: 0L,
+                    ),
+                )
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override fun assist(chatId: String): Flow<ClaudeAssist?> = callbackFlow {
+        val job = launch {
+            listen(root.child("assist").child(chatId)).collect { snap ->
+                val target = snap.child("target").getValue(String::class.java)
+                val phase = snap.child("phase").getValue(String::class.java)
+                trySend(if (target != null && phase != null) ClaudeAssist(target, phase) else null)
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override fun typing(chatId: String, otherUid: String): Flow<Boolean> = callbackFlow {
+        val job = launch {
+            listen(root.child("typing").child(chatId).child(otherUid)).collect { snap ->
+                // A mark older than a few seconds is from a phone that went away mid-word.
+                val at = snap.getValue(Long::class.java)
+                trySend(at != null && System.currentTimeMillis() - at < TYPING_FRESH_MS)
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override suspend fun setTyping(chatId: String, typing: Boolean) {
+        val uid = auth.currentUser?.uid ?: return
+        val ref = root.child("typing").child(chatId).child(uid)
+        if (typing) {
+            ref.onDisconnect().removeValue()
+            ref.setValue(ServerValue.TIMESTAMP)
+        } else {
+            ref.removeValue()
+        }
+    }
+
+    override fun reactions(chatId: String): Flow<Map<String, Map<String, String>>> = callbackFlow {
+        val job = launch {
+            listen(root.child("chats").child(chatId).child("reactions")).collect { snap ->
+                trySend(
+                    snap.children.associate { message ->
+                        message.key.orEmpty() to message.children.mapNotNull { r -> r.getValue(String::class.java)?.let { (r.key ?: "") to it } }.toMap()
+                    },
+                )
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override suspend fun react(chatId: String, messageId: String, emoji: String?) {
+        val uid = auth.currentUser?.uid ?: return
+        val ref = root.child("chats").child(chatId).child("reactions").child(messageId).child(uid)
+        if (emoji == null) ref.removeValue() else ref.setValue(emoji)
     }
 
     // ------------------------------------------------------------------ blocking
@@ -422,10 +609,19 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         auth.signOut()
     }
 
+    // Last, so that everything above (the calls included) exists when the first sign-in state arrives.
+    init {
+        auth.addAuthStateListener { onUser(it.currentUser) }
+    }
+
     companion object {
         const val SETUP_NEEDED = "setup"
         private const val MESSAGES_SHOWN = 300
         private const val PREVIEW_LENGTH = 200
+
+        /** A photo as base64 must stay under this (the rules allow 1.5 MB). */
+        private const val MEDIA_MAX_CHARS = 1_450_000
+        private const val TYPING_FRESH_MS = 8_000L
 
         /** Where the database is when the config file does not name one (created in Belgium, europe-west1). */
         private const val DATABASE_URL = "https://qmusic-2552b-default-rtdb.europe-west1.firebasedatabase.app"

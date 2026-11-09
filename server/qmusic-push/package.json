@@ -1,0 +1,8 @@
+{
+  "name": "qmusic-push",
+  "private": true,
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^12.7.0"
+  }
+}

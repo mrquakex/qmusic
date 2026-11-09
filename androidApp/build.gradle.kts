@@ -31,6 +31,12 @@ android {
         versionName = providers.gradleProperty("qmusic.versionName").get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Phones are ARM; x86_64 only for a build meant for the PC's emulator (-Pqmusic.emulator=true). The calls'
+        // WebRTC library is ~12 MB per kind, so the others are left out.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            if (providers.gradleProperty("qmusic.emulator").orNull == "true") abiFilters += "x86_64"
+        }
         buildConfigField("String", "LASTFM_KEY", "\"${localProperties.getProperty("lastfm.key", "")}\"")
         buildConfigField("String", "LASTFM_SECRET", "\"${localProperties.getProperty("lastfm.secret", "")}\"")
     }
@@ -50,6 +56,11 @@ android {
         debug {
             applicationIdSuffix = ".debug"
         }
+    }
+
+    // Native libraries are kept compressed in the APK: a smaller download for the in-app update.
+    packaging {
+        jniLibs.useLegacyPackaging = true
     }
 
     compileOptions {

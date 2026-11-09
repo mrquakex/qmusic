@@ -17,7 +17,9 @@
     "userChats": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
-        ".indexOn": ["lastAt"],
+        ".indexOn": [
+          "lastAt"
+        ],
         "$chatId": {
           ".write": "auth != null && $chatId.matches(/^[A-Za-z0-9]+_[A-Za-z0-9]+$/) && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) && ($chatId.beginsWith($uid + '_') || $chatId.endsWith('_' + $uid)) && (auth.uid === $uid || root.child('blocked').child($uid).child(auth.uid).val() !== true)",
           "read": {
@@ -30,7 +32,10 @@
       "$chatId": {
         ".read": "auth != null && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid))",
         "messages": {
-          ".indexOn": ["at", "from"],
+          ".indexOn": [
+            "at",
+            "from"
+          ],
           "$messageId": {
             ".write": "auth != null && $chatId.matches(/^[A-Za-z0-9]+_[A-Za-z0-9]+$/) && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) && ((!data.exists() && newData.child('from').val() === auth.uid && root.child('blocked').child($chatId.replace(auth.uid, '').replace('_', '')).child(auth.uid).val() !== true) || (data.exists() && !newData.exists() && data.child('from').val() === auth.uid))",
             ".validate": "!newData.exists() || (newData.child('text').isString() && newData.child('text').val().length <= 4000 && newData.child('at').val() === now)"
@@ -39,6 +44,14 @@
         "read": {
           "$uid": {
             ".write": "auth != null && auth.uid === $uid && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid))"
+          }
+        },
+        "reactions": {
+          "$messageId": {
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid))",
+              ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 8)"
+            }
           }
         }
       }
@@ -53,6 +66,55 @@
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "notify": {
+      "$id": {
+        ".write": "auth != null && !data.exists() && newData.child('from').val() === auth.uid",
+        ".validate": "newData.hasChildren(['from', 'to', 'chatId', 'type', 'at']) && newData.child('at').val() === now && newData.child('to').isString() && newData.child('chatId').isString() && (newData.child('type').val() === 'chat' || newData.child('type').val() === 'call')"
+      }
+    },
+    "turn": {
+      ".read": "auth != null"
+    },
+    "calls": {
+      "$chatId": {
+        ".read": "auth != null && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid))",
+        ".write": "auth != null && $chatId.matches(/^[A-Za-z0-9]+_[A-Za-z0-9]+$/) && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid))"
+      }
+    },
+    "incomingCall": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && (auth.uid === $uid || (newData.exists() && newData.child('from').val() === auth.uid && root.child('blocked').child($uid).child(auth.uid).val() !== true) || (!newData.exists() && data.child('from').val() === auth.uid))"
+      }
+    },
+    "presence": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "typing": {
+      "$chatId": {
+        ".read": "auth != null && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid))",
+        "$uid": {
+          ".write": "auth != null && auth.uid === $uid && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid))"
+        }
+      }
+    },
+    "media": {
+      "$chatId": {
+        ".read": "auth != null && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid))",
+        "$id": {
+          ".write": "auth != null && !data.exists() && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid))",
+          ".validate": "newData.hasChildren(['data', 'mime']) && newData.child('data').isString() && newData.child('data').val().length < 1500000 && newData.child('mime').val() === 'image/jpeg'"
+        }
+      }
+    },
+    "assist": {
+      "$chatId": {
+        ".read": "auth != null && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid))"
       }
     }
   }

@@ -27,6 +27,24 @@ object ChatPush {
     private const val EXTRA_USERNAME = "chat_username"
     private const val EXTRA_PHOTO = "chat_photo"
 
+    /** A call's push: the app wakes and hears the call itself (and rings); a cancelled call stops ringing. */
+    fun onCall(context: Context, data: Map<String, String>) {
+        if (data["action"] == "cancel") {
+            CallNotifications.cancelIncoming(context)
+            return
+        }
+        // Rings at once from what the push carries; the app, woken, takes the call over from there.
+        val from = data["from"]
+        if (from != null && !com.qmusic.ui.chat.CallHooks.appVisible) {
+            CallNotifications.showIncoming(
+                context,
+                ChatUser(from, data["name"].orEmpty().ifBlank { "QMusic" }, data["username"].orEmpty(), data["photo"]?.ifBlank { null }),
+                data["video"] == "1",
+            )
+        }
+        com.qmusic.ui.chat.ChatCallActions.wake(context)
+    }
+
     fun notify(context: Context, data: Map<String, String>) {
         val chatId = data["chatId"] ?: return
         val from = data["from"] ?: return

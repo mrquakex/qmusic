@@ -46,3 +46,7 @@
 
 # Named only in the manifest (cast options meta-data), so R8 cannot see it is used.
 -keep class com.qmusic.app.CastOptionsProvider { *; }
+
+# Calls: WebRTC is called from its native code by name.
+-keep class org.webrtc.** { *; }
+-dontwarn org.webrtc.**

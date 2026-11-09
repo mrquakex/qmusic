@@ -1,0 +1,22 @@
+[Unit]
+Description=QMusic push notifications and calls relay credentials
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qmusic-push
+Group=qmusic-push
+WorkingDirectory=/opt/qmusic-push
+ExecStart=/usr/local/bin/node /opt/qmusic-push/index.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/etc/qmusic
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

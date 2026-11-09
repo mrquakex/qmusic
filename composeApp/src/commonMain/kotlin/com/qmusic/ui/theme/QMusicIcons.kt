@@ -219,6 +219,33 @@ object QMusicIcons {
     /** A speech bubble: the messages section. */
     val Chat: ImageVector = stroked("Chat", "M4 5h16v11H9l-5 4V5z")
 
+    /** A handset: a voice call. */
+    val Phone: ImageVector = stroked(
+        "Phone",
+        "M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z",
+    )
+
+    /** The handset turned down: end the call. */
+    val PhoneEnd: ImageVector = stroked(
+        "PhoneEnd",
+        "M3 14.5c5-5 13-5 18 0l-2.5 2.5-3.5-2v-2.5a10 10 0 0 0-6 0V15l-3.5 2z",
+    )
+
+    /** A camera: a video call, or the camera on. */
+    val Camera: ImageVector = stroked("Camera", "M3 7h12v10H3zM15 10.5l6-3.5v10l-6-3.5")
+
+    /** The camera crossed out. */
+    val CameraOff: ImageVector = stroked("CameraOff", "M3 7h12v10H3zM15 10.5l6-3.5v10l-6-3.5M2 3l20 18")
+
+    /** The microphone crossed out. */
+    val MicOff: ImageVector = stroked(
+        "MicOff",
+        "M9 5a3 3 0 0 1 6 0v6a3 3 0 0 1-6 0zM5 11a7 7 0 0 0 14 0M12 18v3M3 3l18 18",
+    )
+
+    /** Two arrows round: the other camera. */
+    val SwitchCamera: ImageVector = stroked("SwitchCamera", "M4 8a8 8 0 0 1 14-3l2 2M20 16a8 8 0 0 1-14 3l-2-2M20 3v4h-4M4 21v-4h4")
+
     /** A paper plane: send. */
     val Send: ImageVector = stroked("Send", "M4 12L20 4l-5 16-3-7-8-1z", "M12 13l8-9")
 

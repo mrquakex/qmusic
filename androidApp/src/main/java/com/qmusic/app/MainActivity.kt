@@ -80,6 +80,18 @@ class MainActivity : AppCompatActivity() {
         hookRingtones()
         openUpdatesIfAsked(intent)
         ChatPush.openIfAsked(intent)
+        acceptCallIfAsked(intent)
+        // While a call rings or goes on, the app shows over the lock screen and turns the screen on.
+        likeWatcher.launch {
+            while (com.qmusic.ui.chat.CallHooks.state == null) kotlinx.coroutines.delay(500)
+            com.qmusic.ui.chat.CallHooks.state?.collect { call ->
+                val over = call != null && call.phase != com.qmusic.ui.chat.CallPhase.ENDED
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                    setShowWhenLocked(over)
+                    setTurnScreenOn(over)
+                }
+            }
+        }
         // A rotation recreates the activity with the same intent: the link was opened the first time already.
         if (savedInstanceState == null) {
             openLinkIfAny(intent)
@@ -183,6 +195,7 @@ class MainActivity : AppCompatActivity() {
         setIntent(intent)
         openUpdatesIfAsked(intent)
         ChatPush.openIfAsked(intent)
+        acceptCallIfAsked(intent)
         openLinkIfAny(intent)
         openShortcutIfAny(intent)
     }
@@ -223,6 +236,24 @@ class MainActivity : AppCompatActivity() {
             else -> null
         } ?: return
         viewModel?.openLink(text)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        com.qmusic.ui.chat.CallHooks.setVisible(true)
+    }
+
+    override fun onStop() {
+        com.qmusic.ui.chat.CallHooks.setVisible(false)
+        super.onStop()
+    }
+
+    /** The answer button of a ringing call was tapped: the call screen answers as soon as it is up. */
+    private fun acceptCallIfAsked(intent: Intent?) {
+        if (intent?.getBooleanExtra(CallNotifications.EXTRA_ACCEPT, false) != true) return
+        intent.removeExtra(CallNotifications.EXTRA_ACCEPT)
+        CallNotifications.cancelIncoming(this)
+        com.qmusic.ui.chat.CallLaunch.acceptRequested.value = true
     }
 
     /** Tapped the "new version" notification: show Settings with the check already done. */

@@ -36,6 +36,13 @@ class ChatController(
 ) {
     val account: StateFlow<ChatAccount> = backend.account
 
+    /** Voice and video calls (null where the platform has none). */
+    val calls: CallService? = backend.calls
+
+    fun reportError(message: String) {
+        _error.value = message
+    }
+
     private val ready = account.map { it as? ChatAccount.Ready }
 
     private val blockedIds: StateFlow<Set<String>> = ready
@@ -157,7 +164,7 @@ class ChatController(
         scope.launch { runCatching { backend.markRead(id) } }
     }
 
-    fun send(other: ChatUser, text: String, share: SharedItem? = null): Boolean {
+    fun send(other: ChatUser, text: String, share: SharedItem? = null, replyTo: ChatReply? = null): Boolean {
         val body = text.trim()
         if (body.isEmpty() && share == null) return false
         if (body.length > MAX_LENGTH) {
@@ -165,9 +172,54 @@ class ChatController(
             return false
         }
         scope.launch {
-            backend.send(other, body, share).onFailure { e -> if (e !is CancellationException) _error.value = e.message }
+            backend.send(other, body, share, replyTo).onFailure { e -> if (e !is CancellationException) _error.value = e.message }
         }
         return true
+    }
+
+    fun sendImage(other: ChatUser, image: PickedImage, caption: String, replyTo: ChatReply? = null) {
+        scope.launch {
+            backend.sendImage(other, image, caption.trim(), replyTo).onFailure { e -> if (e !is CancellationException) _error.value = e.message }
+        }
+    }
+
+    suspend fun imageBytes(other: ChatUser, id: String): ByteArray? = chatIdWith(other)?.let { backend.imageBytes(it, id) }
+
+    fun presence(other: ChatUser) = backend.presence(other.uid).catch { emit(null) }
+
+    fun assist(other: ChatUser) = chatIdWith(other)?.let { id -> backend.assist(id).catch { emit(null) } } ?: flowOf(null)
+
+    fun typing(other: ChatUser) = chatIdWith(other)?.let { id -> backend.typing(id, other.uid).catch { emit(false) } } ?: flowOf(false)
+
+    private var typingSince = 0L
+    private var typingStop: Job? = null
+
+    /** Called as the person types: tells the other side, at most every few seconds, and stops a while after. */
+    fun onTyping(other: ChatUser, now: Long) {
+        val id = chatIdWith(other) ?: return
+        if (now - typingSince > TYPING_EVERY_MS) {
+            typingSince = now
+            scope.launch { runCatching { backend.setTyping(id, true) } }
+        }
+        typingStop?.cancel()
+        typingStop = scope.launch {
+            delay(TYPING_IDLE_MS)
+            stopTyping(other)
+        }
+    }
+
+    fun stopTyping(other: ChatUser) {
+        val id = chatIdWith(other) ?: return
+        typingSince = 0L
+        typingStop?.cancel()
+        scope.launch { runCatching { backend.setTyping(id, false) } }
+    }
+
+    fun reactions(other: ChatUser) = chatIdWith(other)?.let { id -> backend.reactions(id).catch { emit(emptyMap()) } } ?: flowOf(emptyMap())
+
+    fun react(other: ChatUser, message: ChatMessage, emoji: String?) {
+        val id = chatIdWith(other) ?: return
+        scope.launch { runCatching { backend.react(id, message.id, emoji) } }
     }
 
     fun delete(other: ChatUser, message: ChatMessage) {
@@ -184,6 +236,8 @@ class ChatController(
 
     companion object {
         const val MAX_LENGTH = 4000
+        private const val TYPING_EVERY_MS = 3_000L
+        private const val TYPING_IDLE_MS = 5_000L
         private const val SEARCH_DELAY_MS = 300L
     }
 }

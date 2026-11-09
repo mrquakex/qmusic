@@ -204,6 +204,28 @@ fun QMusicApp(
                 chatOpen = true
                 request.user?.let { chatController.openConversation(it) }
             }
+            // A call (ringing, going on or just over) takes the whole screen, over any section.
+            val callService = chatController?.calls
+            val call by (callService?.state ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
+            if (callService != null && call != null) {
+                val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
+                val askPermissions = com.qmusic.ui.chat.rememberCallPermissions()
+                val acceptAsked by com.qmusic.ui.chat.CallLaunch.acceptRequested.collectAsState()
+                LaunchedEffect(acceptAsked, call?.phase) {
+                    val c = call ?: return@LaunchedEffect
+                    if (acceptAsked && c.phase == com.qmusic.ui.chat.CallPhase.INCOMING) {
+                        com.qmusic.ui.chat.CallLaunch.acceptRequested.value = false
+                        askPermissions(c.video) { granted -> if (granted) callService.accept() else callService.decline() }
+                    }
+                }
+                com.qmusic.ui.chat.CallScreen(
+                    service = callService,
+                    s = chatStrings,
+                    onAccept = { video -> askPermissions(video) { granted -> if (granted) callService.accept() else callService.decline() } },
+                    modifier = modifier,
+                )
+                return@CompositionLocalProvider
+            }
             if (chatOpen && chatController != null) {
                 val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
                 com.qmusic.ui.chat.ChatApp(
@@ -832,6 +854,9 @@ fun QMusicApp(
                             }
                         },
                         dominantTint = desktopDominant,
+                        onOpenVideos = { videosOpen = true },
+                        onOpenChat = if (chatAvailable) ({ chatOpen = true }) else null,
+                        chatUnread = chatUnread,
                     )
 
                     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {

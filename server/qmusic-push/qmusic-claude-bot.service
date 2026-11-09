@@ -1,0 +1,23 @@
+[Unit]
+Description=QMusic: the owner's Claude in the app's messages (Claude Code, no tools)
+After=network-online.target qmusic-push.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qmusic-claude
+Group=qmusic-claude
+SupplementaryGroups=qmusic-push
+Environment=HOME=/var/lib/qmusic-claude
+WorkingDirectory=/var/lib/qmusic-claude
+ExecStart=/usr/local/bin/node /opt/qmusic-push/claude-bot.js
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/qmusic-claude
+PrivateTmp=true
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

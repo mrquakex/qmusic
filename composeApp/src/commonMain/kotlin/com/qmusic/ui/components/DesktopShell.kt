@@ -13,6 +13,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -142,6 +143,11 @@ fun DesktopTopNavBar(
     onAccountClick: () -> Unit,
     dominantTint: Color?,
     modifier: Modifier = Modifier,
+    /** QVideo (on tablets; the phone has it in the bottom bar). */
+    onOpenVideos: (() -> Unit)? = null,
+    /** The messages, with the number of conversations not read. */
+    onOpenChat: (() -> Unit)? = null,
+    chatUnread: Int = 0,
 ) {
     val s = LocalStrings.current
     val windowActions = LocalDesktopWindowActions.current
@@ -261,6 +267,31 @@ fun DesktopTopNavBar(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 CastButton(modifier = Modifier.size(40.dp))
+                if (onOpenVideos != null) {
+                    IconButton(onClick = onOpenVideos, modifier = Modifier.size(40.dp)) {
+                        Icon(QMusicIcons.VideoPlay, contentDescription = "QVideo", tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(20.dp))
+                    }
+                }
+                if (onOpenChat != null) {
+                    IconButton(onClick = onOpenChat, modifier = Modifier.size(40.dp)) {
+                        Box {
+                            Icon(QMusicIcons.Chat, contentDescription = null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(20.dp))
+                            if (chatUnread > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .offset(x = 6.dp, y = (-6).dp)
+                                        .size(14.dp)
+                                        .clip(androidx.compose.foundation.shape.CircleShape)
+                                        .background(Color.White),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(if (chatUnread > 9) "9+" else chatUnread.toString(), color = Color.Black, fontSize = 9.sp)
+                                }
+                            }
+                        }
+                    }
+                }
                 IconButton(onClick = onOpenStats, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = QMusicIcons.Stats,

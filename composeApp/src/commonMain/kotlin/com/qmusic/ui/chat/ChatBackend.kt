@@ -23,10 +23,46 @@ data class SharedItem(
     val thumbnail: String? = null,
 )
 
+/**
+ * A photo in a conversation: its size, and a tiny blurred preview (base64 JPEG, ~1 KB) that shows at once; the photo
+ * itself ([id] under media/) is fetched when it is shown.
+ */
+data class ChatImage(val id: String, val width: Int, val height: Int, val thumb: String)
+
+/** A photo picked to send: already shrunk and compressed on the phone. */
+class PickedImage(val jpeg: ByteArray, val width: Int, val height: Int, val thumb: String)
+
+/** The uid of the owner's Claude (see server/qmusic-push/claude-bot.js). */
+const val CLAUDE_BOT_UID = "claudebot"
+
+/** The one person whose Claude it is: only they can call it into a conversation. */
+const val CLAUDE_OWNER_UID = "2hxOw0dRcwUwsW7N6ogH4fRcqXo1"
+
+/** A message that calls Claude into a conversation: it starts with "claude" or "@claude". */
+fun callsClaude(text: String): Boolean = Regex("^\\s*@?claude\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)
+
+/** Claude at work on a message: [phase] is looking (at a photo), thinking or writing. */
+data class ClaudeAssist(val target: String, val phase: String)
+
+/** The message a message answers: shown quoted above it. */
+data class ChatReply(val id: String, val from: String, val text: String)
+
+/** Whether someone has the app open now, and when they last had. */
+data class Presence(val online: Boolean, val lastSeen: Long)
+
+/** The reactions people can put on a message. */
+val REACTIONS = listOf("❤️", "😂", "👍", "😮", "😢", "🔥")
+
 data class ChatMessage(
     val id: String,
     val from: String,
     val text: String,
+    val replyTo: ChatReply? = null,
+    val image: ChatImage? = null,
+    /** The model that wrote it ("Claude Sonnet 5.5"), for Claude's answers. */
+    val model: String? = null,
+    /** Still being written (Claude's answer as it streams in). */
+    val streaming: Boolean = false,
     /** When the server took it, in milliseconds; the phone's own time while it is still on its way. */
     val at: Long,
     val share: SharedItem? = null,
@@ -90,7 +126,7 @@ interface ChatBackend {
     /** Until when [chatId]'s other member has read (updated live). */
     fun otherReadAt(chatId: String, otherUid: String): Flow<Long>
 
-    suspend fun send(other: ChatUser, text: String, share: SharedItem?): Result<Unit>
+    suspend fun send(other: ChatUser, text: String, share: SharedItem?, replyTo: ChatReply?): Result<Unit>
     suspend fun markRead(chatId: String)
     suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit>
 
@@ -100,6 +136,32 @@ interface ChatBackend {
 
     /** Removes the person's profile, @username and every message they sent. */
     suspend fun deleteAccount(): Result<Unit>
+
+    /** Sends a photo (with an optional caption). */
+    suspend fun sendImage(other: ChatUser, image: PickedImage, caption: String, replyTo: ChatReply?): Result<Unit> =
+        Result.failure(UnsupportedOperationException())
+
+    /** The photo [id] of [chatId] (kept on the phone after the first time). */
+    suspend fun imageBytes(chatId: String, id: String): ByteArray? = null
+
+    /** What Claude is doing in [chatId] right now (null when nothing). */
+    fun assist(chatId: String): Flow<ClaudeAssist?> = kotlinx.coroutines.flow.flowOf(null)
+
+    /** Whether [uid] is online, and since when they are not. */
+    fun presence(uid: String): Flow<Presence?> = kotlinx.coroutines.flow.flowOf(null)
+
+    /** The other person is typing in [chatId]. */
+    fun typing(chatId: String, otherUid: String): Flow<Boolean> = kotlinx.coroutines.flow.flowOf(false)
+    suspend fun setTyping(chatId: String, typing: Boolean) {}
+
+    /** The reactions of a conversation: message id → (person → emoji). */
+    fun reactions(chatId: String): Flow<Map<String, Map<String, String>>> = kotlinx.coroutines.flow.flowOf(emptyMap())
+
+    /** Puts [emoji] on a message (null takes ours away). */
+    suspend fun react(chatId: String, messageId: String, emoji: String?) {}
+
+    /** Voice and video calls, where this platform has them. */
+    val calls: CallService? get() = null
 }
 
 /** A conversation's id: both people's ids in order, so each pair has exactly one. */

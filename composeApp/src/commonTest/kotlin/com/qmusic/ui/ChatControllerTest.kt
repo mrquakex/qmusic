@@ -48,7 +48,7 @@ private class FakeChat : ChatBackend {
     override fun threads(): Flow<List<ChatThread>> = threadList
     override fun messages(chatId: String): Flow<List<ChatMessage>> = flowOf(emptyList())
     override fun otherReadAt(chatId: String, otherUid: String): Flow<Long> = flowOf(0L)
-    override suspend fun send(other: ChatUser, text: String, share: SharedItem?): Result<Unit> {
+    override suspend fun send(other: ChatUser, text: String, share: SharedItem?, replyTo: com.qmusic.ui.chat.ChatReply?): Result<Unit> {
         sent += Triple(other, text, share)
         return Result.success(Unit)
     }
