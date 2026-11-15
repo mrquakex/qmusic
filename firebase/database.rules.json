@@ -359,6 +359,19 @@
           ".write": "auth != null && auth.uid === $uid && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))"
         }
       }
+    },
+    "tvCodes": {
+      "$code": {
+        ".read": "$code.matches(/^[0-9]{6}$/)",
+        ".write": "$code.matches(/^[0-9]{6}$/) && (!data.exists() || !newData.exists() || data.child('at').val() < now - 900000)",
+        ".validate": "!newData.exists() || (newData.child('s').isString() && newData.child('s').val().matches(/^[0-9a-f]{32}$/) && newData.child('n').isString() && newData.child('n').val().length <= 80)"
+      }
+    },
+    "tvs": {
+      "$tv": {
+        ".read": "$tv.matches(/^[0-9a-f]{32}$/)",
+        ".write": "$tv.matches(/^[0-9a-f]{32}$/)"
+      }
     }
   }
 }

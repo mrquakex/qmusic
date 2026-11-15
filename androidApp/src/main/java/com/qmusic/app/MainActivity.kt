@@ -1,5 +1,8 @@
 package com.qmusic.app
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.layout.fillMaxSize
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -103,6 +106,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         CastBridge.init(this)
+        // A TV linked by code: on a TV, Qeyf waits for a phone; on a phone, it plays on linked TVs.
+        com.qmusic.ui.tv.TvAndroid.init(this)
 
         // The heart in the playback notification: shows and toggles the like of the playing song.
         MediaActions.onToggleLike = { viewModel.currentTrack.value?.let(viewModel::toggleFavorite) }
@@ -145,11 +150,44 @@ class MainActivity : AppCompatActivity() {
         }
 
         setContent {
-            QMusicApp(viewModel = viewModel)
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
+                QMusicApp(viewModel = viewModel)
+                val language by container.settings.language.collectAsState()
+                com.qmusic.ui.tv.TvOverlay(english = language == "en")
+            }
         }
     }
 
     private var viewModel: MainViewModel? = null
+
+    /** A remote's key used for a TV's playing (its release is not passed on either). */
+    private var tvKeyHeld = -1
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (com.qmusic.ui.tv.TvScreen.isTv) {
+            if (event.action == android.view.KeyEvent.ACTION_UP && event.keyCode == tvKeyHeld) {
+                tvKeyHeld = -1
+                return true
+            }
+            if (event.action == android.view.KeyEvent.ACTION_DOWN) {
+                val key = when (event.keyCode) {
+                    android.view.KeyEvent.KEYCODE_DPAD_CENTER, android.view.KeyEvent.KEYCODE_ENTER, android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> com.qmusic.ui.tv.TvKey.CENTER
+                    android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, android.view.KeyEvent.KEYCODE_MEDIA_PLAY, android.view.KeyEvent.KEYCODE_MEDIA_PAUSE -> com.qmusic.ui.tv.TvKey.PLAY_PAUSE
+                    android.view.KeyEvent.KEYCODE_DPAD_LEFT, android.view.KeyEvent.KEYCODE_MEDIA_REWIND -> com.qmusic.ui.tv.TvKey.LEFT
+                    android.view.KeyEvent.KEYCODE_DPAD_RIGHT, android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> com.qmusic.ui.tv.TvKey.RIGHT
+                    android.view.KeyEvent.KEYCODE_MEDIA_NEXT -> com.qmusic.ui.tv.TvKey.NEXT
+                    android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS -> com.qmusic.ui.tv.TvKey.PREVIOUS
+                    android.view.KeyEvent.KEYCODE_BACK -> com.qmusic.ui.tv.TvKey.BACK
+                    else -> null
+                }
+                if (key != null && com.qmusic.ui.tv.TvScreen.onKey(key)) {
+                    tvKeyHeld = event.keyCode
+                    return true
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
 
     /** A video that is playing shrinks into a floating window when the person leaves the app. */
     override fun onUserLeaveHint() {

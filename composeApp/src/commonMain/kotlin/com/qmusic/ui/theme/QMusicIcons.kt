@@ -50,6 +50,9 @@ object QMusicIcons {
             }
         }.build()
 
+    /** A television, for playing on a TV. */
+    val Tv: ImageVector = stroked("Tv", "M3.5 5.5h17v11h-17z", "M8.5 20h7", "M12 16.5V20")
+
     val Play: ImageVector = filled(
         "Play",
         "M7.5 4.8a1.8 1.8 0 0 1 2.7-1.5l10.2 6.2a1.8 1.8 0 0 1 0 3l-10.2 6.2a1.8 1.8 0 0 1-2.7-1.5V4.8z",

@@ -134,6 +134,9 @@ fun QMusicApp(
             .forService(accountMode == com.qmusic.settings.AccountMode.SPOTIFY)
 
         CompositionLocalProvider(LocalStrings provides strings) {
+            if (com.qmusic.ui.tv.TvScreen.isTv && accountMode == com.qmusic.settings.AccountMode.UNSET) {
+                LaunchedEffect(Unit) { viewModel.chooseAccount(com.qmusic.settings.AccountMode.NONE) }
+            }
             // First launch: which account brings the music (the sign-in pages open over it).
             if (accountMode == com.qmusic.settings.AccountMode.UNSET) {
                 val ytLogin by viewModel.showYouTubeLoginDialog.collectAsState()
@@ -220,10 +223,9 @@ fun QMusicApp(
                 }
             }
             // Listening / watching together: the music player and the video player as the session sees them.
-            LaunchedEffect(chatController) {
-                val controller = chatController ?: return@LaunchedEffect
-                if (controller.together != null) return@LaunchedEffect
-                val music = object : com.qmusic.ui.chat.TogetherPlayer {
+            // (They are the TV's players too, when a phone plays on it: see TvScreen.)
+            val togetherMusic = remember {
+                object : com.qmusic.ui.chat.TogetherPlayer {
                     override fun current() = viewModel.currentTrack.value?.let { song ->
                         com.qmusic.ui.chat.SharedItem(com.qmusic.ui.chat.ShareKind.SONG, song.id, song.title, song.artists.joinToString(", ") { it.name }, song.thumbnail)
                     }
@@ -245,7 +247,9 @@ fun QMusicApp(
                     override fun play() = viewModel.resume()
                     override fun pause() = viewModel.pause()
                 }
-                val video = object : com.qmusic.ui.chat.TogetherPlayer {
+            }
+            val togetherVideo = remember {
+                object : com.qmusic.ui.chat.TogetherPlayer {
                     // A video asked for before its player was ready: where to put it once it is.
                     var waiting: Triple<String, Long, Boolean>? = null
                     val playback get() = com.qmusic.ui.chat.TogetherVideo.playback
@@ -274,6 +278,48 @@ fun QMusicApp(
                         if (!play) p.pause()
                     }
                 }
+            }
+            val tvScope = rememberCoroutineScope()
+            androidx.compose.runtime.SideEffect {
+                com.qmusic.ui.tv.TvLink.english = language == "en"
+                val tv = com.qmusic.ui.tv.TvScreen
+                tv.music = togetherMusic
+                tv.video = togetherVideo
+                tv.musicIndex = { viewModel.queueIndex.value }
+                tv.musicDuration = { viewModel.duration.value }
+                tv.videoDuration = { com.qmusic.ui.chat.TogetherVideo.playback?.durationMs?.value ?: 0L }
+                tv.jump = { index -> viewModel.skipToQueueIndex(index) }
+                tv.next = { viewModel.next() }
+                tv.previous = { viewModel.previous() }
+                tv.playQueue = { songs, index, positionMs ->
+                    chatOpen = false
+                    videosOpen = false
+                    viewModel.playerController.playQueue(songs, index)
+                    if (positionMs > 1_500) {
+                        tvScope.launch {
+                            // Once the song is under way, on to where the phone was in it.
+                            kotlinx.coroutines.withTimeoutOrNull(20_000) {
+                                viewModel.currentTrack.first { it?.id == songs[index].id }
+                                viewModel.isPlaying.first { it }
+                            } ?: return@launch
+                            viewModel.seekTo(positionMs)
+                        }
+                    }
+                }
+            }
+            // On a TV, a video sent from a phone fills the screen.
+            if (com.qmusic.ui.tv.TvScreen.isTv) {
+                val tvMode by com.qmusic.ui.tv.TvScreen.mode.collectAsState()
+                val tvWatch by videosController.watch.collectAsState()
+                LaunchedEffect(tvMode, tvWatch?.video?.id) {
+                    if (tvMode == com.qmusic.ui.tv.TvMode.VIDEO && tvWatch != null) videosController.setFullscreen(true)
+                }
+            }
+            LaunchedEffect(chatController) {
+                val controller = chatController ?: return@LaunchedEffect
+                if (controller.together != null) return@LaunchedEffect
+                val music = togetherMusic
+                val video = togetherVideo
                 controller.together = com.qmusic.ui.chat.TogetherController(
                     backend = chatBackend!!,
                     scope = chatScope,

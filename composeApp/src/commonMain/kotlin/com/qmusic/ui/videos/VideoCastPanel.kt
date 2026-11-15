@@ -35,7 +35,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import com.qmusic.ui.CastButton
 import com.qmusic.ui.VideoCast
 import com.qmusic.ui.VideoCastState
 import com.qmusic.ui.theme.QMusicIcons
@@ -63,7 +62,7 @@ internal fun CastPanel(w: WatchState, state: VideoCastState?, s: VideoStrings, c
         Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { controller.pop() }) { Icon(QMusicIcons.ChevronDown, null, tint = Color.White, modifier = Modifier.size(28.dp)) }
             Box(Modifier.weight(1f))
-            CastButton(Modifier.size(44.dp))
+            com.qmusic.ui.tv.TvButton(modifier = Modifier.size(44.dp))
         }
         Column(Modifier.align(Alignment.Center).padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(if (state == null) words.opening else words.onTv, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)

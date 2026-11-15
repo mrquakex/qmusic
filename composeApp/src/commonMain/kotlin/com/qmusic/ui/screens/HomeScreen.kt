@@ -176,7 +176,7 @@ fun HomeScreen(
                     ) {
                         QMusicHeaderLogo(modifier = Modifier.weight(1f))
                         // As on YouTube Music: cast and search sit at the right of the logo
-                        com.qmusic.ui.CastButton(modifier = Modifier.size(48.dp))
+                        com.qmusic.ui.tv.TvButton(tint = Ink, modifier = Modifier.size(48.dp))
                         if (onChatClick != null) {
                             IconButton(onClick = onChatClick) {
                                 Box {

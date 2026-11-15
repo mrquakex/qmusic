@@ -16,6 +16,7 @@ import com.qmusic.engine.models.SongItem
 import com.qmusic.player.PlayerHolder
 import com.qmusic.ui.VideoCast
 import com.qmusic.ui.VideoCastState
+import com.qmusic.ui.tv.TvSender
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
@@ -59,16 +60,17 @@ object CastBridge : SessionAvailabilityListener {
                     }
                 })
             }
-        VideoCast.cast = { id, title, thumb, start -> castVideo(id, title, thumb, start) }
-        VideoCast.playPause = { cast?.let { if (it.isPlaying) it.pause() else it.play() } }
-        VideoCast.seekTo = { ms -> cast?.seekTo(ms) }
-        VideoCast.stop = { stopVideo() }
+        // A TV linked by code (see TvSender) takes these while it is in use; else the Chromecast.
+        VideoCast.cast = { id, title, thumb, start -> if (TvSender.active) TvSender.castVideo(id, title, thumb, start) else castVideo(id, title, thumb, start) }
+        VideoCast.playPause = { if (TvSender.active) TvSender.playPause() else cast?.let { if (it.isPlaying) it.pause() else it.play() } }
+        VideoCast.seekTo = { ms -> if (TvSender.active) TvSender.seekTo(ms) else cast?.seekTo(ms) }
+        VideoCast.stop = { if (TvSender.active) TvSender.stopVideo() else stopVideo() }
         hookPlayer()
     }
 
     /** The music player picks a song while casting: it plays on the TV (set again whenever the player is new). */
     private fun hookPlayer() {
-        PlayerHolder.peek()?.onRemotePlayAt = { index -> castFrom(index, 0L) }
+        PlayerHolder.peek()?.onRemotePlayAt = { index -> if (TvSender.active) TvSender.castMusicFrom(index, 0L) else castFrom(index, 0L) }
     }
 
     override fun onCastSessionAvailable() {

@@ -405,23 +405,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                 } else {
                     Box(Modifier.weight(1f))
                 }
-                val tvConnected by com.qmusic.ui.VideoCast.connected.collectAsState()
-                if (tvConnected) {
-                    Text(
-                        if (s == VideoStrings.English) "Play on TV" else "TV'de oynat",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(Color.White.copy(alpha = 0.2f))
-                            .clickable {
-                                com.qmusic.ui.VideoCast.cast?.invoke(w.video.id, w.details?.title ?: w.video.title, w.video.thumbnail, playback.positionMs.value)
-                            }
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                    )
-                }
-                com.qmusic.ui.CastButton(Modifier.size(44.dp))
+                com.qmusic.ui.tv.TvButton(modifier = Modifier.size(44.dp))
                 IconButton(onClick = { sheet = true }) { Icon(QMusicIcons.Settings, x.playerSettings, tint = Color.White, modifier = Modifier.size(22.dp)) }
             }
 
