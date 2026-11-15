@@ -1,5 +1,6 @@
 package com.qmusic.ui.videos
 
+import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -111,11 +112,13 @@ fun WatchPage(
             var height by remember { mutableStateOf(1f) }
             var total by remember { mutableStateOf(0f) }
             val wide = maxWidth >= WIDE_WATCH && maxHeight >= 600.dp
+            // Ambient light: the video's colours glow softly around it, on the dark theme (as on YouTube).
+            val ambient = !com.qmusic.ui.theme.lightTheme
             val player: @Composable () -> Unit = {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color.Black)
+                        .background(if (ambient) Color.Transparent else Color.Black)
                         .statusBarsPadding()
                         .pointerInput(Unit) {
                             detectVerticalDragGestures(
@@ -158,18 +161,60 @@ fun WatchPage(
             if (wide) {
                 // A tablet: the video and what is about it on the left, what comes next down the right.
                 Row(modifier = layer) {
-                    Column(modifier = Modifier.weight(1.7f)) {
-                        player()
-                        WatchDetails(controller, w, s, onShare, onSignIn, seek, showRelated = false)
+                    Box(Modifier.weight(1.7f)) {
+                        if (ambient) AmbientGlow(w.video.thumbnail, Modifier.fillMaxWidth())
+                        Column {
+                            player()
+                            WatchDetails(controller, w, s, onShare, onSignIn, seek, showRelated = false)
+                        }
                     }
                     RelatedColumn(controller, w, s, Modifier.weight(1f).statusBarsPadding())
                 }
             } else {
-                Column(modifier = layer) {
-                    player()
-                    WatchDetails(controller, w, s, onShare, onSignIn, seek, showRelated = true)
+                Box(modifier = layer) {
+                    if (ambient) AmbientGlow(w.video.thumbnail, Modifier.fillMaxWidth())
+                    Column {
+                        player()
+                        WatchDetails(controller, w, s, onShare, onSignIn, seek, showRelated = true)
+                    }
                 }
             }
+        }
+    }
+}
+
+/**
+ * The light of the video around it: its picture, much enlarged and blurred, behind the player and a little below it,
+ * fading into the page. It changes with each video (its own colours).
+ */
+@Composable
+private fun AmbientGlow(picture: String?, modifier: Modifier) {
+    if (picture == null) return
+    val tint = com.qmusic.ui.rememberDominantColor(picture)
+    BoxWithConstraints(modifier) {
+        // The player's height (16:9) and as much again below it, where the glow fades out.
+        val playerHeight = maxWidth * 9f / 16f
+        Box(Modifier.fillMaxWidth().height(playerHeight * 2f)) {
+            AsyncImage(
+                model = picture,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                alpha = 0.55f,
+                modifier = Modifier.fillMaxWidth().height(playerHeight * 1.5f).graphicsLayer { scaleX = 1.3f; scaleY = 1.3f }.blur(70.dp),
+            )
+            tint?.let { c ->
+                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0f to c.copy(alpha = 0.22f), 0.7f to c.copy(alpha = 0.08f), 1f to Color.Transparent)))
+            }
+            // Down into the page's own background.
+            Box(
+                Modifier.fillMaxSize().background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.45f to Color.Transparent,
+                        1f to VideoColors.Background,
+                    ),
+                ),
+            )
         }
     }
 }
@@ -177,6 +222,11 @@ fun WatchPage(
 @Composable
 private fun PlayerBox(w: WatchState, playback: VideoPlayback?, s: VideoStrings, controller: VideosController, fullscreen: Boolean, modifier: Modifier) {
     val fill by controller.fill.collectAsState()
+    val (onTv, tvState) = castingHere(w)
+    if (onTv) {
+        Box(modifier = modifier.background(Color.Black)) { CastPanel(w, tvState, s, controller) }
+        return
+    }
     Box(modifier = modifier.background(Color.Black)) {
         val isPlaying = playback?.isPlaying?.collectAsState()?.value ?: false
         val buffering = playback?.buffering?.collectAsState()?.value ?: false

@@ -162,6 +162,7 @@ fun VideosApp(
             }
         }
     }
+    VideoCastEffect(controller, playback)
     VideoBackgroundEffect(
         active = watch != null,
         title = watch?.details?.title ?: watch?.video?.title,

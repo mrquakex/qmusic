@@ -193,6 +193,10 @@ class YouTube(
     suspend fun resolveVideoSource(videoId: String, maxHeight: Int = 720): Result<VideoSource?> =
         runCatching { extractor?.videoSource(videoId, maxHeight) }
 
+    /** The picture and sound of [videoId] for a TV (Chromecast), up to [maxHeight]. */
+    suspend fun castStreams(videoId: String, maxHeight: Int = 1080): Result<com.qmusic.engine.models.CastStreams?> =
+        runCatching { extractor?.castStreams(videoId, maxHeight) }
+
     /** The small pictures shown over the seek bar while it is held, or null when the video has none. */
     suspend fun previewFrames(videoId: String): Result<com.qmusic.engine.models.PreviewFrames?> =
         runCatching { extractor?.previewFrames(videoId) }

@@ -24,6 +24,9 @@ interface ExtractorStreamResolver {
     /** The video's preview frames (for the seek bar), or null when YouTube has none. */
     suspend fun previewFrames(videoId: String): com.qmusic.engine.models.PreviewFrames? = null
 
+    /** The picture and sound of [videoId] for a TV, up to [maxHeight] (H.264 and AAC, which every TV plays). */
+    suspend fun castStreams(videoId: String, maxHeight: Int): com.qmusic.engine.models.CastStreams? = null
+
     /** Drops any cached stream extraction for [videoId] so the next lookup fetches fresh URLs. */
     fun invalidate(videoId: String) {}
 }

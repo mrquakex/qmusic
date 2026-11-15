@@ -57,6 +57,40 @@ private object PipePipeStreamResolver : ExtractorStreamResolver {
             pickVideoSource(info(videoId), maxHeight)
         }
 
+    override suspend fun castStreams(videoId: String, maxHeight: Int): com.qmusic.engine.models.CastStreams? =
+        withContext(Dispatchers.IO) {
+            check(initialised)
+            val info = info(videoId)
+            // H.264 picture and AAC sound in MP4: what every Chromecast and Android TV plays; the best that fits.
+            val video = info.videoOnlyStreams
+                .filter { it.isUrl && it.height in 1..maxHeight && it.codec?.startsWith("avc1") == true }
+                .mapNotNull { v -> v.itagItem?.let { it to v } }
+                .filter { (item, _) -> item.indexEnd > 0 && item.initEnd > 0 }
+                .maxWithOrNull(compareBy<Pair<dev.maxrave.pipepipe.extractor.services.youtube.ItagItem, dev.maxrave.pipepipe.extractor.stream.VideoStream>>({ it.second.height }, { it.second.fps }, { it.second.bitrate }))
+                ?: return@withContext null
+            val audio = info.audioStreams
+                .filter { it.isUrl && it.format?.mimeType == "audio/mp4" }
+                .mapNotNull { a -> a.itagItem?.let { it to a } }
+                .filter { (item, _) -> item.indexEnd > 0 && item.initEnd > 0 }
+                .maxByOrNull { it.second.averageBitrate }
+                ?: return@withContext null
+            val (vItem, v) = video
+            val (aItem, a) = audio
+            com.qmusic.engine.models.CastStreams(
+                video = com.qmusic.engine.models.CastTrack(
+                    url = v.content, mimeType = "video/mp4", codecs = v.codec ?: "avc1.640028", bitrate = v.bitrate.coerceAtLeast(1),
+                    width = v.width, height = v.height, fps = v.fps,
+                    initStart = vItem.initStart, initEnd = vItem.initEnd, indexStart = vItem.indexStart, indexEnd = vItem.indexEnd,
+                ),
+                audio = com.qmusic.engine.models.CastTrack(
+                    url = a.content, mimeType = "audio/mp4", codecs = a.codec ?: "mp4a.40.2", bitrate = a.averageBitrate.coerceAtLeast(1),
+                    initStart = aItem.initStart, initEnd = aItem.initEnd, indexStart = aItem.indexStart, indexEnd = aItem.indexEnd,
+                ),
+                durationSec = info.duration,
+                title = info.name.orEmpty(),
+            )
+        }
+
     override suspend fun videoQualities(videoId: String): List<VideoQuality> =
         withContext(Dispatchers.IO) {
             check(initialised)
