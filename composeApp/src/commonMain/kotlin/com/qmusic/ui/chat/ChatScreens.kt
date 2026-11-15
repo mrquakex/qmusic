@@ -1124,6 +1124,25 @@ private fun ConversationPage(
                         }
                     }
                 }
+                // Reading further up: a button back to the newest, with how many came meanwhile.
+                val away by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { listState.firstVisibleItemIndex > 3 } }
+                if (!away) newBelow = 0
+                if (away) {
+                    val downScope = androidx.compose.runtime.rememberCoroutineScope()
+                    Box(
+                        Modifier.align(Alignment.BottomEnd).padding(14.dp).size(44.dp).clip(CircleShape).background(DarkSurfaceVariant)
+                            .clickable { downScope.launch { listState.animateScrollToItem(0) }; newBelow = 0 },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(QMusicIcons.ChevronDown, contentDescription = s.scrollDown, tint = Color.White)
+                        if (newBelow > 0) {
+                            Box(
+                                Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp).height(18.dp).widthIn(min = 18.dp).clip(CircleShape).background(TickRead).padding(horizontal = 4.dp),
+                                contentAlignment = Alignment.Center,
+                            ) { Text(if (newBelow > 99) "99+" else newBelow.toString(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                        }
+                    }
+                }
             }
         }
         if (isBlocked) {
