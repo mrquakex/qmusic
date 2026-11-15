@@ -720,6 +720,11 @@ private fun SoundSettings(s: ChatStrings) {
         }
         SettingSwitch(s.soundInChat, s.soundInChatNote, inChat) { sounds.setInChat(it) }
         SettingSwitch(s.soundSmall, s.soundSmallNote, small) { sounds.setSmall(it) }
+        val typing by sounds.typing.collectAsState()
+        SettingSwitch(s.soundTyping, s.soundTypingNote, typing) { on ->
+            sounds.setTyping(on)
+            if (on) sounds.playKey()
+        }
     }
     picking?.let { kind ->
         val current = choices[kind]

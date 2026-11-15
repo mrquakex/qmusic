@@ -97,6 +97,8 @@ internal fun ChatHome(
     onGroupCall: ((ChatUser, Boolean) -> Unit)?,
 ) {
     val tab by controller.tab.collectAsState()
+    // A phone that would miss calls: the setup opens by itself.
+    SetupWizard(s)
     // Back from another tab goes to Chats first, then out.
     PlatformBackHandler(enabled = tab != ChatTab.CHATS) { controller.selectTab(ChatTab.CHATS) }
     Column(Modifier.fillMaxSize().background(BgRoot)) {

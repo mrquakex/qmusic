@@ -414,6 +414,24 @@ data class ChatStrings(
 
     val micSilent: String get() = if (english) "The microphone recorded no sound. Check the microphone permission and that no other app is using it." else "Mikrofon hiç ses almadı. Mikrofon iznini ve başka bir uygulamanın mikrofonu kullanmadığını kontrol et."
 
+    val readinessLockScreen: String get() = if (english) "Show on the lock screen" else "Kilit ekranında göster"
+    val setupTitle: String get() = if (english) "Get calls on this phone" else "Aramaları bu cihazda al"
+    val setupBody: String get() = if (english) "So that calls ring and messages arrive even when Qeyf is closed, this phone needs a few settings. Tap Set up: each page opens by itself; turn on what it shows and come back." else "Qeyf kapalıyken de aramaların çalması ve mesajların gelmesi için bu cihazda birkaç ayar gerekiyor. Hazırla'ya dokun: sayfalar sırayla kendiliğinden açılır; gösterileni aç ve geri dön."
+    val setupStart: String get() = if (english) "Set up" else "Hazırla"
+    val setupLater: String get() = if (english) "Later" else "Sonra"
+    val setupDone: String get() = if (english) "All set. Calls and messages will reach this phone." else "Hazır. Aramalar ve mesajlar bu cihaza ulaşacak."
+    val setupStill: String get() = if (english) "Still off:" else "Hâlâ kapalı:"
+    val setupAgain: String get() = if (english) "Try again" else "Tekrar dene"
+    val setupHintNotifications: String get() = if (english) "Turn notifications on." else "Bildirimleri aç."
+    val setupHintChannels: String get() = if (english) "Turn the message and call notifications on." else "Mesaj ve arama bildirimlerini aç."
+    val setupHintFullScreen: String get() = if (english) "Allow full-screen notifications for Qeyf." else "Qeyf için tam ekran bildirime izin ver."
+    val setupHintBattery: String get() = if (english) "Choose Allow (no battery limits)." else "İzin ver'i seç (pil kısıtlaması yok)."
+    val setupHintAutostart: String get() = if (english) "Find Qeyf and turn autostart on." else "Qeyf'i bul ve otomatik başlatmayı aç."
+    val setupHintLockScreen: String get() = if (english) "Turn on Show on lock screen and Display pop-up windows." else "Kilit ekranında göster ve Açılır pencereleri göster'i aç."
+
+    val soundTyping: String get() = if (english) "Keyboard sound while typing" else "Yazarken klavye sesi"
+    val soundTypingNote: String get() = if (english) "A mechanical key's click for each letter in the message box (silent on silent mode)." else "Mesaj kutusunda her harfte mekanik tuş sesi (sessiz modda çalmaz)."
+
     companion object {
         val Turkish = ChatStrings(
             title = "Mesajlar",

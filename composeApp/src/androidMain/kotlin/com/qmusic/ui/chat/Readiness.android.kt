@@ -65,6 +65,18 @@ private val AUTOSTART: Map<String, List<ComponentName>> = mapOf(
     ),
 )
 
+private fun isXiaomi(): Boolean = (Build.MANUFACTURER + " " + Build.BRAND).lowercase().let { "xiaomi" in it || "redmi" in it || "poco" in it }
+
+/**
+ * One of MIUI's own permissions (10008 autostart, 10020 show on lock screen, 10021 open windows from the background):
+ * true when allowed, false when denied, null when it cannot be read (not MIUI, or the system hides it).
+ */
+private fun miuiAllowed(context: Context, op: Int): Boolean? = runCatching {
+    val ops = context.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+    val check = android.app.AppOpsManager::class.java.getMethod("checkOpNoThrow", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, String::class.java)
+    (check.invoke(ops, op, android.os.Process.myUid(), context.packageName) as Int) == android.app.AppOpsManager.MODE_ALLOWED
+}.getOrNull()
+
 private fun autostartPages(): List<ComponentName> {
     val maker = (Build.MANUFACTURER + " " + Build.BRAND).lowercase()
     return AUTOSTART.entries.firstOrNull { (name, _) -> name in maker }?.value.orEmpty()
@@ -87,9 +99,16 @@ private fun issuesOf(context: Context): List<ReadinessIssue> = buildList {
     // Battery limits (Samsung's above all) hold back pushes to a sleeping phone: calls arrive late or not at all.
     val power = context.getSystemService(Context.POWER_SERVICE) as PowerManager
     if (!power.isIgnoringBatteryOptimizations(context.packageName)) add(ReadinessIssue.BATTERY)
-    // Xiaomi, Oppo, Vivo, Huawei…: their autostart switch cannot be read, so it is asked for until it was opened once.
+    // Xiaomi's switches are read for real; the other makers' cannot be, so those are asked for until opened once.
     val prefs = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE)
-    if (autostartPages().isNotEmpty() && !prefs.getBoolean(KEY_AUTOSTART_DONE, false)) add(ReadinessIssue.AUTOSTART)
+    if (isXiaomi()) {
+        val auto = miuiAllowed(context, 10008)
+        if (auto == false || (auto == null && !prefs.getBoolean(KEY_AUTOSTART_DONE, false))) add(ReadinessIssue.AUTOSTART)
+        // The ringing call fills a locked screen only with these two.
+        if (miuiAllowed(context, 10020) == false || miuiAllowed(context, 10021) == false) add(ReadinessIssue.LOCK_SCREEN)
+    } else if (autostartPages().isNotEmpty() && !prefs.getBoolean(KEY_AUTOSTART_DONE, false)) {
+        add(ReadinessIssue.AUTOSTART)
+    }
 }
 
 @Suppress("DEPRECATION")
@@ -128,6 +147,12 @@ actual fun rememberReadiness(): Readiness {
             ReadinessIssue.BATTERY -> listOf(
                 @Suppress("BatteryLife") Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$pkg")),
                 Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+            )
+            ReadinessIssue.LOCK_SCREEN -> listOf(
+                // MIUI's own page of the app's permissions (lock screen, pop-ups); the app's settings otherwise.
+                Intent("miui.intent.action.APP_PERM_EDITOR").setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity").putExtra("extra_pkgname", pkg),
+                Intent("miui.intent.action.APP_PERM_EDITOR").setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.AppPermissionsEditorActivity").putExtra("extra_pkgname", pkg),
+                details,
             )
             ReadinessIssue.AUTOSTART -> {
                 context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).edit().putBoolean(KEY_AUTOSTART_DONE, true).apply()

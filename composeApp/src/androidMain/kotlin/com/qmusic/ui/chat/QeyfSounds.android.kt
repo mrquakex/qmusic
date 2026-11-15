@@ -25,6 +25,7 @@ object QeyfSounds {
     private const val PREFS = "qmusic_settings"
     private const val KEY_IN_CHAT = "sound_in_chat"
     private const val KEY_SMALL = "sound_small"
+    private const val KEY_TYPING = "sound_typing"
     private const val MESSAGE_PREFIX = "qeyf_msg_"
     private const val RING_PREFIX = "qeyf_ring_"
 
@@ -41,6 +42,8 @@ object QeyfSounds {
     fun small(context: Context) = prefs(context).getBoolean(KEY_SMALL, true)
     fun setInChat(context: Context, on: Boolean) = prefs(context).edit().putBoolean(KEY_IN_CHAT, on).apply()
     fun setSmall(context: Context, on: Boolean) = prefs(context).edit().putBoolean(KEY_SMALL, on).apply()
+    fun typing(context: Context) = prefs(context).getBoolean(KEY_TYPING, true)
+    fun setTyping(context: Context, on: Boolean) = prefs(context).edit().putBoolean(KEY_TYPING, on).apply()
 
     private fun resId(context: Context, file: String): Int = context.resources.getIdentifier(file, "raw", context.packageName)
     private fun fileOf(kind: SoundKind, id: String) = "snd_${kind.file}_$id"
@@ -125,12 +128,24 @@ object QeyfSounds {
 
     private val pendingPlay = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
 
-    private fun playFile(context: Context, file: String, call: Boolean) {
+    private fun playFile(context: Context, file: String, call: Boolean, volume: Float = 1f, rate: Float = 1f) {
         val app = context.applicationContext
         val res = resId(app, file).takeIf { it != 0 } ?: return
         val (p, map) = poolFor(app, call)
         val sample = map.getOrPut(file) { p.load(app, res, 1) }
-        if (synchronized(ready) { sample in ready }) p.play(sample, 1f, 1f, 1, 0, 1f) else pendingPlay[sample] = true
+        if (synchronized(ready) { sample in ready }) p.play(sample, volume, volume, 1, 0, rate) else pendingPlay[sample] = true
+    }
+
+    private var lastKeyAt = 0L
+
+    /** One of five recorded keys, a little louder or softer and higher or lower each time, so it sounds like typing. */
+    fun playKey(context: Context) {
+        if (!typing(context) || !ringerAllows(context)) return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastKeyAt < 30) return
+        lastKeyAt = now
+        val r = kotlin.random.Random
+        playFile(context, "snd_type_" + (1 + r.nextInt(5)), call = false, volume = 0.35f + r.nextFloat() * 0.15f, rate = 0.94f + r.nextFloat() * 0.12f)
     }
 
     /** Silent and vibrate mode keep the app's own little sounds quiet, as the phone's own do. */
@@ -216,6 +231,16 @@ private class AndroidChatSounds(private val context: Context) : ChatSounds {
     override fun preview(kind: SoundKind, id: String) = QeyfSounds.preview(context, kind, id)
     override fun play(kind: SoundKind) = QeyfSounds.playChat(context, kind)
     override fun playSmall(sound: SmallSound) = QeyfSounds.playSmall(context, sound)
+
+    private val _typing = MutableStateFlow(QeyfSounds.typing(context))
+    override val typing: StateFlow<Boolean> = _typing.asStateFlow()
+
+    override fun setTyping(on: Boolean) {
+        QeyfSounds.setTyping(context, on)
+        _typing.value = on
+    }
+
+    override fun playKey() = QeyfSounds.playKey(context)
 }
 
 @Composable

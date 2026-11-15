@@ -399,6 +399,105 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, a: ChatAccou
 
 // ------------------------------------------------------------------ the list
 
+internal fun readinessLabel(issue: ReadinessIssue, s: ChatStrings): String = when (issue) {
+    ReadinessIssue.NOTIFICATIONS -> s.readinessNotifications
+    ReadinessIssue.CHANNELS -> s.readinessChannels
+    ReadinessIssue.FULL_SCREEN -> s.readinessFullScreen
+    ReadinessIssue.BATTERY -> s.readinessBattery
+    ReadinessIssue.AUTOSTART -> s.readinessAutostart
+    ReadinessIssue.LOCK_SCREEN -> s.readinessLockScreen
+}
+
+private fun readinessHint(issue: ReadinessIssue, s: ChatStrings): String = when (issue) {
+    ReadinessIssue.NOTIFICATIONS -> s.setupHintNotifications
+    ReadinessIssue.CHANNELS -> s.setupHintChannels
+    ReadinessIssue.FULL_SCREEN -> s.setupHintFullScreen
+    ReadinessIssue.BATTERY -> s.setupHintBattery
+    ReadinessIssue.AUTOSTART -> s.setupHintAutostart
+    ReadinessIssue.LOCK_SCREEN -> s.setupHintLockScreen
+}
+
+/** Shown once per opening when this phone is not ready: dismissed for the rest of the time the app is open. */
+internal object SetupWizardState {
+    var dismissed = false
+}
+
+/**
+ * The setup, start to end: one button walks through every missing setting. Each page opens by itself; coming back,
+ * the app checks it, and opens the next. What could not be turned on is listed, with a way to try again.
+ */
+@Composable
+internal fun SetupWizard(s: ChatStrings) {
+    val readiness = rememberReadiness()
+    var open by remember { mutableStateOf(!SetupWizardState.dismissed && readiness.issues.isNotEmpty()) }
+    var running by remember { mutableStateOf(false) }
+    var tried by remember { mutableStateOf(setOf<ReadinessIssue>()) }
+    var current by remember { mutableStateOf<ReadinessIssue?>(null) }
+    val issues = readiness.issues
+    // Back from a page (the issues were checked again): the next one not tried yet opens by itself.
+    LaunchedEffect(running, issues) {
+        if (!running) return@LaunchedEffect
+        val next = issues.firstOrNull { it !in tried }
+        if (next == null) {
+            running = false
+            current = null
+            return@LaunchedEffect
+        }
+        current = next
+        kotlinx.coroutines.delay(900)
+        tried = tried + next
+        readiness.fix(next)
+    }
+    if (!open) return
+    androidx.compose.ui.window.Dialog(onDismissRequest = { }) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(DarkSurfaceVariant).padding(22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(QMusicIcons.Phone, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(34.dp))
+            Spacer(Modifier.height(12.dp))
+            Text(s.setupTitle, color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Spacer(Modifier.height(10.dp))
+            when {
+                issues.isEmpty() -> Text(s.setupDone, color = TextSecondary, fontSize = 15.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                running && current != null -> {
+                    Text(readinessLabel(current!!, s), color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(readinessHint(current!!, s), color = TextSecondary, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Spacer(Modifier.height(14.dp))
+                    CircularProgressIndicator(color = Ink, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+                }
+                else -> {
+                    Text(if (tried.isEmpty()) s.setupBody else s.setupStill, color = TextSecondary, fontSize = 14.sp, lineHeight = 20.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Spacer(Modifier.height(12.dp))
+                    issues.forEach { issue ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFFFF5A5F)))
+                            Spacer(Modifier.width(10.dp))
+                            Text(readinessLabel(issue, s), color = TextPrimary, fontSize = 15.sp)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(18.dp))
+            if (issues.isEmpty()) {
+                WhiteButton(s.closeLabel) { open = false; SetupWizardState.dismissed = true }
+            } else if (!running) {
+                WhiteButton(if (tried.isEmpty()) s.setupStart else s.setupAgain) {
+                    tried = emptySet()
+                    running = true
+                }
+                Text(
+                    s.setupLater,
+                    color = TextSecondary,
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(top = 10.dp).clip(RoundedCornerShape(10.dp)).clickable { open = false; SetupWizardState.dismissed = true }.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+        }
+    }
+}
+
 /** What on this phone keeps calls and messages from arriving, each a tap away from its settings page. */
 @Composable
 internal fun ReadinessCard(s: ChatStrings) {
@@ -420,13 +519,7 @@ internal fun ReadinessCard(s: ChatStrings) {
         ) {
             readiness.issues.forEach { issue ->
                 Text(
-                    when (issue) {
-                        ReadinessIssue.NOTIFICATIONS -> s.readinessNotifications
-                        ReadinessIssue.CHANNELS -> s.readinessChannels
-                        ReadinessIssue.FULL_SCREEN -> s.readinessFullScreen
-                        ReadinessIssue.BATTERY -> s.readinessBattery
-                        ReadinessIssue.AUTOSTART -> s.readinessAutostart
-                    },
+                    readinessLabel(issue, s),
                     color = InkInverse,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -1313,6 +1406,8 @@ private fun ConversationPage(
                         BasicTextField(
                             value = text,
                             onValueChange = { v ->
+                                // A key's click for each letter typed or deleted (not when the text is set at once).
+                                if (kotlin.math.abs(v.length - text.length) in 1..2) sounds?.playKey()
                                 text = v.take(ChatController.MAX_LENGTH)
                                 if (v.isNotBlank()) controller.onTyping(other, Clock.System.now().toEpochMilliseconds()) else controller.stopTyping(other)
                             },
@@ -2243,26 +2338,21 @@ private fun Bubble(
                 modifier = Modifier.align(Alignment.End).padding(start = 12.dp, end = 10.dp, bottom = 6.dp, top = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (m.expireAt > 0) Text("⏱ ", color = fgSoft, fontSize = 10.sp)
-                if (starred) Text("★ ", color = Color(0xFFFFB800), fontSize = 11.sp)
+                if (m.expireAt > 0) Icon(QMusicIcons.Timer, contentDescription = null, tint = fgSoft, modifier = Modifier.padding(end = 3.dp).size(12.dp))
+                if (starred) Icon(QMusicIcons.Star, contentDescription = null, tint = fgSoft, modifier = Modifier.padding(end = 3.dp).size(12.dp))
                 if (m.edited && !m.deleted) Text(s.edited + "  ", color = fgSoft, fontSize = 11.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
                 Text(clock(m.at), color = fgSoft, fontSize = 11.sp)
                 if (mine && !m.deleted) {
                     Spacer(Modifier.width(4.dp))
                     // Waiting (no connection): a clock; sent: one grey tick; on their phone: two grey; read: two green.
-                    Text(
-                        text = when {
-                            m.pending -> "◷"
-                            read || delivered -> "✓✓"
-                            else -> "✓"
+                    MessageTick(
+                        when {
+                            m.pending -> TickState.WAITING
+                            read -> TickState.READ
+                            delivered -> TickState.DELIVERED
+                            else -> TickState.SENT
                         },
-                        color = when {
-                            m.pending -> fgSoft
-                            read -> TickRead
-                            else -> fgSoft.copy(alpha = if (delivered) 0.75f else 0.55f)
-                        },
-                        fontSize = 12.sp,
-                        fontWeight = if (read) FontWeight.Bold else FontWeight.Normal,
+                        fgSoft,
                     )
                 }
             }
@@ -2429,6 +2519,49 @@ private fun ViewOnceCard(mine: Boolean, opened: Boolean, s: ChatStrings, onOpen:
                 color = fg.copy(alpha = 0.6f),
                 fontSize = 12.sp,
             )
+        }
+    }
+}
+
+/** Where a message is: not sent yet (no connection), on the server, on their phone, read. */
+internal enum class TickState { WAITING, SENT, DELIVERED, READ }
+
+/**
+ * A message's state, drawn: a small clock while it waits for a connection, one grey tick once the server has it, two
+ * grey ticks once it is on their phone, two green ticks once they read it.
+ */
+@Composable
+internal fun MessageTick(state: TickState, soft: Color) {
+    val colour = when (state) {
+        TickState.READ -> TickRead
+        TickState.DELIVERED -> soft.copy(alpha = 0.85f)
+        else -> soft
+    }
+    androidx.compose.foundation.Canvas(Modifier.size(width = 18.dp, height = 12.dp)) {
+        val w = size.width
+        val h = size.height
+        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = h * 0.13f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+        fun tick(dx: Float) {
+            val path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(dx + w * 0.04f, h * 0.55f)
+                lineTo(dx + w * 0.22f, h * 0.82f)
+                lineTo(dx + w * 0.58f, h * 0.18f)
+            }
+            drawPath(path, colour, style = stroke)
+        }
+        when (state) {
+            TickState.WAITING -> {
+                val r = h * 0.42f
+                val c = androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.5f)
+                drawCircle(colour, r, c, style = stroke)
+                drawLine(colour, c, androidx.compose.ui.geometry.Offset(c.x, c.y - r * 0.6f), strokeWidth = stroke.width, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                drawLine(colour, c, androidx.compose.ui.geometry.Offset(c.x + r * 0.45f, c.y), strokeWidth = stroke.width, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+            }
+            TickState.SENT -> tick(w * 0.2f)
+            else -> {
+                tick(0f)
+                tick(w * 0.36f)
+            }
         }
     }
 }

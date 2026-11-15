@@ -39,6 +39,7 @@ data class SoundOption(val id: String, val tr: String, val en: String) {
 object ChatSoundCatalog {
     val options: Map<SoundKind, List<SoundOption>> = mapOf(
         SoundKind.SEND to listOf(
+            SoundOption("enter", "Klavye", "Keyboard"),
             SoundOption("anahtar", "Anahtar", "Switch"),
             SoundOption("kabarcik", "Kabarcık", "Bubble"),
             SoundOption("firlat", "Fırlat", "Whoosh"),
@@ -84,7 +85,7 @@ object ChatSoundCatalog {
      * Sounds" (tools/sounds/import_kenney.py); the ringtone is the 16-bar loop cut from their own track (cut_loop.py).
      */
     val defaults: Map<SoundKind, String> = mapOf(
-        SoundKind.SEND to "anahtar",
+        SoundKind.SEND to "enter",
         SoundKind.RECEIVE to "yeni",
         SoundKind.NOTIFY to "yeni",
         SoundKind.RING to "plucky",
@@ -114,6 +115,11 @@ interface ChatSounds {
     /** The send / arrive sound of an open conversation (silent when the phone is on silent or vibrate). */
     fun play(kind: SoundKind)
     fun playSmall(sound: SmallSound)
+
+    /** A key's click while typing in the message box (a mechanical keyboard), when it is turned on. */
+    val typing: StateFlow<Boolean>
+    fun setTyping(on: Boolean)
+    fun playKey()
 }
 
 @Composable

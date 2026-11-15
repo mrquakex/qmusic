@@ -10,3 +10,5 @@
 - **Qeyf mesajı** (`snd_recv_yeni`, `snd_notify_yeni`, the default message and notification sound since 2.10.1): "New
   Notification 07" by Universfield, from Pixabay (Pixabay Content License: free to use in apps, no credit needed),
   sent by the owner; trimmed and normalised like the Kenney ones.
+- **Klavye** (`snd_send_enter`, the default send sound since 2.10.6) and the typing clicks (`snd_type_1`..`snd_type_5`):
+  cut from "Keyboard Sound Google Enter" by pexjojo on Pixabay (Pixabay Content License, no credit needed), sent by the owner.
