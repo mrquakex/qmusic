@@ -15,6 +15,9 @@
     <!-- Calls -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Sending your location in a message (asked only when you send one). -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
@@ -27,6 +30,8 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <!-- Ringtones: setting the phone's ringtone, notification and alarm sounds, and giving a contact a ringtone. -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
@@ -163,6 +168,15 @@
             android:name=".AutoUpdateJob"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <service
+            android:name=".GroupCallMissedJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <receiver
+            android:name=".GroupCallActionReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".UpdatedReceiver"

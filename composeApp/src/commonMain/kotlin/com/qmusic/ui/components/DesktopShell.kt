@@ -504,9 +504,9 @@ fun DesktopLeftSidebar(
         Color.White.copy(alpha = 0.12f)
     }
 
-    val primaryItems = listOf(
+    val primaryItems = listOfNotNull(
         Triple(ScreenTab.HOME, s.tabHome, QMusicIcons.Home),
-        Triple(ScreenTab.FOR_YOU, s.tabForYou, QMusicIcons.Samples),
+        Triple(ScreenTab.FOR_YOU, s.tabForYou, QMusicIcons.Samples).takeIf { com.qmusic.ui.FOR_YOU_SHOWN },
         Triple(ScreenTab.LIBRARY, s.tabLibrary, QMusicIcons.Library),
     )
 

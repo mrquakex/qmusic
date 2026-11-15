@@ -37,3 +37,18 @@ actual fun PhotoEditor(image: PickedImage, onDone: (PickedImage) -> Unit, onCanc
 
 @androidx.compose.runtime.Composable
 actual fun GroupCallVideo(service: GroupCallService, uid: String?, modifier: androidx.compose.ui.Modifier) = Unit
+
+@androidx.compose.runtime.Composable
+actual fun rememberLocationPicker(onPicked: (ChatLocation) -> Unit, onError: (String) -> Unit): () -> Unit = { onError("none") }
+
+@androidx.compose.runtime.Composable
+actual fun rememberContactPicker(onPicked: (ChatContact) -> Unit): () -> Unit = {}
+
+@androidx.compose.runtime.Composable
+actual fun rememberContactSaver(): (ChatContact) -> Unit = {}
+
+@androidx.compose.runtime.Composable
+actual fun rememberAppLock(): AppLock? = null
+
+@androidx.compose.runtime.Composable
+actual fun rememberChatSounds(): ChatSounds? = null

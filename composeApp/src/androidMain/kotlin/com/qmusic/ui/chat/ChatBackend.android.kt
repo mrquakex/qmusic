@@ -374,6 +374,9 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 "replyTo" to null,
                 "together" to null,
                 "edited" to null,
+                "poll" to null,
+                "location" to null,
+                "contact" to null,
             ),
         ).await()
     }
@@ -391,6 +394,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         }.ifEmpty { null }
         val extra = HashMap<String, Any?>()
         extra["forwarded"] = true
+        message.location?.let { l -> extra["location"] = mapOf("lat" to l.lat, "lng" to l.lng, "label" to l.label) }
+        message.contact?.let { c -> extra["contact"] = mapOf("name" to c.name, "phone" to c.phone) }
         message.attachment?.let { a ->
             extra["attachment"] = buildMap<String, Any?> {
                 put("kind", a.kind.name.lowercase())
@@ -410,6 +415,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             message.attachment?.kind == AttachmentKind.VIDEO -> "🎬"
             message.attachment?.kind == AttachmentKind.FILE -> "📄 " + message.attachment.name
             images != null -> "📷"
+            message.location != null -> "📍"
+            message.contact != null -> "👤 " + message.contact.name
             else -> null
         }
         val preview = listOfNotNull(label, message.text.ifBlank { null }).joinToString(" ").ifBlank { null }
@@ -450,6 +457,9 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 message.attachment != null -> "📄 " + message.attachment.name
                 message.images.isNotEmpty() -> "📷"
                 message.share != null -> "🎵 " + message.share.title
+                message.poll != null -> "📊 " + message.poll.question
+                message.location != null -> "📍"
+                message.contact != null -> "👤 " + message.contact.name
                 else -> ""
             }
         }
@@ -523,6 +533,53 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             },
             _privacy,
         ) { map, p -> if (hideWhenPrivate && p.hideReadReceipts) emptyMap() else map }
+
+    // ------------------------------------------------------------------ polls, places, contacts
+
+    override suspend fun sendPoll(other: ChatUser, poll: ChatPoll): Result<Unit> = runCatching {
+        val question = poll.question.trim().take(300)
+        val options = poll.options.map { it.trim().take(100) }.filter { it.isNotEmpty() }.distinct().take(12)
+        require(question.isNotEmpty() && options.size >= 2) { "poll" }
+        sendMessage(other, "", null, null, null, "📊 $question", extra = mapOf("poll" to mapOf("q" to question, "o" to options, "m" to poll.multiple)))
+    }
+
+    override fun pollVotes(chatId: String): Flow<Map<String, Map<String, List<Int>>>> = callbackFlow {
+        val job = launch {
+            listen(root.child("chats").child(chatId).child("polls")).collect { snap ->
+                trySend(
+                    snap.children.associate { poll ->
+                        poll.key.orEmpty() to poll.children.mapNotNull { v ->
+                            val uid = v.key ?: return@mapNotNull null
+                            val picks = v.getValue(String::class.java).orEmpty().split(',').mapNotNull { it.toIntOrNull() }
+                            if (picks.isEmpty()) null else uid to picks
+                        }.toMap()
+                    },
+                )
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override suspend fun vote(chatId: String, messageId: String, choices: List<Int>) {
+        val ref = root.child("chats").child(chatId).child("polls").child(messageId).child(me())
+        if (choices.isEmpty()) ref.removeValue() else ref.setValue(choices.distinct().sorted().joinToString(","))
+    }
+
+    override suspend fun sendLocation(other: ChatUser, location: ChatLocation): Result<Unit> = runCatching {
+        val tr = app.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+        sendMessage(
+            other, "", null, null, null, if (tr) "📍 Konum" else "📍 Location",
+            extra = mapOf("location" to mapOf("lat" to location.lat, "lng" to location.lng, "label" to location.label.take(120))),
+        )
+    }
+
+    override suspend fun sendContact(other: ChatUser, contact: ChatContact): Result<Unit> = runCatching {
+        require(contact.phone.isNotBlank()) { "phone" }
+        sendMessage(
+            other, "", null, null, null, "👤 " + contact.name.ifBlank { contact.phone },
+            extra = mapOf("contact" to mapOf("name" to contact.name.take(80), "phone" to contact.phone.take(40))),
+        )
+    }
 
     // ------------------------------------------------------------------ link cards
 
@@ -612,6 +669,19 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             deleted = child("deleted").getValue(Boolean::class.java) == true,
             forwarded = child("forwarded").getValue(Boolean::class.java) == true,
             expireAt = child("expireAt").getValue(Long::class.java) ?: 0L,
+            poll = child("poll").takeIf { it.exists() }?.let { p ->
+                val question = p.child("q").getValue(String::class.java) ?: return@let null
+                val options = p.child("o").children.mapNotNull { it.getValue(String::class.java) }
+                if (options.size < 2) null else ChatPoll(question, options, p.child("m").getValue(Boolean::class.java) == true)
+            },
+            location = child("location").takeIf { it.exists() }?.let { l ->
+                val lat = l.child("lat").getValue(Double::class.java) ?: return@let null
+                val lng = l.child("lng").getValue(Double::class.java) ?: return@let null
+                ChatLocation(lat, lng, l.child("label").getValue(String::class.java).orEmpty())
+            },
+            contact = child("contact").takeIf { it.exists() }?.let { c ->
+                ChatContact(c.child("name").getValue(String::class.java).orEmpty(), c.child("phone").getValue(String::class.java) ?: return@let null)
+            },
         )
     }
 

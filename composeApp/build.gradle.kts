@@ -93,6 +93,7 @@ kotlin {
                 implementation(libs.media3.database)
                 implementation("androidx.media3:media3-transformer:1.5.1")
                 implementation("androidx.media3:media3-effect:1.5.1")
+                implementation("androidx.biometric:biometric:1.1.0")
                 implementation(libs.okhttp)
                 implementation("androidx.appcompat:appcompat:1.7.0")
                 // Calls as the phone's own calls: Bluetooth / car / watch control, audio routes, the phoneCall service.

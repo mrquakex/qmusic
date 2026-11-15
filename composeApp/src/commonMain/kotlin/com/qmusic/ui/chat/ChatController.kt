@@ -174,6 +174,27 @@ class ChatController(
 
     suspend fun linkPreview(url: String): LinkPreview? = runCatching { backend.linkPreview(url) }.getOrNull()
 
+    // ------------------------------------------------------------------ polls, places, contacts
+
+    fun sendPoll(other: ChatUser, poll: ChatPoll) {
+        scope.launch { backend.sendPoll(other, poll).onFailure { _error.value = it.message } }
+    }
+
+    fun pollVotes(other: ChatUser) = chatIdWith(other)?.let { id -> backend.pollVotes(id).catch { emit(emptyMap()) } } ?: flowOf(emptyMap())
+
+    fun vote(other: ChatUser, message: ChatMessage, choices: List<Int>) {
+        val id = chatIdWith(other) ?: return
+        scope.launch { runCatching { backend.vote(id, message.id, choices) } }
+    }
+
+    fun sendLocation(other: ChatUser, location: ChatLocation) {
+        scope.launch { backend.sendLocation(other, location).onFailure { _error.value = it.message } }
+    }
+
+    fun sendContact(other: ChatUser, contact: ChatContact) {
+        scope.launch { backend.sendContact(other, contact).onFailure { _error.value = it.message } }
+    }
+
     // ------------------------------------------------------------------ the person
 
     val privacy: StateFlow<Privacy> = backend.privacy

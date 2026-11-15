@@ -45,3 +45,10 @@ const val MAX_GROUP_CALL = 6
 /** Draws a member's picture ([uid]), or our own camera (null). */
 @Composable
 expect fun GroupCallVideo(service: GroupCallService, uid: String?, modifier: Modifier)
+
+/** A ringing group call's notification was tapped: open the group, and with [join] join its call. */
+data class GroupCallRequest(val group: ChatUser, val video: Boolean, val join: Boolean)
+
+object GroupCallLaunch {
+    val request = kotlinx.coroutines.flow.MutableStateFlow<GroupCallRequest?>(null)
+}

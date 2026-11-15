@@ -17,6 +17,15 @@ data class ChatUser(
 /** What the person shares: their last seen (and being online), and whether they tell others they read. */
 data class Privacy(val hideLastSeen: Boolean = false, val hideReadReceipts: Boolean = false)
 
+/** A poll: a question, its choices (2-12), and whether more than one can be picked. */
+data class ChatPoll(val question: String, val options: List<String>, val multiple: Boolean)
+
+/** A place sent in a message. */
+data class ChatLocation(val lat: Double, val lng: Double, val label: String = "")
+
+/** A contact sent in a message. */
+data class ChatContact(val name: String, val phone: String)
+
 /** The card of a link in a message: the page's title, a line about it and its picture. */
 data class LinkPreview(val url: String, val title: String, val description: String, val image: String?, val site: String)
 
@@ -213,6 +222,9 @@ data class ChatMessage(
     val forwarded: Boolean = false,
     /** A disappearing message: when it goes (server time), 0 when it stays. */
     val expireAt: Long = 0,
+    val poll: ChatPoll? = null,
+    val location: ChatLocation? = null,
+    val contact: ChatContact? = null,
 )
 
 /** A conversation as the list shows it. */
@@ -447,6 +459,19 @@ interface ChatBackend {
 
     /** The card of a link (fetched once, then kept). */
     suspend fun linkPreview(url: String): LinkPreview? = null
+
+    // ------------------------------------------------------------------ polls, places, contacts
+
+    suspend fun sendPoll(other: ChatUser, poll: ChatPoll): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    /** The votes of [chatId]'s polls: message id → (person → the choices they picked). */
+    fun pollVotes(chatId: String): Flow<Map<String, Map<String, List<Int>>>> = kotlinx.coroutines.flow.flowOf(emptyMap())
+
+    /** The person's choices in a poll (empty takes their vote back). */
+    suspend fun vote(chatId: String, messageId: String, choices: List<Int>) {}
+
+    suspend fun sendLocation(other: ChatUser, location: ChatLocation): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun sendContact(other: ChatUser, contact: ChatContact): Result<Unit> = Result.failure(UnsupportedOperationException())
 }
 
 /** A conversation's id: both people's ids in order, so each pair has exactly one. */

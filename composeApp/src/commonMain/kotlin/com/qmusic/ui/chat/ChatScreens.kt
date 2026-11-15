@@ -118,6 +118,9 @@ fun ChatApp(
     PlatformBackHandler(enabled = true) { if (!controller.pop()) onExit() }
     val askPermissions = rememberCallPermissions()
     val voicePlayer = rememberVoicePlayer()
+    val lock = rememberAppLock()
+    val lockOn by (lock?.enabled ?: remember { kotlinx.coroutines.flow.MutableStateFlow(false) }).collectAsState()
+    val unlocked by ChatLock.unlocked.collectAsState()
     val calls = controller.calls
     val onCall: ((ChatUser, Boolean) -> Unit)? = calls?.let { service ->
         { other, video -> askPermissions(video) { granted -> if (granted) service.call(other, video) else controller.reportError(s.callPermission) } }
@@ -129,7 +132,7 @@ fun ChatApp(
             is ChatAccount.Unavailable -> MessagePage(s, onExit, if (a.reason == "setup") s.setupNeeded else s.unavailable)
             ChatAccount.SignedOut -> SignInPage(controller, s, onExit)
             is ChatAccount.NeedsProfile -> ProfilePage(controller, s, a, onExit)
-            is ChatAccount.Ready -> when (val top = routes.lastOrNull()) {
+            is ChatAccount.Ready -> if (lock != null && lockOn && !unlocked && lock.available) LockedPage(lock, s, onExit) else when (val top = routes.lastOrNull()) {
                 is ChatRoute.Conversation -> ConversationPage(controller, s, a.me, top.other, shareables, onOpenShare, onCall, voicePlayer)
                 ChatRoute.NewChat -> NewChatPage(controller, s)
                 ChatRoute.NewGroup -> NewGroupPage(controller, s)
@@ -711,6 +714,15 @@ private fun ConversationPage(
     var pendingPhotos by remember { mutableStateOf<List<PickedImage>?>(null) }
     var locked by remember { mutableStateOf(false) }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val sounds = rememberChatSounds()
+    // The last message heard here: a new one after it plays the send or arrive sound (not the first load).
+    var lastHeard by remember(other.uid) { mutableStateOf<String?>(null) }
+    val pollVotes by remember(other.uid) { controller.pollVotes(other) }.collectAsState(initial = emptyMap())
+    var pollDialog by remember { mutableStateOf(false) }
+    var votersFor by remember { mutableStateOf<ChatMessage?>(null) }
+    var reactionsFor by remember { mutableStateOf<ChatMessage?>(null) }
+    val saveContact = rememberContactSaver()
+    val pickContact = rememberContactPicker { contact -> controller.sendContact(other, contact) }
     val groupCalls = controller.groupCalls
     val callPeople by remember(other.uid) { if (other.isGroup) controller.groupCallParticipants(other) else kotlinx.coroutines.flow.flowOf(emptyList()) }.collectAsState(initial = emptyList())
     val group by remember(other.uid) { if (isGroup) controller.group(other) else kotlinx.coroutines.flow.flowOf(null) }.collectAsState(initial = null)
@@ -752,6 +764,18 @@ private fun ConversationPage(
     val pickVideo = rememberFilePicker(video = true, onPicked = sendPicked)
     val pickFile = rememberFilePicker(video = false, onPicked = sendPicked)
     val openFile = rememberAttachmentOpener()
+    val pickLocation = rememberLocationPicker(
+        onPicked = { place -> controller.sendLocation(other, place) },
+        onError = { why ->
+            controller.reportError(
+                when (why) {
+                    "off" -> s.locationOff
+                    "permission" -> s.locationDenied
+                    else -> s.locationNone
+                },
+            )
+        },
+    )
 
     // Voice messages: hold the microphone to record, let go to send, slide left to throw it away.
     val recorder = rememberVoiceRecorder()
@@ -1040,6 +1064,13 @@ private fun ConversationPage(
                 val newest = list.lastOrNull()
                 var newBelow by remember { mutableStateOf(0) }
                 LaunchedEffect(newest?.id) {
+                    if (newest != null) {
+                        val before = lastHeard
+                        lastHeard = newest.id
+                        if (before != null && before != newest.id && !newest.system) {
+                            sounds?.play(if (newest.from == me.uid) SoundKind.SEND else SoundKind.RECEIVE)
+                        }
+                    }
                     if (newest != null && (newest.from == me.uid || listState.firstVisibleItemIndex <= 1)) {
                         listState.animateScrollToItem(0)
                         newBelow = 0
@@ -1100,6 +1131,11 @@ private fun ConversationPage(
                                     onInfo = if (mine && !m.deleted) ({ infoFor = m }) else null,
                                     onQuoteTap = { id -> jumpTo = id },
                                     loadPreview = { url -> controller.linkPreview(url) },
+                                    pollVotes = pollVotes[m.id].orEmpty(),
+                                    onVote = { picks -> controller.vote(other, m, picks) },
+                                    onShowVoters = { votersFor = m },
+                                    onSaveContact = { c -> saveContact(c) },
+                                    onShowReactions = { reactionsFor = m },
                                     s = s,
                                     otherName = title,
                                     names = memberNames,
@@ -1240,6 +1276,27 @@ private fun ConversationPage(
                                 text = { Text(s.fileAttach, color = TextPrimary, fontSize = 14.sp) },
                                 onClick = { attach = false; pickFile() },
                             )
+                            if (!isClaude) {
+                                DropdownMenuItem(
+                                    leadingIcon = { Text("📊", fontSize = 18.sp) },
+                                    text = { Text(s.poll, color = TextPrimary, fontSize = 14.sp) },
+                                    onClick = { attach = false; pollDialog = true },
+                                )
+                            }
+                            DropdownMenuItem(
+                                leadingIcon = { Text("📍", fontSize = 18.sp) },
+                                text = { Text(s.location, color = TextPrimary, fontSize = 14.sp) },
+                                onClick = {
+                                    attach = false
+                                    controller.reportInfo(s.locationFinding)
+                                    pickLocation()
+                                },
+                            )
+                            DropdownMenuItem(
+                                leadingIcon = { Text("👤", fontSize = 18.sp) },
+                                text = { Text(s.contact, color = TextPrimary, fontSize = 14.sp) },
+                                onClick = { attach = false; pickContact() },
+                            )
                             options.forEach { item ->
                                 DropdownMenuItem(
                                     leadingIcon = { Icon(if (item.kind == ShareKind.SONG) QMusicIcons.Headphones else QMusicIcons.VideoPlay, null, tint = Color.White) },
@@ -1299,6 +1356,7 @@ private fun ConversationPage(
                             recordingSince = null
                             locked = false
                             recorder?.stop()?.let { voice ->
+                                sounds?.playSmall(SmallSound.REC_SENT)
                                 controller.sendFile(other, voice, "", quoted())
                                 replyTo = null
                             }
@@ -1321,6 +1379,7 @@ private fun ConversationPage(
                                         askMic(false) { granted -> micReady = granted }
                                         return@awaitEachGesture
                                     }
+                                    sounds?.playSmall(SmallSound.REC_START)
                                     if (!recorder.start()) return@awaitEachGesture
                                     voicePlayer?.stop()
                                     recordingSince = Clock.System.now().toEpochMilliseconds()
@@ -1346,6 +1405,7 @@ private fun ConversationPage(
                                         recorder.cancel()
                                     } else {
                                         recorder.stop()?.let { voice ->
+                                            sounds?.playSmall(SmallSound.REC_SENT)
                                             controller.sendFile(other, voice, "", quoted())
                                             replyTo = null
                                         }
@@ -1427,6 +1487,29 @@ private fun ConversationPage(
         val read = if (isGroup) readMarks else mapOf(other.uid to readAt)
         val delivered = if (isGroup) deliveredMarks else mapOf(other.uid to deliveredAt)
         MessageInfoDialog(m, people, read, delivered, s) { infoFor = null }
+    }
+    if (pollDialog) PollDialog(s, onSend = { poll -> controller.sendPoll(other, poll) }) { pollDialog = false }
+    // A person's name in this conversation (us, the other, or a group member).
+    val nameOfUid: (String) -> String = { uid ->
+        when (uid) {
+            me.uid -> s.you
+            CLAUDE_BOT_UID -> "Claude"
+            else -> memberNames[uid] ?: if (uid == other.uid) other.name else "?"
+        }
+    }
+    votersFor?.let { m ->
+        m.poll?.let { poll -> VotersDialog(poll, pollVotes[m.id].orEmpty(), nameOfUid, s) { votersFor = null } }
+    }
+    reactionsFor?.let { m ->
+        val users = group?.members?.associate { it.user.uid to it.user }.orEmpty()
+        ReactionsDialog(
+            reactions = reactions[m.id].orEmpty(),
+            myUid = me.uid,
+            nameOf = nameOfUid,
+            userOf = { uid -> users[uid] ?: if (uid == me.uid) me else if (uid == other.uid) other else ChatUser(uid, nameOfUid(uid), "") },
+            s = s,
+            onRemoveMine = { controller.react(other, m, null) },
+        ) { reactionsFor = null }
     }
     if (muteDialog) {
         val now = Clock.System.now().toEpochMilliseconds()
@@ -1966,6 +2049,11 @@ private fun Bubble(
     onInfo: (() -> Unit)? = null,
     onQuoteTap: (String) -> Unit = {},
     loadPreview: suspend (String) -> LinkPreview? = { null },
+    pollVotes: Map<String, List<Int>> = emptyMap(),
+    onVote: (List<Int>) -> Unit = {},
+    onShowVoters: () -> Unit = {},
+    onSaveContact: (ChatContact) -> Unit = {},
+    onShowReactions: () -> Unit = {},
 ) {
     if (m.system) {
         SystemLine(m.text)
@@ -1973,7 +2061,8 @@ private fun Bubble(
     }
     var menu by remember { mutableStateOf(false) }
     // One to three emoji alone: big, without a bubble, as people expect.
-    val bigEmoji = !m.deleted && m.images.isEmpty() && m.attachment == null && m.share == null && m.replyTo == null && isBigEmoji(m.text)
+    val bigEmoji = !m.deleted && m.images.isEmpty() && m.attachment == null && m.share == null && m.replyTo == null && m.poll == null && m.location == null && m.contact == null && isBigEmoji(m.text)
+    val hasCard = m.share != null || m.images.isNotEmpty() || m.attachment != null || m.poll != null || m.location != null || m.contact != null
     val fromClaude = m.from == CLAUDE_BOT_UID
     // Pull a message to the right to answer it.
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
@@ -2038,7 +2127,7 @@ private fun Bubble(
                     onClick = { if (selecting) onToggleSelect() else m.share?.let(onOpenShare) },
                     onLongClick = { if (selecting) onToggleSelect() else menu = true },
                 )
-                .padding(if (m.share != null || m.images.isNotEmpty() || m.attachment != null) 4.dp else 0.dp),
+                .padding(if (hasCard) 4.dp else 0.dp),
         ) {
             val fg = if (mine && !m.deleted && !bigEmoji) Color.Black else TextPrimary
             val fgSoft = if (mine && !m.deleted && !bigEmoji) Color.Black.copy(alpha = 0.55f) else TextSecondary
@@ -2113,6 +2202,11 @@ private fun Bubble(
                     AttachmentKind.FILE -> FileBubble(a, mine, m.progress, s) { onOpenFile(a) }
                 }
             }
+            if (!m.deleted) {
+                m.poll?.let { poll -> PollCard(poll, pollVotes, myUid, mine, s, onVote = onVote, onShowVoters = onShowVoters) }
+                m.location?.let { place -> LocationCard(place, mine, s) }
+                m.contact?.let { c -> ContactCard(c, mine, s) { onSaveContact(c) } }
+            }
             m.share?.let { ShareCard(it, mine, s) }
             if (m.together && m.share != null && !mine) {
                 Box(Modifier.padding(start = 8.dp, top = 8.dp)) { Pill((if (m.share.kind == ShareKind.SONG) "🎧 " else "🍿 ") + s.join, primary = true, onClick = onJoin) }
@@ -2173,7 +2267,7 @@ private fun Bubble(
             }
             if (!m.deleted) DropdownMenuItem(text = { Text(s.reply, color = TextPrimary) }, onClick = { menu = false; onReply() })
             if (onCopy != null && m.text.isNotEmpty() && !m.deleted) DropdownMenuItem(text = { Text(s.copy, color = TextPrimary) }, onClick = { menu = false; onCopy() })
-            if (onForward != null && !m.deleted) DropdownMenuItem(text = { Text(s.forward, color = TextPrimary) }, onClick = { menu = false; onForward() })
+            if (onForward != null && !m.deleted && m.poll == null) DropdownMenuItem(text = { Text(s.forward, color = TextPrimary) }, onClick = { menu = false; onForward() })
             if (onEdit != null) DropdownMenuItem(text = { Text(s.edit, color = TextPrimary) }, onClick = { menu = false; onEdit() })
             if (!m.deleted) DropdownMenuItem(text = { Text(if (starred) s.unstar else s.star, color = TextPrimary) }, onClick = { menu = false; onStar() })
             if (onInfo != null) DropdownMenuItem(text = { Text(s.info, color = TextPrimary) }, onClick = { menu = false; onInfo() })
@@ -2200,7 +2294,7 @@ private fun Bubble(
                     .padding(horizontal = 8.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(DarkSurfaceVariant)
-                    .clickable { if (reactions[myUid] != null) onReact(null) }
+                    .clickable(onClick = onShowReactions)
                     .padding(horizontal = 8.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -2220,6 +2314,9 @@ internal fun quoteText(m: ChatMessage): String = m.text.ifBlank {
         m.attachment?.kind == AttachmentKind.VOICE -> "🎤 " + mmss(m.attachment.durationMs)
         m.attachment?.kind == AttachmentKind.VIDEO -> "🎬 Video"
         m.attachment?.kind == AttachmentKind.FILE -> "📄 " + m.attachment.name
+        m.poll != null -> "📊 " + m.poll.question
+        m.location != null -> "📍"
+        m.contact != null -> "👤 " + m.contact.name
         m.images.isNotEmpty() -> if (m.images.size == 1) "📷" else "📷 ×" + m.images.size
         m.share != null -> (if (m.share.kind == ShareKind.SONG) "🎵 " else "🎬 ") + m.share.title
         else -> ""

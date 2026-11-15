@@ -1,0 +1,560 @@
+<title>Qeyf Sesleri</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single listening column; each kind of sound is a shelf of cards you tap to hear, with a pocket phone to try them in a chat. */
+:root {
+  --bg: #F4F2EE;
+  --surface: #FFFFFF;
+  --surface-2: #ECE8E1;
+  --ink: #17140F;
+  --ink-soft: #5C554A;
+  --line: #DDD6CB;
+  --tea: #A86A12;          /* the amber of tea in a tulip glass */
+  --tea-soft: #F1DFC0;
+  --bubble-mine: #17140F;
+  --bubble-mine-ink: #FFFFFF;
+  --bubble-theirs: #FFFFFF;
+  --read: #1DAA61;
+  --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0F0E0C; --surface: #191714; --surface-2: #23201C; --ink: #F3EEE6; --ink-soft: #A79E90; --line: #2E2A24;
+    --tea: #E2A44A; --tea-soft: #3A2B17; --bubble-mine: #F3EEE6; --bubble-mine-ink: #0F0E0C; --bubble-theirs: #23201C; --read: #2BC774;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0F0E0C; --surface: #191714; --surface-2: #23201C; --ink: #F3EEE6; --ink-soft: #A79E90; --line: #2E2A24;
+  --tea: #E2A44A; --tea-soft: #3A2B17; --bubble-mine: #F3EEE6; --bubble-mine-ink: #0F0E0C; --bubble-theirs: #23201C; --read: #2BC774;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 120px;
+}
+.wrap { max-width: 980px; margin: 0 auto; display: grid; gap: 40px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
+button { font: inherit; color: inherit; }
+button:focus-visible, .card:focus-visible { outline: 2px solid var(--tea); outline-offset: 2px; }
+
+/* --- head --- */
+.head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 28px; align-items: end; }
+.mark { font-family: var(--font-display); font-weight: 800; font-size: 15px; letter-spacing: .02em; display: inline-flex; align-items: center; gap: 8px; color: var(--ink-soft); }
+.mark i { width: 22px; height: 22px; border-radius: 50%; background: var(--ink); display: inline-block; position: relative; }
+.mark i::after { content: ""; position: absolute; right: -3px; bottom: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--tea); }
+.head h1 { font-size: clamp(38px, 7vw, 68px); font-weight: 800; line-height: .95; letter-spacing: -.02em; margin-top: 14px; }
+.head h1 span { color: var(--tea); }
+.head p { color: var(--ink-soft); max-width: 58ch; margin: 14px 0 0; }
+.how { font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft); display: grid; gap: 6px; text-align: right; }
+.how b { color: var(--ink); font-weight: 500; }
+
+/* --- shelves --- */
+.shelf { display: grid; gap: 14px; }
+.shelf-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.shelf-head h2 { font-size: 24px; font-weight: 700; letter-spacing: -.01em; }
+.shelf-head .when { color: var(--ink-soft); font-size: 14px; }
+.shelf-head .chosen { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--tea); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.card {
+  position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 12px 12px 10px; display: grid; gap: 8px; cursor: pointer; text-align: left;
+  transition: border-color .15s, transform .15s, background .15s;
+}
+.card:hover { border-color: var(--ink-soft); }
+.card[aria-checked="true"] { border-color: var(--tea); background: linear-gradient(var(--surface), var(--surface)) padding-box; box-shadow: 0 0 0 1px var(--tea) inset; }
+.card .row { display: flex; align-items: center; gap: 8px; }
+.card .name { font-family: var(--font-display); font-weight: 700; font-size: 17px; flex: 1; min-width: 0; }
+.card .dot { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--line); flex: none; display: grid; place-items: center; }
+.card[aria-checked="true"] .dot { border-color: var(--tea); background: var(--tea); }
+.card[aria-checked="true"] .dot::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--surface); }
+.card canvas { width: 100%; height: 38px; display: block; }
+.card .meta { display: flex; justify-content: space-between; gap: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.card .note { font-size: 12.5px; color: var(--ink-soft); line-height: 1.35; }
+.card.playing { transform: translateY(-2px); }
+.card.playing canvas { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--tea) 55%, transparent)); }
+.play { width: 30px; height: 30px; border-radius: 50%; border: none; background: var(--ink); color: var(--bg); display: grid; place-items: center; cursor: pointer; flex: none; }
+.play svg { width: 12px; height: 12px; fill: currentColor; }
+
+/* --- the pocket phone --- */
+.try { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 340px); gap: 28px; align-items: center; }
+.try h2 { font-size: 28px; font-weight: 800; }
+.try p { color: var(--ink-soft); margin: 10px 0 0; max-width: 46ch; }
+.phone { background: var(--surface-2); border: 1px solid var(--line); border-radius: 28px; padding: 14px; display: grid; gap: 10px; }
+.phone .top { display: flex; align-items: center; gap: 10px; padding: 2px 4px 8px; border-bottom: 1px solid var(--line); }
+.phone .av { width: 34px; height: 34px; border-radius: 50%; background: var(--ink); color: var(--bg); display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; }
+.phone .who b { display: block; font-size: 14px; }
+.phone .who span { font-size: 12px; color: var(--read); }
+.feed { display: grid; gap: 6px; height: 220px; overflow-y: auto; align-content: end; padding: 4px; }
+.msg { max-width: 78%; padding: 7px 11px; border-radius: 16px; font-size: 14px; animation: pop .22s ease-out; }
+.msg.me { justify-self: end; background: var(--bubble-mine); color: var(--bubble-mine-ink); border-bottom-right-radius: 4px; }
+.msg.them { justify-self: start; background: var(--bubble-theirs); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.msg small { font-family: var(--font-mono); font-size: 10px; opacity: .65; margin-left: 6px; }
+.msg.me small.r { color: var(--read); opacity: 1; }
+@keyframes pop { from { transform: scale(.92); opacity: 0; } to { transform: none; opacity: 1; } }
+.phone .bar { display: flex; gap: 8px; }
+.phone .bar button { flex: 1; border: none; border-radius: 22px; padding: 10px 12px; cursor: pointer; font-weight: 600; font-size: 13.5px; }
+.phone .send { background: var(--ink); color: var(--bg); }
+.phone .recv { background: var(--surface); border: 1px solid var(--line) !important; }
+.phone .ring { background: var(--tea); color: #fff; }
+.ringing { position: relative; }
+.ringing::after { content: ""; position: absolute; inset: -4px; border-radius: 30px; border: 2px solid var(--tea); animation: ring 1s ease-out infinite; pointer-events: none; }
+@keyframes ring { from { opacity: .9; transform: scale(1); } to { opacity: 0; transform: scale(1.04); } }
+
+/* --- small sounds and ideas --- */
+.toggles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.toggle { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.toggle b { font-size: 14.5px; display: block; }
+.toggle span { font-size: 12.5px; color: var(--ink-soft); }
+.switch { width: 40px; height: 24px; border-radius: 12px; border: none; background: var(--line); position: relative; cursor: pointer; flex: none; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); transition: left .15s; box-shadow: 0 1px 2px rgb(0 0 0 / .2); }
+.switch[aria-checked="true"] { background: var(--tea); }
+.switch[aria-checked="true"]::after { left: 19px; }
+.ideas { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.idea { border-top: 2px solid var(--ink); padding-top: 10px; }
+.idea b { font-family: var(--font-display); font-size: 16px; }
+.idea p { margin: 4px 0 0; color: var(--ink-soft); font-size: 14px; }
+
+/* --- the choice, to send back --- */
+.dock {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-top: 1px solid var(--line);
+}
+.dock .in { max-width: 980px; margin: 0 auto; display: flex; gap: 12px; align-items: center; }
+.dock code { font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft); flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; user-select: all; }
+.dock button { border: none; background: var(--ink); color: var(--bg); border-radius: 20px; padding: 9px 16px; font-weight: 600; cursor: pointer; flex: none; }
+.toast { position: fixed; left: 50%; bottom: calc(70px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: 13px; z-index: 6; }
+
+@media (max-width: 720px) {
+  .head { grid-template-columns: minmax(0, 1fr); }
+  .how { text-align: left; }
+  .try { grid-template-columns: minmax(0, 1fr); }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg, .ringing::after { animation: none; }
+  .card { transition: none; }
+}
+</style>
+
+<div class="wrap">
+  <header class="head">
+    <div>
+      <div class="mark"><i></i>qeyf</div>
+      <h1>Qeyf'in <span>sesleri</span></h1>
+      <p>Mesaj atınca, sohbetteyken mesaj gelince, bildirimde ve aramada çalacak sesler. Her kartın oynat düğmesine bas, beğendiğini seç. Hepsi Qeyf için burada sıfırdan yapıldı; başka bir uygulamanın sesi yok.</p>
+    </div>
+    <div class="how">
+      <div><b>oynat</b> → dinle</div>
+      <div><b>kart</b> → seç</div>
+      <div><b>alttaki şerit</b> → seçimlerin</div>
+    </div>
+  </header>
+
+  <section class="try" aria-labelledby="try-h">
+    <div>
+      <h2 id="try-h">Sohbette dene</h2>
+      <p>Seçtiğin sesler bu küçük telefonda çalar: Gönder senin mesajını, Mesaj gelsin karşı tarafınkini, Ara da zil sesini dener.</p>
+    </div>
+    <div class="phone" id="phone">
+      <div class="top">
+        <div class="av">A</div>
+        <div class="who"><b>Ayşe</b><span>çevrimiçi</span></div>
+      </div>
+      <div class="feed" id="feed" aria-live="polite"></div>
+      <div class="bar">
+        <button class="send" id="b-send" type="button">Gönder</button>
+        <button class="recv" id="b-recv" type="button">Mesaj gelsin</button>
+        <button class="ring" id="b-ring" type="button">Ara</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="shelves"></div>
+
+  <section class="shelf" aria-labelledby="small-h">
+    <div class="shelf-head"><h2 id="small-h">Küçük sesler</h2><span class="when">uygulamanın içindeki kısa dokunuşlar; istemediğini kapat</span></div>
+    <div class="toggles" id="toggles"></div>
+  </section>
+
+  <section class="shelf" aria-labelledby="ideas-h">
+    <div class="shelf-head"><h2 id="ideas-h">Aklımdakiler</h2><span class="when">seslerle birlikte eklenebilecekler</span></div>
+    <div class="ideas">
+      <div class="idea"><b>Kişiye özel ses</b><p>Annen yazınca başka, arkadaşın yazınca başka ses. Profilden seçilir.</p></div>
+      <div class="idea"><b>Titreşim deseni</b><p>Sesle uyumlu titreşimler; zil için ritmik, mesaj için tek kısa.</p></div>
+      <div class="idea"><b>Sessiz saatler</b><p>Gece 00:00 ile 08:00 arası bildirimler sessiz gelir, aramalar yine çalar.</p></div>
+      <div class="idea"><b>Uygulama içi sesler anahtarı</b><p>Sohbetteyken gönderme ve gelme seslerini tek dokunuşla kapat.</p></div>
+      <div class="idea"><b>Arama bekleme sesi</b><p>Sen ararken karşı taraf çalarken duyduğun ses de Qeyf'e özel olur.</p></div>
+      <div class="idea"><b>Kendi zil sesin</b><p>Telefondaki bir şarkıyı ya da Qeyf'te dinlediğin bir parçanın bir anını zil sesi yap.</p></div>
+    </div>
+  </section>
+</div>
+
+<div class="dock">
+  <div class="in">
+    <code id="summary"></code>
+    <button id="copy" type="button">Seçimlerimi kopyala</button>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+/*
+ * Each sound is a recipe of notes, played by the Web Audio synthesizer below. The same recipes are rendered into the
+ * app's sound files, so what plays here is what plays on the phone.
+ *   note: t start (s), f frequency (Hz), f2/g glide to f2 over g s, d length (s), w wave (sine|triangle|square|noise),
+ *         v loudness, a attack (s), fm {r ratio, i index}, lp low-pass (Hz), bp band-pass (Hz)
+ */
+const N = (t, f, d, extra = {}) => ({ t, f, d, w: "sine", v: 0.5, a: 0.004, ...extra });
+// Notes by name (A4 = 440 Hz).
+const hz = (name) => {
+  const m = name.match(/^([A-G])(#|b)?(\d)$/);
+  const base = { C: -9, D: -7, E: -5, F: -4, G: -2, A: 0, B: 2 }[m[1]] + (m[2] === "#" ? 1 : m[2] === "b" ? -1 : 0);
+  return 440 * Math.pow(2, (base + (Number(m[3]) - 4) * 12) / 12);
+};
+const bell = (t, n, d, v = 0.35, r = 3.5, i = 2.2) => N(t, hz(n), d, { fm: { r, i }, v });
+const mallet = (t, n, d = 0.35, v = 0.5) => N(t, hz(n), d, { w: "triangle", v, a: 0.002 });
+
+const SHELVES = [
+  {
+    id: "send", title: "Mesaj gönderince", when: "sohbetteyken mesajın gidince",
+    sounds: [
+      { id: "firlat", name: "Fırlat", note: "Hafif yükselen bir süzülüş", notes: [N(0, 520, 0.16, { f2: 1180, g: 0.09, v: 0.45 })] },
+      { id: "damla", name: "Damla", note: "Suya düşen tek damla", notes: [N(0, 1500, 0.15, { f2: 820, g: 0.05, v: 0.5 })] },
+      { id: "tik", name: "Tık", note: "Kısa, kuru, net", notes: [N(0, 2400, 0.035, { w: "triangle", v: 0.35, a: 0.001 }), N(0, 1200, 0.06, { v: 0.3 })] },
+      { id: "kus", name: "Kuş", note: "İki küçük cıvıltı", notes: [N(0, hz("G6"), 0.07, { v: 0.35 }), N(0.07, hz("C7"), 0.1, { v: 0.35 })] },
+      { id: "kabarcik", name: "Kabarcık", note: "Yuvarlak bir 'blop'", notes: [N(0, 300, 0.14, { f2: 900, g: 0.08, v: 0.6, fm: { r: 1.5, i: 0.6 } })] },
+    ],
+  },
+  {
+    id: "receive", title: "Sohbetteyken mesaj gelince", when: "açık sohbete yeni mesaj düşünce",
+    sounds: [
+      { id: "pit", name: "Pıt", note: "Yumuşak tek nota", notes: [N(0, 880, 0.16, { v: 0.45 })] },
+      { id: "cam", name: "Cam", note: "İnce cam çınlaması", notes: [bell(0, "E6", 0.42, 0.28, 3.5, 1.4)] },
+      { id: "ikinota", name: "İki nota", note: "Aşağı inen iki ses", notes: [N(0, hz("E6"), 0.08, { v: 0.35 }), N(0.08, hz("C6"), 0.14, { v: 0.35 })] },
+      { id: "dusus", name: "Düşüş", note: "Tatlı bir iniş", notes: [N(0, 1100, 0.2, { f2: 620, g: 0.12, v: 0.42 })] },
+      { id: "yumusak", name: "Yumuşak", note: "Kısa, sıcak bir akor", notes: [N(0, 660, 0.22, { w: "triangle", v: 0.28 }), N(0, 990, 0.22, { w: "triangle", v: 0.2 })] },
+    ],
+  },
+  {
+    id: "notify", title: "Bildirim sesi", when: "uygulama kapalıyken mesaj gelince",
+    sounds: [
+      { id: "qeyf", name: "Qeyf", note: "İmza: üç notalı çan", notes: [bell(0, "C6", 0.5), bell(0.11, "E6", 0.5), bell(0.22, "G6", 0.8, 0.32)] },
+      { id: "cay", name: "Çay kaşığı", note: "İnce belli bardağa iki tıklama", notes: [bell(0, "E7", 0.35, 0.3, 5.1, 3), bell(0.16, "E7", 0.55, 0.26, 5.1, 3)] },
+      { id: "marimba", name: "Marimba", note: "Tahta, neşeli", notes: [mallet(0, "A5", 0.3), mallet(0.1, "E6", 0.45)] },
+      { id: "yukselen", name: "Yükselen", note: "Merdiven gibi çıkan üç ses", notes: [N(0, hz("D6"), 0.12, { v: 0.32 }), N(0.1, hz("F#6"), 0.12, { v: 0.32 }), N(0.2, hz("A6"), 0.3, { v: 0.32 })] },
+      { id: "kristal", name: "Kristal", note: "Uzun yankılı tek çan", notes: [bell(0, "B6", 1.2, 0.32, 2.76, 2.6)] },
+    ],
+  },
+  {
+    id: "ring", title: "Arama zil sesi", when: "sesli ve görüntülü aramada, grup aramasında",
+    loop: true,
+    sounds: [
+      {
+        id: "ritim", name: "Qeyf ritmi", note: "Marimbayla kısa melodi",
+        notes: [mallet(0, "C5"), mallet(0.18, "E5"), mallet(0.36, "G5"), mallet(0.54, "C6", 0.5), mallet(0.9, "G5"), mallet(1.08, "C6", 0.6)],
+        length: 2.2,
+      },
+      {
+        id: "hicaz", name: "Hicaz", note: "Hicaz makamında, saz tınısında",
+        notes: [["D5", 0], ["Eb5", 0.16], ["F#5", 0.32], ["G5", 0.48], ["A5", 0.64], ["G5", 0.9], ["F#5", 1.06], ["Eb5", 1.22], ["D5", 1.38]].map(([n, t]) =>
+          N(t, hz(n), 0.42, { w: "sawtooth", v: 0.22, a: 0.002, lp: 2200 })),
+        length: 2.4,
+      },
+      {
+        id: "eskizil", name: "Eski zil", note: "Çevirmeli telefonun zili",
+        notes: Array.from({ length: 18 }, (_, k) => bell(k * 0.05, k % 2 ? "E7" : "D7", 0.06, 0.22, 7.1, 3.5)),
+        length: 2.0,
+      },
+      {
+        id: "gece", name: "Gece", note: "Sakin, yumuşak akorlar",
+        notes: [N(0, hz("A4"), 1.1, { v: 0.18, a: 0.15 }), N(0, hz("C#5"), 1.1, { v: 0.14, a: 0.15 }), N(0, hz("E5"), 1.1, { v: 0.14, a: 0.15 }),
+          N(1.1, hz("F#4"), 1.1, { v: 0.18, a: 0.15 }), N(1.1, hz("A4"), 1.1, { v: 0.14, a: 0.15 }), N(1.1, hz("C#5"), 1.1, { v: 0.14, a: 0.15 })],
+        length: 2.6,
+      },
+      {
+        id: "darbuka", name: "Darbuka", note: "Düm tek tek düm tek",
+        notes: [
+          N(0, 150, 0.22, { f2: 70, g: 0.12, v: 0.9 }),
+          N(0.3, 0, 0.06, { w: "noise", bp: 3200, v: 0.6 }), N(0.45, 0, 0.06, { w: "noise", bp: 3200, v: 0.5 }),
+          N(0.6, 150, 0.22, { f2: 70, g: 0.12, v: 0.9 }),
+          N(0.9, 0, 0.06, { w: "noise", bp: 3200, v: 0.6 }),
+          N(1.2, 150, 0.22, { f2: 70, g: 0.12, v: 0.9 }), N(1.35, 150, 0.22, { f2: 70, g: 0.12, v: 0.7 }),
+          N(1.5, 0, 0.06, { w: "noise", bp: 3200, v: 0.6 }),
+        ],
+        length: 1.8,
+      },
+    ],
+  },
+  {
+    id: "ringback", title: "Arama bekleme sesi", when: "sen ararken, karşı taraf çalarken duyduğun",
+    loop: true,
+    sounds: [
+      { id: "klasik", name: "Klasik", note: "Türkiye'deki çalma sesi (450 Hz)", notes: [N(0, 450, 1.0, { v: 0.25, a: 0.01, hold: true })], length: 4.0 },
+      { id: "yumusakbek", name: "Yumuşak", note: "İki notalı nazik bekleme", notes: [N(0, hz("A5"), 0.35, { v: 0.28 }), N(0.35, hz("E5"), 0.5, { v: 0.28 })], length: 2.5 },
+      { id: "qeyfbek", name: "Qeyf", note: "Bildirim çanının sakin hali", notes: [bell(0, "C6", 0.6, 0.22), bell(0.18, "G5", 0.9, 0.2)], length: 2.8 },
+    ],
+  },
+];
+
+const SMALL = [
+  { id: "recstart", name: "Kayıt başladı", note: "Sesli mesaj kaydına basınca", notes: [N(0, hz("C6"), 0.06, { v: 0.3 }), N(0.06, hz("G6"), 0.08, { v: 0.3 })] },
+  { id: "recstop", name: "Kayıt gönderildi", note: "Parmağını kaldırınca", notes: [N(0, hz("G6"), 0.06, { v: 0.3 }), N(0.06, hz("C6"), 0.1, { v: 0.3 })] },
+  { id: "connected", name: "Arama bağlandı", note: "Karşı taraf açınca", notes: [bell(0, "G5", 0.3, 0.25), bell(0.12, "D6", 0.4, 0.25)] },
+  { id: "ended", name: "Arama bitti", note: "Kapatınca", notes: [N(0, hz("E5"), 0.15, { v: 0.3 }), N(0.15, hz("C5"), 0.25, { v: 0.3 })] },
+];
+
+// ---------------------------------------------------------------- the synthesizer
+
+let audio = null;
+const getAudio = () => (audio ??= new (window.AudioContext || window.webkitAudioContext)());
+
+function noiseBuffer(ctx, seconds) {
+  const b = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * seconds), ctx.sampleRate);
+  const data = b.getChannelData(0);
+  let seed = 7;
+  for (let i = 0; i < data.length; i++) { seed = (seed * 16807) % 2147483647; data[i] = seed / 1073741823.5 - 1; }
+  return b;
+}
+
+/** Schedules [notes] on [ctx] starting at [at], into [out]. */
+function play(ctx, notes, at, out) {
+  for (const n of notes) {
+    const t0 = at + n.t;
+    const end = t0 + n.d;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t0);
+    env.gain.linearRampToValueAtTime(n.v, t0 + n.a);
+    if (n.hold) env.gain.setValueAtTime(n.v, end - 0.02), env.gain.linearRampToValueAtTime(0.0001, end);
+    else env.gain.exponentialRampToValueAtTime(0.0001, end);
+    let src;
+    if (n.w === "noise") {
+      src = ctx.createBufferSource();
+      src.buffer = noiseBuffer(ctx, n.d + 0.05);
+    } else {
+      src = ctx.createOscillator();
+      src.type = n.w;
+      src.frequency.setValueAtTime(n.f, t0);
+      if (n.f2) src.frequency.exponentialRampToValueAtTime(n.f2, t0 + n.g);
+      if (n.fm) {
+        const mod = ctx.createOscillator();
+        const depth = ctx.createGain();
+        mod.frequency.setValueAtTime(n.f * n.fm.r, t0);
+        depth.gain.setValueAtTime(n.f * n.fm.i, t0);
+        depth.gain.exponentialRampToValueAtTime(n.f * n.fm.i * 0.05 + 0.01, end);
+        mod.connect(depth).connect(src.frequency);
+        mod.start(t0); mod.stop(end + 0.02);
+      }
+    }
+    let node = src;
+    if (n.lp || n.bp) {
+      const f = ctx.createBiquadFilter();
+      f.type = n.lp ? "lowpass" : "bandpass";
+      f.frequency.value = n.lp || n.bp;
+      if (n.bp) f.Q.value = 1.4;
+      node = node.connect(f);
+    }
+    node.connect(env).connect(out);
+    src.start(t0); src.stop(end + 0.02);
+  }
+}
+
+const lengthOf = (s) => s.length ?? Math.max(...s.notes.map((n) => n.t + n.d)) + 0.05;
+
+let current = null;
+function audition(sound, times = 1, onEnd) {
+  const ctx = getAudio();
+  if (ctx.state === "suspended") ctx.resume();
+  stopAll();
+  const master = ctx.createGain();
+  master.gain.value = 0.9;
+  master.connect(ctx.destination);
+  const len = lengthOf(sound);
+  const start = ctx.currentTime + 0.03;
+  for (let k = 0; k < times; k++) play(ctx, sound.notes, start + k * len, master);
+  const timer = setTimeout(() => { if (current?.master === master) current = null; onEnd?.(); }, (len * times + 0.1) * 1000);
+  current = { master, timer, onEnd };
+}
+function stopAll() {
+  if (!current) return;
+  clearTimeout(current.timer);
+  try { current.master.disconnect(); } catch (e) {}
+  const end = current.onEnd;
+  current = null;
+  end?.();
+}
+
+/** Draws the sound's shape (rendered offline once) into its card. */
+async function drawWave(canvas, sound) {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = canvas.clientWidth || 160, h = canvas.clientHeight || 38;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const g = canvas.getContext("2d");
+  g.scale(dpr, dpr);
+  const css = getComputedStyle(document.documentElement);
+  try {
+    const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const len = lengthOf(sound);
+    const ctx = new Offline(1, Math.ceil(22050 * len), 22050);
+    play(ctx, sound.notes, 0, ctx.destination);
+    const buf = await ctx.startRendering();
+    const data = buf.getChannelData(0);
+    const bars = Math.floor(w / 3);
+    const step = Math.max(1, Math.floor(data.length / bars));
+    let peak = 0.0001;
+    const vals = [];
+    for (let i = 0; i < bars; i++) {
+      let m = 0;
+      for (let j = i * step; j < Math.min(data.length, (i + 1) * step); j++) m = Math.max(m, Math.abs(data[j]));
+      vals.push(m); peak = Math.max(peak, m);
+    }
+    g.fillStyle = css.getPropertyValue("--ink").trim() || "#000";
+    vals.forEach((v, i) => {
+      const bh = Math.max(2, (v / peak) * (h - 4));
+      g.globalAlpha = 0.25 + 0.75 * (v / peak);
+      g.fillRect(i * 3, (h - bh) / 2, 2, bh);
+    });
+  } catch (e) {
+    g.fillStyle = css.getPropertyValue("--line").trim();
+    g.fillRect(0, h / 2 - 1, w, 2);
+  }
+}
+
+// ---------------------------------------------------------------- the page
+
+const DEFAULTS = { send: "firlat", receive: "pit", notify: "qeyf", ring: "ritim", ringback: "klasik" };
+let picks = { ...DEFAULTS };
+let small = Object.fromEntries(SMALL.map((s) => [s.id, true]));
+try {
+  const saved = JSON.parse(localStorage.getItem("qeyf-sounds") || "null");
+  if (saved?.picks) picks = { ...picks, ...saved.picks };
+  if (saved?.small) small = { ...small, ...saved.small };
+} catch (e) {}
+const save = () => { try { localStorage.setItem("qeyf-sounds", JSON.stringify({ picks, small })); } catch (e) {} };
+
+const PLAY = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 1.2v9.6L10.5 6z"/></svg>';
+const STOP = '<svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1"/></svg>';
+const soundById = (shelfId, id) => SHELVES.find((s) => s.id === shelfId).sounds.find((x) => x.id === id);
+
+function buildShelves() {
+  const root = document.getElementById("shelves");
+  root.style.display = "grid";
+  root.style.gap = "40px";
+  for (const shelf of SHELVES) {
+    const sec = document.createElement("section");
+    sec.className = "shelf";
+    sec.innerHTML = `<div class="shelf-head"><h2>${shelf.title}</h2><span class="when">${shelf.when}</span><span class="chosen" data-chosen="${shelf.id}"></span></div><div class="cards" role="radiogroup" aria-label="${shelf.title}"></div>`;
+    const cards = sec.querySelector(".cards");
+    for (const s of shelf.sounds) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.tabIndex = 0;
+      card.setAttribute("role", "radio");
+      card.dataset.shelf = shelf.id;
+      card.dataset.id = s.id;
+      const len = lengthOf(s);
+      card.innerHTML = `<div class="row"><button class="play" type="button" aria-label="${s.name} sesini çal">${PLAY}</button><span class="name">${s.name}</span><span class="dot"></span></div>
+        <canvas aria-hidden="true"></canvas>
+        <div class="note">${s.note}</div>
+        <div class="meta"><span>${shelf.loop ? "döngü" : "tek"}</span><span>${len.toFixed(2).replace(".", ",")} sn</span></div>`;
+      const btn = card.querySelector(".play");
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (card.classList.contains("playing")) { stopAll(); return; }
+        markPlaying(card, btn);
+        audition(s, shelf.loop ? 2 : 1, () => unmark(card, btn));
+      });
+      const choose = () => {
+        picks[shelf.id] = s.id; save(); refresh();
+        markPlaying(card, btn);
+        audition(s, 1, () => unmark(card, btn));
+      };
+      card.addEventListener("click", choose);
+      card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(); } });
+      cards.appendChild(card);
+      requestAnimationFrame(() => drawWave(card.querySelector("canvas"), s));
+    }
+    root.appendChild(sec);
+  }
+}
+function markPlaying(card, btn) {
+  document.querySelectorAll(".card.playing").forEach((c) => { c.classList.remove("playing"); const b = c.querySelector(".play"); if (b) b.innerHTML = PLAY; });
+  card.classList.add("playing"); btn.innerHTML = STOP;
+}
+function unmark(card, btn) { card.classList.remove("playing"); btn.innerHTML = PLAY; }
+
+function buildToggles() {
+  const root = document.getElementById("toggles");
+  for (const s of SMALL) {
+    const row = document.createElement("div");
+    row.className = "toggle";
+    row.innerHTML = `<button class="play" type="button" aria-label="${s.name} sesini çal">${PLAY}</button><div><b>${s.name}</b><span>${s.note}</span></div><button class="switch" type="button" role="switch" id="sw-${s.id}" aria-label="${s.name}"></button>`;
+    const btn = row.querySelector(".play");
+    btn.addEventListener("click", () => { btn.innerHTML = STOP; audition(s, 1, () => (btn.innerHTML = PLAY)); });
+    const sw = row.querySelector(".switch");
+    sw.addEventListener("click", () => { small[s.id] = !small[s.id]; save(); refresh(); });
+    root.appendChild(row);
+  }
+}
+
+function summaryText() {
+  const name = (shelf) => soundById(shelf, picks[shelf]).name;
+  const on = SMALL.filter((s) => small[s.id]).map((s) => s.name);
+  return `Gönderme: ${name("send")} · Gelen: ${name("receive")} · Bildirim: ${name("notify")} · Zil: ${name("ring")} · Bekleme: ${name("ringback")} · Küçük sesler: ${on.length ? on.join(", ") : "kapalı"}`;
+}
+function refresh() {
+  document.querySelectorAll(".card").forEach((c) => c.setAttribute("aria-checked", String(picks[c.dataset.shelf] === c.dataset.id)));
+  document.querySelectorAll("[data-chosen]").forEach((el) => (el.textContent = "seçili: " + soundById(el.dataset.chosen, picks[el.dataset.chosen]).name));
+  SMALL.forEach((s) => document.getElementById("sw-" + s.id).setAttribute("aria-checked", String(!!small[s.id])));
+  document.getElementById("summary").textContent = summaryText();
+}
+
+// The pocket phone.
+const feed = document.getElementById("feed");
+const now = () => new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
+function bubble(text, mine) {
+  const el = document.createElement("div");
+  el.className = "msg " + (mine ? "me" : "them");
+  el.innerHTML = `${text}<small${mine ? ' class="r"' : ""}>${now()}${mine ? " ✓✓" : ""}</small>`;
+  feed.appendChild(el);
+  feed.scrollTop = feed.scrollHeight;
+  while (feed.children.length > 12) feed.firstChild.remove();
+}
+const mineLines = ["Akşam ne yapıyoruz?", "Bu şarkıyı dinle 🎧", "Geliyorum 10 dk", "Haha tamam 😂", "Çay demledim ☕"];
+const theirLines = ["Film izleyelim mi?", "Süper olmuş!", "Neredesin?", "Tamamdır 👍", "Birlikte dinleyelim mi?"];
+let mi = 0, ti = 0;
+document.getElementById("b-send").addEventListener("click", () => { bubble(mineLines[mi++ % mineLines.length], true); audition(soundById("send", picks.send)); });
+document.getElementById("b-recv").addEventListener("click", () => { bubble(theirLines[ti++ % theirLines.length], false); audition(soundById("receive", picks.receive)); });
+const phone = document.getElementById("phone");
+const ringBtn = document.getElementById("b-ring");
+ringBtn.addEventListener("click", () => {
+  if (phone.classList.contains("ringing")) { stopAll(); return; }
+  phone.classList.add("ringing"); ringBtn.textContent = "Kapat";
+  audition(soundById("ring", picks.ring), 3, () => { phone.classList.remove("ringing"); ringBtn.textContent = "Ara"; });
+});
+
+document.getElementById("copy").addEventListener("click", async () => {
+  const text = summaryText();
+  try { await navigator.clipboard.writeText(text); toast("Kopyalandı. Sohbete yapıştırıp gönder."); }
+  catch (e) {
+    const sel = window.getSelection(); const r = document.createRange();
+    r.selectNodeContents(document.getElementById("summary")); sel.removeAllRanges(); sel.addRange(r);
+    toast("Metin seçildi; kopyalayıp gönder.");
+  }
+});
+function toast(t) { const el = document.getElementById("toast"); el.textContent = t; el.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (el.hidden = true), 2400); }
+
+buildShelves();
+buildToggles();
+refresh();
+bubble("Selam! Sesleri burada dene 👋", false);
+</script>

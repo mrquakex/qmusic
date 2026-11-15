@@ -81,6 +81,9 @@ object CallHooks {
     /** A call rang out unanswered while the app was out of sight: the "missed call" notification. */
     var onMissed: ((peer: ChatUser, video: Boolean) -> Unit)? = null
 
+    /** The person joined (or started) a group's call here, or left it (null): that group's ringing notification goes. */
+    var onGroupJoined: ((groupId: String?) -> Unit)? = null
+
     /** A call is going on (keep the app alive with a foreground service), or it is over. */
     var onActive: ((active: Boolean, peer: ChatUser?, video: Boolean) -> Unit)? = null
 
@@ -621,6 +624,8 @@ internal class FirebaseCallService(
                     PeerConnection.PeerConnectionState.CONNECTED -> {
                         s.disconnectJob?.cancel()
                         _state.update { it?.copy(phase = CallPhase.ACTIVE, startedAt = it.startedAt ?: System.currentTimeMillis(), weak = false) }
+                        // "Connected": once, the first time (not after a reconnect).
+                        if (!s.connectedOnce) QeyfSounds.playSmall(app, SmallSound.CONNECTED, call = true)
                         s.connectedOnce = true
                         telecom.setActive()
                     }
@@ -765,6 +770,8 @@ internal class FirebaseCallService(
         runCatching { s.pc?.dispose() }
         localTrack.value = null
         remoteTrack.value = null
+        // "Ended", for a call that was on (still in the call's sound route, before it is let go).
+        if (s.connectedOnce) QeyfSounds.playSmall(app, SmallSound.ENDED, call = true)
         stopAudio()
         CallHooks.onActive?.invoke(false, null, false)
         _state.update { it?.copy(phase = CallPhase.ENDED, endReason = reason) }
@@ -833,16 +840,13 @@ internal class FirebaseCallService(
         proximity = null
     }
 
-    private var ringtone: android.media.Ringtone? = null
-    private var ringback: ToneGenerator? = null
+    private var ringtone: android.media.MediaPlayer? = null
+    private var ringback: android.media.MediaPlayer? = null
 
     private fun startRinging() {
-        runCatching {
-            ringtone = RingtoneManager.getRingtone(app, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))?.apply {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) isLooping = true
-                play()
-            }
-        }
+        // Qeyf's own ringtone (the one chosen in Profile and privacy → Sounds).
+        QeyfSounds.stop(ringtone)
+        ringtone = QeyfSounds.startRingtone(app)
         val vibrator = app.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             runCatching { vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 800, 800), 0)) }
@@ -850,18 +854,18 @@ internal class FirebaseCallService(
     }
 
     private fun stopRinging() {
-        runCatching { ringtone?.stop() }
+        QeyfSounds.stop(ringtone)
         ringtone = null
         runCatching { (app.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)?.cancel() }
     }
 
     private fun startRingback() {
-        runCatching { ringback = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 70).also { it.startTone(ToneGenerator.TONE_SUP_RINGTONE) } }
+        QeyfSounds.stop(ringback)
+        ringback = QeyfSounds.startRingback(app)
     }
 
     private fun stopRingback() {
-        runCatching { ringback?.stopTone() }
-        runCatching { ringback?.release() }
+        QeyfSounds.stop(ringback)
         ringback = null
     }
 

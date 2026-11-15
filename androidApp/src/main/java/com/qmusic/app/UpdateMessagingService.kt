@@ -26,6 +26,10 @@ class UpdateMessagingService : FirebaseMessagingService() {
             ChatPush.onFriend(applicationContext, message.data)
             return
         }
+        if (message.data["type"] == "groupcall") {
+            GroupCallNotifications.showRinging(applicationContext, message.data)
+            return
+        }
         if (message.data["type"] == "call") {
             ChatPush.onCall(applicationContext, message.data)
             return
@@ -37,10 +41,10 @@ class UpdateMessagingService : FirebaseMessagingService() {
         if (message.data["type"] != "update") return
         val version = message.data["version"] ?: return
         val summary = message.data["body"] ?: message.notification?.body
-        // Where the update can go in by itself it is fetched now and installed while the app is not in use;
-        // elsewhere the notification leads to the update button.
+        // Everyone sees that a new version is out, and a tap installs it right away. Where it can go in by itself it is
+        // also fetched now, and installed while the app is not in use for those who do not tap.
+        UpdatePush.notify(applicationContext, version, summary)
         if (AutoUpdate.canBeSilent(applicationContext)) AutoUpdate.schedule(applicationContext)
-        else UpdatePush.notify(applicationContext, version, summary)
     }
 
     /** The phone's push address changed: the messages account keeps the new one. */
@@ -51,6 +55,8 @@ class UpdateMessagingService : FirebaseMessagingService() {
 
 object UpdatePush {
     const val EXTRA_OPEN_UPDATES = "open_updates"
+    const val EXTRA_INSTALL_NOW = "install_now"
+    const val NOTIFICATION_ID_PUBLIC = 1003
     private const val TOPIC = "releases"
     private const val CHANNEL_ID = "qmusic_updates"
     private const val NOTIFICATION_ID = 1003
@@ -79,11 +85,14 @@ object UpdatePush {
             context,
             0,
             Intent(context, MainActivity::class.java)
-                .putExtra(EXTRA_OPEN_UPDATES, true)
+                .putExtra(EXTRA_INSTALL_NOW, true)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val bodyText = summary?.takeIf { it.isNotBlank() } ?: context.getString(R.string.update_ready_text)
+        val tr = prefs.getString("language", "tr") != "en"
+        val bodyText = summary?.takeIf { it.isNotBlank() }
+            ?: if (tr) "Şimdi güncellemek için dokun. Dokunmazsan uygulamayı kullanmadığın bir anda kendiliğinden kurulur."
+            else "Tap to update now. Otherwise it installs by itself while you are not using the app."
         manager.notify(
             NOTIFICATION_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)

@@ -125,6 +125,7 @@ internal class FirebaseGroupCallService(
             startMedia(video)
             startAudio()
             CallHooks.onActive?.invoke(true, group, video)
+            CallHooks.onGroupJoined?.invoke(group.uid)
             val ref = callRef(group.uid)
             val others = runCatching { ref.child("members").get().await() }.getOrNull()
                 ?.children?.mapNotNull { it.key }?.filter { it != mine.uid }.orEmpty()
@@ -139,7 +140,7 @@ internal class FirebaseGroupCallService(
             // The first one rings the others.
             if (others.isEmpty()) {
                 root.child("notify").push().setValue(
-                    mapOf("from" to mine.uid, "to" to group.uid, "chatId" to group.uid, "type" to "groupcall", "body" to "", "at" to ServerValue.TIMESTAMP),
+                    mapOf("from" to mine.uid, "to" to group.uid, "chatId" to group.uid, "type" to "groupcall", "body" to "", "video" to video, "at" to ServerValue.TIMESTAMP),
                 )
             }
             listenSignals(group.uid, mine.uid)
@@ -278,6 +279,7 @@ internal class FirebaseGroupCallService(
                     when (newState) {
                         PeerConnection.PeerConnectionState.CONNECTED -> {
                             peer.connected = true
+                            if (_state.value?.startedAt == null) QeyfSounds.playSmall(app, SmallSound.CONNECTED, call = true)
                             _state.update { it?.copy(startedAt = it.startedAt ?: System.currentTimeMillis()) }
                             publish()
                         }
@@ -401,8 +403,10 @@ internal class FirebaseGroupCallService(
         audio = null
         localTrack.value = null
         remoteTracks.value = emptyMap()
+        if (_state.value?.startedAt != null) QeyfSounds.playSmall(app, SmallSound.ENDED, call = true)
         stopAudio()
         CallHooks.onActive?.invoke(false, null, false)
+        CallHooks.onGroupJoined?.invoke(null)
         _state.value = null
     }
 

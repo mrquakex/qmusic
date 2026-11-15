@@ -99,7 +99,7 @@ async function handleGroup(n) {
   const data = {
     type: "chat",
     chatId: n.chatId,
-    from: n.chatId,
+    sender: n.chatId,
     name: String(group.name || "Grup"),
     username: "",
     photo: String(group.photo || ""),
@@ -107,11 +107,19 @@ async function handleGroup(n) {
     group: "1",
   };
   const call = n.type === "groupcall";
-  if (call) data.body = `📞 ${senderName || "Biri"} grup araması başlattı`;
+  if (call) {
+    // A group call rings each member like a phone call (the app shows it full screen, with Join and Decline).
+    data.type = "groupcall";
+    data.starter = senderName || "Biri";
+    data.video = n.video ? "1" : "0";
+    data.callAt = String(Number(n.at) || Date.now());
+    data.body = `${senderName || "Biri"} grup araması başlattı`;
+  }
   const targets = Object.keys(group.members).filter((uid) => uid !== n.from);
   await Promise.all(
     targets.map(async (uid) => {
-      if (!call && (await isMuted(uid, n.chatId))) return;
+      // A muted group neither notifies nor rings.
+      if (await isMuted(uid, n.chatId)) return;
       await deliver(uid, data, call ? 60 * 1000 : 24 * 3600 * 1000);
     }).map((p) => p.catch((e) => log("group push failed:", e.message))),
   );
@@ -170,7 +178,7 @@ async function handle(n) {
   const data = {
     type: call ? "call" : friend ? "friend" : "chat",
     chatId: n.chatId,
-    from: shownFrom,
+    sender: shownFrom,
     name: String(sender.name || ""),
     username: String(sender.username || ""),
     photo: String(sender.photo || ""),

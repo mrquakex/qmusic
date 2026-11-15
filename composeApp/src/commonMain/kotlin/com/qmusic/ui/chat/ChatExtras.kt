@@ -194,10 +194,29 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
                 }
             }
         }
+        item { SectionTitle(s.soundsTitle) }
+        item { SoundSettings(s) }
         item { SectionTitle(s.privacyTitle) }
         item {
             SettingSwitch(s.hideLastSeen, s.hideLastSeenNote, privacy.hideLastSeen) { controller.setPrivacy(privacy.copy(hideLastSeen = it)) }
             SettingSwitch(s.hideReadReceipts, s.hideReadReceiptsNote, privacy.hideReadReceipts) { controller.setPrivacy(privacy.copy(hideReadReceipts = it)) }
+            val lock = rememberAppLock()
+            if (lock != null) {
+                val lockOn by lock.enabled.collectAsState()
+                SettingSwitch(s.appLock, if (lock.available) s.appLockNote else s.appLockUnavailable, lockOn) { on ->
+                    // Turning it on or off asks for the lock itself first.
+                    if (lock.available) {
+                        lock.authenticate(s.appLock, s.lockBody) { ok ->
+                            if (ok) {
+                                lock.setEnabled(on)
+                                ChatLock.unlocked.value = true
+                            }
+                        }
+                    } else if (!on) {
+                        lock.setEnabled(false)
+                    }
+                }
+            }
             Text(s.e2eNote, color = TextMuted, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(16.dp))
         }
     }
@@ -560,5 +579,70 @@ fun GroupCallScreen(service: GroupCallService, s: ChatStrings, me: ChatUser?, mo
 private fun CallRoundButton(icon: androidx.compose.ui.graphics.vector.ImageVector, on: Boolean, onClick: () -> Unit) {
     Box(Modifier.size(54.dp).clip(CircleShape).background(if (on) Color.White else Color.White.copy(alpha = 0.14f)).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
         Icon(icon, null, tint = if (on) Color.Black else Color.White, modifier = Modifier.size(24.dp))
+    }
+}
+
+// ------------------------------------------------------------------ sounds
+
+/** Which Qeyf sound plays for what; a pick plays it once. */
+@Composable
+private fun SoundSettings(s: ChatStrings) {
+    val sounds = rememberChatSounds() ?: return
+    val choices by sounds.choices.collectAsState()
+    val inChat by sounds.inChat.collectAsState()
+    val small by sounds.small.collectAsState()
+    val english = s.you == "You"
+    var picking by remember { mutableStateOf<SoundKind?>(null) }
+    val rows = listOf(
+        SoundKind.SEND to s.soundSend,
+        SoundKind.RECEIVE to s.soundReceive,
+        SoundKind.NOTIFY to s.soundNotify,
+        SoundKind.RING to s.soundRing,
+        SoundKind.RINGBACK to s.soundRingback,
+    )
+    Column {
+        rows.forEach { (kind, label) ->
+            Row(Modifier.fillMaxWidth().clickable { picking = kind }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(label, color = TextPrimary, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                Text(
+                    ChatSoundCatalog.option(kind, choices[kind] ?: ChatSoundCatalog.defaults.getValue(kind)).name(english),
+                    color = TickRead,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+        SettingSwitch(s.soundInChat, s.soundInChatNote, inChat) { sounds.setInChat(it) }
+        SettingSwitch(s.soundSmall, s.soundSmallNote, small) { sounds.setSmall(it) }
+    }
+    picking?.let { kind ->
+        val current = choices[kind]
+        AlertDialog(
+            onDismissRequest = { picking = null },
+            containerColor = DarkSurfaceVariant,
+            title = { Text(rows.first { it.first == kind }.second, color = TextPrimary) },
+            text = {
+                Column {
+                    ChatSoundCatalog.options.getValue(kind).forEach { option ->
+                        val on = option.id == current
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable {
+                                sounds.choose(kind, option.id)
+                                sounds.preview(kind, option.id)
+                            }.padding(vertical = 11.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(Modifier.size(20.dp).clip(CircleShape).background(if (on) TickRead else DarkSurface), contentAlignment = Alignment.Center) {
+                                if (on) Box(Modifier.size(8.dp).clip(CircleShape).background(Color.White))
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Text(option.name(english), color = TextPrimary, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                            Icon(QMusicIcons.Play, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { picking = null }) { Text("OK", color = Color.White) } },
+        )
     }
 }

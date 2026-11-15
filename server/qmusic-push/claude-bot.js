@@ -215,6 +215,9 @@ function describe(message) {
     const what = att.kind === "voice" ? "voice message" : att.kind === "video" ? "video" : `file "${att.name || "file"}"`;
     text = `[${what}] ${text}`;
   }
+  if (message.poll && message.poll.q) text = `[poll: "${message.poll.q}" — ${(message.poll.o || []).join(" / ")}] ${text}`;
+  if (message.location) text = `[location: ${message.location.lat}, ${message.location.lng}] ${text}`;
+  if (message.contact) text = `[contact: ${message.contact.name || ""} ${message.contact.phone || ""}] ${text}`;
   const photos = photosOf(message).length;
   if (photos > 0) text = `[${photos > 1 ? photos + " photos" : "photo"}] ${text}`;
   return text.trim();

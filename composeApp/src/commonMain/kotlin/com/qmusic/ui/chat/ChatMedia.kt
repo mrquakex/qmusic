@@ -62,3 +62,52 @@ expect fun VideoMessagePlayer(url: String, modifier: Modifier)
 /** Crop, turn and draw on a photo before it is sent; [onDone] gets the edited one. */
 @Composable
 expect fun PhotoEditor(image: PickedImage, onDone: (PickedImage) -> Unit, onCancel: () -> Unit)
+
+/**
+ * Asks for the location permission when needed, then finds where the phone is now; [onPicked] gets it, or null with
+ * [onError] told why ("permission", "off", "none").
+ */
+@Composable
+expect fun rememberLocationPicker(onPicked: (ChatLocation) -> Unit, onError: (String) -> Unit): () -> Unit
+
+/** Opens the phone's contacts to pick one (a name and a number). */
+@Composable
+expect fun rememberContactPicker(onPicked: (ChatContact) -> Unit): () -> Unit
+
+/** Opens the phone's "new contact" screen filled with [ChatContact]'s name and number. */
+@Composable
+expect fun rememberContactSaver(): (ChatContact) -> Unit
+
+/** The phone's own lock (fingerprint, face, or the screen lock code) in front of the messages. */
+interface AppLock {
+    /** This phone has a fingerprint, face or screen lock set up. */
+    val available: Boolean
+    val enabled: StateFlow<Boolean>
+    fun setEnabled(on: Boolean)
+
+    /** Shows the phone's own prompt; [onResult] hears whether the person proved it is them. */
+    fun authenticate(title: String, subtitle: String, onResult: (Boolean) -> Unit)
+}
+
+@Composable
+expect fun rememberAppLock(): AppLock?
+
+/**
+ * Whether the messages are open now. They lock again when the app has been out of sight for a minute (a quick trip to
+ * the photo picker or the camera does not lock them).
+ */
+object ChatLock {
+    val unlocked = kotlinx.coroutines.flow.MutableStateFlow(false)
+    private var hiddenAt = 0L
+
+    fun onHidden(now: Long) {
+        hiddenAt = now
+    }
+
+    fun onShown(now: Long) {
+        if (hiddenAt > 0 && now - hiddenAt > RELOCK_AFTER_MS) unlocked.value = false
+        hiddenAt = 0
+    }
+
+    private const val RELOCK_AFTER_MS = 60_000L
+}

@@ -1,5 +1,6 @@
 package com.qmusic.ui
 
+import kotlinx.coroutines.flow.first
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -166,13 +167,17 @@ fun QMusicApp(
                 return@CompositionLocalProvider
             }
             val navTabs = remember(strings) {
-                listOf(
+                listOfNotNull(
                     NavigationTabItem(ScreenTab.HOME, strings.tabHome, QMusicIcons.Home),
-                    NavigationTabItem(ScreenTab.FOR_YOU, strings.tabForYou, QMusicIcons.Samples),
+                    NavigationTabItem(ScreenTab.FOR_YOU, strings.tabForYou, QMusicIcons.Samples).takeIf { FOR_YOU_SHOWN },
                     NavigationTabItem(ScreenTab.SEARCH, strings.tabSearch, QMusicIcons.Search),
                     NavigationTabItem(ScreenTab.LIBRARY, strings.tabLibrary, QMusicIcons.Library),
                     NavigationTabItem(ScreenTab.SETTINGS, strings.tabSettings, QMusicIcons.Settings),
                 )
+            }
+            // "Sana Özel" is hidden for now: a phone that was left on it opens on the home page.
+            LaunchedEffect(Unit) {
+                viewModel.currentTab.collect { tab -> if (!FOR_YOU_SHOWN && tab == ScreenTab.FOR_YOU) viewModel.selectTab(ScreenTab.HOME) }
             }
 
             // The Videos section (YouTube itself) is entered from the navigation bar and takes the whole screen, like
@@ -265,6 +270,32 @@ fun QMusicApp(
                 chatOpen = true
                 request.user?.let { user ->
                     if (request.profile) chatController.openProfileOf(user.uid, user) else chatController.openConversation(user)
+                }
+            }
+            // A ringing group call's notification: open the group; with Join, join its call (if it is still going on:
+            // a call that ended meanwhile is not started again, which would ring everyone).
+            val groupLaunch by com.qmusic.ui.chat.GroupCallLaunch.request.collectAsState()
+            val askGroupCall = com.qmusic.ui.chat.rememberCallPermissions()
+            LaunchedEffect(groupLaunch, chatController) {
+                val request = groupLaunch ?: return@LaunchedEffect
+                val controller = chatController ?: return@LaunchedEffect
+                com.qmusic.ui.chat.GroupCallLaunch.request.value = null
+                videosOpen = false
+                chatOpen = true
+                controller.openConversation(request.group)
+                if (!request.join) return@LaunchedEffect
+                val service = controller.groupCalls ?: return@LaunchedEffect
+                kotlinx.coroutines.withTimeoutOrNull(15_000) {
+                    controller.account.first { it is com.qmusic.ui.chat.ChatAccount.Ready }
+                } ?: return@LaunchedEffect
+                val people = kotlinx.coroutines.withTimeoutOrNull(6_000) { controller.groupCallParticipants(request.group).first() }.orEmpty()
+                val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
+                if (people.isEmpty()) {
+                    controller.reportError(chatStrings.groupCallEnded)
+                    return@LaunchedEffect
+                }
+                askGroupCall(request.video) { granted ->
+                    if (granted) service.join(request.group, request.video) else controller.reportError(chatStrings.callPermission)
                 }
             }
             // A call (ringing, going on or just over) takes the whole screen, over any section.
@@ -1466,3 +1497,6 @@ private fun WhatsNewDialog(news: com.qmusic.ui.viewmodel.MainViewModel.WhatsNew,
         confirmButton = { TextButton(onClick = onDismiss) { Text(if (english) "Got it" else "Tamam") } },
     )
 }
+
+/** The "Sana Özel" tab (song samples to swipe through); hidden for now, true brings it back. */
+const val FOR_YOU_SHOWN = false

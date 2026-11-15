@@ -32,7 +32,7 @@ object ChatPush {
 
     /** "X wants to be your friend" / "X accepted": tapping it opens their profile. */
     fun onFriend(context: Context, data: Map<String, String>) {
-        val from = data["from"] ?: return
+        val from = (data["sender"] ?: data["from"]) ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
@@ -82,7 +82,7 @@ object ChatPush {
             return
         }
         // Rings at once from what the push carries; the app, woken, takes the call over from there.
-        val from = data["from"]
+        val from = (data["sender"] ?: data["from"])
         if (from != null && !com.qmusic.ui.chat.CallHooks.appVisible) {
             CallNotifications.showIncoming(
                 context,
@@ -120,7 +120,7 @@ object ChatPush {
 
     fun notify(context: Context, data: Map<String, String>) {
         val chatId = data["chatId"] ?: return
-        val from = data["from"] ?: return
+        val from = (data["sender"] ?: data["from"]) ?: return
         // The sender sees two ticks as soon as the phone has it, whether it is shown or not.
         background.launch { runCatching { com.qmusic.ui.chat.ChatNotificationActions.delivered(context.applicationContext, chatId) } }
         if (ChatPresence.openChatId == chatId) return
@@ -157,11 +157,8 @@ object ChatPush {
         ) return
         val tr = tr(context)
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            manager.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, if (tr) "Mesajlar" else "Messages", NotificationManager.IMPORTANCE_HIGH),
-            )
-        }
+        // The messages channel plays the chosen Qeyf sound (see QeyfSounds).
+        val channel = com.qmusic.ui.chat.QeyfSounds.messageChannelId(context)
         val sender = Person.Builder().setName(peer.name).setKey(peer.uid).build()
         val me = Person.Builder().setName(if (tr) "Sen" else "You").build()
         val style = NotificationCompat.MessagingStyle(me)
@@ -197,7 +194,7 @@ object ChatPush {
         runCatching {
             manager.notify(
                 chatId.hashCode(),
-                NotificationCompat.Builder(context, CHANNEL_ID)
+                NotificationCompat.Builder(context, channel)
                     .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
                     .setStyle(style)
                     .setCategory(NotificationCompat.CATEGORY_MESSAGE)

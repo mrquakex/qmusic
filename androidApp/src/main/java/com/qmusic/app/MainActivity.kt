@@ -79,7 +79,9 @@ class MainActivity : AppCompatActivity() {
         this.viewModel = viewModel
         hookRingtones()
         openUpdatesIfAsked(intent)
+        installNowIfAsked(intent)
         ChatPush.openIfAsked(intent)
+        GroupCallNotifications.openIfAsked(this, intent)
         acceptCallIfAsked(intent)
         // While a call rings or goes on, the app shows over the lock screen and turns the screen on.
         likeWatcher.launch {
@@ -207,7 +209,9 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         openUpdatesIfAsked(intent)
+        installNowIfAsked(intent)
         ChatPush.openIfAsked(intent)
+        GroupCallNotifications.openIfAsked(this, intent)
         acceptCallIfAsked(intent)
         openLinkIfAny(intent)
         openShortcutIfAny(intent)
@@ -254,10 +258,12 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         com.qmusic.ui.chat.CallHooks.setVisible(true)
+        com.qmusic.ui.chat.ChatLock.onShown(System.currentTimeMillis())
     }
 
     override fun onStop() {
         com.qmusic.ui.chat.CallHooks.setVisible(false)
+        com.qmusic.ui.chat.ChatLock.onHidden(System.currentTimeMillis())
         AutoUpdate.onAppHidden(this)
         super.onStop()
     }
@@ -277,6 +283,21 @@ class MainActivity : AppCompatActivity() {
         viewModel?.apply {
             selectTab(ScreenTab.SETTINGS)
             checkForUpdates()
+        }
+    }
+
+    /**
+     * Tapped "a new version is out": the downloaded update goes in now (Android's sheet asks first when it must);
+     * when it is not downloaded yet, it is fetched and installed as from the update button.
+     */
+    private fun installNowIfAsked(intent: Intent?) {
+        if (intent?.getBooleanExtra(UpdatePush.EXTRA_INSTALL_NOW, false) != true) return
+        intent.removeExtra(UpdatePush.EXTRA_INSTALL_NOW)
+        getSystemService(android.app.NotificationManager::class.java)?.cancel(UpdatePush.NOTIFICATION_ID_PUBLIC)
+        if (AutoUpdate.installNow(this)) return
+        viewModel?.apply {
+            selectTab(ScreenTab.SETTINGS)
+            checkForUpdates(silent = true)
         }
     }
 

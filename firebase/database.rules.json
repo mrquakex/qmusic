@@ -65,6 +65,14 @@
           "ttl": {
             ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 7776000000"
           }
+        },
+        "polls": {
+          "$messageId": {
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))",
+              ".validate": "!newData.exists() || (newData.isString() && newData.val().matches(/^[0-9]{1,2}(,[0-9]{1,2}){0,11}$/))"
+            }
+          }
         }
       }
     },

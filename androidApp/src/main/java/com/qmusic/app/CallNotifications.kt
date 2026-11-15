@@ -27,6 +27,20 @@ object CallNotifications {
     private const val RING_CHANNEL = "qmusic_calls_ring"
     private const val ONGOING_CHANNEL = "qmusic_calls_ongoing"
     private const val MISSED_CHANNEL = "qmusic_calls_missed"
+    /** The ringing channel, with the ringtone the person chose (see QeyfSounds). */
+    fun ringChannelId(context: Context): String = com.qmusic.ui.chat.QeyfSounds.ringChannelId(context)
+    const val MISSED_CHANNEL_ID = MISSED_CHANNEL
+
+    /** The ringing and ongoing channels exist (group calls ring through the same one). */
+    fun ensureChannels(context: Context) = channels(context)
+
+    fun ensureMissedChannel(context: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(MISSED_CHANNEL, if (tr(context)) "Cevapsız aramalar" else "Missed calls", NotificationManager.IMPORTANCE_DEFAULT),
+            )
+        }
+    }
     const val RING_ID = 2001
     const val ONGOING_ID = 2002
     const val EXTRA_ACCEPT = "call_accept"
@@ -39,17 +53,6 @@ object CallNotifications {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)
         val tr = tr(context)
-        manager.createNotificationChannel(
-            NotificationChannel(RING_CHANNEL, if (tr) "Gelen aramalar" else "Incoming calls", NotificationManager.IMPORTANCE_HIGH).apply {
-                setSound(
-                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
-                    AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build(),
-                )
-                enableVibration(true)
-                vibrationPattern = longArrayOf(0, 800, 800)
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            },
-        )
         manager.createNotificationChannel(
             NotificationChannel(ONGOING_CHANNEL, if (tr) "Süren arama" else "Ongoing call", NotificationManager.IMPORTANCE_LOW),
         )
@@ -73,7 +76,7 @@ object CallNotifications {
         channels(context)
         val tr = tr(context)
         val caller = Person.Builder().setName(peer.name).setKey(peer.uid).setImportant(true).build()
-        val notification = NotificationCompat.Builder(context, RING_CHANNEL)
+        val notification = NotificationCompat.Builder(context, ringChannelId(context))
             .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
             .setContentTitle(peer.name)
             .setContentText(if (video) (if (tr) "Görüntülü arama" else "Video call") else (if (tr) "Sesli arama" else "Voice call"))

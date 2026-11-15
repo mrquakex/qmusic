@@ -96,6 +96,13 @@ object AutoUpdate {
         runCatching { installer.commitFile(file) }
     }
 
+    /** The person asked for it (tapped the notification): the downloaded update goes in now. False when none is downloaded yet. */
+    internal fun installNow(context: Context): Boolean {
+        val file = ready(context) ?: return false
+        val installer = (context.applicationContext as QMusicApplication).container.updateInstaller as? ApkUpdateInstaller ?: return false
+        return runCatching { installer.commitFile(file) }.isSuccess
+    }
+
     internal fun installedVersion(context: Context): String =
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull().orEmpty()
 }
@@ -139,6 +146,8 @@ class UpdatedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         AutoUpdate.forget(context)
+        // The "new version is out" notification is done.
+        context.getSystemService(NotificationManager::class.java)?.cancel(UpdatePush.NOTIFICATION_ID_PUBLIC)
         File(context.cacheDir, "updates").listFiles()?.forEach { it.delete() }
         val version = AutoUpdate.installedVersion(context)
         val english = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") == "en"
