@@ -156,7 +156,7 @@ internal fun StarredPage(controller: ChatController, s: ChatStrings) {
                         }
                         Spacer(Modifier.height(4.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("★ ", color = Color(0xFFFFCC00), fontSize = 13.sp)
+                            Icon(QMusicIcons.Star, contentDescription = null, tint = TextSecondary, modifier = Modifier.padding(end = 6.dp).size(14.dp))
                             Text(m.text, color = TextSecondary, fontSize = 14.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
                         }
                     }
@@ -402,11 +402,13 @@ internal fun MessageInfoDialog(
                         ChatAvatar(user, 36.dp)
                         Spacer(Modifier.width(10.dp))
                         Text(user.name, color = TextPrimary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        MessageTick(if (r) TickState.READ else if (d) TickState.DELIVERED else TickState.SENT, TextSecondary)
+                        Spacer(Modifier.width(4.dp))
                         Text(
                             when {
-                                r -> "✓✓ " + s.readBy
-                                d -> "✓✓ " + s.deliveredTo
-                                else -> "✓ " + s.sentOnly
+                                r -> s.readBy
+                                d -> s.deliveredTo
+                                else -> s.sentOnly
                             },
                             color = if (r) TickRead else TextSecondary,
                             fontSize = 13.sp,
@@ -792,17 +794,7 @@ internal fun CallsPage(controller: ChatController, s: ChatStrings, onCall: ((Cha
                         Column(Modifier.weight(1f)) {
                             Text(c.peer.name, color = if (missed) MissedRed else TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                // ↙ came in, ↗ went out.
-                                Text(
-                                    when (c.direction) {
-                                        CallDirection.IN -> "↙ "
-                                        CallDirection.OUT -> "↗ "
-                                        CallDirection.GROUP -> ""
-                                    },
-                                    color = if (missed) MissedRed else TickRead,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                )
+                                if (c.direction != CallDirection.GROUP) DirectionArrow(incoming = c.direction == CallDirection.IN, colour = if (missed) MissedRed else TickRead)
                                 Text(
                                     listOf(
                                         when {

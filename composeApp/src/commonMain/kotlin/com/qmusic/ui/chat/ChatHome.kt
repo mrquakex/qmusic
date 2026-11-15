@@ -541,12 +541,24 @@ internal fun CallArrow(c: CallLogEntry) {
     if (c.direction == CallDirection.GROUP) {
         Icon(QMusicIcons.Group, contentDescription = null, tint = TextSecondary, modifier = Modifier.padding(end = 4.dp).size(14.dp))
     } else {
-        Text(
-            if (c.direction == CallDirection.IN) "↙ " else "↗ ",
-            color = if (c.outcome == CallOutcome.MISSED) CallRed else TickRead,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-        )
+        DirectionArrow(incoming = c.direction == CallDirection.IN, colour = if (c.outcome == CallOutcome.MISSED) CallRed else TickRead)
+    }
+}
+
+/** A small drawn arrow: down-left for a call that came in, up-right for one that went out. */
+@Composable
+internal fun DirectionArrow(incoming: Boolean, colour: Color) {
+    androidx.compose.foundation.Canvas(Modifier.padding(end = 5.dp).size(12.dp)) {
+        val w = size.width
+        val stroke = w * 0.15f
+        val cap = androidx.compose.ui.graphics.StrokeCap.Round
+        val tip = if (incoming) androidx.compose.ui.geometry.Offset(w * 0.18f, w * 0.82f) else androidx.compose.ui.geometry.Offset(w * 0.82f, w * 0.18f)
+        val tail = if (incoming) androidx.compose.ui.geometry.Offset(w * 0.82f, w * 0.18f) else androidx.compose.ui.geometry.Offset(w * 0.18f, w * 0.82f)
+        drawLine(colour, tail, tip, strokeWidth = stroke, cap = cap)
+        // The head: two short strokes along the sides of the square from the tip.
+        val dx = if (incoming) w * 0.42f else -w * 0.42f
+        drawLine(colour, tip, androidx.compose.ui.geometry.Offset(tip.x + dx, tip.y), strokeWidth = stroke, cap = cap)
+        drawLine(colour, tip, androidx.compose.ui.geometry.Offset(tip.x, tip.y - dx), strokeWidth = stroke, cap = cap)
     }
 }
 

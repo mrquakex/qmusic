@@ -161,6 +161,19 @@ async function deliver(uid, data, ttl) {
   return result.successCount;
 }
 
+/** A preview's mark ("📷", "🎤 0:12", "📞 Cevapsız arama") said in words: no emoji in notifications. */
+const MARKS = [["📞", ""], ["🎥", ""], ["🎤", "Sesli mesaj"], ["🎬", "Video"], ["📄", "Dosya"], ["📷", "Fotoğraf"], ["📍", "Konum"], ["👤", ""], ["📊", ""], ["🎵", ""], ["🎧", ""], ["🍿", ""], ["⏱", ""], ["📎", "Dosya"]];
+function plainPreview(text) {
+  const t = String(text || "").trimStart();
+  for (const [mark, word] of MARKS) {
+    if (!t.startsWith(mark)) continue;
+    const rest = t.slice(mark.length).replace(/^️/, "").trim();
+    if (!rest) return word;
+    return word && (rest.startsWith("×") || /^[0-9]/.test(rest)) ? `${word} ${rest}` : rest;
+  }
+  return t;
+}
+
 /** Someone put a reaction on a message: its writer hears about it ("Ali reacted ❤️ to: …"). */
 async function handleReaction(n) {
   if (n.from === n.to) return;
@@ -175,7 +188,7 @@ async function handleReaction(n) {
   if (await isMuted(n.to, n.chatId)) return;
   const who = (await db.ref(`users/${n.from}`).get()).val() || {};
   const emoji = String(n.emoji || "").slice(0, 8);
-  const quote = String(n.body || "").slice(0, 120);
+  const quote = plainPreview(n.body).slice(0, 120);
   const data = {
     type: "reaction",
     chatId: n.chatId,

@@ -138,7 +138,10 @@ internal fun PollCard(
     val myPicks = votes[myUid].orEmpty()
     val voters = votes.size
     Column(Modifier.width(270.dp).padding(start = 10.dp, end = 10.dp, top = 10.dp)) {
-        Text("📊 " + poll.question, color = fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(QMusicIcons.Poll, contentDescription = null, tint = fg, modifier = Modifier.padding(end = 6.dp).size(18.dp))
+            Text(poll.question, color = fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        }
         Text(if (poll.multiple) s.pollPickMany else s.pollPickOne, color = soft, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp))
         poll.options.forEachIndexed { i, option ->
             val count = votes.values.count { i in it }
@@ -269,7 +272,8 @@ internal fun LocationCard(location: ChatLocation, mine: Boolean, s: ChatStrings)
             Modifier.fillMaxWidth().background(if (mine) Color.Black.copy(alpha = 0.06f) else Color.White.copy(alpha = 0.06f)).padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("📍 " + location.label.ifBlank { s.location }, color = if (mine) Color.Black else TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Icon(QMusicIcons.Location, contentDescription = null, tint = if (mine) Color.Black else TextPrimary, modifier = Modifier.padding(end = 6.dp).size(18.dp))
+            Text(location.label.ifBlank { s.location }, color = if (mine) Color.Black else TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             Text(s.openMap, color = if (mine) Color.Black.copy(alpha = 0.6f) else TextSecondary, fontSize = 12.sp)
         }
     }
@@ -376,7 +380,7 @@ internal fun LockedPage(lock: AppLock, s: ChatStrings, onExit: () -> Unit) {
         TopBar("", onExit)
         Column(Modifier.weight(1f).fillMaxWidth().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Box(Modifier.size(88.dp).clip(CircleShape).background(DarkSurfaceVariant), contentAlignment = Alignment.Center) {
-                Text("🔒", fontSize = 40.sp)
+                Icon(QMusicIcons.Lock, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(40.dp))
             }
             Spacer(Modifier.height(20.dp))
             Text(s.lockTitle, color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)

@@ -590,8 +590,18 @@ internal fun ThreadRow(
                         modifier = Modifier.weight(1f),
                     )
                 } else {
+                    val parts = remember(t.lastText, s.english) { ChatPreview.split(t.lastText, s.english) }
+                    parts.kind?.let { kind ->
+                        Text(prefix, color = if (t.unread) TextPrimary else TextSecondary, fontSize = 14.sp, maxLines = 1)
+                        Icon(
+                            ChatPreview.icon(kind),
+                            contentDescription = null,
+                            tint = if (kind == PreviewKind.MISSED_CALL) Color(0xFFFF5A5F) else TextSecondary,
+                            modifier = Modifier.padding(end = 4.dp).size(16.dp),
+                        )
+                    }
                     Text(
-                        prefix + t.lastText,
+                        if (parts.kind != null) parts.text else prefix + parts.text,
                         color = if (t.unread) TextPrimary else TextSecondary,
                         fontSize = 14.sp,
                         fontWeight = if (t.unread) FontWeight.SemiBold else FontWeight.Normal,
@@ -1304,7 +1314,7 @@ private fun ConversationPage(
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(if (q.from == me.uid) s.you else memberNames[q.from] ?: nameOf(q.from, me.uid, title, s), color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Text(quoteText(q), color = TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(ChatPreview.plain(quoteText(q), s.english), color = TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     IconButton(onClick = { replyTo = null }) { Icon(QMusicIcons.Close, contentDescription = null, tint = TextSecondary) }
                 }
@@ -2281,7 +2291,7 @@ private fun Bubble(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
-                        Text(quoted.text, color = fgSoft, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(ChatPreview.plain(quoted.text, s.english), color = fgSoft, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                     if (quoted.thumb.isNotEmpty()) QuoteThumb(quoted.thumb)
                 }
@@ -2325,7 +2335,7 @@ private fun Bubble(
             }
             m.share?.let { ShareCard(it, mine, s) }
             if (m.together && m.share != null && !mine) {
-                Box(Modifier.padding(start = 8.dp, top = 8.dp)) { Pill((if (m.share.kind == ShareKind.SONG) "🎧 " else "🍿 ") + s.join, primary = true, onClick = onJoin) }
+                Box(Modifier.padding(start = 8.dp, top = 8.dp)) { Pill(s.join, primary = true, onClick = onJoin) }
             }
             if (m.text.isNotEmpty() && !m.deleted) {
                 val textModifier = Modifier.padding(start = 12.dp, end = 12.dp, top = if (!mine && m.model != null) 2.dp else 8.dp)

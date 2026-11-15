@@ -173,7 +173,10 @@ object ChatPush {
         // In a group each line has its writer; one-to-one, the other person (or Claude speaking in the conversation).
         val authorKey = data["author"]?.ifBlank { null } ?: from
         val authorName = data["authorName"]?.ifBlank { null } ?: if (group) "" else conversation.name
-        val text = if (group && data["text"] != null && data["type"] != "reaction") data["text"].orEmpty() else data["body"].orEmpty()
+        val english = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") == "en"
+        val raw = if (group && data["text"] != null && data["type"] != "reaction") data["text"].orEmpty() else data["body"].orEmpty()
+        // Kept with a mark in front ("📷", "🎤 0:12"): the notification says it in words.
+        val text = com.qmusic.ui.chat.ChatPreview.plain(raw, english)
         val line = Line(text, System.currentTimeMillis(), false, authorKey, authorName, data["authorPhoto"]?.ifBlank { null } ?: if (group) null else conversation.photo)
         val (lines, count) = synchronized(history) {
             val list = history.getOrPut(chatId) { ArrayDeque() }

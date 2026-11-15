@@ -507,7 +507,7 @@ internal fun TogetherBanner(state: TogetherState, s: ChatStrings, onOpen: () -> 
         }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text((if (song) "🎧 " + s.listeningWith else "🍿 " + s.watchingWith), color = ClaudeCoral, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(if (song) s.listeningWith else s.watchingWith, color = ClaudeCoral, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             Text(state.item.title, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Pill(s.leave, primary = false, onClick = onLeave)

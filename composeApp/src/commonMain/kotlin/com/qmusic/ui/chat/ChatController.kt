@@ -821,6 +821,7 @@ class ChatController(
         // Its writer hears about it, with what the message said.
         val preview = message.text.ifBlank {
             when {
+                // The mark is turned into words where it is shown (see ChatPreview).
                 message.images.isNotEmpty() -> "📷"
                 message.attachment != null -> message.attachment.name.ifBlank { "📎" }
                 message.share != null -> message.share.title
