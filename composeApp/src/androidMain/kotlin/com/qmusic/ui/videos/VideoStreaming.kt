@@ -11,6 +11,7 @@ import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheKeyFactory
 import androidx.media3.datasource.cache.CacheWriter
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import com.qmusic.engine.video.VideoQuality
@@ -63,20 +64,49 @@ internal object VideoStreaming {
      * A YouTube file's address changes with every lookup, but the file does not: it is kept under the video's own id,
      * its format and its size.
      */
-    private val cacheKeys = CacheKeyFactory { spec ->
-        val uri = spec.uri
+    private val cacheKeys = CacheKeyFactory { spec -> keyOf(spec.uri, spec.key) }
+
+    fun cacheKeyOf(uri: Uri): String = keyOf(uri, null)
+
+    private fun keyOf(uri: Uri, key: String?): String {
         val id = uri.getQueryParameter("id")
         val itag = uri.getQueryParameter("itag")
         val clen = uri.getQueryParameter("clen")
-        if (uri.host?.endsWith("googlevideo.com") == true && id != null && itag != null) "gv:$id:$itag:${clen.orEmpty()}"
-        else spec.key ?: uri.toString()
+        return if (uri.host?.endsWith("googlevideo.com") == true && id != null && itag != null) "gv:$id:$itag:${clen.orEmpty()}"
+        else key ?: uri.toString()
     }
 
-    fun cached(context: Context): CacheDataSource.Factory = CacheDataSource.Factory()
-        .setCache(cache(context))
+    /** The videos the person downloaded: a cache of its own that nothing evicts. */
+    @Volatile private var downloads: SimpleCache? = null
+
+    @Synchronized
+    fun downloadCache(context: Context): SimpleCache = downloads ?: SimpleCache(
+        File(context.applicationContext.filesDir, "video_downloads"),
+        NoOpCacheEvictor(),
+        StandaloneDatabaseProvider(context.applicationContext),
+    ).also { downloads = it }
+
+    /** Reads a whole file from the network into the downloads cache. */
+    fun downloader(context: Context): CacheDataSource.Factory = CacheDataSource.Factory()
+        .setCache(downloadCache(context))
         .setUpstreamDataSourceFactory(network())
         .setCacheKeyFactory(cacheKeys)
         .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+    /** What the player reads through: the downloads first, then the cache of what was played, then the network. */
+    fun cached(context: Context): CacheDataSource.Factory {
+        val played = CacheDataSource.Factory()
+            .setCache(cache(context))
+            .setUpstreamDataSourceFactory(network())
+            .setCacheKeyFactory(cacheKeys)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        return CacheDataSource.Factory()
+            .setCache(downloadCache(context))
+            .setCacheWriteDataSinkFactory(null)
+            .setUpstreamDataSourceFactory(played)
+            .setCacheKeyFactory(cacheKeys)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+    }
 
     private val preloader = Executors.newFixedThreadPool(2) { r -> Thread(r, "video-preload").apply { isDaemon = true; priority = Thread.MIN_PRIORITY } }
     private val preloaded = Collections.synchronizedSet(LinkedHashSet<String>())

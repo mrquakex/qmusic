@@ -1,0 +1,236 @@
+package com.qmusic.ui.videos
+
+import android.content.Context
+import android.net.Uri
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.cache.CacheWriter
+import com.qmusic.engine.video.VideoItem
+import com.qmusic.engine.video.VideoQuality
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+
+// ---------------------------------------------------------------------- SponsorBlock
+
+/**
+ * SponsorBlock answers for the first four letters of the video id's SHA-256, so it never learns which video is watched,
+ * and the segments of every video that starts that way come back; the one wanted is picked here.
+ */
+actual suspend fun fetchSponsorSegments(videoId: String): List<SkipSegment> = withContext(Dispatchers.IO) {
+    runCatching {
+        val prefix = MessageDigest.getInstance("SHA-256").digest(videoId.toByteArray())
+            .joinToString("") { "%02x".format(it) }.take(4)
+        val categories = URLEncoder.encode("[\"sponsor\",\"selfpromo\",\"interaction\"]", "UTF-8")
+        val actions = URLEncoder.encode("[\"skip\"]", "UTF-8")
+        val connection = URL("https://sponsor.ajay.app/api/skipSegments/$prefix?categories=$categories&actionTypes=$actions")
+            .openConnection() as HttpURLConnection
+        connection.connectTimeout = 6_000
+        connection.readTimeout = 6_000
+        connection.setRequestProperty("User-Agent", "QMusic")
+        try {
+            if (connection.responseCode != 200) return@runCatching emptyList()
+            val all = JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
+            val result = ArrayList<SkipSegment>()
+            for (i in 0 until all.length()) {
+                val video = all.getJSONObject(i)
+                if (video.optString("videoID") != videoId) continue
+                val segments = video.optJSONArray("segments") ?: continue
+                for (j in 0 until segments.length()) {
+                    val segment = segments.getJSONObject(j)
+                    if (segment.optString("actionType", "skip") != "skip") continue
+                    val range = segment.getJSONArray("segment")
+                    val start = (range.getDouble(0) * 1000).toLong()
+                    val end = (range.getDouble(1) * 1000).toLong()
+                    if (end - start >= 1_000) result += SkipSegment(start, end, segment.optString("category"))
+                }
+            }
+            result.sortedBy { it.startMs }
+        } finally {
+            connection.disconnect()
+        }
+    }.getOrDefault(emptyList())
+}
+
+// ---------------------------------------------------------------------- downloads
+
+/** What the app does while videos download (see DownloadKeepAliveService): set where the service is. */
+object VideoDownloadHooks {
+    /** [count] downloads are running, [percent] through, the first of them called [title]; count 0 = nothing runs. */
+    var onActive: ((count: Int, percent: Int, title: String?) -> Unit)? = null
+}
+
+@Composable
+actual fun rememberVideoDownloads(): VideoDownloads? {
+    val context = LocalContext.current
+    return VideoDownloadManager.also { it.init(context) }
+}
+
+/**
+ * Keeps videos on the device: the whole picture and sound are read into a cache of their own that nothing evicts, under
+ * the same keys the player uses, so a downloaded video plays from it (also without the network) and costs no data.
+ */
+@UnstableApi
+internal object VideoDownloadManager : VideoDownloads {
+    private lateinit var appContext: Context
+    private var started = false
+
+    private val _items = MutableStateFlow<List<DownloadedVideo>>(emptyList())
+    override val items: StateFlow<List<DownloadedVideo>> = _items.asStateFlow()
+
+    private val executor = Executors.newFixedThreadPool(2) { r -> Thread(r, "video-download").apply { isDaemon = true; priority = Thread.MIN_PRIORITY } }
+    private val writers = ConcurrentHashMap<String, MutableList<CacheWriter>>()
+    private val cancelled = ConcurrentHashMap.newKeySet<String>()
+    private var lastHook = 0L
+
+    private val prefs get() = appContext.getSharedPreferences("qvideo_downloads", Context.MODE_PRIVATE)
+
+    @Synchronized
+    fun init(context: Context) {
+        if (started) return
+        started = true
+        appContext = context.applicationContext
+        val list = load()
+        // What was on its way when the app stopped carries on from where its cache got to.
+        _items.value = list.map { if (it.state == DownloadState.DOWNLOADING || it.state == DownloadState.QUEUED) it.copy(state = DownloadState.QUEUED) else it }
+        _items.value.filter { it.state == DownloadState.QUEUED }.forEach(::run)
+    }
+
+    override fun start(item: VideoItem, quality: VideoQuality) {
+        if (quality.isLive) return
+        val entry = DownloadedVideo(item, quality, DownloadState.QUEUED)
+        cancelled.remove(item.id)
+        _items.value = _items.value.filter { it.item.id != item.id } + entry
+        save()
+        run(entry)
+    }
+
+    override fun cancel(id: String) = remove(id)
+
+    override fun remove(id: String) {
+        val entry = _items.value.firstOrNull { it.item.id == id } ?: return
+        cancelled.add(id)
+        writers[id]?.toList()?.forEach { runCatching { it.cancel() } }
+        _items.value = _items.value.filter { it.item.id != id }
+        save()
+        executor.execute {
+            val cache = VideoStreaming.downloadCache(appContext)
+            keysOf(entry.quality).forEach { runCatching { cache.removeResource(it) } }
+            hook(force = true)
+        }
+    }
+
+    private fun keysOf(quality: VideoQuality) = listOfNotNull(quality.videoUrl, quality.audioUrl)
+        .map { VideoStreaming.cacheKeyOf(Uri.parse(it)) }
+
+    private fun run(entry: DownloadedVideo) {
+        val id = entry.item.id
+        executor.execute {
+            try {
+                if (id in cancelled) return@execute
+                update(id) { it.copy(state = DownloadState.DOWNLOADING) }
+                hook(force = true)
+                val urls = listOfNotNull(entry.quality.videoUrl, entry.quality.audioUrl)
+                val sizes = LongArray(urls.size)
+                val done = LongArray(urls.size)
+                val factory = VideoStreaming.downloader(appContext)
+                urls.forEachIndexed { i, url ->
+                    val writer = CacheWriter(
+                        factory.createDataSource(),
+                        DataSpec.Builder().setUri(Uri.parse(url)).build(),
+                        null,
+                    ) { requestLength, bytesCached, _ ->
+                        sizes[i] = requestLength.coerceAtLeast(bytesCached)
+                        done[i] = bytesCached
+                        update(id) { it.copy(bytes = done.sum(), total = sizes.sum()) }
+                        hook()
+                    }
+                    writers.getOrPut(id) { java.util.Collections.synchronizedList(ArrayList()) }.add(writer)
+                    writer.cache()
+                }
+                update(id) { it.copy(state = DownloadState.DONE, bytes = done.sum(), total = done.sum()) }
+            } catch (e: Throwable) {
+                if (id !in cancelled) update(id) { it.copy(state = DownloadState.FAILED) }
+            } finally {
+                writers.remove(id)
+                hook(force = true)
+            }
+        }
+    }
+
+    private fun update(id: String, change: (DownloadedVideo) -> DownloadedVideo) {
+        val before = _items.value
+        val index = before.indexOfFirst { it.item.id == id }
+        if (index < 0) return
+        val next = change(before[index])
+        _items.value = before.toMutableList().also { it[index] = next }
+        if (next.state != before[index].state) save()
+    }
+
+    private fun hook(force: Boolean = false) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (!force && now - lastHook < 1_000) return
+        lastHook = now
+        val running = _items.value.filter { it.state == DownloadState.DOWNLOADING || it.state == DownloadState.QUEUED }
+        val bytes = running.sumOf { it.bytes }
+        val total = running.sumOf { it.total }
+        val percent = if (total > 0) ((bytes * 100) / total).toInt().coerceIn(0, 100) else 0
+        VideoDownloadHooks.onActive?.invoke(running.size, percent, running.firstOrNull()?.item?.title)
+    }
+
+    // ------------------------------------------------------------------ the list, kept across launches
+
+    private fun save() {
+        val array = JSONArray()
+        _items.value.forEach { d ->
+            array.put(
+                JSONObject()
+                    .put("id", d.item.id).put("title", d.item.title)
+                    .put("channel", d.item.channelName ?: "").put("channelId", d.item.channelId ?: "")
+                    .put("thumb", d.item.thumbnail ?: "").put("duration", d.item.duration ?: "")
+                    .put("height", d.quality.height).put("fps", d.quality.fps)
+                    .put("videoUrl", d.quality.videoUrl).put("audioUrl", d.quality.audioUrl ?: "")
+                    .put("state", d.state.name).put("bytes", d.bytes).put("total", d.total),
+            )
+        }
+        prefs.edit().putString("list", array.toString()).apply()
+    }
+
+    private fun load(): List<DownloadedVideo> = runCatching {
+        val array = JSONArray(prefs.getString("list", "[]"))
+        (0 until array.length()).map { i ->
+            val o = array.getJSONObject(i)
+            DownloadedVideo(
+                item = VideoItem(
+                    id = o.getString("id"),
+                    title = o.getString("title"),
+                    channelName = o.optString("channel").ifBlank { null },
+                    channelId = o.optString("channelId").ifBlank { null },
+                    duration = o.optString("duration").ifBlank { null },
+                    thumbnail = o.optString("thumb").ifBlank { null },
+                ),
+                quality = VideoQuality(
+                    height = o.getInt("height"),
+                    fps = o.getInt("fps"),
+                    videoUrl = o.getString("videoUrl"),
+                    audioUrl = o.optString("audioUrl").ifBlank { null },
+                ),
+                state = runCatching { DownloadState.valueOf(o.getString("state")) }.getOrDefault(DownloadState.FAILED),
+                bytes = o.optLong("bytes"),
+                total = o.optLong("total"),
+            )
+        }
+    }.getOrDefault(emptyList())
+}

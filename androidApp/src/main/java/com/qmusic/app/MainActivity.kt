@@ -127,6 +127,19 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // QVideo downloads keep going with the app left (see DownloadKeepAliveService).
+        com.qmusic.ui.videos.VideoDownloadHooks.onActive = { count, percent, title ->
+            val service = Intent(this, DownloadKeepAliveService::class.java)
+            if (count > 0) {
+                service.putExtra(DownloadKeepAliveService.EXTRA_COUNT, count)
+                service.putExtra(DownloadKeepAliveService.EXTRA_PERCENT, percent)
+                service.putExtra(DownloadKeepAliveService.EXTRA_TITLE, title)
+                runCatching { ContextCompat.startForegroundService(this, service) }
+            } else {
+                stopService(service)
+            }
+        }
+
         setContent {
             QMusicApp(viewModel = viewModel)
         }

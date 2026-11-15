@@ -337,6 +337,28 @@ private fun WatchDetails(
                     if (!controller.openSaveSheet(w.video.id)) onSignIn()
                 }
                 ActionPill(label = s.share, icon = QMusicIcons.Share, active = false) { onShare("https://youtu.be/${w.video.id}") }
+                if (controller.canDownload && !w.isLive()) {
+                    val x = s.extras()
+                    val downloads by controller.downloads.collectAsState()
+                    val dl = downloads.firstOrNull { it.item.id == w.video.id }
+                    ActionPill(
+                        label = when (dl?.state) {
+                            DownloadState.DONE -> x.downloaded
+                            DownloadState.DOWNLOADING -> "%${dl?.percent ?: 0}"
+                            DownloadState.QUEUED -> "…"
+                            DownloadState.FAILED -> x.downloadFailed
+                            null -> x.download
+                        },
+                        icon = if (dl?.state == DownloadState.DONE) QMusicIcons.DownloadDone else QMusicIcons.Download,
+                        active = dl?.state == DownloadState.DONE,
+                    ) {
+                        when (dl?.state) {
+                            null, DownloadState.FAILED -> controller.downloadCurrent()
+                            DownloadState.DOWNLOADING, DownloadState.QUEUED -> controller.removeDownload(w.video.id)
+                            DownloadState.DONE -> Unit
+                        }
+                    }
+                }
             }
             if (w.signInPrompt) {
                 Row(
@@ -416,7 +438,16 @@ private fun LazyListScope.relatedItems(controller: VideosController, w: WatchSta
         }
     }
     item(key = "related-title") {
-        Text(s.related, color = VideoColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 4.dp))
+        val autoplay by controller.autoplay.collectAsState()
+        Row(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(s.related, color = VideoColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text(s.extras().autoplay, color = VideoColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(end = 6.dp))
+            androidx.compose.material3.Switch(
+                checked = autoplay != "0",
+                onCheckedChange = { controller.setAutoplay(it) },
+                colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = VideoColors.Red, checkedThumbColor = Color.White),
+            )
+        }
     }
     if (w.details == null && !w.detailsError) item(key = "related-loading") { Loading() }
     items(w.related.size, key = { i -> (w.related[i].ids().firstOrNull() ?: "r") + "#" + i }) { i ->

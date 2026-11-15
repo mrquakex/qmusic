@@ -485,6 +485,7 @@ class VideosController(
             // The stream and the page load side by side: the picture should not wait for the comments' address.
             launch { loadStream(id) }
             launch { loadCaptions(id) }
+            launch { loadSegments(id) }
             service.watch(id).fold(
                 onSuccess = { d ->
                     _watch.update { w ->
@@ -514,6 +515,9 @@ class VideosController(
 
     /** One lookup per video at a time: asking ahead and asking for real share the same answer. */
     private suspend fun qualitiesOf(id: String): Result<List<VideoQuality>> {
+        // A video on the device plays from it: no lookup, no data, and it works without a network.
+        _downloads.value.firstOrNull { it.item.id == id && it.state == DownloadState.DONE }
+            ?.let { return Result.success(listOf(it.quality)) }
         qualityCache[id]?.takeIf { it.at.elapsedNow() < CACHE_LIFETIME }?.let { return Result.success(it.qualities) }
         val lookup = inFlight.getOrPut(id) {
             scope.async {
@@ -908,27 +912,56 @@ class VideosController(
         }
     }
 
-    /** More clips: the ones YouTube relates to the last, then the next page of the search. */
+    /**
+     * More clips, so the swiping never ends (as on YouTube): the ones YouTube relates to the last, the next page of the
+     * search, and when both are dry, new Shorts searches on other topics. Clips already in the list are left out.
+     */
     private fun loadMoreShorts() {
         if (shortsMore?.isActive == true) return
-        val last = _shorts.value.items.lastOrNull() ?: return
+        if (_shorts.value.items.isEmpty()) return
+        var gotAny = false
         shortsMore = scope.launch {
             fun add(list: List<VideoItem>): Int {
                 val before = _shorts.value.items.size
                 _shorts.update { cur ->
-                    val seen = cur.items.mapTo(HashSet()) { it.id }
-                    cur.copy(items = cur.items + list.filter { it.id !in seen })
+                    val have = cur.items.mapTo(HashSet()) { it.id }
+                    val (fresh, old) = list.distinctBy { it.id }.filter { it.id !in have }.partition { it.id !in seen }
+                    cur.copy(items = cur.items + fresh.shuffled() + old.shuffled())
                 }
-                prepareShorts(_shorts.value.index)
-                return _shorts.value.items.size - before
+                val added = _shorts.value.items.size - before
+                if (added > 0) {
+                    markSeenIds(_shorts.value.items.takeLast(added).map { it.id })
+                    prepareShorts(_shorts.value.index)
+                }
+                return added
             }
-            val related = service.watch(last.id).getOrNull()?.related?.shortItems().orEmpty()
-            if (add(related) == 0) {
-                val token = shortsContinuation ?: return@launch
-                service.more(token).onSuccess { feed ->
-                    shortsContinuation = feed.continuation
-                    add(feed.shortItems())
+            var added = 0
+            for (attempt in 0 until SHORTS_MORE_ATTEMPTS) {
+                val last = _shorts.value.items.lastOrNull() ?: return@launch
+                added += add(service.watch(last.id).getOrNull()?.related?.shortItems().orEmpty())
+                if (added < SHORTS_MORE_MIN) {
+                    shortsContinuation?.let { token ->
+                        service.more(token).onSuccess { feed ->
+                            shortsContinuation = feed.continuation
+                            added += add(feed.shortItems())
+                        }
+                    }
                 }
+                if (added < SHORTS_MORE_MIN) {
+                    discoverFeed(SHORTS_TOPICS, 2, VideoSearchFilter.SHORTS).onSuccess { feed ->
+                        if (feed.continuation != null) shortsContinuation = feed.continuation
+                        added += add(feed.shortItems())
+                    }
+                }
+                if (added >= SHORTS_MORE_MIN) break
+                delay(1_500)
+            }
+            gotAny = added > 0
+        }.also { job ->
+            // The person may already be at the end of what came: ask again (only while asking still brings clips).
+            job.invokeOnCompletion {
+                val s = _shorts.value
+                if (it == null && gotAny && s.index >= s.items.size - 3) scope.launch { loadMoreShorts() }
             }
         }
     }
@@ -953,6 +986,88 @@ class VideosController(
             }
         }
         return true
+    }
+
+    // ------------------------------------------------------------------ autoplay, sleep timer, SponsorBlock, downloads
+
+    /** "1" while the next video starts by itself when one ends, as on YouTube. */
+    val autoplay = settings.string(KEY_AUTOPLAY, "1")
+
+    fun setAutoplay(on: Boolean) = settings.setString(KEY_AUTOPLAY, if (on) "1" else "0")
+
+    /** A video ended: the sleep timer that waits for this stops here, otherwise autoplay goes on to the next one. */
+    fun onEnded() {
+        if (_sleep.value.mode == SleepMode.VIDEO_END) {
+            _sleep.value = SleepTimer()
+            return
+        }
+        if (autoplay.value != "0") playNext()
+    }
+
+    private val _sleep = MutableStateFlow(SleepTimer())
+    val sleep: StateFlow<SleepTimer> = _sleep.asStateFlow()
+
+    fun setSleepMinutes(minutes: Int) = _sleep.update { SleepTimer(SleepMode.TIMER, minutes, it.token + 1) }
+
+    fun setSleepAtVideoEnd() = _sleep.update { SleepTimer(SleepMode.VIDEO_END, 0, it.token + 1) }
+
+    fun clearSleep() = _sleep.update { SleepTimer(SleepMode.OFF, 0, it.token + 1) }
+
+    /** "1" while the stretches SponsorBlock marked are skipped. */
+    val sponsorBlock = settings.string(KEY_SPONSOR, "1")
+
+    fun setSponsorBlock(on: Boolean) {
+        settings.setString(KEY_SPONSOR, if (on) "1" else "0")
+        val id = _watch.value?.video?.id
+        if (on && id != null && _segments.value.isEmpty()) scope.launch { loadSegments(id) }
+    }
+
+    private val _segments = MutableStateFlow<List<SkipSegment>>(emptyList())
+
+    /** The parts of the video that is open to skip (empty while SponsorBlock is off). */
+    val segments: StateFlow<List<SkipSegment>> = _segments.asStateFlow()
+
+    private val _skipTick = MutableStateFlow(0)
+
+    /** Counts the parts skipped, so the player can tell the person each time. */
+    val skipTick: StateFlow<Int> = _skipTick.asStateFlow()
+
+    fun noteSkipped() = _skipTick.update { it + 1 }
+
+    private suspend fun loadSegments(id: String) {
+        _segments.value = emptyList()
+        if (sponsorBlock.value == "0") return
+        val found = fetchSponsorSegments(id)
+        if (_watch.value?.video?.id == id) _segments.value = found
+    }
+
+    private val _downloads = MutableStateFlow<List<DownloadedVideo>>(emptyList())
+
+    /** The videos on the device and the ones on their way there. */
+    val downloads: StateFlow<List<DownloadedVideo>> = _downloads.asStateFlow()
+
+    private var downloadService: VideoDownloads? = null
+    private var downloadsJob: kotlinx.coroutines.Job? = null
+
+    /** Whether this device can keep videos. */
+    val canDownload: Boolean get() = downloadService != null
+
+    fun attachDownloads(service: VideoDownloads?) {
+        if (service === downloadService) return
+        downloadService = service
+        downloadsJob?.cancel()
+        downloadsJob = service?.let { s -> scope.launch { s.items.collect { _downloads.value = it } } }
+    }
+
+    /** Keeps the video that is open, in the quality it plays in. */
+    fun downloadCurrent() {
+        val w = _watch.value ?: return
+        val quality = w.quality?.takeIf { !it.isLive } ?: return
+        downloadService?.start(w.video, quality)
+    }
+
+    fun removeDownload(id: String) {
+        downloadService?.remove(id)
     }
 
     // ------------------------------------------------------------------ settings, resume, history
@@ -1191,6 +1306,8 @@ class VideosController(
         const val KEY_COOKIES = "video_cookies"
         const val KEY_SEARCHES = "video_searches"
         const val KEY_SEEN = "video_seen"
+        const val KEY_AUTOPLAY = "video_autoplay"
+        const val KEY_SPONSOR = "video_sponsorblock"
         private const val SEEN_KEPT = 600
         private const val FRESH_MIN = 8
         private const val RECENT_SEARCHES_USED = 6
@@ -1219,6 +1336,8 @@ class VideosController(
         private const val WATCH_LATER_TITLE = "Watch later"
         private const val MAX_SEARCHES = 20
         private const val SHORTS_QUERY = "#shorts"
+        private const val SHORTS_MORE_ATTEMPTS = 3
+        private const val SHORTS_MORE_MIN = 6
         private val CACHE_LIFETIME = kotlin.time.Duration.parse("30m")
         private const val CACHE_SIZE = 12
         private const val PREFETCH_DELAY_MS = 2_500L

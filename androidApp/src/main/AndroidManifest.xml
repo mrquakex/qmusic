@@ -94,6 +94,11 @@
             android:foregroundServiceType="mediaPlayback" />
 
         <service
+            android:name=".DownloadKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
             android:name=".CallKeepAliveService"
             android:exported="false"
             android:foregroundServiceType="microphone|camera" />

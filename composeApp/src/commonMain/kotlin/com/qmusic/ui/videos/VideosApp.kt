@@ -63,6 +63,22 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlin.time.Duration.Companion.seconds
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
+import androidx.compose.foundation.layout.widthIn
 
 /**
  * The Videos section: YouTube itself, entered from the navigation bar and shaped like its own app (own top bar, own
@@ -146,7 +162,32 @@ fun VideosApp(
     )
     val playing by (playback?.isPlaying ?: NotPlaying).collectAsState()
     val ended by (playback?.ended ?: NotPlaying).collectAsState()
-    LaunchedEffect(ended) { if (ended) controller.playNext() }
+    LaunchedEffect(ended) { if (ended) controller.onEnded() }
+    // Videos kept on the device.
+    val downloadsService = rememberVideoDownloads()
+    LaunchedEffect(downloadsService) { controller.attachDownloads(downloadsService) }
+    // SponsorBlock: a marked part is jumped over once when the video reaches it.
+    val segments by controller.segments.collectAsState()
+    LaunchedEffect(segments, playback) {
+        val p = playback ?: return@LaunchedEffect
+        if (segments.isEmpty()) return@LaunchedEffect
+        val skipped = HashSet<SkipSegment>()
+        p.positionMs.collect { pos ->
+            val hit = segments.firstOrNull { pos >= it.startMs && pos < it.endMs - 400 && it !in skipped } ?: return@collect
+            skipped += hit
+            p.seekTo(hit.endMs)
+            controller.noteSkipped()
+        }
+    }
+    // The sleep timer pauses the video when its minutes are up.
+    val sleep by controller.sleep.collectAsState()
+    LaunchedEffect(sleep.token) {
+        if (sleep.mode == SleepMode.TIMER) {
+            delay(sleep.minutes * 60_000L)
+            playback?.pause()
+            controller.clearSleep()
+        }
+    }
     FullscreenEffect(fullscreen && top is VideoRoute.Watch)
     PictureInPictureEffect(watch != null && top is VideoRoute.Watch && playing)
 
@@ -172,23 +213,40 @@ fun VideosApp(
         LaunchedEffect(landscape, top is VideoRoute.Watch) {
             if (top is VideoRoute.Watch) controller.setFullscreen(landscape)
         }
+        // Scrolling a feed down hides the bars, scrolling up brings them back (as on YouTube).
+        val bars = remember { mutableStateOf(true) }
+        val hideOnScroll = remember {
+            object : NestedScrollConnection {
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (available.y < -4f) bars.value = false else if (available.y > 4f) bars.value = true
+                    return Offset.Zero
+                }
+            }
+        }
+        val feedPage = top == null && tab != VideoTab.SHORTS
+        LaunchedEffect(tab, routes.size) { bars.value = true }
+        val miniShown = watch != null && top !is VideoRoute.Watch && top !is VideoRoute.Shorts && !(top == null && tab == VideoTab.SHORTS) && !pip
         Column(modifier = Modifier.fillMaxSize()) {
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().then(if (feedPage) Modifier.nestedScroll(hideOnScroll) else Modifier)) {
                 when (top) {
-                    null -> TabContent(controller, tab, s, signedIn, onSignIn, playback, onPauseMusic, onShare, onAccount = { accountDialog = true })
+                    null -> TabContent(controller, tab, s, signedIn, onSignIn, playback, onPauseMusic, onShare, onAccount = { accountDialog = true }, barsVisible = bars.value || !feedPage)
                     is VideoRoute.Search -> SearchResultsPage(controller, s, onSignIn)
                     is VideoRoute.Watch -> WatchPage(controller, playback, s, onShare, onSignIn)
                     is VideoRoute.Channel -> ChannelPage(controller, s, onSignIn)
                     is VideoRoute.Playlist -> PlaylistPage(controller, top.title, s, onSignIn)
                     is VideoRoute.Shorts -> ShortsPage(controller, playback, s, true, onPauseMusic, onShare, onSignIn)
                 }
+                // The video that was pulled down floats in a corner over the page, as on YouTube.
+                val w = watch
+                if (w != null && miniShown) {
+                    FloatingMiniPlayer(w, playback, onOpen = { controller.push(VideoRoute.Watch(w.video)) }, onClose = { controller.closeWatch() })
+                }
             }
-            val w = watch
-            if (w != null && top !is VideoRoute.Watch && !pip) {
-                MiniWatchBar(w, playback, onOpen = { controller.push(VideoRoute.Watch(w.video)) }, onClose = { controller.closeWatch() })
-            }
-            if (top !is VideoRoute.Watch && !pip) {
-                VideoBottomBar(tab = tab.takeIf { routes.isEmpty() }, s = s, onTab = { t -> if (t == tab && routes.isEmpty()) controller.refreshCurrent() else controller.selectTab(t) }, onMusic = exit)
+            // While the video floats small the bottom bar is away; closing the video brings it back.
+            if (top !is VideoRoute.Watch && !pip && !miniShown) {
+                AnimatedVisibility(visible = bars.value || !feedPage, enter = expandVertically(expandFrom = Alignment.Top), exit = shrinkVertically(shrinkTowards = Alignment.Top)) {
+                    VideoBottomBar(tab = tab.takeIf { routes.isEmpty() }, s = s, onTab = { t -> if (t == tab && routes.isEmpty()) controller.refreshCurrent() else controller.selectTab(t) }, onMusic = exit)
+                }
             }
         }
         if (searching) SearchBox(controller, s)
@@ -217,30 +275,61 @@ private val NotPlaying: StateFlow<Boolean> = MutableStateFlow(false)
 private val NoStalls: StateFlow<Int> = MutableStateFlow(0)
 private val NoPosition: StateFlow<Long> = MutableStateFlow(0L)
 
-/** The video that is playing small, above the bottom bar: tap to open it again, play/pause, close. */
+/**
+ * The video that was pulled down, small and floating in a corner over the page (as on YouTube): tap to open it again,
+ * play / pause and close on it, drag it anywhere; let go and it settles on the nearer side.
+ */
 @Composable
-private fun MiniWatchBar(w: WatchState, playback: VideoPlayback?, onOpen: () -> Unit, onClose: () -> Unit) {
+private fun androidx.compose.foundation.layout.BoxScope.FloatingMiniPlayer(w: WatchState, playback: VideoPlayback?, onOpen: () -> Unit, onClose: () -> Unit) {
     val playing by (playback?.isPlaying ?: NotPlaying).collectAsState()
     val position by (playback?.positionMs ?: NoPosition).collectAsState()
     val duration by (playback?.durationMs ?: NoPosition).collectAsState()
-    Column(modifier = Modifier.fillMaxWidth().background(VideoColors.Surface).clickable(onClick = onOpen)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.width(104.dp).aspectRatio(16f / 9f).background(Color.Black)) {
-                if (w.video.thumbnail != null) AsyncImage(model = w.video.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                if (playback != null && w.quality != null) VideoPlaybackSurface(playback, Modifier.fillMaxSize())
+    val density = LocalDensity.current
+    var area by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    var card by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    val margin = with(density) { 12.dp.toPx() }
+    val minX = -(area.width - card.width - 2 * margin).coerceAtLeast(0f)
+    val minY = -(area.height - card.height - 2 * margin).coerceAtLeast(0f)
+    Box(Modifier.matchParentSize().onSizeChanged { area = it })
+    Box(
+        modifier = Modifier
+            .align(Alignment.BottomEnd)
+            .padding(margin.let { with(density) { it.toDp() } })
+            .offset { IntOffset(offset.x.roundToInt(), offset.y.roundToInt()) }
+            .fillMaxWidth(0.5f)
+            .widthIn(max = 300.dp)
+            .aspectRatio(16f / 9f)
+            .onSizeChanged { card = it }
+            .shadow(14.dp, RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.Black)
+            .pointerInput(minX, minY) {
+                detectDragGestures(
+                    onDragEnd = { offset = Offset(if (offset.x < minX / 2) minX else 0f, offset.y) },
+                ) { change, drag ->
+                    change.consume()
+                    offset = Offset((offset.x + drag.x).coerceIn(minX, 0f), (offset.y + drag.y).coerceIn(minY, 0f))
+                }
             }
-            Column(modifier = Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                Text(w.details?.title ?: w.video.title, color = VideoColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                (w.details?.channelName ?: w.video.channelName)?.let { Text(it, color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-            }
-            IconButton(onClick = { playback?.togglePlay() }) {
-                Icon(if (playing) QMusicIcons.Pause else QMusicIcons.Play, null, tint = VideoColors.Text, modifier = Modifier.size(24.dp))
-            }
-            IconButton(onClick = onClose) { Icon(QMusicIcons.Close, null, tint = VideoColors.Text, modifier = Modifier.size(22.dp)) }
+            .clickable(onClick = onOpen),
+    ) {
+        if (w.video.thumbnail != null) AsyncImage(model = w.video.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        if (playback != null && w.quality != null) VideoPlaybackSurface(playback, Modifier.fillMaxSize())
+        Box(
+            Modifier.fillMaxWidth().height(44.dp).background(
+                androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent)),
+            ),
+        )
+        IconButton(onClick = { playback?.togglePlay() }, modifier = Modifier.align(Alignment.TopStart).size(40.dp)) {
+            Icon(if (playing) QMusicIcons.Pause else QMusicIcons.Play, null, tint = Color.White, modifier = Modifier.size(22.dp))
+        }
+        IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).size(40.dp)) {
+            Icon(QMusicIcons.Close, null, tint = Color.White, modifier = Modifier.size(20.dp))
         }
         val fraction = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
-        Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(VideoColors.Chip)) {
-            Box(modifier = Modifier.fillMaxWidth(fraction).height(2.dp).background(VideoColors.Red))
+        Box(modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Color.White.copy(alpha = 0.25f))) {
+            Box(modifier = Modifier.fillMaxWidth(fraction).height(3.dp).background(VideoColors.Red))
         }
     }
 }
@@ -248,7 +337,7 @@ private fun MiniWatchBar(w: WatchState, playback: VideoPlayback?, onOpen: () -> 
 @Composable
 private fun TopBar(s: VideoStrings, onSearch: () -> Unit, onAccount: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().background(VideoColors.Background).statusBarsPadding().padding(start = 12.dp, end = 4.dp).height(52.dp),
+        modifier = Modifier.fillMaxWidth().background(VideoColors.Background).padding(start = 12.dp, end = 4.dp).height(52.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         com.qmusic.ui.theme.QMusicLogo(size = 30.dp, tint = Color.White)
@@ -308,14 +397,17 @@ private fun TabContent(
     onPauseMusic: () -> Unit,
     onShare: (String) -> Unit,
     onAccount: () -> Unit,
+    barsVisible: Boolean = true,
 ) {
     if (tab == VideoTab.SHORTS) {
         ShortsPage(controller, playback, s, false, onPauseMusic, onShare, onSignIn)
         return
     }
     val refresh by controller.refresh.collectAsState()
-    Column(modifier = Modifier.fillMaxSize()) {
-        TopBar(s, onSearch = { controller.openSearchBox() }, onAccount = onAccount)
+    Column(modifier = Modifier.fillMaxSize().background(VideoColors.Background).statusBarsPadding()) {
+        AnimatedVisibility(visible = barsVisible, enter = expandVertically(expandFrom = Alignment.Bottom), exit = shrinkVertically(shrinkTowards = Alignment.Top)) {
+            TopBar(s, onSearch = { controller.openSearchBox() }, onAccount = onAccount)
+        }
         when (tab) {
             VideoTab.HOME -> {
                 val state by controller.home.state.collectAsState()
@@ -381,9 +473,31 @@ private fun SubscriptionsTab(controller: VideosController, s: VideoStrings, sign
 @Composable
 private fun LibraryTab(controller: VideosController, s: VideoStrings, signedIn: Boolean, onSignIn: () -> Unit) {
     var section by remember { mutableStateOf(LibrarySection.HISTORY) }
+    var downloadsView by remember { mutableStateOf(false) }
     val loader = controller.library(section)
     val state by loader.state.collectAsState()
     LaunchedEffect(signedIn, section) { if (signedIn) loader.load() }
+    val chips: @Composable () -> Unit = {
+        LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(LibrarySection.entries) { entry ->
+                val label = when (entry) {
+                    LibrarySection.HISTORY -> s.history
+                    LibrarySection.LIKED -> s.liked
+                    LibrarySection.WATCH_LATER -> s.watchLater
+                    LibrarySection.PLAYLISTS -> s.playlists
+                }
+                LabelChip(label, !downloadsView && entry == section) {
+                    downloadsView = false
+                    section = entry
+                }
+            }
+            if (controller.canDownload) item { LabelChip(s.extras().downloads, downloadsView) { downloadsView = true } }
+        }
+    }
+    if (downloadsView) {
+        DownloadsPage(controller, s, chips)
+        return
+    }
     FeedColumn(
         state = if (signedIn) state else state.copy(signInNeeded = true, entries = emptyList()),
         s = s,
@@ -399,21 +513,57 @@ private fun LibraryTab(controller: VideosController, s: VideoStrings, signedIn: 
         onSignIn = onSignIn,
         compact = section != LibrarySection.PLAYLISTS,
         header = {
-            item(key = "sections") {
-                LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(LibrarySection.entries) { entry ->
-                        val label = when (entry) {
-                            LibrarySection.HISTORY -> s.history
-                            LibrarySection.LIKED -> s.liked
-                            LibrarySection.WATCH_LATER -> s.watchLater
-                            LibrarySection.PLAYLISTS -> s.playlists
+            item(key = "sections") { chips() }
+        },
+    )
+}
+
+/** The videos kept on the device: they play without the network, and can be deleted here. */
+@Composable
+private fun DownloadsPage(controller: VideosController, s: VideoStrings, chips: @Composable () -> Unit) {
+    val x = s.extras()
+    val list by controller.downloads.collectAsState()
+    Column(modifier = Modifier.fillMaxSize()) {
+        chips()
+        if (list.isEmpty()) {
+            Text(x.noDownloads, color = VideoColors.TextSecondary, fontSize = 14.sp, modifier = Modifier.padding(20.dp))
+        }
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            items(list, key = { it.item.id }) { d ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    VideoRowCard(
+                        d.item, s,
+                        onClick = {
+                            val done = list.filter { it.state == DownloadState.DONE }.map { it.item }
+                            val at = done.indexOfFirst { it.id == d.item.id }
+                            if (at >= 0) controller.openFrom(done, at) else controller.openFrom(listOf(d.item), 0)
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(end = 4.dp)) {
+                        Text(
+                            when (d.state) {
+                                DownloadState.DONE -> "${d.bytes / 1_048_576} MB"
+                                DownloadState.DOWNLOADING -> "%${d.percent}"
+                                DownloadState.QUEUED -> "…"
+                                DownloadState.FAILED -> x.downloadFailed
+                            },
+                            color = if (d.state == DownloadState.FAILED) VideoColors.Red else VideoColors.TextSecondary,
+                            fontSize = 11.sp,
+                        )
+                        IconButton(onClick = { controller.removeDownload(d.item.id) }) {
+                            Icon(
+                                if (d.state == DownloadState.DONE) QMusicIcons.Trash else QMusicIcons.Close,
+                                if (d.state == DownloadState.DONE) x.removeDownload else x.cancelDownload,
+                                tint = VideoColors.TextSecondary,
+                                modifier = Modifier.size(20.dp),
+                            )
                         }
-                        LabelChip(label, entry == section) { section = entry }
                     }
                 }
             }
-        },
-    )
+        }
+    }
 }
 
 // ---------------------------------------------------------------------- search
@@ -622,8 +772,13 @@ private val QUALITY_CHOICES = listOf("360", "480", "720", "1080")
 private fun SettingsBody(controller: VideosController, s: VideoStrings, signedIn: Boolean) {
     val wifi by controller.wifiQuality.collectAsState()
     val mobile by controller.mobileQuality.collectAsState()
+    val autoplay by controller.autoplay.collectAsState()
+    val sponsor by controller.sponsorBlock.collectAsState()
+    val x = s.extras()
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (!signedIn) Text(s.signInBody, color = VideoColors.TextSecondary, fontSize = 14.sp)
+        SwitchRow(x.autoplay, null, autoplay != "0") { controller.setAutoplay(it) }
+        SwitchRow(x.sponsorBlock, x.sponsorBlockHint, sponsor != "0") { controller.setSponsorBlock(it) }
         Text(s.qualityWifi, color = VideoColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(QUALITY_CHOICES) { h -> LabelChip("${h}p", wifi == h) { controller.setWifiQuality(h) } }
@@ -632,6 +787,21 @@ private fun SettingsBody(controller: VideosController, s: VideoStrings, signedIn
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(QUALITY_CHOICES) { h -> LabelChip("${h}p", mobile == h) { controller.setMobileQuality(h) } }
         }
+    }
+}
+
+@Composable
+internal fun SwitchRow(label: String, hint: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, color = VideoColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            if (hint != null) Text(hint, color = VideoColors.TextSecondary, fontSize = 12.sp)
+        }
+        androidx.compose.material3.Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = VideoColors.Red, checkedThumbColor = Color.White),
+        )
     }
 }
 

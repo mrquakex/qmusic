@@ -97,6 +97,18 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
     val duration by playback.durationMs.collectAsState()
     val ended by playback.ended.collectAsState()
     val live = w.isLive()
+    val x = s.extras()
+    val autoplay by controller.autoplay.collectAsState()
+    val sleep by controller.sleep.collectAsState()
+    val skipTick by controller.skipTick.collectAsState()
+    var note by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(skipTick) {
+        if (skipTick > 0) {
+            note = x.sponsorSkipped
+            delay(1_800)
+            note = null
+        }
+    }
     val device = rememberDeviceControls()
     // The brightness or volume being changed, and how far: shown for a moment.
     var hud by remember { mutableStateOf<Pair<String, Float>?>(null) }
@@ -187,6 +199,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
             Pill(hint, Modifier.align(if (hint.startsWith("-")) Alignment.CenterStart else Alignment.CenterEnd).padding(horizontal = 40.dp))
         }
         if (fast) Pill("2x  ▶▶", Modifier.align(Alignment.TopCenter).padding(top = 12.dp))
+        else note?.let { Pill(it, Modifier.align(Alignment.TopCenter).padding(top = 12.dp), small = true) }
         hud?.let { (label, value) -> Pill("$label  ${(value * 100).toInt()}%", Modifier.align(Alignment.Center)) }
 
         if (visible || ended) {
@@ -201,6 +214,10 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(QMusicIcons.Settings, s.quality, tint = Color.White, modifier = Modifier.size(22.dp)) }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("${x.autoplay}: ${if (autoplay != "0") x.on else x.off}", fontWeight = FontWeight.Bold) },
+                            onClick = { controller.setAutoplay(autoplay == "0") },
+                        )
                         if (w.qualities.size > 1) {
                             DropdownMenuItem(text = { Text(s.quality, fontWeight = FontWeight.Bold) }, onClick = {}, enabled = false)
                             w.qualities.forEach { q ->
@@ -244,6 +261,23 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                                     menu = false
                                 },
                             )
+                        }
+                        DropdownMenuItem(text = { Text(x.sleepTimer, fontWeight = FontWeight.Bold) }, onClick = {}, enabled = false)
+                        SleepItem(x.sleepOffLabel, sleep.mode == SleepMode.OFF) {
+                            controller.clearSleep()
+                            menu = false
+                        }
+                        listOf(15, 30, 45, 60).forEach { minutes ->
+                            SleepItem(x.sleepMinutes(minutes), sleep.mode == SleepMode.TIMER && sleep.minutes == minutes) {
+                                controller.setSleepMinutes(minutes)
+                                menu = false
+                            }
+                        }
+                        if (!live) {
+                            SleepItem(x.sleepVideoEnd, sleep.mode == SleepMode.VIDEO_END) {
+                                controller.setSleepAtVideoEnd()
+                                menu = false
+                            }
                         }
                     }
                 }
@@ -298,7 +332,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                     )
                 }
             }
-        } else if (!live && duration > 0) {
+        } else if (!live && duration > 0 && !fullscreen) {
             // Hidden controls leave a hairline of progress, as YouTube does.
             val fraction = (position.toFloat() / duration).coerceIn(0f, 1f)
             Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(2.dp).background(Color.White.copy(alpha = 0.25f))) {
@@ -309,11 +343,16 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
 }
 
 @Composable
-private fun Pill(text: String, modifier: Modifier) {
+private fun SleepItem(label: String, selected: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(text = { Text(if (selected) "$label  ✓" else label) }, onClick = onClick)
+}
+
+@Composable
+private fun Pill(text: String, modifier: Modifier, small: Boolean = false) {
     Text(
         text,
         color = Color.White,
-        fontSize = 20.sp,
+        fontSize = if (small) 13.sp else 20.sp,
         fontWeight = FontWeight.Bold,
         modifier = modifier.clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 16.dp, vertical = 8.dp),
     )
