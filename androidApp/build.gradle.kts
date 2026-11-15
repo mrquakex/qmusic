@@ -35,7 +35,7 @@ android {
         // WebRTC library is ~12 MB per kind, so the others are left out.
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
-            if (providers.gradleProperty("qmusic.emulator").orNull == "true") abiFilters += "x86_64"
+            if (providers.gradleProperty("qmusic.emulator").orNull == "true") abiFilters += listOf("x86_64", "x86")
         }
         buildConfigField("String", "LASTFM_KEY", "\"${localProperties.getProperty("lastfm.key", "")}\"")
         buildConfigField("String", "LASTFM_SECRET", "\"${localProperties.getProperty("lastfm.secret", "")}\"")
@@ -66,6 +66,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
+        // Android 7 (older TVs) has no java.time, which the YouTube extractor uses: it is built into the app.
+        isCoreLibraryDesugaringEnabled = true
     }
 
     buildFeatures {
@@ -99,6 +101,7 @@ registerLaunchTask("launchDebug", "installDebug", "com.qmusic.app.debug")
 registerLaunchTask("launchRelease", "installRelease", "com.qmusic.app")
 
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     implementation(project(":composeApp"))
     implementation(project(":core:player"))
     implementation(project(":core:yt-engine"))
