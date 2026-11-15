@@ -48,6 +48,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -219,6 +220,55 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
         }
         item { SectionTitle(s.soundsTitle) }
         item { SoundSettings(s) }
+        item { SectionTitle(s.mediaTitle) }
+        item {
+            val mode by controller.autoDownload.collectAsState()
+            var choosing by remember { mutableStateOf(false) }
+            val label = when (mode) {
+                "wifi" -> s.mediaWifi
+                "never" -> s.mediaNever
+                else -> s.mediaAlways
+            }
+            Row(Modifier.fillMaxWidth().clickable { choosing = true }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(s.mediaAuto, color = TextPrimary, fontSize = 15.sp)
+                    Text(s.mediaAutoNote, color = TextSecondary, fontSize = 12.sp)
+                }
+                Text(label, color = TextSecondary, fontSize = 14.sp)
+            }
+            if (choosing) {
+                ChoiceDialog(
+                    s.mediaAuto,
+                    listOf(
+                        s.mediaAlways to { controller.setAutoDownload("always") },
+                        s.mediaWifi to { controller.setAutoDownload("wifi") },
+                        s.mediaNever to { controller.setAutoDownload("never") },
+                    ),
+                    s,
+                ) { choosing = false }
+            }
+            // How much room the messages' photos, voice and videos take, and emptying it.
+            var bytes by remember { mutableStateOf<Long?>(null) }
+            var clearing by remember { mutableStateOf(false) }
+            val scope = androidx.compose.runtime.rememberCoroutineScope()
+            LaunchedEffect(clearing) { if (!clearing) bytes = controller.mediaCacheBytes() }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(s.mediaStorage, color = TextPrimary, fontSize = 15.sp)
+                    Text(bytes?.let { sizeLabel(it) } ?: "…", color = TextSecondary, fontSize = 12.sp)
+                }
+                Pill(s.mediaClear, primary = false) {
+                    if (!clearing) {
+                        clearing = true
+                        scope.launch {
+                            controller.clearMediaCache()
+                            clearing = false
+                        }
+                    }
+                }
+            }
+            Text(s.mediaClearNote, color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
+        }
         item { SectionTitle(s.wallpaper) }
         item {
             val current by controller.wallpaper.collectAsState()
@@ -831,3 +881,4 @@ internal fun CallsPage(controller: ChatController, s: ChatStrings, onCall: ((Cha
         )
     }
 }
+

@@ -278,6 +278,9 @@ class CallKeepAliveService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Started a moment after the call already ended (a call cancelled within a second or two): Android still
+        // needs it to show itself once, and then it goes at once, leaving nothing behind.
+        val live = com.qmusic.ui.chat.CallHooks.state?.value?.let { it.phase != com.qmusic.ui.chat.CallPhase.ENDED } == true
         val video = intent?.getBooleanExtra(EXTRA_VIDEO, false) == true
         val peer = intent?.getStringExtra(EXTRA_NAME)?.let { ChatUser(uid = "", name = it, username = "") }
         val media = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -294,8 +297,18 @@ class CallKeepAliveService : Service() {
         }.distinct()
         val notification = CallNotifications.ongoing(this, peer, video)
         val started = tries.any { type -> runCatching { ServiceCompat.startForeground(this, CallNotifications.ONGOING_ID, notification, type) }.isSuccess }
-        if (!started) stopSelf()
+        if (!started || !live) {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
         return START_NOT_STICKY
+    }
+
+    override fun onDestroy() {
+        // Its "call going on" notification never outlives it.
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        runCatching { getSystemService(android.app.NotificationManager::class.java).cancel(CallNotifications.ONGOING_ID) }
+        super.onDestroy()
     }
 
     companion object {

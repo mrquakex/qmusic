@@ -32,6 +32,11 @@ data class Privacy(
 /** A list the person sends one message to many through: each gets it in their own conversation. */
 data class Broadcast(val id: String, val name: String, val members: List<ChatUser>, val log: List<Pair<String, Long>> = emptyList())
 
+/** A backend where a tapped photo loads whatever the auto-download setting says. */
+interface ForcesImages {
+    fun forceImage(id: String)
+}
+
 /** What an invite link shows before joining. */
 data class GroupInvite(val code: String, val groupId: String, val name: String, val photo: String?)
 
@@ -53,7 +58,17 @@ data class StatusItem(
     val durationMs: Long = 0,
     /** The typeface of a text status (an index into the status fonts). */
     val font: Int = 0,
+    /** Words written over a photo or a video, where they were put. */
+    val overlay: StatusOverlay? = null,
+    /** A song that goes with it (tapped, it plays in the app). */
+    val song: SharedItem? = null,
 )
+
+/** Words over a status picture: [x] and [y] are where their middle is (0-1 of the width and height). */
+data class StatusOverlay(val text: String, val x: Float, val y: Float, val color: Long)
+
+/** What a status carries besides its picture or words. */
+data class StatusExtras(val overlay: StatusOverlay? = null, val song: SharedItem? = null)
 
 /** Someone's statuses, oldest first, and whether the person has seen all of them. */
 data class StatusGroup(val owner: ChatUser, val items: List<StatusItem>, val seenAll: Boolean, val seen: Set<String>)
@@ -342,6 +357,8 @@ data class ChatThread(
     /** Someone is typing in it (when they last typed, and who, for groups). */
     val typingAt: Long = 0,
     val typingName: String = "",
+    /** What they are doing is recording a voice message (with [typingAt]). */
+    val typingRec: Boolean = false,
     /** Marked as a favourite (the Favourites filter of the list). */
     val favorite: Boolean = false,
     /** Kept in the locked chats (opened with the phone's lock; notifications do not show it). */
@@ -452,6 +469,10 @@ interface ChatBackend {
 
     /** The other person is typing in [chatId]. */
     fun typing(chatId: String, otherUid: String): Flow<Boolean> = kotlinx.coroutines.flow.flowOf(false)
+
+    /** The other side (someone else, in a group) is recording a voice message now. */
+    fun recording(chatId: String, otherUid: String): Flow<Boolean> = kotlinx.coroutines.flow.flowOf(false)
+    suspend fun setRecording(chatId: String, recording: Boolean) {}
     suspend fun setTyping(chatId: String, typing: Boolean) {}
 
     /** The reactions of a conversation: message id → (person → emoji). */
@@ -584,9 +605,9 @@ interface ChatBackend {
     /** Friends' statuses the person may see, the ones with something unseen first. */
     fun friendStatuses(): Flow<List<StatusGroup>> = kotlinx.coroutines.flow.flowOf(emptyList())
 
-    suspend fun postTextStatus(text: String, background: Long, font: Int = 0): Result<Unit> = Result.failure(UnsupportedOperationException())
-    suspend fun postPhotoStatus(image: PickedImage, caption: String): Result<Unit> = Result.failure(UnsupportedOperationException())
-    suspend fun postVideoStatus(file: PickedFile, caption: String): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun postTextStatus(text: String, background: Long, font: Int = 0, extras: StatusExtras = StatusExtras()): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun postPhotoStatus(image: PickedImage, caption: String, extras: StatusExtras = StatusExtras()): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun postVideoStatus(file: PickedFile, caption: String, extras: StatusExtras = StatusExtras()): Result<Unit> = Result.failure(UnsupportedOperationException())
     suspend fun deleteStatus(id: String) {}
 
     /** The person saw [item]: its owner's list of viewers gets them. */
@@ -644,6 +665,22 @@ interface ChatBackend {
 
     /** Puts the person's photo, as their privacy says, on what others keep of them (groups, friends, chats). */
     suspend fun refreshMyCopies() {}
+
+    // ------------------------------------------------------------------ media and storage
+
+    /** When photos load by themselves: "always", "wifi" (not on mobile data) or "never" (a tap loads each). */
+    val autoDownload: StateFlow<String> get() = kotlinx.coroutines.flow.MutableStateFlow("always")
+    fun setAutoDownload(mode: String) {}
+
+    /** A photo may come from the network now without a tap (the setting and the connection allow it). */
+    fun mayAutoDownload(): Boolean = true
+
+    /** How much the messages' media take on the phone, and clearing it (it comes back from the server when shown). */
+    suspend fun mediaCacheBytes(): Long = 0L
+    suspend fun clearMediaCache() {}
+
+    /** The last [limit] messages of a conversation, read once (for searching across conversations). */
+    suspend fun recentMessages(chatId: String, limit: Int): List<ChatMessage> = emptyList()
 
     /** Every message of a conversation, oldest first (for exporting it). */
     suspend fun allMessages(chatId: String): List<ChatMessage> = emptyList()

@@ -432,6 +432,32 @@ data class ChatStrings(
     val soundTyping: String get() = if (english) "Keyboard sound while typing" else "Yazarken klavye sesi"
     val soundTypingNote: String get() = if (english) "A mechanical key's click for each letter in the message box (silent on silent mode)." else "Mesaj kutusunda her harfte mekanik tuş sesi (sessiz modda çalmaz)."
 
+    val statusAddText: String get() = if (english) "Text" else "Yazı"
+    val statusAddSong: String get() = if (english) "Song" else "Şarkı"
+    val statusTextHint: String get() = if (english) "Write something" else "Bir şey yaz"
+    val statusDone: String get() = if (english) "Done" else "Tamam"
+    val statusSongPick: String get() = if (english) "Add a song" else "Şarkı ekle"
+    val statusNoSong: String get() = if (english) "Play a song in Qeyf first, then add it here." else "Önce Qeyf'te bir şarkı çal, sonra buradan ekle."
+    val statusSongRemove: String get() = if (english) "Remove the song" else "Şarkıyı kaldır"
+    val statusListen: String get() = if (english) "Listen" else "Dinle"
+
+    val statusSongSearch: String get() = if (english) "Search for a song" else "Şarkı ara"
+    val statusNowPlaying: String get() = if (english) "Playing now" else "Şu an çalan"
+
+    val recordingVoice: String get() = if (english) "recording a voice message…" else "ses kaydediyor…"
+
+    val searchMessagesTitle: String get() = if (english) "Messages" else "Mesajlar"
+
+    val mediaTitle: String get() = if (english) "Media and storage" else "Medya ve depolama"
+    val mediaAuto: String get() = if (english) "Load photos by themselves" else "Fotoğrafları otomatik indir"
+    val mediaAutoNote: String get() = if (english) "Otherwise a tap on a photo loads it" else "Kapalıysa fotoğrafa dokununca iner"
+    val mediaAlways: String get() = if (english) "Always" else "Her zaman"
+    val mediaWifi: String get() = if (english) "Wi-Fi only" else "Sadece Wi-Fi"
+    val mediaNever: String get() = if (english) "Never" else "Hiçbir zaman"
+    val mediaStorage: String get() = if (english) "Media on this phone" else "Bu telefondaki medya"
+    val mediaClear: String get() = if (english) "Clear" else "Temizle"
+    val mediaClearNote: String get() = if (english) "Clearing frees the room; photos and voice messages load again when opened." else "Temizleyince yer açılır; fotoğraflar ve sesli mesajlar açılınca yeniden iner."
+
     companion object {
         val Turkish = ChatStrings(
             title = "Mesajlar",

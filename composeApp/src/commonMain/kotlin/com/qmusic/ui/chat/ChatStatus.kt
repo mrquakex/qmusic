@@ -84,6 +84,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.text.font.FontFamily
 import kotlin.math.abs
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.gestures.detectDragGestures
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.debounce
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.alpha
 
 /** The colours a text status can stand on (dark, so white text reads on all of them). */
@@ -94,6 +103,9 @@ internal val StatusColors = listOf(
 /** The typefaces a text status can be written in. */
 internal val StatusFonts = listOf(FontFamily.Default, FontFamily.Serif, FontFamily.Monospace, FontFamily.Cursive, FontFamily.SansSerif)
 internal val StatusFontWeights = listOf(FontWeight.SemiBold, FontWeight.Normal, FontWeight.Medium, FontWeight.Normal, FontWeight.Black)
+
+/** How long a photo or a text with a song stays on screen. */
+private const val SONG_MS = 15_000L
 
 /** How long a photo or a text stays on screen. */
 private const val STILL_MS = 5_000L
@@ -213,14 +225,14 @@ internal fun StatusTab(controller: ChatController, s: ChatStrings, me: ChatUser,
         ) { addMenu = false }
     }
     pendingImage?.let { img ->
-        StatusMediaComposer(s, image = img, video = null, onCancel = { pendingImage = null }) { caption, edited ->
-            controller.postPhotoStatus(edited ?: img, caption)
+        StatusMediaComposer(s, image = img, video = null, songs = controller.shareables, searchSongs = controller.searchSongs, onCancel = { pendingImage = null }) { caption, edited, extras ->
+            controller.postPhotoStatus(edited ?: img, caption, extras)
             pendingImage = null
         }
     }
     pendingVideo?.let { file ->
-        StatusMediaComposer(s, image = null, video = file, onCancel = { pendingVideo = null }) { caption, _ ->
-            controller.postVideoStatus(file, caption)
+        StatusMediaComposer(s, image = null, video = file, songs = controller.shareables, searchSongs = controller.searchSongs, onCancel = { pendingVideo = null }) { caption, _, extras ->
+            controller.postVideoStatus(file, caption, extras)
             pendingVideo = null
         }
     }
@@ -276,6 +288,8 @@ internal fun TextStatusPage(controller: ChatController, s: ChatStrings) {
     var colour by remember { mutableIntStateOf(0) }
     var font by remember { mutableIntStateOf(0) }
     var emoji by remember { mutableStateOf(false) }
+    var song by remember { mutableStateOf<SharedItem?>(null) }
+    var picking by remember { mutableStateOf(false) }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
@@ -284,7 +298,8 @@ internal fun TextStatusPage(controller: ChatController, s: ChatStrings) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { controller.pop() }) { Icon(QMusicIcons.Close, contentDescription = s.cancel, tint = Color.White) }
             Spacer(Modifier.weight(1f))
-            // Emoji, the typeface ("Aa" in the next one), and the palette (the next colour).
+            // A song, emoji, the typeface ("Aa" in the next one), and the palette (the next colour).
+            IconButton(onClick = { picking = true }) { Icon(QMusicIcons.Headphones, contentDescription = s.statusAddSong, tint = Color.White) }
             IconButton(onClick = {
                 emoji = !emoji
                 if (emoji) keyboard?.hide() else runCatching { focus.requestFocus() }.also { keyboard?.show() }
@@ -318,6 +333,13 @@ internal fun TextStatusPage(controller: ChatController, s: ChatStrings) {
                 modifier = Modifier.fillMaxWidth().focusRequester(focus),
             )
         }
+        song?.let { g ->
+            StatusSongChip(g, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 64.dp), trailing = {
+                Spacer(Modifier.width(8.dp))
+                Icon(QMusicIcons.Close, contentDescription = s.statusSongRemove, tint = Color.White, modifier = Modifier.size(16.dp))
+            }) { song = null }
+        }
+        if (picking) StatusSongPicker(s, controller.shareables().filter { it.kind == ShareKind.SONG }, controller.searchSongs, onPick = { song = it }) { picking = false }
         if (emoji) {
             EmojiPanel(onEmoji = { e -> text = (text + e).take(700) }, modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 88.dp))
         }
@@ -325,7 +347,7 @@ internal fun TextStatusPage(controller: ChatController, s: ChatStrings) {
             Box(
                 Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(20.dp).size(56.dp).clip(CircleShape).background(Color.White)
                     .clickable {
-                        controller.postTextStatus(text, StatusColors[colour], font)
+                        controller.postTextStatus(text, StatusColors[colour], font, StatusExtras(song = song))
                         controller.pop()
                         controller.selectTab(ChatTab.STATUS)
                     },
@@ -335,17 +357,189 @@ internal fun TextStatusPage(controller: ChatController, s: ChatStrings) {
     }
 }
 
-/** A photo or a video before it goes up: shown full screen with a caption box. */
+/** The colours words over a status can be: white first, then strong ones that read on any picture. */
+internal val OverlayColors = listOf(0xFFFFFFFF, 0xFF000000, 0xFFFFD60A, 0xFFFF3B30, 0xFF34C759, 0xFF0A84FF, 0xFFBF5AF2)
+
+/**
+ * Words over a status picture, drawn where they were put ([StatusOverlay.x], [StatusOverlay.y]), on a soft shadow so
+ * they read on any picture. [onMove]: they can be dragged (while writing the status).
+ */
+@Composable
+internal fun StatusOverlayText(overlay: StatusOverlay, modifier: Modifier = Modifier, onMove: ((Float, Float) -> Unit)? = null) {
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val w = constraints.maxWidth.toFloat()
+        val h = constraints.maxHeight.toFloat()
+        var size by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+        val dark = overlay.color == 0xFF000000
+        Text(
+            overlay.text,
+            color = Color(overlay.color),
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            style = TextStyle(shadow = androidx.compose.ui.graphics.Shadow(if (dark) Color.White.copy(alpha = 0.6f) else Color.Black.copy(alpha = 0.7f), blurRadius = 8f)),
+            modifier = Modifier
+                .widthIn(max = maxWidth * 0.86f)
+                .onSizeChanged { size = it }
+                .offset {
+                    androidx.compose.ui.unit.IntOffset(
+                        (overlay.x * w - size.width / 2f).toInt().coerceIn(0, (w - size.width).toInt().coerceAtLeast(0)),
+                        (overlay.y * h - size.height / 2f).toInt().coerceIn(0, (h - size.height).toInt().coerceAtLeast(0)),
+                    )
+                }
+                .then(
+                    if (onMove == null) {
+                        Modifier
+                    } else {
+                        Modifier.pointerInput(Unit) {
+                            detectDragGestures { change, drag ->
+                                change.consume()
+                                onMove(drag.x / w, drag.y / h)
+                            }
+                        }
+                    },
+                ),
+        )
+    }
+}
+
+/** A status's song: its cover and name; a tap plays it. */
+@Composable
+internal fun StatusSongChip(song: SharedItem, modifier: Modifier = Modifier, trailing: (@Composable () -> Unit)? = null, onClick: () -> Unit) {
+    Row(
+        modifier.clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.55f)).clickable(onClick = onClick).padding(start = 6.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).background(Color.White.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
+            if (song.thumbnail != null) {
+                AsyncImage(model = song.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            } else {
+                Icon(QMusicIcons.Headphones, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.widthIn(max = 220.dp)) {
+            Text(song.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (song.subtitle.isNotBlank()) Text(song.subtitle, color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        trailing?.invoke()
+    }
+}
+
+/** Picks the song for a status: the one playing in Qeyf now, or any found by searching. */
+@OptIn(kotlinx.coroutines.FlowPreview::class)
+@Composable
+internal fun StatusSongPicker(
+    s: ChatStrings,
+    songs: List<SharedItem>,
+    search: suspend (String) -> List<SharedItem> = { emptyList() },
+    onPick: (SharedItem) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    var found by remember { mutableStateOf<List<SharedItem>?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        snapshotFlow { query.trim() }.debounce(400).distinctUntilChanged().collect { q ->
+            if (q.length < 2) {
+                found = null
+                return@collect
+            }
+            busy = true
+            found = runCatching { search(q) }.getOrDefault(emptyList())
+            busy = false
+        }
+    }
+    val list = found ?: songs
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurfaceVariant,
+        title = { Text(s.statusSongPick, color = TextPrimary) },
+        text = {
+            Column {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(BgRoot).padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(QMusicIcons.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Box(Modifier.weight(1f)) {
+                        if (query.isEmpty()) Text(s.statusSongSearch, color = TextMuted, fontSize = 15.sp)
+                        BasicTextField(
+                            value = query,
+                            onValueChange = { query = it.take(60) },
+                            singleLine = true,
+                            textStyle = TextStyle(color = TextPrimary, fontSize = 15.sp),
+                            cursorBrush = SolidColor(TextPrimary),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    if (busy) CircularProgressIndicator(color = TextPrimary, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                }
+                Spacer(Modifier.height(8.dp))
+                if (list.isEmpty()) {
+                    Text(if (found == null) s.statusNoSong else s.noResults, color = TextSecondary, fontSize = 14.sp, modifier = Modifier.padding(vertical = 12.dp))
+                } else {
+                    if (found == null) Text(s.statusNowPlaying, color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 4.dp))
+                    LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                        items(list, key = { it.id }) { song ->
+                            Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { onPick(song); onDismiss() }.padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black)) {
+                                    if (song.thumbnail != null) AsyncImage(model = song.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(song.title, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    if (song.subtitle.isNotBlank()) Text(song.subtitle, color = TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(s.cancel, color = TextSecondary) } },
+    )
+}
+
+/**
+ * A photo or a video before it goes up, full screen: a caption, words written over it (dragged where they should be,
+ * in a colour), and a song (the one playing in Qeyf).
+ */
 @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
 @Composable
-internal fun StatusMediaComposer(s: ChatStrings, image: PickedImage?, video: PickedFile?, onCancel: () -> Unit, onShare: (String, PickedImage?) -> Unit) {
+internal fun StatusMediaComposer(
+    s: ChatStrings,
+    image: PickedImage?,
+    video: PickedFile?,
+    songs: () -> List<SharedItem> = { emptyList() },
+    searchSongs: suspend (String) -> List<SharedItem> = { emptyList() },
+    onCancel: () -> Unit,
+    onShare: (String, PickedImage?, StatusExtras) -> Unit,
+) {
     var caption by remember { mutableStateOf("") }
     var photo by remember(image) { mutableStateOf(image) }
     var editing by remember { mutableStateOf(false) }
+    var overlay by remember { mutableStateOf<StatusOverlay?>(null) }
+    var writing by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("") }
+    var colour by remember { mutableStateOf(0) }
+    var song by remember { mutableStateOf<SharedItem?>(null) }
+    var picking by remember { mutableStateOf(false) }
+    // The bars of the screen, measured out here: inside its own window the dialog does not hear about them, and the
+    // caption box went under the gesture bar.
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val topBar = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
+    val bottomBar = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
     Dialog(onDismissRequest = onCancel, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         val shown = photo
         if (editing && shown != null) {
-            PhotoEditor(shown, onDone = { photo = it; editing = false }, onCancel = { editing = false })
+            Box(Modifier.fillMaxSize().background(Color.Black).padding(top = topBar, bottom = bottomBar)) {
+                PhotoEditor(shown, onDone = { photo = it; editing = false }, onCancel = { editing = false })
+            }
             return@Dialog
         }
         Box(Modifier.fillMaxSize().background(Color.Black).imePadding()) {
@@ -353,11 +547,35 @@ internal fun StatusMediaComposer(s: ChatStrings, image: PickedImage?, video: Pic
                 shown != null -> AsyncImage(model = shown.jpeg, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
                 video != null -> VideoMessagePlayer(video.location, Modifier.fillMaxSize())
             }
-            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onCancel) { Icon(QMusicIcons.Close, contentDescription = s.cancel, tint = Color.White) }
-                Spacer(Modifier.weight(1f))
-                if (shown != null) {
-                    IconButton(onClick = { editing = true }) { Icon(QMusicIcons.Edit, contentDescription = s.statusEdit, tint = Color.White) }
+            // The words over it, draggable.
+            overlay?.takeIf { !writing }?.let { o ->
+                StatusOverlayText(o, onMove = { dx, dy -> overlay = o.copy(x = (o.x + dx).coerceIn(0.05f, 0.95f), y = (o.y + dy).coerceIn(0.08f, 0.92f)) })
+            }
+            Column(Modifier.fillMaxWidth().padding(top = topBar).padding(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onCancel) { Icon(QMusicIcons.Close, contentDescription = s.cancel, tint = Color.White) }
+                    Spacer(Modifier.weight(1f))
+                    // Words over it ("Aa"), a song, and the photo editor.
+                    Text(
+                        "Aa",
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clip(CircleShape).clickable {
+                            draft = overlay?.text.orEmpty()
+                            writing = true
+                        }.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                    IconButton(onClick = { picking = true }) { Icon(QMusicIcons.Headphones, contentDescription = s.statusAddSong, tint = Color.White) }
+                    if (shown != null) {
+                        IconButton(onClick = { editing = true }) { Icon(QMusicIcons.Edit, contentDescription = s.statusEdit, tint = Color.White) }
+                    }
+                }
+                song?.let { g ->
+                    StatusSongChip(g, Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp), trailing = {
+                        Spacer(Modifier.width(8.dp))
+                        Icon(QMusicIcons.Close, contentDescription = s.statusSongRemove, tint = Color.White, modifier = Modifier.size(16.dp))
+                    }) { song = null }
                 }
             }
             if (video != null && video.durationMs > 60_000L) {
@@ -365,31 +583,76 @@ internal fun StatusMediaComposer(s: ChatStrings, image: PickedImage?, video: Pic
                     s.statusVideoLimit,
                     color = Color.White,
                     fontSize = 13.sp,
-                    modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 60.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.6f)).padding(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = topBar + 110.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.6f)).padding(horizontal = 12.dp, vertical = 6.dp),
                 )
             }
-            Row(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(24.dp)).background(Color(0xCC1E1E1E)).padding(horizontal = 18.dp, vertical = 13.dp)) {
-                    if (caption.isEmpty()) Text(s.statusCaption, color = Color.White.copy(alpha = 0.5f), fontSize = 16.sp)
-                    BasicTextField(
-                        value = caption,
-                        onValueChange = { caption = it.take(700) },
-                        textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
-                        cursorBrush = SolidColor(Color.White),
-                        maxLines = 4,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+            if (!writing) {
+                Row(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = bottomBar).padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(24.dp)).background(Color(0xCC1E1E1E)).padding(horizontal = 18.dp, vertical = 13.dp)) {
+                        if (caption.isEmpty()) Text(s.statusCaption, color = Color.White.copy(alpha = 0.5f), fontSize = 16.sp)
+                        BasicTextField(
+                            value = caption,
+                            onValueChange = { caption = it.take(700) },
+                            textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
+                            cursorBrush = SolidColor(Color.White),
+                            maxLines = 4,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Box(
+                        Modifier.size(52.dp).clip(CircleShape).background(Color.White).clickable {
+                            onShare(caption, photo.takeIf { it !== image }, StatusExtras(overlay = overlay, song = song))
+                        },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(QMusicIcons.Send, contentDescription = s.statusShare, tint = Color.Black) }
                 }
-                Spacer(Modifier.width(10.dp))
-                Box(Modifier.size(52.dp).clip(CircleShape).background(Color.White).clickable { onShare(caption, photo.takeIf { it !== image }) }, contentAlignment = Alignment.Center) {
-                    Icon(QMusicIcons.Send, contentDescription = s.statusShare, tint = Color.Black)
+            }
+            // Writing the words: big, in the middle, with the colours under them.
+            if (writing) {
+                val focus = remember { FocusRequester() }
+                LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)).clickable(enabled = false) {}) {
+                    Text(
+                        s.statusDone,
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = topBar + 8.dp, end = 12.dp).clip(RoundedCornerShape(16.dp)).clickable {
+                            val text = draft.trim()
+                            overlay = if (text.isEmpty()) null else (overlay?.copy(text = text, color = OverlayColors[colour]) ?: StatusOverlay(text, 0.5f, 0.4f, OverlayColors[colour]))
+                            writing = false
+                        }.padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
+                    Box(Modifier.align(Alignment.Center).fillMaxWidth().padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
+                        if (draft.isEmpty()) Text(s.statusTextHint, color = Color.White.copy(alpha = 0.5f), fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                        BasicTextField(
+                            value = draft,
+                            onValueChange = { draft = it.take(200) },
+                            textStyle = TextStyle(color = Color(OverlayColors[colour]), fontSize = 28.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
+                            cursorBrush = SolidColor(Color.White),
+                            modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                        )
+                    }
+                    Row(
+                        Modifier.align(Alignment.BottomCenter).padding(bottom = bottomBar + 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        OverlayColors.forEachIndexed { i, c ->
+                            Box(
+                                Modifier.size(if (i == colour) 32.dp else 26.dp).clip(CircleShape).background(Color.White).padding(2.dp).clip(CircleShape).background(Color(c))
+                                    .clickable { colour = i },
+                            )
+                        }
+                    }
                 }
             }
         }
     }
+    if (picking) StatusSongPicker(s, songs().filter { it.kind == ShareKind.SONG }, searchSongs, onPick = { song = it }) { picking = false }
 }
 
 // ------------------------------------------------------------------ watching
@@ -415,7 +678,8 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
     var confirmDelete by remember { mutableStateOf<StatusItem?>(null) }
     var menu by remember { mutableStateOf(false) }
     var reply by remember(owner) { mutableStateOf("") }
-    val paused = held || typing || viewersOpen || menu || confirmDelete != null
+    var listening by remember(owner) { mutableStateOf(false) }
+    val paused = held || typing || viewersOpen || menu || confirmDelete != null || listening
     PlatformBackHandler(enabled = true) { controller.pop() }
 
     if (items.isEmpty()) {
@@ -442,7 +706,13 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
 
     // How far the current one has played (0..1); a video goes as long as it is.
     var progress by remember(item.id) { mutableFloatStateOf(0f) }
-    var videoLength by remember(item.id) { mutableLongStateOf(if (item.kind == StatusKind.VIDEO) item.durationMs.coerceAtLeast(1_000L) else STILL_MS) }
+    var videoLength by remember(item.id) { mutableLongStateOf(if (item.kind == StatusKind.VIDEO) item.durationMs.coerceAtLeast(1_000L) else if (item.song != null) SONG_MS else STILL_MS) }
+    // Its song plays by itself (from a little into it), for as long as the status shows.
+    var songUrl by remember(item.id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(item.id) {
+        songUrl = item.song?.let { g -> runCatching { controller.songAudio(g.id) }.getOrNull() }
+    }
+    songUrl?.let { url -> StatusAudio(url, playing = !paused && !listening) }
     var videoReady by remember(item.id) { mutableStateOf(item.kind != StatusKind.VIDEO) }
     LaunchedEffect(item.id, paused, videoReady, videoLength) {
         if (paused || !videoReady) return@LaunchedEffect
@@ -509,6 +779,19 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
                         videoReady = true
                     },
                 )
+            }
+        }
+
+        // Words written over it.
+        item.overlay?.let { o -> StatusOverlayText(o) }
+        // Its song: a tap plays it in Qeyf (the status waits meanwhile).
+        item.song?.let { g ->
+            StatusSongChip(g, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 76.dp), trailing = {
+                Spacer(Modifier.width(8.dp))
+                Icon(QMusicIcons.Play, contentDescription = s.statusListen, tint = Color.White, modifier = Modifier.size(16.dp))
+            }) {
+                listening = true
+                controller.openShare(g)
             }
         }
 

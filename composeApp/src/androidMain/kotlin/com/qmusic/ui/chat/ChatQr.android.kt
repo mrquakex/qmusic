@@ -115,3 +115,21 @@ actual fun rememberTextFileShare(): (fileName: String, text: String) -> Unit {
         }
     }
 }
+
+@Composable
+actual fun StatusAudio(url: String, playing: Boolean) {
+    val context = LocalContext.current
+    val player = remember(url) {
+        ExoPlayer.Builder(context)
+            // It takes the sound: music playing in the app pauses while a status sings.
+            .setAudioAttributes(androidx.media3.common.AudioAttributes.Builder().setUsage(androidx.media3.common.C.USAGE_MEDIA).setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
+            .build().apply {
+                setMediaItem(MediaItem.fromUri(Uri.parse(url)))
+                repeatMode = Player.REPEAT_MODE_ONE
+                prepare()
+                seekTo(30_000L)
+            }
+    }
+    DisposableEffect(player) { onDispose { player.release() } }
+    LaunchedEffect(player, playing) { player.playWhenReady = playing }
+}

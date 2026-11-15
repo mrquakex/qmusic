@@ -316,6 +316,19 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
         }
     }
     val unreadTotal = all.orEmpty().count { it.unread }
+    var found by remember { mutableStateOf<List<ChatController.FoundMessage>>(emptyList()) }
+    var foundBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(search) {
+        val q = search.trim()
+        if (q.length < 2) {
+            found = emptyList()
+            return@LaunchedEffect
+        }
+        kotlinx.coroutines.delay(350)
+        foundBusy = true
+        found = runCatching { controller.searchMessages(q) }.getOrDefault(emptyList())
+        foundBusy = false
+    }
     val lockedCount = controller.lockedThreads.collectAsState().value.size
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
@@ -382,6 +395,17 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
                     TogetherBanner(state, s, onOpen = { thread?.let { controller.openConversation(it.other) } }, onLeave = { controller.together?.leave() })
                 }
             }
+            // Messages saying what was searched, in every conversation.
+            if (search.trim().length >= 2) {
+                item(key = "msgHead") { SectionTitle(s.searchMessagesTitle) }
+                when {
+                    foundBusy && found.isEmpty() -> item(key = "msgBusy") {
+                        Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Ink, strokeWidth = 2.dp, modifier = Modifier.size(20.dp)) }
+                    }
+                    found.isEmpty() -> item(key = "msgNone") { Text(s.noResults, color = TextSecondary, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+                    else -> items(found, key = { "m_" + it.thread.id + it.message.id }) { f -> FoundRow(f, search.trim(), me, s) { controller.openAt(f) } }
+                }
+            }
             when {
                 list == null -> item(key = "loading") {
                     Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Ink, strokeWidth = 2.dp) }
@@ -420,8 +444,8 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
     }
     muteFor?.let { t -> MuteChoice(controller, s, t, now) { muteFor = null } }
     cameraShot?.let { shot ->
-        StatusMediaComposer(s, image = shot, video = null, onCancel = { cameraShot = null }) { caption, edited ->
-            controller.postPhotoStatus(edited ?: shot, caption)
+        StatusMediaComposer(s, image = shot, video = null, songs = controller.shareables, onCancel = { cameraShot = null }) { caption, edited, extras ->
+            controller.postPhotoStatus(edited ?: shot, caption, extras)
             cameraShot = null
             controller.selectTab(ChatTab.STATUS)
         }
@@ -435,6 +459,36 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
             confirmButton = { TextButton(onClick = { confirmDelete = false; controller.deleteAccount() }) { Text(s.delete, color = Ink) } },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(s.cancel, color = TextSecondary) } },
         )
+    }
+}
+
+/** A message found by searching: who, where, when, with the words searched in bold. */
+@Composable
+private fun FoundRow(f: ChatController.FoundMessage, query: String, me: ChatUser, s: ChatStrings, onClick: () -> Unit) {
+    val text = f.message.text
+    val at = text.indexOf(query, ignoreCase = true)
+    // A little before the words found, so they show even in a long message.
+    val from = if (at > 30) at - 20 else 0
+    val shown = (if (from > 0) "…" else "") + text.substring(from).replace('\n', ' ')
+    val start = if (at >= 0) at - from + (if (from > 0) 1 else 0) else -1
+    val mine = if (f.message.from == me.uid) s.you + ": " else ""
+    val styled = androidx.compose.ui.text.buildAnnotatedString {
+        append(mine)
+        append(shown)
+        if (start >= 0 && start + query.length <= shown.length) {
+            addStyle(androidx.compose.ui.text.SpanStyle(color = TextPrimary, fontWeight = FontWeight.Bold), mine.length + start, mine.length + start + query.length)
+        }
+    }
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        ChatAvatar(f.thread.other, 44.dp)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(f.thread.other.name, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(listTime(f.message.at, s), color = TextMuted, fontSize = 12.sp)
+            }
+            Text(styled, color = TextSecondary, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 

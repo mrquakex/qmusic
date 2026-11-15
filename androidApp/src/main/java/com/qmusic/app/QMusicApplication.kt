@@ -41,6 +41,9 @@ class QMusicApplication : Application() {
                 runCatching { androidx.core.content.ContextCompat.startForegroundService(app, service) }
             } else {
                 app.stopService(service)
+                // Whatever said "on a call" goes with it: the ongoing notification, and a ringing one left over.
+                runCatching { app.getSystemService(android.app.NotificationManager::class.java).cancel(CallNotifications.ONGOING_ID) }
+                CallNotifications.cancelIncoming(app)
             }
         }
     }

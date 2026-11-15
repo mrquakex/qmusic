@@ -84,6 +84,10 @@ expect fun QrCode(text: String, modifier: Modifier)
 @Composable
 expect fun rememberQrScanner(onResult: (String) -> Unit): (() -> Unit)?
 
+/** A status's song, from a little into it (where it usually gets going), playing while [playing]. */
+@Composable
+expect fun StatusAudio(url: String, playing: Boolean)
+
 /** A status video: no controls, paused when asked; [onReady] says how long it is (ms). */
 @Composable
 expect fun StatusVideo(url: String, paused: Boolean, modifier: Modifier, onReady: (Long) -> Unit)

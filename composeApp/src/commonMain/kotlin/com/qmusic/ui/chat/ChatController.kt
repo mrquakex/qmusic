@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
 /** The pages of the messages section, the last one on screen. */
@@ -201,9 +202,17 @@ class ChatController(
         }
     }
 
-    fun postTextStatus(text: String, background: Long, font: Int = 0) = post { backend.postTextStatus(text, background, font) }
-    fun postPhotoStatus(image: PickedImage, caption: String) = post { backend.postPhotoStatus(image, caption) }
-    fun postVideoStatus(file: PickedFile, caption: String) = post { backend.postVideoStatus(file, caption) }
+    fun postTextStatus(text: String, background: Long, font: Int = 0, extras: StatusExtras = StatusExtras()) = post { backend.postTextStatus(text, background, font, extras) }
+    fun postPhotoStatus(image: PickedImage, caption: String, extras: StatusExtras = StatusExtras()) = post { backend.postPhotoStatus(image, caption, extras) }
+    fun postVideoStatus(file: PickedFile, caption: String, extras: StatusExtras = StatusExtras()) = post { backend.postVideoStatus(file, caption, extras) }
+
+    /** What can be shared now (the song playing, the video open), and how a shared song or video is opened: set by the app. */
+    var shareables: () -> List<SharedItem> = { emptyList() }
+    var openShare: (SharedItem) -> Unit = {}
+
+    /** Songs for [query] from the music side (to add one to a status), and a song's audio address (to play it there). */
+    var searchSongs: suspend (String) -> List<SharedItem> = { emptyList() }
+    var songAudio: suspend (String) -> String? = { null }
 
     fun deleteStatus(item: StatusItem) {
         scope.launch { runCatching { backend.deleteStatus(item.id) } }
@@ -275,6 +284,55 @@ class ChatController(
         list.members.forEach { send(it, body) }
         scope.launch { runCatching { backend.logBroadcast(list.id, body) } }
     }
+
+    // ------------------------------------------------------------------ media and storage
+
+    val autoDownload: StateFlow<String> get() = backend.autoDownload
+    fun setAutoDownload(mode: String) = backend.setAutoDownload(mode)
+    fun mayAutoDownload(): Boolean = backend.mayAutoDownload()
+    suspend fun mediaCacheBytes(): Long = backend.mediaCacheBytes()
+    suspend fun clearMediaCache() = backend.clearMediaCache()
+
+    /** A photo tapped to load: it comes whatever the auto-download setting says. */
+    fun forceImage(image: ChatImage) {
+        (backend as? ForcesImages)?.forceImage(image.id)
+    }
+
+    // ------------------------------------------------------------------ searching all conversations
+
+    /** A message found by searching: in which conversation, and what it said. */
+    data class FoundMessage(val thread: ChatThread, val message: ChatMessage)
+
+    /**
+     * Messages saying [query], in every conversation (the last few hundred of each), newest first. Read once from the
+     * server (cached by it after), so a search is quick the second time.
+     */
+    suspend fun searchMessages(query: String): List<FoundMessage> {
+        val q = query.trim()
+        if (q.length < 2) return emptyList()
+        val all = allThreads.value.orEmpty().filter { !it.locked }
+        val found = kotlinx.coroutines.coroutineScope {
+            all.map { t ->
+                async {
+                    backend.recentMessages(t.id, SEARCH_DEPTH)
+                        .filter { m -> !m.deleted && !m.system && m.text.contains(q, ignoreCase = true) }
+                        .map { FoundMessage(t, it) }
+                }
+            }.flatMap { it.await() }
+        }
+        return found.sortedByDescending { it.message.at }.take(60)
+    }
+
+    /** A message to show when its conversation opens (a search result was tapped). */
+    private val jumps = HashMap<String, String>()
+
+    fun openAt(found: FoundMessage) {
+        jumps[found.thread.other.uid] = found.message.id
+        openConversation(found.thread.other)
+    }
+
+    /** The message to go to in [other]'s conversation, once. */
+    fun takeJump(other: ChatUser): String? = jumps.remove(other.uid)
 
     // ------------------------------------------------------------------ export
 
@@ -790,6 +848,32 @@ class ChatController(
 
     fun typing(other: ChatUser) = chatIdWith(other)?.let { id -> backend.typing(id, other.uid).catch { emit(false) } } ?: flowOf(false)
 
+    fun recording(other: ChatUser) = chatIdWith(other)?.let { id -> backend.recording(id, other.uid).catch { emit(false) } } ?: flowOf(false)
+
+    private var recordingBeat: Job? = null
+
+    /** Leaving a conversation while recording: the others stop seeing it. */
+    fun stopRecordingIfAny(other: ChatUser) {
+        if (recordingBeat != null) setRecording(other, false)
+    }
+
+    /** Recording a voice message: the other side sees it, renewed every few seconds until it stops. */
+    fun setRecording(other: ChatUser, on: Boolean) {
+        val id = chatIdWith(other) ?: return
+        recordingBeat?.cancel()
+        recordingBeat = null
+        if (on) {
+            recordingBeat = scope.launch {
+                while (true) {
+                    runCatching { backend.setRecording(id, true) }
+                    delay(4_000)
+                }
+            }
+        } else {
+            scope.launch { runCatching { backend.setRecording(id, false) } }
+        }
+    }
+
     private var typingSince = 0L
     private var typingStop: Job? = null
 
@@ -845,6 +929,8 @@ class ChatController(
     }
 
     companion object {
+        /** How many of each conversation's last messages a search reads. */
+        const val SEARCH_DEPTH = 400
         const val MAX_LENGTH = 4000
         const val MAX_PHOTOS = 10
         const val MAX_FILE_BYTES = 100L * 1024 * 1024

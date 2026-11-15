@@ -125,7 +125,6 @@ fun QMusicApp(
     androidx.compose.runtime.SideEffect { com.qmusic.ui.theme.amoledTheme = amoled }
     SystemBarsTheme(light)
     QMusicTheme {
-        var showSplash by remember { mutableStateOf(!com.qmusic.ui.components.SplashState.shown) }
 
         val language by viewModel.language.collectAsState()
         val accountMode by viewModel.accountMode.collectAsState()
@@ -208,6 +207,18 @@ fun QMusicApp(
             val chatBackend = com.qmusic.ui.chat.rememberChatBackend()
             val chatScope = rememberCoroutineScope()
             val chatController = remember(chatBackend) { chatBackend?.let { com.qmusic.ui.chat.ChatController(it, chatScope) } }
+            // The music side, for statuses: finding a song, and the address of its sound to play it in the status.
+            LaunchedEffect(chatController) {
+                val controller = chatController ?: return@LaunchedEffect
+                controller.searchSongs = { query ->
+                    viewModel.youTube.search(query, com.qmusic.engine.models.SearchFilter.SONGS).getOrNull()?.items.orEmpty().take(25).map { song ->
+                        com.qmusic.ui.chat.SharedItem(com.qmusic.ui.chat.ShareKind.SONG, song.id, song.title, song.artists.joinToString(", ") { it.name }, song.thumbnail)
+                    }
+                }
+                controller.songAudio = { id ->
+                    viewModel.youTube.resolveStreamUrls(id).getOrNull()?.firstOrNull { !it.isDrm }?.url
+                }
+            }
             // Listening / watching together: the music player and the video player as the session sees them.
             LaunchedEffect(chatController) {
                 val controller = chatController ?: return@LaunchedEffect
@@ -1491,8 +1502,7 @@ fun QMusicApp(
             }
         }
         }
-        // The opening animation plays over the app while it loads underneath, then fades away.
-        if (showSplash) QMusicSplash(onFinished = { showSplash = false }, modifier = modifier)
+        // No opening animation: the app opens straight away (Android shows its own short splash with the icon).
     }
 }
 

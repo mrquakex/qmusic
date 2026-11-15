@@ -81,7 +81,7 @@ private fun Context.findActivity(): Activity? {
  * message), chats/{chatId}/messages/{id} and chats/{chatId}/read/{uid}, blocked/{uid}/{other} = true,
  * pushTokens/{uid}/{key} = token. See firebase/database.rules.json for who may read and write what.
  */
-internal class FirebaseChatBackend private constructor(private val app: Context) : ChatBackend {
+internal class FirebaseChatBackend private constructor(private val app: Context) : ChatBackend, ForcesImages {
     private val auth = FirebaseAuth.getInstance()
     private val db: FirebaseDatabase = openDatabase()
     private val root: DatabaseReference = db.reference
@@ -385,6 +385,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             mutedUntil = child("mutedUntil").getValue(Long::class.java) ?: 0L,
             typingAt = child("typingAt").getValue(Long::class.java) ?: 0L,
             typingName = child("typingName").getValue(String::class.java).orEmpty(),
+            typingRec = child("typingRec").getValue(Boolean::class.java) == true,
             favorite = child("favorite").getValue(Boolean::class.java) == true,
             locked = child("locked").getValue(Boolean::class.java) == true,
         )
@@ -1595,6 +1596,43 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     /** Photos already fetched: memory first, then the app's cache folder. */
     private val imageCache = android.util.LruCache<String, ByteArray>(24)
 
+    private val mediaPrefs by lazy { app.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE) }
+    private val _autoDownload by lazy { MutableStateFlow(mediaPrefs.getString("media_auto_download", "always") ?: "always") }
+    override val autoDownload: StateFlow<String> get() = _autoDownload
+
+    override fun setAutoDownload(mode: String) {
+        if (mode !in setOf("always", "wifi", "never")) return
+        mediaPrefs.edit().putString("media_auto_download", mode).apply()
+        _autoDownload.value = mode
+    }
+
+    override fun mayAutoDownload(): Boolean = when (_autoDownload.value) {
+        "never" -> false
+        // Wi-Fi (or any connection that is not counted, like a home network over a cable).
+        "wifi" -> runCatching { !(app.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).isActiveNetworkMetered }.getOrDefault(true)
+        else -> true
+    }
+
+    /** Photos asked for by a tap: they load whatever the setting says. */
+    private val forcedImages = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    override fun forceImage(id: String) {
+        forcedImages += id
+    }
+
+    private fun mediaDirs() = listOf("chat_media", "voice", "video_out", "exports").map { java.io.File(app.cacheDir, it) }
+
+    override suspend fun mediaCacheBytes(): Long = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        mediaDirs().sumOf { dir -> dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } }
+    }
+
+    override suspend fun clearMediaCache() {
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            mediaDirs().forEach { dir -> dir.listFiles()?.forEach { runCatching { it.deleteRecursively() } } }
+        }
+        imageCache.evictAll()
+    }
+
     override suspend fun imageBytes(chatId: String, image: ChatImage): ByteArray? {
         val url = image.url ?: return imageBytes(chatId, image.id)
         imageCache.get(url)?.let { return it }
@@ -1602,6 +1640,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         imageCache.get("$chatId/${image.id}")?.let { return it }
         val file = java.io.File(java.io.File(app.cacheDir, "chat_media").apply { mkdirs() }, url.substringAfterLast('/'))
         if (file.exists()) return file.readBytes().also { imageCache.put(url, it) }
+        // Not on the phone yet: from the network only when the setting allows it now, or it was tapped.
+        if (!mayAutoDownload() && image.id !in forcedImages) return null
         val bytes = kotlinx.coroutines.withContext(Dispatchers.IO) { MediaUpload.download(url) } ?: return null
         runCatching { file.writeBytes(bytes) }
         imageCache.put(url, bytes)
@@ -1728,6 +1768,44 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         awaitClose { job.cancel() }
     }
 
+    override fun recording(chatId: String, otherUid: String): Flow<Boolean> = callbackFlow {
+        val uid = me()
+        val job = launch {
+            listen(root.child("recording").child(chatId)).collect { snap ->
+                val now = System.currentTimeMillis()
+                // One-to-one: the other person; in a group: anyone but the person.
+                trySend(
+                    snap.children.any { c ->
+                        val who = c.key ?: return@any false
+                        (if (isGroupId(chatId)) who != uid else who == otherUid) && now - (c.getValue(Long::class.java) ?: 0L) < TYPING_FRESH_MS
+                    },
+                )
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override suspend fun setRecording(chatId: String, recording: Boolean) {
+        val uid = auth.currentUser?.uid ?: return
+        val name = (_account.value as? ChatAccount.Ready)?.me?.name?.substringBefore(' ').orEmpty()
+        val ref = root.child("recording").child(chatId).child(uid)
+        if (recording) {
+            ref.onDisconnect().removeValue()
+            ref.setValue(ServerValue.TIMESTAMP)
+        } else {
+            ref.removeValue()
+        }
+        // The others' lists say "recording a voice message…" in place of "typing…".
+        val others = if (isGroupId(chatId)) groups[chatId]?.members?.map { it.user.uid }.orEmpty() else chatId.split("_")
+        val updates = HashMap<String, Any?>()
+        others.filter { it != uid && it != CLAUDE_BOT_UID }.forEach { other ->
+            updates["userChats/$other/$chatId/typingAt"] = if (recording) ServerValue.TIMESTAMP else null
+            updates["userChats/$other/$chatId/typingName"] = if (recording) name else null
+            updates["userChats/$other/$chatId/typingRec"] = if (recording) true else null
+        }
+        if (updates.isNotEmpty()) root.updateChildren(updates)
+    }
+
     override suspend fun setTyping(chatId: String, typing: Boolean) {
         val uid = auth.currentUser?.uid ?: return
         val name = (_account.value as? ChatAccount.Ready)?.me?.name?.substringBefore(' ').orEmpty()
@@ -1744,6 +1822,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         others.filter { it != uid && it != CLAUDE_BOT_UID }.forEach { other ->
             updates["userChats/$other/$chatId/typingAt"] = if (typing) ServerValue.TIMESTAMP else null
             updates["userChats/$other/$chatId/typingName"] = if (typing) name else null
+            updates["userChats/$other/$chatId/typingRec"] = null
         }
         if (updates.isNotEmpty()) root.updateChildren(updates)
     }
@@ -1855,6 +1934,23 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             height = child("h").getValue(Int::class.java) ?: 0,
             durationMs = child("dur").getValue(Long::class.java) ?: 0L,
             font = child("font").getValue(Int::class.java) ?: 0,
+            overlay = child("ov").takeIf { it.exists() }?.let { o ->
+                StatusOverlay(
+                    text = o.child("t").getValue(String::class.java)?.takeIf { it.isNotBlank() } ?: return@let null,
+                    x = (o.child("x").getValue(Double::class.java) ?: 0.5).toFloat(),
+                    y = (o.child("y").getValue(Double::class.java) ?: 0.5).toFloat(),
+                    color = o.child("c").getValue(Long::class.java) ?: 0xFFFFFFFF,
+                )
+            },
+            song = child("song").takeIf { it.exists() }?.let { g ->
+                SharedItem(
+                    kind = ShareKind.SONG,
+                    id = g.child("id").getValue(String::class.java) ?: return@let null,
+                    title = g.child("title").getValue(String::class.java).orEmpty(),
+                    subtitle = g.child("sub").getValue(String::class.java).orEmpty(),
+                    thumbnail = g.child("thumb").getValue(String::class.java),
+                )
+            },
         )
     }
 
@@ -1900,6 +1996,14 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         }
     }
 
+    /** The extras of a status as they are kept. */
+    private fun StatusExtras.fields(): Map<String, Any?> = buildMap {
+        overlay?.takeIf { it.text.isNotBlank() }?.let { o ->
+            put("ov", mapOf("t" to o.text.take(200), "x" to o.x.toDouble().coerceIn(0.0, 1.0), "y" to o.y.toDouble().coerceIn(0.0, 1.0), "c" to o.color))
+        }
+        song?.let { g -> put("song", mapOf("id" to g.id, "title" to g.title.take(120), "sub" to g.subtitle.take(120), "thumb" to g.thumbnail)) }
+    }
+
     private suspend fun postStatus(fields: Map<String, Any?>) {
         val uid = me()
         val id = root.child("statuses").child(uid).push().key ?: error("no id")
@@ -1907,22 +2011,22 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         root.child("statuses").child(uid).child(id).setValue(fields + mapOf("at" to ServerValue.TIMESTAMP, "expireAt" to now + STATUS_LIFE_MS)).await()
     }
 
-    override suspend fun postTextStatus(text: String, background: Long, font: Int): Result<Unit> = runCatching {
+    override suspend fun postTextStatus(text: String, background: Long, font: Int, extras: StatusExtras): Result<Unit> = runCatching {
         val body = text.trim().take(700)
         require(body.isNotEmpty()) { "text" }
-        postStatus(mapOf("kind" to StatusKind.TEXT.name, "text" to body, "bg" to background, "font" to font))
+        postStatus(mapOf("kind" to StatusKind.TEXT.name, "text" to body, "bg" to background, "font" to font) + extras.fields())
     }
 
-    override suspend fun postPhotoStatus(image: PickedImage, caption: String): Result<Unit> = runCatching {
+    override suspend fun postPhotoStatus(image: PickedImage, caption: String, extras: StatusExtras): Result<Unit> = runCatching {
         val uid = me()
         val url = kotlinx.coroutines.withContext(Dispatchers.IO) {
             MediaUpload.upload(token(), "u_$uid", "jpg", "image/jpeg", image.jpeg.size.toLong(), { image.jpeg.inputStream() }) {}
         }
         imageCache.put(url, image.jpeg)
-        postStatus(mapOf("kind" to StatusKind.PHOTO.name, "url" to url, "text" to caption.trim().take(700), "thumb" to image.thumb, "w" to image.width, "h" to image.height))
+        postStatus(mapOf("kind" to StatusKind.PHOTO.name, "url" to url, "text" to caption.trim().take(700), "thumb" to image.thumb, "w" to image.width, "h" to image.height) + extras.fields())
     }
 
-    override suspend fun postVideoStatus(file: PickedFile, caption: String): Result<Unit> = runCatching {
+    override suspend fun postVideoStatus(file: PickedFile, caption: String, extras: StatusExtras): Result<Unit> = runCatching {
         val uid = me()
         // Made small first, like a video in a message.
         var source = file.location
@@ -1942,7 +2046,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             mapOf(
                 "kind" to StatusKind.VIDEO.name, "url" to url, "text" to caption.trim().take(700), "thumb" to file.thumb,
                 "w" to file.width, "h" to file.height, "dur" to file.durationMs.coerceAtMost(STATUS_VIDEO_MS),
-            ),
+            ) + extras.fields(),
         )
     }
 
@@ -2109,6 +2213,11 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     override suspend fun logBroadcast(id: String, text: String) {
         root.child("broadcasts").child(me()).child(id).child("log").push().setValue(mapOf("text" to text.take(2000), "at" to ServerValue.TIMESTAMP))
     }
+
+    override suspend fun recentMessages(chatId: String, limit: Int): List<ChatMessage> = runCatching {
+        root.child("chats").child(chatId).child("messages").orderByChild("at").limitToLast(limit).get().await()
+            .children.mapNotNull { it.toMessage(emptySet()) }
+    }.getOrDefault(emptyList())
 
     override suspend fun allMessages(chatId: String): List<ChatMessage> {
         val snap = root.child("chats").child(chatId).child("messages").orderByChild("at").get().await()

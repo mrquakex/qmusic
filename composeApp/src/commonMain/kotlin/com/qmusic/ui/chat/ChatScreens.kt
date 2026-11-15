@@ -93,6 +93,9 @@ import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
+/** Loads a photo that the auto-download setting held back (it was tapped). */
+internal val LocalForceImage = androidx.compose.runtime.staticCompositionLocalOf<(ChatImage) -> Unit> { {} }
+
 /** The conversation open on screen right now (no notification is shown for it). */
 object ChatPresence {
     var openChatId: String? = null
@@ -113,6 +116,22 @@ fun ChatApp(
     onOpenShare: (SharedItem) -> Unit,
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
+) {
+    controller.shareables = shareables
+    controller.openShare = onOpenShare
+    androidx.compose.runtime.CompositionLocalProvider(LocalForceImage provides { image -> controller.forceImage(image) }) {
+        ChatAppContent(controller, s, shareables, onOpenShare, onExit, modifier)
+    }
+}
+
+@Composable
+private fun ChatAppContent(
+    controller: ChatController,
+    s: ChatStrings,
+    shareables: () -> List<SharedItem>,
+    onOpenShare: (SharedItem) -> Unit,
+    onExit: () -> Unit,
+    modifier: Modifier,
 ) {
     val account by controller.account.collectAsState()
     val routes by controller.routes.collectAsState()
@@ -582,7 +601,7 @@ internal fun ThreadRow(
                 }
                 if (typingNow) {
                     Text(
-                        (if (t.isGroup && t.typingName.isNotEmpty()) t.typingName + " " else "") + s.typing,
+                        (if (t.isGroup && t.typingName.isNotEmpty()) t.typingName + " " else "") + (if (t.typingRec) s.recordingVoice else s.typing),
                         color = TickRead,
                         fontSize = 14.sp,
                         fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
@@ -799,6 +818,8 @@ private fun ConversationPage(
 
     val presence by remember(other.uid) { controller.presence(other) }.collectAsState(initial = null)
     val typing by remember(other.uid) { controller.typing(other) }.collectAsState(initial = false)
+    val recordingThem by remember(other.uid) { controller.recording(other) }.collectAsState(initial = false)
+    DisposableEffect(other.uid) { onDispose { controller.stopRecordingIfAny(other) } }
     val reactions by remember(other.uid) { controller.reactions(other) }.collectAsState(initial = emptyMap())
     val assist by remember(other.uid) { controller.assist(other) }.collectAsState(initial = null)
     DisposableEffect(other.uid) {
@@ -830,7 +851,8 @@ private fun ConversationPage(
     fun readByAll(at: Long) = others.isNotEmpty() && others.all { (readMarks[it] ?: 0L) >= at }
     fun deliveredToAll(at: Long) = others.isNotEmpty() && others.all { maxOf(readMarks[it] ?: 0L, deliveredMarks[it] ?: 0L) >= at }
     // A tapped quote: the list goes to the message answered (fetching older ones when needed).
-    var jumpTo by remember { mutableStateOf<String?>(null) }
+    // Opened from a search: straight to the message found.
+    var jumpTo by remember { mutableStateOf(controller.takeJump(other)) }
     var flash by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(jumpTo, rows) {
         val target = jumpTo ?: return@LaunchedEffect
@@ -904,6 +926,7 @@ private fun ConversationPage(
                         Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         val seen = presence
                         val status = when {
+                            recordingThem -> s.recordingVoice
                             typing -> s.typing
                             isGroup -> group?.members?.joinToString(", ") { if (it.user.uid == me.uid) s.you else it.user.name.substringBefore(' ') }.orEmpty()
                             seen?.online == true -> s.online
@@ -1464,6 +1487,7 @@ private fun ConversationPage(
                                     }
                                     sounds?.playSmall(SmallSound.REC_START)
                                     if (!recorder.start()) return@awaitEachGesture
+                                    controller.setRecording(other, true)
                                     voicePlayer?.stop()
                                     recordingSince = Clock.System.now().toEpochMilliseconds()
                                     cancelling = false
@@ -1486,8 +1510,10 @@ private fun ConversationPage(
                                     cancelling = false
                                     if (thrownAway) {
                                         recorder.cancel()
+                                        controller.setRecording(other, false)
                                     } else {
                                         val voice = recorder.stop()
+                                        controller.setRecording(other, false)
                                         if (voice != null) {
                                             sounds?.playSmall(SmallSound.REC_SENT)
                                             controller.sendFile(other, voice, "", quoted())
@@ -1696,7 +1722,15 @@ private fun ChatAlbum(images: List<ChatImage>, load: suspend (ChatImage) -> Byte
 @Composable
 internal fun PhotoCell(image: ChatImage, load: suspend (ChatImage) -> ByteArray?, onOpen: () -> Unit, scanning: Boolean, modifier: Modifier) {
     var bytes by remember(image.id, image.url) { mutableStateOf<ByteArray?>(null) }
-    LaunchedEffect(image.id, image.url) { bytes = load(image) }
+    // Not loaded by itself (the auto-download setting): a tap loads it.
+    var waiting by remember(image.id, image.url) { mutableStateOf(true) }
+    var tries by remember(image.id, image.url) { mutableStateOf(0) }
+    val force = LocalForceImage.current
+    LaunchedEffect(image.id, image.url, tries) {
+        waiting = true
+        bytes = load(image)
+        waiting = false
+    }
     val thumb = remember(image.thumb) { runCatching { kotlin.io.encoding.Base64.decode(image.thumb) }.getOrNull() }
     Box(
         modifier = modifier
@@ -1708,7 +1742,17 @@ internal fun PhotoCell(image: ChatImage, load: suspend (ChatImage) -> ByteArray?
         }
         bytes?.let { AsyncImage(model = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
         if (bytes == null) {
-            CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(28.dp).align(Alignment.Center))
+            if (waiting) {
+                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(28.dp).align(Alignment.Center))
+            } else {
+                Box(
+                    Modifier.align(Alignment.Center).size(48.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)).clickable {
+                        force(image)
+                        tries++
+                    },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(QMusicIcons.Download, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp)) }
+            }
         }
         if (scanning) PhotoScan(Modifier.matchParentSize())
     }
