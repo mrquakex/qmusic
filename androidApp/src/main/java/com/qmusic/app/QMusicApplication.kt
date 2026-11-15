@@ -14,6 +14,7 @@ class QMusicApplication : Application() {
         UpdatePush.subscribe(this)
         // A release the push did not bring (the phone was off) is picked up in the background too.
         AutoUpdate.schedule(this, delayMs = 60_000)
+        AutoUpdate.hookBanner(this)
         HeadsetResume.start(this, container.settings)
     }
 

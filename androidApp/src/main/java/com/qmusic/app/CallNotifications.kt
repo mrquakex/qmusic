@@ -92,6 +92,11 @@ object CallNotifications {
             }
         }
         channels(context)
+        // A new call: whatever was left of the last ringing notification goes first, so this one rings afresh (an
+        // update of the old one would come silently: it only alerts once). The same call again (its photo came in)
+        // just updates it, quietly.
+        val previous = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("ring_id", null)
+        if (previous != callId) runCatching { context.getSystemService(NotificationManager::class.java).cancel(RING_ID) }
         val tr = tr(context)
         val icon = NotificationAvatars.icon(peer.uid, peer.name, peer.photo)
         val caller = Person.Builder().setName(peer.name).setKey(peer.uid).setIcon(icon).setImportant(true).build()

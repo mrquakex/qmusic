@@ -207,6 +207,7 @@ internal class FirebaseCallService(
         val listeners = ArrayList<Pair<com.google.firebase.database.Query, Any>>()
         var timeout: Job? = null
         var disconnectJob: Job? = null
+        var statsJob: Job? = null
         var connectedOnce = false
         var ended = false
         var lastReoffer: String? = null
@@ -735,6 +736,7 @@ internal class FirebaseCallService(
                         if (!s.connectedOnce) QeyfSounds.playSmall(app, SmallSound.CONNECTED, call = true)
                         s.connectedOnce = true
                         telecom.setActive()
+                        watchStats(s)
                     }
                     PeerConnection.PeerConnectionState.DISCONNECTED -> {
                         _state.update { it?.copy(weak = true) }
@@ -897,6 +899,7 @@ internal class FirebaseCallService(
         val s = session ?: return
         if (s.ended) return
         s.ended = true
+        s.statsJob?.cancel()
         s.note("finish $reason write=$write from " + Throwable().stackTrace.drop(1).take(3).joinToString(" < ") { "${it.methodName}:${it.lineNumber}" })
         // Who ended it, and how it got there: kept on the server for a while (callDebug/{uid}/{call}).
         runCatching {
@@ -998,6 +1001,73 @@ internal class FirebaseCallService(
     }
 
     // ------------------------------------------------------------------ sound
+
+    /**
+     * While connected: how loud the other person is (for the ring on screen) and how good the connection is, read from
+     * WebRTC's own figures every third of a second. No sound from them for a long while is noted in the call's trail
+     * (with what the connection says), to find why a call had no voice.
+     */
+    private fun watchStats(s: Session) {
+        s.statsJob?.cancel()
+        s.statsJob = scope.launch {
+            var lastBytes = -1L
+            var silentSince = 0L
+            var silenceNoted = false
+            var lastLost = -1L
+            var lastReceived = -1L
+            while (session === s && !s.ended) {
+                val pc = s.pc ?: break
+                val report = kotlinx.coroutines.suspendCancellableCoroutine<org.webrtc.RTCStatsReport?> { cont ->
+                    runCatching { pc.getStats { r -> if (cont.isActive) cont.resume(r) } }.onFailure { if (cont.isActive) cont.resume(null) }
+                } ?: break
+                var level = 0f
+                var bytes = 0L
+                var lost = 0L
+                var received = 0L
+                var rtt = -1.0
+                var jitter = 0.0
+                for (st in report.statsMap.values) {
+                    val m = st.members
+                    when (st.type) {
+                        "inbound-rtp" -> if (m["kind"] == "audio") {
+                            (m["audioLevel"] as? Number)?.toFloat()?.let { level = it }
+                            (m["bytesReceived"] as? Number)?.toLong()?.let { bytes += it }
+                            (m["packetsLost"] as? Number)?.toLong()?.let { lost += it }
+                            (m["packetsReceived"] as? Number)?.toLong()?.let { received += it }
+                            (m["jitter"] as? Number)?.toDouble()?.let { jitter = it }
+                        }
+                        "candidate-pair" -> if (m["state"] == "succeeded" && m["nominated"] == true) {
+                            (m["currentRoundTripTime"] as? Number)?.toDouble()?.let { rtt = it }
+                        }
+                    }
+                }
+                // Lost sound in the last moment, as a share of what came.
+                val lossNow = if (lastLost >= 0 && received > lastReceived) (lost - lastLost).toDouble() / (received - lastReceived).coerceAtLeast(1) else 0.0
+                lastLost = lost
+                lastReceived = received
+                val quality = when {
+                    rtt < 0 -> -1
+                    rtt > 0.6 || lossNow > 0.15 || jitter > 0.1 -> 0
+                    rtt > 0.35 || lossNow > 0.06 || jitter > 0.05 -> 1
+                    rtt > 0.18 || lossNow > 0.02 -> 2
+                    else -> 3
+                }
+                _state.update { it?.copy(remoteLevel = level.coerceIn(0f, 1f), quality = quality) }
+                // Nothing arriving from them (no bytes) for 6 seconds: noted once, with the connection's figures.
+                val now = System.currentTimeMillis()
+                if (bytes > lastBytes) {
+                    silentSince = 0L
+                } else if (silentSince == 0L) {
+                    silentSince = now
+                } else if (!silenceNoted && now - silentSince > 6_000) {
+                    silenceNoted = true
+                    s.note("no sound arriving for 6 s: bytes=$bytes rtt=$rtt lost=$lost received=$received muted=${_state.value?.muted} route=${_state.value?.route}")
+                }
+                lastBytes = bytes
+                delay(330)
+            }
+        }
+    }
 
     private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var focus: AudioFocusRequest? = null

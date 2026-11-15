@@ -43,6 +43,10 @@ data class CallState(
     /** Where the sound can go now (earpiece, speaker, a headset, Bluetooth), and where it goes. */
     val routes: List<AudioRoute> = emptyList(),
     val route: String? = null,
+    /** How loud the other person is right now (0-1): the ring around their picture moves with it. */
+    val remoteLevel: Float = 0f,
+    /** The connection, 0 (bad) to 3 (good), from its delay and lost sound; -1 before it is known. */
+    val quality: Int = -1,
 )
 
 enum class AudioRouteKind { EARPIECE, SPEAKER, WIRED, BLUETOOTH }

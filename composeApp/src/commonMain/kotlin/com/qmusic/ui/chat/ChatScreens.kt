@@ -2236,13 +2236,15 @@ private fun Bubble(
                 .combinedClickable(
                     onClick = { if (selecting) onToggleSelect() else m.share?.let(onOpenShare) },
                     onLongClick = { if (selecting) onToggleSelect() else menu = true },
+                    // Two quick taps: a heart (again: taken back).
+                    onDoubleClick = if (selecting || m.deleted || m.pending) null else ({ onReact(if (reactions[myUid] == REACTIONS.first()) null else REACTIONS.first()) }),
                 )
                 .padding(if (hasCard) 4.dp else 0.dp),
         ) {
             val fg = if (mine && !m.deleted && !bigEmoji) InkInverse else TextPrimary
             val fgSoft = if (mine && !m.deleted && !bigEmoji) InkInverse.copy(alpha = 0.55f) else TextSecondary
             if (m.forwarded && !m.deleted) {
-                Text("↪ " + s.forwarded, color = fgSoft, fontSize = 11.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, modifier = Modifier.padding(start = 10.dp, end = 12.dp, top = 6.dp))
+                Text(s.forwarded, color = fgSoft, fontSize = 11.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, modifier = Modifier.padding(start = 10.dp, end = 12.dp, top = 6.dp))
             }
             if (senderName != null) {
                 Text(

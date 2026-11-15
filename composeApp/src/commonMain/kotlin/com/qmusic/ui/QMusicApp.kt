@@ -331,6 +331,8 @@ fun QMusicApp(
             // A call (ringing, going on or just over) takes the whole screen, over any section.
             val callService = chatController?.calls
             val call by (callService?.state ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
+            // A downloaded update while the app is open: a tap restarts it in the new version (never during a call).
+            if (call == null) UpdateReadyBanner(english = language == "en")
             if (callService != null && call != null) {
                 val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
                 val askPermissions = com.qmusic.ui.chat.rememberCallPermissions()

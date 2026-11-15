@@ -71,10 +71,20 @@ object AutoUpdate {
     internal fun remember(context: Context, file: File, version: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_FILE, file.absolutePath).putString(KEY_VERSION, version).apply()
+        com.qmusic.ui.UpdateReady.version.value = version
     }
 
     internal fun forget(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+        com.qmusic.ui.UpdateReady.version.value = null
+    }
+
+    /** At start: an update downloaded before shows its "ready" banner; the banner's button installs it. */
+    fun hookBanner(context: Context) {
+        val app = context.applicationContext
+        com.qmusic.ui.UpdateReady.install = { installNow(app) }
+        val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        com.qmusic.ui.UpdateReady.version.value = if (ready(app) != null) prefs.getString(KEY_VERSION, null) else null
     }
 
     /** Not on screen, no sound playing (music or video, ours or another app's), no call. */
@@ -114,7 +124,9 @@ class AutoUpdateJob : JobService() {
 
     override fun onStartJob(params: JobParameters): Boolean {
         val context = applicationContext
-        if (!AutoUpdate.canBeSilent(context)) return false
+        // Without silent installs (older Android, or installs from the app not allowed) the update is still
+        // downloaded: the banner, or the system's own install screen on Xiaomi, takes it from there.
+        if (!AutoUpdate.canBeSilent(context) && !isXiaomi() && !context.packageManager.canRequestPackageInstalls()) return false
         work = scope.launch {
             try {
                 if (AutoUpdate.ready(context) == null) {

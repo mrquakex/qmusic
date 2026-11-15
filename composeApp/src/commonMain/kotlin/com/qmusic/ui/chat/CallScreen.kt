@@ -102,13 +102,32 @@ fun CallScreen(
             Spacer(Modifier.height(if (videoUp) 16.dp else 72.dp))
             if (!videoUp) {
                 Pulse(active = call.phase == CallPhase.CALLING || call.phase == CallPhase.INCOMING) {
-                    ChatAvatar(call.peer, 120.dp)
+                    // While talking, a soft ring around them follows their voice.
+                    val level by androidx.compose.animation.core.animateFloatAsState(
+                        if (call.phase == CallPhase.ACTIVE) call.remoteLevel else 0f,
+                        animationSpec = tween(120),
+                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        if (level > 0.01f) {
+                            Box(
+                                Modifier.size(120.dp).scale(1f + (level * 2.2f).coerceAtMost(0.45f)).clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.10f + level * 0.25f)),
+                            )
+                        }
+                        ChatAvatar(call.peer, 120.dp)
+                    }
                 }
                 Spacer(Modifier.height(24.dp))
             }
             Text(call.peer.name, color = TextPrimary, fontSize = if (videoUp) 20.sp else 28.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
-            Text(statusText(call, s), color = TextSecondary, fontSize = 15.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(statusText(call, s), color = TextSecondary, fontSize = 15.sp)
+                if (call.phase == CallPhase.ACTIVE && call.quality >= 0) {
+                    Spacer(Modifier.width(10.dp))
+                    SignalBars(call.quality)
+                }
+            }
             if (call.weak && call.phase == CallPhase.ACTIVE) {
                 Spacer(Modifier.height(6.dp))
                 Text(s.callWeak, color = TextSecondary, fontSize = 13.sp)
@@ -249,6 +268,22 @@ private fun Pulse(active: Boolean, content: @Composable () -> Unit) {
     Box(contentAlignment = Alignment.Center) {
         if (active) Box(Modifier.size(150.dp).scale(scale).clip(CircleShape).background(Color.White.copy(alpha = 0.06f)))
         content()
+    }
+}
+
+/** The connection in four bars: all lit is good, one is bad (red). */
+@Composable
+private fun SignalBars(quality: Int) {
+    val lit = (quality + 1).coerceIn(1, 4)
+    val colour = when (quality) {
+        0 -> Color(0xFFFF5A5F)
+        1 -> Color(0xFFFFB800)
+        else -> Color.White
+    }
+    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        for (i in 0 until 4) {
+            Box(Modifier.width(3.dp).height((5 + i * 3).dp).clip(RoundedCornerShape(1.dp)).background(if (i < lit) colour else Color.White.copy(alpha = 0.25f)))
+        }
     }
 }
 

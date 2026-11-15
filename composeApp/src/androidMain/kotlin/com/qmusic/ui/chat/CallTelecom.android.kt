@@ -29,6 +29,10 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
 
     private var control: CallControlScope? = null
     private var job: Job? = null
+
+    /** Which call is the live one: a call that was already over when the system finished taking it is let go at once. */
+    @Volatile
+    private var generation = 0
     private var endpoints: List<CallEndpointCompat> = emptyList()
     private var current: CallEndpointCompat? = null
     private var wantSpeaker = false
@@ -64,6 +68,7 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
             return
         }
         end(DisconnectCause.LOCAL)
+        val gen = ++generation
         wantSpeaker = video
         val type = if (video) CallAttributesCompat.CALL_TYPE_VIDEO_CALL else CallAttributesCompat.CALL_TYPE_AUDIO_CALL
         job = scope.launch {
@@ -81,6 +86,12 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
                     onSetActive = { },
                     onSetInactive = { },
                 ) {
+                    // Ended while the system was still taking it: told at once, so no call is left behind in the
+                    // phone (which would then think it is still on a call).
+                    if (gen != generation) {
+                        launch { runCatching { disconnect(DisconnectCause(DisconnectCause.LOCAL)) } }
+                        return@addCall
+                    }
                     control = this
                     if (incoming) launch { answer(type) }
                     launch {
@@ -177,6 +188,7 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
 
     /** The call is over: the system is told why ([DisconnectCause] codes), and lets the call go. */
     fun end(cause: Int) {
+        generation++
         val c = control
         val j = job
         control = null
@@ -187,7 +199,9 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
         if (c == null && j == null) return
         scope.launch {
             if (c != null) runCatching { c.disconnect(DisconnectCause(cause)) }
-            j?.cancel()
+            // The call's own work stops only after the system was told; if it was still being added, the check in
+            // [start] lets it go as soon as it is in.
+            if (c != null) j?.cancel()
         }
     }
 }
