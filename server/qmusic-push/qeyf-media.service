@@ -1,0 +1,21 @@
+[Unit]
+Description=Qeyf: media of the messages (photos, voice, videos, files)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qmusic-push
+Group=qmusic-push
+WorkingDirectory=/opt/qmusic-push
+ExecStart=/usr/local/bin/node /opt/qmusic-push/media.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/qeyf-media
+PrivateTmp=true
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

@@ -16,3 +16,18 @@ actual fun rememberImagePicker(onPicked: (List<PickedImage>) -> Unit): () -> Uni
 
 @Composable
 actual fun rememberCamera(onPicked: (PickedImage?) -> Unit): () -> Unit = {}
+
+@androidx.compose.runtime.Composable
+actual fun rememberVoiceRecorder(): VoiceRecorder? = null
+
+@androidx.compose.runtime.Composable
+actual fun rememberVoicePlayer(): VoicePlayer? = null
+
+@androidx.compose.runtime.Composable
+actual fun rememberFilePicker(video: Boolean, onPicked: (PickedFile?) -> Unit): () -> Unit = {}
+
+@androidx.compose.runtime.Composable
+actual fun rememberAttachmentOpener(): (ChatAttachment) -> Unit = {}
+
+@androidx.compose.runtime.Composable
+actual fun VideoMessagePlayer(url: String, modifier: androidx.compose.ui.Modifier) = Unit

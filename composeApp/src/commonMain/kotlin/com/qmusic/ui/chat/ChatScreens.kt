@@ -11,6 +11,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -113,6 +115,7 @@ fun ChatApp(
     val error by controller.error.collectAsState()
     PlatformBackHandler(enabled = true) { if (!controller.pop()) onExit() }
     val askPermissions = rememberCallPermissions()
+    val voicePlayer = rememberVoicePlayer()
     val calls = controller.calls
     val onCall: ((ChatUser, Boolean) -> Unit)? = calls?.let { service ->
         { other, video -> askPermissions(video) { granted -> if (granted) service.call(other, video) else controller.reportError(s.callPermission) } }
@@ -125,8 +128,12 @@ fun ChatApp(
             ChatAccount.SignedOut -> SignInPage(controller, s, onExit)
             is ChatAccount.NeedsProfile -> ProfilePage(controller, s, a, onExit)
             is ChatAccount.Ready -> when (val top = routes.lastOrNull()) {
-                is ChatRoute.Conversation -> ConversationPage(controller, s, a.me, top.other, shareables, onOpenShare, onCall)
+                is ChatRoute.Conversation -> ConversationPage(controller, s, a.me, top.other, shareables, onOpenShare, onCall, voicePlayer)
                 ChatRoute.NewChat -> NewChatPage(controller, s)
+                ChatRoute.NewGroup -> NewGroupPage(controller, s)
+                is ChatRoute.GroupInfo -> GroupInfoPage(controller, s, a.me, top.group)
+                is ChatRoute.AddMembers -> AddMembersPage(controller, s, top.group)
+                ChatRoute.Archived -> ArchivedPage(controller, s, a.me)
                 ChatRoute.Friends -> FriendsPage(controller, s)
                 is ChatRoute.Profile -> ProfilePage(controller, s, a.me, top.user, onCall)
                 null -> ThreadListPage(controller, s, a.me, onExit)
@@ -156,12 +163,12 @@ fun ChatApp(
 // ------------------------------------------------------------------ pieces
 
 @Composable
-private fun Centered(content: @Composable () -> Unit) {
+internal fun Centered(content: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
 }
 
 @Composable
-private fun TopBar(title: String, onBack: () -> Unit, actions: @Composable () -> Unit = {}, leading: (@Composable () -> Unit)? = null) {
+internal fun TopBar(title: String, onBack: () -> Unit, actions: @Composable () -> Unit = {}, leading: (@Composable () -> Unit)? = null) {
     Row(
         modifier = Modifier.fillMaxWidth().statusBarsPadding().height(56.dp).padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -178,10 +185,16 @@ private fun TopBar(title: String, onBack: () -> Unit, actions: @Composable () ->
 
 @Composable
 fun ChatAvatar(user: ChatUser, size: androidx.compose.ui.unit.Dp) {
-    if (user.uid == CLAUDE_BOT_UID) ClaudeAvatar(size) else ChatAvatar(user.name, user.photo, size)
+    when {
+        user.uid == CLAUDE_BOT_UID -> ClaudeAvatar(size)
+        user.isGroup && user.photo == null -> Box(Modifier.size(size).clip(CircleShape).background(DarkSurfaceVariant), contentAlignment = Alignment.Center) {
+            Icon(QMusicIcons.Group, contentDescription = null, tint = Color.White, modifier = Modifier.size(size * 0.5f))
+        }
+        else -> ChatAvatar(user.name, user.photo, size)
+    }
 }
 
-private val ClaudeCoral = Color(0xFFD97757)
+internal val ClaudeCoral = Color(0xFFD97757)
 
 /** Claude's picture: its coral colour with a white spark. */
 @Composable
@@ -222,7 +235,7 @@ fun ChatAvatar(name: String, photo: String?, size: androidx.compose.ui.unit.Dp) 
 }
 
 @Composable
-private fun WhiteButton(text: String, enabled: Boolean = true, busy: Boolean = false, onClick: () -> Unit) {
+internal fun WhiteButton(text: String, enabled: Boolean = true, busy: Boolean = false, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -241,7 +254,7 @@ private fun WhiteButton(text: String, enabled: Boolean = true, busy: Boolean = f
 }
 
 @Composable
-private fun Field(value: String, onValue: (String) -> Unit, hint: String, prefix: String? = null, modifier: Modifier = Modifier, capitalize: Boolean = true) {
+internal fun Field(value: String, onValue: (String) -> Unit, hint: String, prefix: String? = null, modifier: Modifier = Modifier, capitalize: Boolean = true) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -345,9 +358,17 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, a: ChatAccou
 
 @Composable
 private fun ThreadListPage(controller: ChatController, s: ChatStrings, me: ChatUser, onExit: () -> Unit) {
-    val threads by controller.threads.collectAsState()
+    val all by controller.threads.collectAsState()
+    val archived by controller.archived.collectAsState()
+    val togetherState by (controller.together?.active ?: remember { kotlinx.coroutines.flow.MutableStateFlow<TogetherState?>(null) }).collectAsState()
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf(false) }
+    var search by remember { mutableStateOf("") }
+    val threads = remember(all, search) {
+        val q = search.trim()
+        if (q.isEmpty()) all else all?.filter { it.other.name.contains(q, ignoreCase = true) || it.lastText.contains(q, ignoreCase = true) || it.other.username.contains(q, ignoreCase = true) }
+    }
     Column(Modifier.fillMaxSize()) {
         TopBar(
             title = s.title,
@@ -365,22 +386,39 @@ private fun ThreadListPage(controller: ChatController, s: ChatStrings, me: ChatU
                         }
                     }
                 }
+                IconButton(onClick = { searching = !searching; if (!searching) search = "" }) { Icon(QMusicIcons.Search, contentDescription = s.search, tint = Color.White) }
                 IconButton(onClick = { controller.openNewChat() }) { Icon(QMusicIcons.Edit, contentDescription = s.newChat, tint = Color.White) }
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Color.White) }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
                         DropdownMenuItem(text = { Text("@${me.username}", color = TextSecondary) }, onClick = {}, enabled = false)
+                        DropdownMenuItem(
+                            leadingIcon = { Icon(QMusicIcons.Group, null, tint = Color.White) },
+                            text = { Text(s.newGroup, color = TextPrimary) },
+                            onClick = { menu = false; controller.openNewGroup() },
+                        )
                         DropdownMenuItem(text = { Text(s.signOut, color = TextPrimary) }, onClick = { menu = false; controller.signOut() })
                         DropdownMenuItem(text = { Text(s.deleteAccount, color = TextPrimary) }, onClick = { menu = false; confirmDelete = true })
                     }
                 }
             },
         )
+        if (searching) {
+            val focus = remember { FocusRequester() }
+            LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+            PlatformBackHandler(enabled = true) { searching = false; search = "" }
+            Field(search, { search = it }, s.searchChats, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).focusRequester(focus))
+        }
         ReadinessCard(s)
+        togetherState?.let { state ->
+            val thread = all?.firstOrNull { it.id == state.chatId }
+            TogetherBanner(state, s, onOpen = { thread?.let { controller.openConversation(it.other) } }, onLeave = { controller.together?.leave() })
+        }
         val list = threads
         when {
             list == null -> Centered { CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp) }
-            list.isEmpty() -> Column(
+            list.isEmpty() && search.isNotBlank() -> Centered { Text(s.noResults, color = TextSecondary, fontSize = 15.sp) }
+            list.isEmpty() && archived.isEmpty() -> Column(
                 Modifier.fillMaxSize().padding(32.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -392,7 +430,30 @@ private fun ThreadListPage(controller: ChatController, s: ChatStrings, me: ChatU
                 Box(Modifier.width(220.dp)) { WhiteButton(s.newChat) { controller.openNewChat() } }
             }
             else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp)) {
-                items(list, key = { it.id }) { t -> ThreadRow(t, me, s, onAvatar = { controller.openProfile(t.other) }) { controller.openConversation(t.other) } }
+                if (archived.isNotEmpty() && search.isBlank()) {
+                    item(key = "archived") {
+                        Row(
+                            Modifier.fillMaxWidth().clickable { controller.openArchived() }.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) { Icon(QMusicIcons.Archive, null, tint = TextSecondary) }
+                            Spacer(Modifier.width(14.dp))
+                            Text(s.archivedTitle, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            val unread = archived.count { it.unread }
+                            Text(if (unread > 0) unread.toString() else archived.size.toString(), color = if (unread > 0) TextPrimary else TextMuted, fontSize = 13.sp)
+                        }
+                    }
+                }
+                items(list, key = { it.id }) { t ->
+                    ThreadRow(
+                        t, me, s,
+                        onAvatar = { if (t.isGroup) controller.openGroupInfo(t.other) else controller.openProfile(t.other) },
+                        actions = listOf(
+                            (if (t.pinned > 0) s.unpin else s.pin) to { controller.setPinned(t, t.pinned == 0L) },
+                            s.archive to { controller.setArchived(t, true) },
+                        ),
+                    ) { controller.openConversation(t.other) }
+                }
             }
         }
     }
@@ -449,9 +510,22 @@ private fun ReadinessCard(s: ChatStrings) {
 }
 
 @Composable
-private fun ThreadRow(t: ChatThread, me: ChatUser, s: ChatStrings, onAvatar: () -> Unit, onClick: () -> Unit) {
+@OptIn(ExperimentalFoundationApi::class)
+internal fun ThreadRow(
+    t: ChatThread,
+    me: ChatUser,
+    s: ChatStrings,
+    onAvatar: () -> Unit,
+    actions: List<Pair<String, () -> Unit>> = emptyList(),
+    onClick: () -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    Box {
+    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
+        actions.forEach { (label, run) -> DropdownMenuItem(text = { Text(label, color = TextPrimary) }, onClick = { menu = false; run() }) }
+    }
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = { if (actions.isNotEmpty()) menu = true }).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.clip(CircleShape).clickable(onClick = onAvatar)) { ChatAvatar(t.other, 52.dp) }
@@ -467,11 +541,16 @@ private fun ThreadRow(t: ChatThread, me: ChatUser, s: ChatStrings, onAvatar: () 
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                if (t.pinned > 0) Icon(QMusicIcons.Pin, contentDescription = null, tint = TextMuted, modifier = Modifier.padding(end = 6.dp).size(14.dp))
                 Text(listTime(t.lastAt, s), color = if (t.unread) TextPrimary else TextMuted, fontSize = 12.sp)
             }
             Spacer(Modifier.height(3.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val prefix = if (t.lastFrom == me.uid) "${s.you}: " else ""
+                val prefix = when {
+                    t.lastFrom == me.uid -> "${s.you}: "
+                    t.isGroup && t.lastFromName.isNotEmpty() && !t.lastText.startsWith("Claude: ") -> "${t.lastFromName}: "
+                    else -> ""
+                }
                 Text(
                     prefix + t.lastText,
                     color = if (t.unread) TextPrimary else TextSecondary,
@@ -484,6 +563,7 @@ private fun ThreadRow(t: ChatThread, me: ChatUser, s: ChatStrings, onAvatar: () 
                 if (t.unread) Box(Modifier.padding(start = 8.dp).size(10.dp).clip(CircleShape).background(Color.White))
             }
         }
+    }
     }
 }
 
@@ -524,12 +604,17 @@ private fun ConversationPage(
     shareables: () -> List<SharedItem>,
     onOpenShare: (SharedItem) -> Unit,
     onCall: ((ChatUser, Boolean) -> Unit)?,
+    voicePlayer: VoicePlayer?,
 ) {
+    val isGroup = other.isGroup
     val messages by remember(other.uid) { controller.messages(other) }.collectAsState(initial = null)
     val readAt by remember(other.uid) { controller.otherReadAt(other) }.collectAsState(initial = 0L)
     val deliveredAt by remember(other.uid) { controller.otherDeliveredAt(other) }.collectAsState(initial = 0L)
+    val group by remember(other.uid) { if (isGroup) controller.group(other) else kotlinx.coroutines.flow.flowOf(null) }.collectAsState(initial = null)
+    val memberNames = remember(group) { group?.members?.associate { it.user.uid to it.user.name }.orEmpty() }
+    val title = group?.name ?: other.name
     val blocked by controller.blocked.collectAsState()
-    val isBlocked = other.uid in blocked
+    val isBlocked = !isGroup && other.uid in blocked
     var text by remember(other.uid) { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
     var attach by remember { mutableStateOf(false) }
@@ -545,23 +630,63 @@ private fun ConversationPage(
     }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     var viewing by remember { mutableStateOf<Pair<List<ChatImage>, Int>?>(null) }
+    var videoOpen by remember { mutableStateOf<String?>(null) }
     val claudeState by controller.claudeState.collectAsState()
     var modelMenu by remember { mutableStateOf(false) }
     val isClaude = other.uid == CLAUDE_BOT_UID
+    val quoted: () -> ChatReply? = { replyTo?.let { ChatReply(it.id, it.from, quoteText(it)) } }
     val sendPhotos: (List<PickedImage>) -> Unit = { photos ->
         if (photos.isNotEmpty()) {
-            controller.sendImages(other, photos, text, replyTo?.let { ChatReply(it.id, it.from, quoteText(it)) })
+            controller.sendImages(other, photos, text, quoted())
+            text = ""
+            replyTo = null
+        }
+    }
+    val sendPicked: (PickedFile?) -> Unit = { file ->
+        if (file != null) {
+            controller.sendFile(other, file, text, quoted())
             text = ""
             replyTo = null
         }
     }
     val pickPhoto = rememberImagePicker { sendPhotos(it) }
     val takePhoto = rememberCamera { photo -> photo?.let { sendPhotos(listOf(it)) } }
+    val pickVideo = rememberFilePicker(video = true, onPicked = sendPicked)
+    val pickFile = rememberFilePicker(video = false, onPicked = sendPicked)
+    val openFile = rememberAttachmentOpener()
+
+    // Voice messages: hold the microphone to record, let go to send, slide left to throw it away.
+    val recorder = rememberVoiceRecorder()
+    val askMic = rememberCallPermissions()
+    var micReady by remember { mutableStateOf(false) }
+    var recordingSince by remember { mutableStateOf<Long?>(null) }
+    var cancelling by remember { mutableStateOf(false) }
+    var elapsed by remember { mutableStateOf(0L) }
+    val level by (recorder?.level ?: remember { kotlinx.coroutines.flow.MutableStateFlow(0f) }).collectAsState()
+    LaunchedEffect(recordingSince) {
+        val since = recordingSince ?: return@LaunchedEffect
+        while (true) {
+            elapsed = Clock.System.now().toEpochMilliseconds() - since
+            kotlinx.coroutines.delay(200)
+        }
+    }
+
+    val togetherState by (controller.together?.active ?: remember { kotlinx.coroutines.flow.MutableStateFlow<TogetherState?>(null) }).collectAsState()
+    var searching by remember(other.uid) { mutableStateOf(false) }
+    var query by remember(other.uid) { mutableStateOf("") }
+    var matchIndex by remember(other.uid) { mutableStateOf(0) }
+
     val presence by remember(other.uid) { controller.presence(other) }.collectAsState(initial = null)
     val typing by remember(other.uid) { controller.typing(other) }.collectAsState(initial = false)
     val reactions by remember(other.uid) { controller.reactions(other) }.collectAsState(initial = emptyMap())
     val assist by remember(other.uid) { controller.assist(other) }.collectAsState(initial = null)
-    DisposableEffect(other.uid) { onDispose { controller.stopTyping(other) } }
+    DisposableEffect(other.uid) {
+        onDispose {
+            controller.stopTyping(other)
+            voicePlayer?.stop()
+            recorder?.cancel()
+        }
+    }
 
     val chatId = controller.chatIdWith(other)
     DisposableEffect(chatId) {
@@ -570,24 +695,41 @@ private fun ConversationPage(
         onDispose { if (ChatPresence.openChatId == chatId) ChatPresence.openChatId = null }
     }
     // What arrives while the conversation is open counts as read.
-    LaunchedEffect(messages?.lastOrNull()?.id) { if (messages?.lastOrNull()?.from == other.uid) controller.markRead(other) }
+    LaunchedEffect(messages?.lastOrNull()?.id) {
+        val last = messages?.lastOrNull()
+        if (last != null && last.from != me.uid) controller.markRead(other)
+    }
+
+    // The rows newest first (the list is drawn from the bottom), and the messages the search finds, newest first.
+    val rows = remember(messages) { messages?.let { withDays(it).asReversed() } }
+    val matches = remember(messages, query) {
+        val q = query.trim()
+        if (q.length < 2) emptyList() else messages.orEmpty().filter { !it.system && it.text.contains(q, ignoreCase = true) }.asReversed()
+    }
+    val current = matches.getOrNull(matchIndex.coerceAtMost((matches.size - 1).coerceAtLeast(0)))
+    LaunchedEffect(current?.id) {
+        val target = current ?: return@LaunchedEffect
+        val index = rows?.indexOfFirst { it is ListRow.Message && it.m.id == target.id } ?: -1
+        if (index >= 0) listState.animateScrollToItem(index)
+    }
 
     Column(Modifier.fillMaxSize().imePadding()) {
         TopBar(
-            title = other.name,
+            title = title,
             onBack = { controller.pop() },
             leading = {
                 Row(
-                    Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { controller.openProfile(other) },
+                    Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { if (isGroup) controller.openGroupInfo(other) else controller.openProfile(other) },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    ChatAvatar(other, 38.dp)
+                    ChatAvatar(other.copy(name = title), 38.dp)
                     Spacer(Modifier.width(10.dp))
                     Column {
-                        Text(other.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         val seen = presence
                         val status = when {
                             typing -> s.typing
+                            isGroup -> group?.members?.joinToString(", ") { if (it.user.uid == me.uid) s.you else it.user.name.substringBefore(' ') }.orEmpty()
                             seen?.online == true -> s.online
                             seen != null && seen.lastSeen > 0 -> s.lastSeen + " " + seenLabel(seen.lastSeen, s)
                             else -> "@" + other.username
@@ -624,38 +766,91 @@ private fun ConversationPage(
                                     }
                                 }
                             }
-                        } else {
-                            Text(status, color = if (typing || seen?.online == true) TextPrimary else TextSecondary, fontSize = 12.sp, maxLines = 1)
+                        } else if (status.isNotEmpty()) {
+                            Text(status, color = if (typing || seen?.online == true) TextPrimary else TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
             },
             actions = {
-                if (onCall != null && !isBlocked && !isClaude) {
+                if (onCall != null && !isBlocked && !isClaude && !isGroup) {
                     IconButton(onClick = { onCall(other, true) }) { Icon(QMusicIcons.Camera, contentDescription = s.callVideo, tint = Color.White) }
                     IconButton(onClick = { onCall(other, false) }) { Icon(QMusicIcons.Phone, contentDescription = s.callVoice, tint = Color.White) }
                 }
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Color.White) }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
+                        if (isGroup) {
+                            DropdownMenuItem(
+                                leadingIcon = { Icon(QMusicIcons.Group, null, tint = Color.White) },
+                                text = { Text(s.groupInfo, color = TextPrimary) },
+                                onClick = { menu = false; controller.openGroupInfo(other) },
+                            )
+                        }
                         DropdownMenuItem(
-                            text = { Text(if (isBlocked) s.unblock else s.block, color = TextPrimary) },
-                            onClick = {
-                                menu = false
-                                controller.setBlocked(other, !isBlocked)
-                            },
+                            leadingIcon = { Icon(QMusicIcons.Search, null, tint = Color.White) },
+                            text = { Text(s.searchMessages, color = TextPrimary) },
+                            onClick = { menu = false; searching = true },
                         )
+                        if (!isClaude) {
+                            val options = remember(menu) { if (menu) shareables() else emptyList() }
+                            options.forEach { item ->
+                                val song = item.kind == ShareKind.SONG
+                                DropdownMenuItem(
+                                    leadingIcon = { Icon(if (song) QMusicIcons.Headphones else QMusicIcons.VideoPlay, null, tint = ClaudeCoral) },
+                                    text = {
+                                        Column {
+                                            Text(if (song) s.listenTogether else s.watchTogether, color = TextPrimary, fontSize = 14.sp)
+                                            Text(item.title, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                    },
+                                    onClick = {
+                                        menu = false
+                                        controller.startTogether(other, item, if (song) s.togetherInviteSong else s.togetherInviteVideo)
+                                    },
+                                )
+                            }
+                        }
+                        if (!isGroup) {
+                            DropdownMenuItem(
+                                text = { Text(if (isBlocked) s.unblock else s.block, color = TextPrimary) },
+                                onClick = {
+                                    menu = false
+                                    controller.setBlocked(other, !isBlocked)
+                                },
+                            )
+                        }
                     }
                 }
             },
         )
+        if (searching) {
+            val searchFocus = remember { FocusRequester() }
+            LaunchedEffect(Unit) { runCatching { searchFocus.requestFocus() } }
+            PlatformBackHandler(enabled = true) { searching = false; query = "" }
+            Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Field(query, { query = it; matchIndex = 0 }, s.searchMessages, modifier = Modifier.weight(1f).focusRequester(searchFocus))
+                Text(
+                    if (query.trim().length < 2) "" else if (matches.isEmpty()) s.noResults else "${matchIndex + 1}/${matches.size}",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+                IconButton(enabled = matchIndex < matches.size - 1, onClick = { matchIndex++ }) { Icon(QMusicIcons.ChevronUp, null, tint = Color.White) }
+                IconButton(enabled = matchIndex > 0, onClick = { matchIndex-- }) { Icon(QMusicIcons.ChevronDown, null, tint = Color.White) }
+                IconButton(onClick = { searching = false; query = "" }) { Icon(QMusicIcons.Close, null, tint = TextSecondary) }
+            }
+        }
         Box(Modifier.fillMaxWidth().height(1.dp).background(BorderSubtle))
-        val list = messages
+        togetherState?.takeIf { it.chatId == chatId }?.let { state ->
+            TogetherBanner(state, s, onOpen = { onOpenShare(state.item) }, onLeave = { controller.together?.leave() })
+        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (list == null) {
+            val list = messages
+            val shown = rows
+            if (list == null || shown == null) {
                 Centered { CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp) }
             } else {
-                val rows = remember(list) { withDays(list) }
                 // A new message: ours always comes into view; theirs only when we are at the bottom already (reading
                 // further up, the place is kept).
                 val newest = list.lastOrNull()
@@ -669,7 +864,7 @@ private fun ConversationPage(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
-                    items(rows.asReversed(), key = { it.key }) { row ->
+                    items(shown, key = { it.key }) { row ->
                         when (row) {
                             is ListRow.Day -> Text(
                                 dayLabel(row.at, s),
@@ -678,24 +873,34 @@ private fun ConversationPage(
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
                             )
-                            is ListRow.Message -> Column { Bubble(
-                                m = row.m,
-                                mine = row.m.from == me.uid,
-                                read = row.m.at <= readAt,
-                                delivered = row.m.at <= maxOf(deliveredAt, readAt),
-                                s = s,
-                                otherName = other.name,
-                                reactions = reactions[row.m.id].orEmpty(),
-                                myUid = me.uid,
-                                onOpenShare = onOpenShare,
-                                onDelete = { controller.delete(other, row.m) },
-                                onReply = { replyTo = row.m },
-                                onReact = { emoji -> controller.react(other, row.m, emoji) },
-                                loadImage = { id -> controller.imageBytes(other, id) },
-                                onOpenImages = { images, index -> viewing = images to index },
-                                assisting = assist?.takeIf { it.target == row.m.id }?.phase,
-                                inClaudeChat = isClaude,
-                            ) }
+                            is ListRow.Message -> Column {
+                                val mine = row.m.from == me.uid
+                                Bubble(
+                                    m = row.m,
+                                    mine = mine,
+                                    read = row.m.at <= readAt,
+                                    delivered = row.m.at <= maxOf(deliveredAt, readAt),
+                                    s = s,
+                                    otherName = title,
+                                    names = memberNames,
+                                    senderName = if (isGroup && !mine) (memberNames[row.m.from] ?: if (row.m.from == CLAUDE_BOT_UID) "Claude" else "?") else null,
+                                    reactions = reactions[row.m.id].orEmpty(),
+                                    myUid = me.uid,
+                                    onOpenShare = onOpenShare,
+                                    onDelete = { controller.delete(other, row.m) },
+                                    onReply = { replyTo = row.m },
+                                    onReact = { emoji -> controller.react(other, row.m, emoji) },
+                                    loadImage = { image -> controller.imageBytes(other, image) },
+                                    onOpenImages = { images, index -> viewing = images to index },
+                                    assisting = assist?.takeIf { it.target == row.m.id }?.phase,
+                                    inClaudeChat = isClaude,
+                                    voicePlayer = voicePlayer,
+                                    onOpenVideo = { url -> videoOpen = url },
+                                    onOpenFile = openFile,
+                                    onJoin = { controller.joinTogether(other) },
+                                    highlight = current?.id == row.m.id,
+                                )
+                            }
                         }
                     }
                 }
@@ -733,7 +938,7 @@ private fun ConversationPage(
                     Text(s.claudeWillAnswer, color = TextPrimary, fontSize = 12.sp)
                 }
             }
-            replyTo?.let { quoted ->
+            replyTo?.let { q ->
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -741,8 +946,8 @@ private fun ConversationPage(
                     Box(Modifier.width(3.dp).height(36.dp).background(Color.White))
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(nameOf(quoted.from, me.uid, other.name, s), color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Text(quoteText(quoted), color = TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(if (q.from == me.uid) s.you else memberNames[q.from] ?: nameOf(q.from, me.uid, title, s), color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(quoteText(q), color = TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     IconButton(onClick = { replyTo = null }) { Icon(QMusicIcons.Close, contentDescription = null, tint = TextSecondary) }
                 }
@@ -751,96 +956,149 @@ private fun ConversationPage(
                 modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
-                Box {
-                    IconButton(onClick = { attach = true }) { Icon(QMusicIcons.Add, contentDescription = null, tint = Color.White) }
-                    DropdownMenu(expanded = attach, onDismissRequest = { attach = false }, containerColor = DarkSurfaceVariant) {
-                        val options = remember(attach) { if (attach) shareables() else emptyList() }
-                        DropdownMenuItem(
-                            leadingIcon = { Icon(QMusicIcons.Add, null, tint = Color.White) },
-                            text = { Text(s.photo, color = TextPrimary, fontSize = 14.sp) },
-                            onClick = {
-                                attach = false
-                                pickPhoto()
-                            },
-                        )
-                        DropdownMenuItem(
-                            leadingIcon = { Icon(QMusicIcons.Camera, null, tint = Color.White) },
-                            text = { Text(s.camera, color = TextPrimary, fontSize = 14.sp) },
-                            onClick = {
-                                attach = false
-                                takePhoto()
-                            },
-                        )
-                        options.forEach { item ->
+                if (recordingSince != null) {
+                    RecordingBar(elapsed, level, s, cancelling, Modifier.weight(1f))
+                } else {
+                    Box {
+                        IconButton(onClick = { attach = true }) { Icon(QMusicIcons.Add, contentDescription = null, tint = Color.White) }
+                        DropdownMenu(expanded = attach, onDismissRequest = { attach = false }, containerColor = DarkSurfaceVariant) {
+                            val options = remember(attach) { if (attach) shareables() else emptyList() }
                             DropdownMenuItem(
-                                leadingIcon = { Icon(if (item.kind == ShareKind.SONG) QMusicIcons.Headphones else QMusicIcons.VideoPlay, null, tint = Color.White) },
-                                text = {
-                                    Column {
-                                        Text(if (item.kind == ShareKind.SONG) s.shareSong else s.shareVideo, color = TextPrimary, fontSize = 14.sp)
-                                        Text(item.title, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    }
-                                },
-                                onClick = {
-                                    attach = false
-                                    controller.send(other, "", item)
-                                },
+                                leadingIcon = { Icon(QMusicIcons.Add, null, tint = Color.White) },
+                                text = { Text(s.photo, color = TextPrimary, fontSize = 14.sp) },
+                                onClick = { attach = false; pickPhoto() },
                             )
+                            DropdownMenuItem(
+                                leadingIcon = { Icon(QMusicIcons.Camera, null, tint = Color.White) },
+                                text = { Text(s.camera, color = TextPrimary, fontSize = 14.sp) },
+                                onClick = { attach = false; takePhoto() },
+                            )
+                            DropdownMenuItem(
+                                leadingIcon = { Icon(QMusicIcons.VideoPlay, null, tint = Color.White) },
+                                text = { Text(s.videoAttach, color = TextPrimary, fontSize = 14.sp) },
+                                onClick = { attach = false; pickVideo() },
+                            )
+                            DropdownMenuItem(
+                                leadingIcon = { Icon(QMusicIcons.File, null, tint = Color.White) },
+                                text = { Text(s.fileAttach, color = TextPrimary, fontSize = 14.sp) },
+                                onClick = { attach = false; pickFile() },
+                            )
+                            options.forEach { item ->
+                                DropdownMenuItem(
+                                    leadingIcon = { Icon(if (item.kind == ShareKind.SONG) QMusicIcons.Headphones else QMusicIcons.VideoPlay, null, tint = Color.White) },
+                                    text = {
+                                        Column {
+                                            Text(if (item.kind == ShareKind.SONG) s.shareSong else s.shareVideo, color = TextPrimary, fontSize = 14.sp)
+                                            Text(item.title, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                    },
+                                    onClick = {
+                                        attach = false
+                                        controller.send(other, "", item)
+                                    },
+                                )
+                            }
                         }
                     }
-                }
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 44.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(DarkSurfaceVariant)
-                        .padding(horizontal = 16.dp, vertical = 11.dp),
-                ) {
-                    if (text.isEmpty()) Text(s.messageHint, color = TextMuted, fontSize = 16.sp)
-                    BasicTextField(
-                        value = text,
-                        onValueChange = { v ->
-                            text = v.take(ChatController.MAX_LENGTH)
-                            if (v.isNotBlank()) controller.onTyping(other, Clock.System.now().toEpochMilliseconds()) else controller.stopTyping(other)
-                        },
-                        textStyle = TextStyle(color = TextPrimary, fontSize = 16.sp),
-                        cursorBrush = SolidColor(Color.White),
-                        maxLines = 6,
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                        modifier = Modifier.fillMaxWidth().focusRequester(inputFocus),
-                    )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 44.dp)
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(DarkSurfaceVariant)
+                            .padding(horizontal = 16.dp, vertical = 11.dp),
+                    ) {
+                        if (text.isEmpty()) Text(s.messageHint, color = TextMuted, fontSize = 16.sp)
+                        BasicTextField(
+                            value = text,
+                            onValueChange = { v ->
+                                text = v.take(ChatController.MAX_LENGTH)
+                                if (v.isNotBlank()) controller.onTyping(other, Clock.System.now().toEpochMilliseconds()) else controller.stopTyping(other)
+                            },
+                            textStyle = TextStyle(color = TextPrimary, fontSize = 16.sp),
+                            cursorBrush = SolidColor(Color.White),
+                            maxLines = 6,
+                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                            modifier = Modifier.fillMaxWidth().focusRequester(inputFocus),
+                        )
+                    }
                 }
                 Spacer(Modifier.width(6.dp))
                 val canSend = text.isNotBlank()
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(if (canSend) Color.White else DarkSurfaceVariant)
-                        .clickable(enabled = canSend) {
-                            val quoted = replyTo?.let { ChatReply(it.id, it.from, quoteText(it)) }
-                            if (controller.send(other, text, replyTo = quoted)) {
-                                text = ""
-                                replyTo = null
-                                controller.stopTyping(other)
-                            }
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(QMusicIcons.Send, contentDescription = null, tint = if (canSend) Color.Black else TextMuted, modifier = Modifier.size(20.dp))
+                if (!canSend && recorder != null && !isClaude) {
+                    val density = androidx.compose.ui.platform.LocalDensity.current
+                    val cancelAt = with(density) { 110.dp.toPx() }
+                    Box(
+                        modifier = Modifier
+                            .size(if (recordingSince != null) 56.dp else 44.dp)
+                            .clip(CircleShape)
+                            .background(if (recordingSince != null) (if (cancelling) Color(0xFF555555) else Color(0xFFFF4D4D)) else Color.White)
+                            .pointerInput(micReady) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown()
+                                    if (!micReady) {
+                                        askMic(false) { granted -> micReady = granted }
+                                        return@awaitEachGesture
+                                    }
+                                    if (!recorder.start()) return@awaitEachGesture
+                                    voicePlayer?.stop()
+                                    recordingSince = Clock.System.now().toEpochMilliseconds()
+                                    cancelling = false
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                        cancelling = change.position.x - down.position.x < -cancelAt
+                                        if (!change.pressed) break
+                                        change.consume()
+                                    }
+                                    val thrownAway = cancelling
+                                    recordingSince = null
+                                    cancelling = false
+                                    if (thrownAway) {
+                                        recorder.cancel()
+                                    } else {
+                                        recorder.stop()?.let { voice ->
+                                            controller.sendFile(other, voice, "", quoted())
+                                            replyTo = null
+                                        }
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(QMusicIcons.Mic, contentDescription = s.voiceHold, tint = if (recordingSince != null) Color.White else Color.Black, modifier = Modifier.size(22.dp))
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(if (canSend) Color.White else DarkSurfaceVariant)
+                            .clickable(enabled = canSend) {
+                                if (controller.send(other, text, replyTo = quoted())) {
+                                    text = ""
+                                    replyTo = null
+                                    controller.stopTyping(other)
+                                }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(QMusicIcons.Send, contentDescription = null, tint = if (canSend) Color.Black else TextMuted, modifier = Modifier.size(20.dp))
+                    }
                 }
             }
         }
     }
     viewing?.let { (images, index) ->
-        PhotoViewer(images, index, load = { id -> controller.imageBytes(other, id) }) { viewing = null }
+        PhotoViewer(images, index, load = { image -> controller.imageBytes(other, image) }) { viewing = null }
     }
+    videoOpen?.let { url -> VideoViewer(url) { videoOpen = null } }
 }
 
 /** A photo in a message: its blurred preview at once, the photo itself when it has come; a tap opens it full. */
 @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
 @Composable
-private fun ChatAlbum(images: List<ChatImage>, load: suspend (String) -> ByteArray?, onOpen: (Int) -> Unit, scanning: Boolean) {
+private fun ChatAlbum(images: List<ChatImage>, load: suspend (ChatImage) -> ByteArray?, onOpen: (Int) -> Unit, scanning: Boolean) {
     if (images.size == 1) {
         val image = images[0]
         val ratio = if (image.width > 0 && image.height > 0) (image.width.toFloat() / image.height).coerceIn(0.56f, 1.9f) else 1f
@@ -872,9 +1130,9 @@ private fun ChatAlbum(images: List<ChatImage>, load: suspend (String) -> ByteArr
 /** One photo: its blurred preview at once, the photo itself when it has come. */
 @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
 @Composable
-private fun PhotoCell(image: ChatImage, load: suspend (String) -> ByteArray?, onOpen: () -> Unit, scanning: Boolean, modifier: Modifier) {
-    var bytes by remember(image.id) { mutableStateOf<ByteArray?>(null) }
-    LaunchedEffect(image.id) { bytes = load(image.id) }
+internal fun PhotoCell(image: ChatImage, load: suspend (ChatImage) -> ByteArray?, onOpen: () -> Unit, scanning: Boolean, modifier: Modifier) {
+    var bytes by remember(image.id, image.url) { mutableStateOf<ByteArray?>(null) }
+    LaunchedEffect(image.id, image.url) { bytes = load(image) }
     val thumb = remember(image.thumb) { runCatching { kotlin.io.encoding.Base64.decode(image.thumb) }.getOrNull() }
     Box(
         modifier = modifier
@@ -942,7 +1200,7 @@ private fun ClaudeWorking(label: String) {
 }
 
 /** Who wrote a quoted message. */
-private fun nameOf(uid: String, myUid: String, otherName: String, s: ChatStrings): String = when (uid) {
+internal fun nameOf(uid: String, myUid: String, otherName: String, s: ChatStrings): String = when (uid) {
     myUid -> s.you
     CLAUDE_BOT_UID -> "Claude"
     else -> otherName
@@ -950,13 +1208,13 @@ private fun nameOf(uid: String, myUid: String, otherName: String, s: ChatStrings
 
 /** The photos of a message, full screen: swipe between them; a tap or back closes it. */
 @Composable
-private fun PhotoViewer(images: List<ChatImage>, start: Int, load: suspend (String) -> ByteArray?, onClose: () -> Unit) {
+internal fun PhotoViewer(images: List<ChatImage>, start: Int, load: suspend (ChatImage) -> ByteArray?, onClose: () -> Unit) {
     PlatformBackHandler(enabled = true) { onClose() }
     val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = start.coerceIn(0, images.lastIndex)) { images.size }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
             var bytes by remember(images[page].id) { mutableStateOf<ByteArray?>(null) }
-            LaunchedEffect(images[page].id) { bytes = load(images[page].id) }
+            LaunchedEffect(images[page].id) { bytes = load(images[page]) }
             Box(Modifier.fillMaxSize().clickable(onClick = onClose), contentAlignment = Alignment.Center) {
                 val b = bytes
                 if (b != null) {
@@ -1053,7 +1311,7 @@ private fun ClaudeMarkdown(text: String, streaming: Boolean, modifier: Modifier)
 
 /** A person in a list: picture, name, @username, and what can be done ([trailing]). */
 @Composable
-private fun PersonRow(user: ChatUser, onClick: () -> Unit, trailing: @Composable () -> Unit = {}) {
+internal fun PersonRow(user: ChatUser, onClick: () -> Unit, trailing: @Composable () -> Unit = {}) {
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1070,7 +1328,7 @@ private fun PersonRow(user: ChatUser, onClick: () -> Unit, trailing: @Composable
 
 /** A small pill button (white when it is the thing to do, grey otherwise). */
 @Composable
-private fun Pill(text: String, primary: Boolean, onClick: () -> Unit) {
+internal fun Pill(text: String, primary: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(18.dp))
@@ -1134,7 +1392,7 @@ private fun FriendsPage(controller: ChatController, s: ChatStrings) {
 }
 
 @Composable
-private fun SectionTitle(text: String) {
+internal fun SectionTitle(text: String) {
     Text(text, color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 6.dp))
 }
 
@@ -1199,7 +1457,7 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 1.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                             three.forEachIndexed { col, image ->
                                 Box(Modifier.weight(1f).aspectRatio(1f)) {
-                                    PhotoCell(image, { id -> controller.imageBytes(user, id) }, { viewing = row * 3 + col }, false, Modifier.fillMaxSize())
+                                    PhotoCell(image, { i -> controller.imageBytes(user, i) }, { viewing = row * 3 + col }, false, Modifier.fillMaxSize())
                                 }
                             }
                             repeat(3 - three.size) { Spacer(Modifier.weight(1f)) }
@@ -1215,7 +1473,7 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
             }
         }
         viewing?.let { index ->
-            PhotoViewer(photos, index, load = { id -> controller.imageBytes(user, id) }) { viewing = null }
+            PhotoViewer(photos, index, load = { i -> controller.imageBytes(user, i) }) { viewing = null }
         }
     }
 }
@@ -1273,12 +1531,26 @@ private fun Bubble(
     onDelete: () -> Unit,
     onReply: () -> Unit,
     onReact: (String?) -> Unit,
-    loadImage: suspend (String) -> ByteArray?,
+    loadImage: suspend (ChatImage) -> ByteArray?,
     onOpenImages: (List<ChatImage>, Int) -> Unit,
     /** Claude is answering this message: looking, thinking or writing. */
     assisting: String? = null,
     inClaudeChat: Boolean = false,
+    /** The group members' names, for quotes. */
+    names: Map<String, String> = emptyMap(),
+    /** In a group: who wrote it (shown over it). */
+    senderName: String? = null,
+    voicePlayer: VoicePlayer? = null,
+    onOpenVideo: (String) -> Unit = {},
+    onOpenFile: (ChatAttachment) -> Unit = {},
+    onJoin: () -> Unit = {},
+    /** The message the search is on. */
+    highlight: Boolean = false,
 ) {
+    if (m.system) {
+        SystemLine(m.text)
+        return
+    }
     var menu by remember { mutableStateOf(false) }
     val fromClaude = m.from == CLAUDE_BOT_UID
     // Pull a message to the right to answer it.
@@ -1330,7 +1602,9 @@ private fun Bubble(
                 .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp))
                 .background(if (mine) Color.White else if (fromClaude) ClaudeBubble else DarkSurfaceVariant)
                 .then(
-                    if (assisting != null) {
+                    if (highlight) {
+                        Modifier.border(2.dp, ClaudeCoral, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp))
+                    } else if (assisting != null) {
                         Modifier.border(2.dp, ClaudeCoral.copy(alpha = pulse), RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp))
                     } else {
                         Modifier
@@ -1340,10 +1614,19 @@ private fun Bubble(
                     onClick = { m.share?.let(onOpenShare) },
                     onLongClick = { menu = true },
                 )
-                .padding(if (m.share != null || m.images.isNotEmpty()) 4.dp else 0.dp),
+                .padding(if (m.share != null || m.images.isNotEmpty() || m.attachment != null) 4.dp else 0.dp),
         ) {
             val fg = if (mine) Color.Black else TextPrimary
             val fgSoft = if (mine) Color.Black.copy(alpha = 0.55f) else TextSecondary
+            if (senderName != null) {
+                Text(
+                    senderName,
+                    color = if (m.from == CLAUDE_BOT_UID) ClaudeCoral else memberColor(m.from),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(start = 10.dp, end = 12.dp, top = if (m.share != null || m.images.isNotEmpty() || m.attachment != null) 4.dp else 8.dp),
+                )
+            }
             m.replyTo?.let { quoted ->
                 Row(
                     modifier = Modifier
@@ -1355,7 +1638,7 @@ private fun Bubble(
                     Box(Modifier.width(3.dp).height(40.dp).background(if (mine) Color.Black else Color.White))
                     Column(Modifier.padding(start = 8.dp, top = 4.dp, bottom = 4.dp)) {
                         Text(
-                            nameOf(quoted.from, myUid, otherName, s),
+                            if (quoted.from == myUid) s.you else names[quoted.from] ?: nameOf(quoted.from, myUid, otherName, s),
                             color = if (mine) Color.Black else TextPrimary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -1375,8 +1658,28 @@ private fun Bubble(
             } else if (!mine && m.model != null) {
                 Text(m.model, color = fgSoft, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp))
             }
-            if (m.images.isNotEmpty()) ChatAlbum(m.images, loadImage, { index -> onOpenImages(m.images, index) }, scanning = assisting != null)
+            if (m.images.isNotEmpty()) {
+                ChatAlbum(m.images, loadImage, { index -> onOpenImages(m.images, index) }, scanning = assisting != null)
+                m.progress?.let { p ->
+                    androidx.compose.material3.LinearProgressIndicator(
+                        progress = { p },
+                        color = if (mine) Color.Black else Color.White,
+                        trackColor = Color.Transparent,
+                        modifier = Modifier.width(260.dp).padding(top = 4.dp),
+                    )
+                }
+            }
+            m.attachment?.let { a ->
+                when (a.kind) {
+                    AttachmentKind.VOICE -> VoiceBubble(a, mine, voicePlayer, m.progress)
+                    AttachmentKind.VIDEO -> VideoBubble(a, m.progress) { onOpenVideo(a.url) }
+                    AttachmentKind.FILE -> FileBubble(a, mine, m.progress, s) { onOpenFile(a) }
+                }
+            }
             m.share?.let { ShareCard(it, mine, s) }
+            if (m.together && m.share != null && !mine) {
+                Box(Modifier.padding(start = 8.dp, top = 8.dp)) { Pill((if (m.share.kind == ShareKind.SONG) "🎧 " else "🍿 ") + s.join, primary = true, onClick = onJoin) }
+            }
             if (m.text.isNotEmpty()) {
                 val textModifier = Modifier.padding(start = 12.dp, end = 12.dp, top = if (!mine && m.model != null) 2.dp else 8.dp)
                 if (fromClaude) {
@@ -1460,8 +1763,11 @@ private fun Bubble(
 }
 
 /** A message as a quote: its text, or what it shared. */
-private fun quoteText(m: ChatMessage): String = m.text.ifBlank {
+internal fun quoteText(m: ChatMessage): String = m.text.ifBlank {
     when {
+        m.attachment?.kind == AttachmentKind.VOICE -> "🎤 " + mmss(m.attachment.durationMs)
+        m.attachment?.kind == AttachmentKind.VIDEO -> "🎬 Video"
+        m.attachment?.kind == AttachmentKind.FILE -> "📄 " + m.attachment.name
         m.images.isNotEmpty() -> if (m.images.size == 1) "📷" else "📷 ×" + m.images.size
         m.share != null -> (if (m.share.kind == ShareKind.SONG) "🎵 " else "🎬 ") + m.share.title
         else -> ""
@@ -1476,7 +1782,7 @@ private fun seenLabel(ms: Long, s: ChatStrings): String = when (daysAgo(ms)) {
 }
 
 @Composable
-private fun ShareCard(item: SharedItem, mine: Boolean, s: ChatStrings) {
+internal fun ShareCard(item: SharedItem, mine: Boolean, s: ChatStrings) {
     val video = item.kind == ShareKind.VIDEO
     Row(
         modifier = Modifier
@@ -1515,7 +1821,7 @@ private fun local(ms: Long): LocalDateTime = Instant.fromEpochMilliseconds(ms).t
 
 private fun two(n: Int) = n.toString().padStart(2, '0')
 
-private fun clock(ms: Long): String = local(ms).let { "${two(it.hour)}:${two(it.minute)}" }
+internal fun clock(ms: Long): String = local(ms).let { "${two(it.hour)}:${two(it.minute)}" }
 
 private fun daysAgo(ms: Long): Int {
     val today = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date
@@ -1528,7 +1834,7 @@ private fun dayLabel(ms: Long, s: ChatStrings): String = when (daysAgo(ms)) {
     else -> local(ms).let { "${two(it.dayOfMonth)}.${two(it.monthNumber)}.${it.year}" }
 }
 
-private fun listTime(ms: Long, s: ChatStrings): String = when (daysAgo(ms)) {
+internal fun listTime(ms: Long, s: ChatStrings): String = when (daysAgo(ms)) {
     0 -> clock(ms)
     1 -> s.yesterday
     else -> local(ms).let { "${two(it.dayOfMonth)}.${two(it.monthNumber)}" }

@@ -106,6 +106,11 @@ fun VideosApp(
 
     // The player belongs to the section, not to the page of a video: leaving the page leaves the video playing small.
     val playback = rememberVideoPlayback()
+    // Watching together reaches the player through this.
+    androidx.compose.runtime.DisposableEffect(playback) {
+        com.qmusic.ui.chat.TogetherVideo.playback = playback
+        onDispose { if (com.qmusic.ui.chat.TogetherVideo.playback === playback) com.qmusic.ui.chat.TogetherVideo.playback = null }
+    }
     var loadedId by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(watch?.video?.id, watch?.quality, watch?.caption, playback) {
         val w = watch

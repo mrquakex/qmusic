@@ -794,6 +794,12 @@ class MainViewModel(
         }
     }
 
+    /** Listening together: [song] on its own from [positionMs] (where another phone is in it). */
+    fun playAt(song: SongItem, positionMs: Long) {
+        applyGapless(false)
+        playerController.playFrom(song, positionMs)
+    }
+
     /** Plays a list in random order, starting from a random song. */
     fun shuffleAll(songs: List<SongItem>) {
         if (songs.isEmpty()) return

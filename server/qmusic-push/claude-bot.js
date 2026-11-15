@@ -125,12 +125,30 @@ function ask(content, { session, onPhase, onText }) {
   });
 }
 
-const membersOf = (chatId) => chatId.split("_");
+const GROUP = /^grp[A-Za-z0-9]{20}$/;
+const isGroup = (chatId) => GROUP.test(chatId);
+
+/** The people of a conversation: the two of a one-to-one chat, or a group's members. */
+async function membersOf(chatId) {
+  if (!isGroup(chatId)) return chatId.split("_");
+  return Object.keys((await db.ref(`groups/${chatId}/members`).get()).val() || {});
+}
 
 /** Both people's list entries (or the owner's, in the own conversation) and the push to the other one. */
 async function listUpdate(chatId, preview) {
   const updates = { [`chats/${chatId}/read/${BOT_UID}`]: TS };
-  for (const uid of membersOf(chatId)) {
+  if (isGroup(chatId)) {
+    // A group: every member's list shows it; one push entry, which the push service sends to all of them.
+    for (const uid of await membersOf(chatId)) {
+      const base = `userChats/${uid}/${chatId}`;
+      updates[`${base}/lastText`] = "Claude: " + preview;
+      updates[`${base}/lastAt`] = TS;
+      updates[`${base}/lastFrom`] = BOT_UID;
+    }
+    updates[`notify/${db.ref("notify").push().key}`] = { from: BOT_UID, to: chatId, chatId, type: "chat", body: preview, at: TS };
+    return updates;
+  }
+  for (const uid of await membersOf(chatId)) {
     if (uid === BOT_UID) continue;
     const base = `userChats/${uid}/${chatId}`;
     updates[`${base}/lastText`] = "Claude: " + preview;
@@ -166,8 +184,20 @@ async function imageBlocks(chatId, message) {
   return blocks.filter(Boolean);
 }
 
+const MEDIA_DIR = "/var/lib/qeyf-media";
+
 async function imageBlock(chatId, image) {
-  if (!image || !image.id) return null;
+  if (!image) return null;
+  // Photos on the media server: new ones carry their link; older ones were copied there as <id>.jpg.
+  const linked = image.url && image.url.match(/\/m\/([A-Za-z0-9_]+)\/([0-9a-f]{32}\.[a-z0-9]+)$/);
+  const onDisk = linked ? `${linked[1]}/${linked[2]}` : image.id && /^[A-Za-z0-9_-]+$/.test(image.id) ? `${chatId}/${image.id}.jpg` : null;
+  if (onDisk) {
+    try {
+      const data = fs.readFileSync(`${MEDIA_DIR}/${onDisk}`);
+      return { type: "image", source: { type: "base64", media_type: "image/jpeg", data: data.toString("base64") } };
+    } catch (_) {}
+  }
+  if (!image.id) return null;
   const media = (await db.ref(`media/${chatId}/${image.id}`).get()).val();
   if (!media || !media.data) return null;
   return { type: "image", source: { type: "base64", media_type: media.mime || "image/jpeg", data: media.data } };
@@ -179,6 +209,11 @@ function describe(message) {
   if (share) {
     const what = share.kind === "SONG" ? "a song" : "a video";
     text = `[shared ${what} from QMusic: "${share.title}"${share.subtitle ? " by " + share.subtitle : ""}] ${text}`;
+  }
+  const att = message.attachment;
+  if (att && att.kind) {
+    const what = att.kind === "voice" ? "voice message" : att.kind === "video" ? "video" : `file "${att.name || "file"}"`;
+    text = `[${what}] ${text}`;
   }
   const photos = photosOf(message).length;
   if (photos > 0) text = `[${photos > 1 ? photos + " photos" : "photo"}] ${text}`;
@@ -200,19 +235,27 @@ async function contentOf(chatId, message, ownChat) {
 
   let text = "";
   if (!ownChat) {
-    const [a, b] = membersOf(chatId);
-    const other = a === OWNER_UID ? b : a;
-    const names = {
-      [OWNER_UID]: ((await db.ref(`users/${OWNER_UID}/name`).get()).val() || "Owner") + " (who called you)",
-      [other]: (await db.ref(`users/${other}/name`).get()).val() || "Friend",
-      [BOT_UID]: "Claude",
-    };
+    const names = { [BOT_UID]: "Claude" };
+    let where;
+    if (isGroup(chatId)) {
+      const group = (await db.ref(`groups/${chatId}`).get()).val() || {};
+      for (const [uid, m] of Object.entries(group.members || {})) names[uid] = (m && m.name) || "Member";
+      const people = Object.entries(names).filter(([uid]) => uid !== BOT_UID).map(([, n]) => n).join(", ");
+      names[OWNER_UID] = (names[OWNER_UID] || "Owner") + " (who called you)";
+      where = `the group chat "${group.name || "group"}" (members: ${people}). Everyone in it will read your answer.`;
+    } else {
+      const [a, b] = await membersOf(chatId);
+      const other = a === OWNER_UID ? b : a;
+      names[OWNER_UID] = ((await db.ref(`users/${OWNER_UID}/name`).get()).val() || "Owner") + " (who called you)";
+      names[other] = (await db.ref(`users/${other}/name`).get()).val() || "Friend";
+      where = `a conversation between ${names[OWNER_UID]} and ${names[other]}. Both will read your answer.`;
+    }
     const recent = (await db.ref(`chats/${chatId}/messages`).orderByChild("at").limitToLast(CONTEXT_MESSAGES).get()).val() || {};
     const lines = Object.values(recent)
       .sort((x, y) => (x.at || 0) - (y.at || 0))
       .map((m) => `${names[m.from] || "?"}: ${describe(m)}`)
       .filter((l) => l.length > 3);
-    text += `You were called into a conversation between ${names[OWNER_UID]} and ${names[other]}. Both will read your answer.\n`;
+    text += `You were called into ${where}\n`;
     text += `Recent messages:\n${lines.join("\n")}\n\n`;
   }
   if (replied) text += `[Replying to this message: "${describe(replied)}"]\n`;

@@ -122,6 +122,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     private fun onUser(user: FirebaseUser?) {
         profileListener?.let { profileRef?.removeEventListener(it) }
         profileListener = null
+        runCatching { com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().setUserId(user?.uid.orEmpty()) }
         runCatching { calls.listenFor(user?.uid) }
         trackPresence(user?.uid)
         runCatching { watchDeliveries(user?.uid) }
@@ -270,6 +271,9 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             // From them, or from Claude speaking in this conversation: anything not ours that came after our last look.
             unread = lastFrom != null && lastFrom != auth.currentUser?.uid && lastAt > read,
             otherReadAt = 0L,
+            pinned = child("pinned").getValue(Long::class.java) ?: 0L,
+            archived = child("archived").getValue(Boolean::class.java) == true,
+            lastFromName = child("lastFromName").getValue(String::class.java).orEmpty(),
         )
     }
 
@@ -277,8 +281,10 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val ref = root.child("chats").child(chatId).child("messages")
         ref.keepSynced(true)
         val query = ref.orderByChild("at").limitToLast(MESSAGES_SHOWN)
-        return combine(listen(query), pendingIds) { snap, pending ->
-            snap.children.mapNotNull { it.toMessage(pending) }
+        return combine(listen(query), pendingIds, outbox, _uploads) { snap, pending, out, progress ->
+            val sent = snap.children.mapNotNull { it.toMessage(pending) }
+            val ids = sent.mapTo(HashSet()) { it.id }
+            sent + out[chatId].orEmpty().filter { it.id !in ids }.map { it.copy(progress = progress[it.id] ?: 0f) }
         }
     }
 
@@ -313,7 +319,25 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 width = child("w").getValue(Int::class.java) ?: 0,
                 height = child("h").getValue(Int::class.java) ?: 0,
                 thumb = child("thumb").getValue(String::class.java).orEmpty(),
+                url = child("url").getValue(String::class.java),
             )
+        }
+        val att = child("attachment")
+        val attachment = att.child("url").getValue(String::class.java)?.let { url ->
+            runCatching { AttachmentKind.valueOf(att.child("kind").getValue(String::class.java).orEmpty().uppercase()) }.getOrNull()?.let { kind ->
+                ChatAttachment(
+                    kind = kind,
+                    url = url,
+                    name = att.child("name").getValue(String::class.java).orEmpty(),
+                    size = att.child("size").getValue(Long::class.java) ?: 0L,
+                    mime = att.child("mime").getValue(String::class.java).orEmpty(),
+                    durationMs = att.child("duration").getValue(Long::class.java) ?: 0L,
+                    width = att.child("w").getValue(Int::class.java) ?: 0,
+                    height = att.child("h").getValue(Int::class.java) ?: 0,
+                    thumb = att.child("thumb").getValue(String::class.java).orEmpty(),
+                    wave = att.child("wave").getValue(String::class.java).orEmpty().map { (it - 'A').coerceIn(0, 25) * 4 },
+                )
+            }
         }
         // An album ("images"), or one photo as the first version wrote it ("image").
         val images = child("images").children.mapNotNull { it.toImage() }.ifEmpty { listOfNotNull(child("image").toImage()) }
@@ -328,6 +352,9 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             at = child("at").getValue(Long::class.java) ?: System.currentTimeMillis(),
             share = share,
             pending = id in pending,
+            attachment = attachment,
+            system = child("system").exists(),
+            together = child("together").getValue(Boolean::class.java) == true,
         )
     }
 
@@ -395,18 +422,21 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         sendMessage(other, text, share, replyTo, images = null, preview = null)
     }
 
-    private fun sendMessage(
+    private suspend fun sendMessage(
         other: ChatUser,
         text: String,
         share: SharedItem?,
         replyTo: ChatReply?,
         images: List<Map<String, Any>>?,
         preview: String?,
+        extra: Map<String, Any?> = emptyMap(),
+        fixedId: String? = null,
     ) {
         val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
-        val chatId = chatIdOf(me.uid, other.uid)
-        val messageId = root.child("chats").child(chatId).child("messages").push().key ?: error("no id")
+        val chatId = conversationId(me.uid, other)
+        val messageId = fixedId ?: root.child("chats").child(chatId).child("messages").push().key ?: error("no id")
         val message = buildMap<String, Any?> {
+            putAll(extra)
             put("from", me.uid)
             put("text", text)
             put("at", ServerValue.TIMESTAMP)
@@ -427,6 +457,10 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         }
         val shown = preview ?: text.ifBlank { share?.let { (if (it.kind == ShareKind.SONG) "🎵 " else "🎬 ") + it.title }.orEmpty() }
         val preview = shown.take(PREVIEW_LENGTH)
+        if (other.isGroup) {
+            sendToGroup(me, chatId, messageId, message, preview)
+            return
+        }
         val mine = "userChats/${me.uid}/$chatId"
         val theirs = "userChats/${other.uid}/$chatId"
         val updates = mapOf<String, Any?>(
@@ -464,33 +498,330 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         root.updateChildren(updates).addOnCompleteListener { pendingIds.update { it - messageId } }
     }
 
+    /** A message to a group: every member's list gets it ("Ali: …"), and one push entry the server sends to all. */
+    private suspend fun sendToGroup(me: ChatUser, groupId: String, messageId: String, message: Map<String, Any?>, preview: String) {
+        val group = groupInfo(groupId) ?: error("no group")
+        val updates = HashMap<String, Any?>()
+        updates["chats/$groupId/messages/$messageId"] = message
+        updates["chats/$groupId/read/${me.uid}"] = ServerValue.TIMESTAMP
+        updates["typing/$groupId/${me.uid}"] = null
+        for (member in group.members) {
+            val base = "userChats/${member.user.uid}/$groupId"
+            updates["$base/other"] = groupId
+            updates["$base/name"] = group.name
+            updates["$base/username"] = ""
+            updates["$base/photo"] = group.photo
+            updates["$base/lastText"] = preview
+            updates["$base/lastAt"] = ServerValue.TIMESTAMP
+            updates["$base/lastFrom"] = me.uid
+            updates["$base/lastFromName"] = me.name.substringBefore(' ')
+        }
+        updates["userChats/${me.uid}/$groupId/read"] = ServerValue.TIMESTAMP
+        updates["notify/${root.child("notify").push().key}"] = mapOf(
+            "from" to me.uid, "to" to groupId, "chatId" to groupId, "type" to "chat", "body" to preview, "at" to ServerValue.TIMESTAMP,
+        )
+        pendingIds.update { it + messageId }
+        root.updateChildren(updates).addOnCompleteListener { pendingIds.update { it - messageId } }
+    }
+
     override suspend fun sendImages(other: ChatUser, images: List<PickedImage>, caption: String, replyTo: ChatReply?): Result<Unit> = runCatching {
         val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
-        val chatId = chatIdOf(me.uid, other.uid)
-        // The photos go up side by side; the message follows once all are there, so it never points at a missing one.
-        val entries = kotlinx.coroutines.coroutineScope {
-            images.map { image ->
-                async(Dispatchers.IO) {
-                    val mediaId = root.child("media").child(chatId).push().key ?: error("no id")
-                    val data = android.util.Base64.encodeToString(image.jpeg, android.util.Base64.NO_WRAP)
-                    require(data.length < MEDIA_MAX_CHARS) { "photo too large" }
-                    // Kept here at once, so our own photos show without downloading them back.
-                    imageCache.put("$chatId/$mediaId", image.jpeg)
-                    root.child("media").child(chatId).child(mediaId).setValue(mapOf("data" to data, "mime" to "image/jpeg")).await()
-                    mapOf("id" to mediaId, "w" to image.width, "h" to image.height, "thumb" to image.thumb)
-                }
-            }.map { it.await() }
+        val chatId = conversationId(me.uid, other)
+        val messageId = root.child("chats").child(chatId).child("messages").push().key ?: error("no id")
+        // Shown at once (from the phone's own copies) while the photos go up to the media server side by side; the
+        // message itself follows once all are there, so it never points at a missing one.
+        val local = images.mapIndexed { i, image ->
+            val id = "$messageId-$i"
+            imageCache.put("$chatId/$id", image.jpeg)
+            ChatImage(id, image.width, image.height, image.thumb)
         }
-        val label = if (entries.size == 1) "📷" else "📷 ×${entries.size}"
-        sendMessage(
-            other = other,
-            text = caption,
-            share = null,
-            replyTo = replyTo,
-            images = entries,
-            preview = if (caption.isBlank()) label else "$label $caption",
+        addOutbox(chatId, ChatMessage(id = messageId, from = me.uid, text = caption, images = local, at = System.currentTimeMillis(), pending = true))
+        try {
+            val sent = LongArray(images.size)
+            val total = images.sumOf { it.jpeg.size.toLong() }.coerceAtLeast(1)
+            val entries = kotlinx.coroutines.coroutineScope {
+                images.mapIndexed { i, image ->
+                    async(Dispatchers.IO) {
+                        val url = MediaUpload.upload(token(), chatId, "jpg", "image/jpeg", image.jpeg.size.toLong(), { image.jpeg.inputStream() }) { done ->
+                            sent[i] = done
+                            _uploads.update { it + (messageId to sent.sum().toFloat() / total) }
+                        }
+                        imageCache.put(url, image.jpeg)
+                        mapOf("id" to local[i].id, "url" to url, "w" to image.width, "h" to image.height, "thumb" to image.thumb)
+                    }
+                }.map { it.await() }
+            }
+            val label = if (entries.size == 1) "📷" else "📷 ×${entries.size}"
+            sendMessage(
+                other = other,
+                text = caption,
+                share = null,
+                replyTo = replyTo,
+                images = entries,
+                preview = if (caption.isBlank()) label else "$label $caption",
+                fixedId = messageId,
+            )
+        } finally {
+            removeOutbox(chatId, messageId)
+        }
+    }
+
+    // ------------------------------------------------------------------ voice messages, videos, files
+
+    /** What is going up from this phone, per conversation: shown in it with how far it got. */
+    private val outbox = MutableStateFlow<Map<String, List<ChatMessage>>>(emptyMap())
+    private val _uploads = MutableStateFlow<Map<String, Float>>(emptyMap())
+    override val uploads: StateFlow<Map<String, Float>> = _uploads.asStateFlow()
+
+    private fun addOutbox(chatId: String, message: ChatMessage) = outbox.update { it + (chatId to (it[chatId].orEmpty() + message)) }
+
+    private fun removeOutbox(chatId: String, messageId: String) {
+        outbox.update { map -> map + (chatId to map[chatId].orEmpty().filter { it.id != messageId }) }
+        _uploads.update { it - messageId }
+    }
+
+    private suspend fun token(): String = auth.currentUser?.getIdToken(false)?.await()?.token ?: error("not signed in")
+
+    override suspend fun sendFile(other: ChatUser, file: PickedFile, caption: String, replyTo: ChatReply?): Result<Unit> = runCatching {
+        val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
+        val chatId = conversationId(me.uid, other)
+        val messageId = root.child("chats").child(chatId).child("messages").push().key ?: error("no id")
+        val ext = when (file.kind) {
+            AttachmentKind.VOICE -> "m4a"
+            AttachmentKind.VIDEO -> "mp4"
+            AttachmentKind.FILE -> file.name.substringAfterLast('.', "bin").lowercase().filter { it.isLetterOrDigit() }.take(8).ifEmpty { "bin" }
+        }
+        val localAttachment = ChatAttachment(file.kind, file.location, file.name, file.size, file.mime, file.durationMs, file.width, file.height, file.thumb, file.wave)
+        addOutbox(chatId, ChatMessage(id = messageId, from = me.uid, text = caption, attachment = localAttachment, at = System.currentTimeMillis(), pending = true))
+        try {
+            require(file.size <= MediaUpload.MAX_BYTES) { "max 100 MB" }
+            val url = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                MediaUpload.upload(token(), chatId, ext, file.mime.ifBlank { "application/octet-stream" }, file.size, { openLocation(file.location) }) { done ->
+                    _uploads.update { it + (messageId to done.toFloat() / file.size.coerceAtLeast(1)) }
+                }
+            }
+            // Our own voice message plays from the phone's copy, without fetching it back.
+            if (file.kind == AttachmentKind.VOICE) localCopies[url] = file.location
+            val attachment = buildMap<String, Any?> {
+                put("kind", file.kind.name.lowercase())
+                put("url", url)
+                put("name", file.name.take(120))
+                put("size", file.size)
+                put("mime", file.mime)
+                if (file.durationMs > 0) put("duration", file.durationMs)
+                if (file.width > 0) put("w", file.width)
+                if (file.height > 0) put("h", file.height)
+                if (file.thumb.isNotEmpty()) put("thumb", file.thumb)
+                // The shape of the sound as letters A-Z (one per bar), small enough to sit in the message.
+                if (file.wave.isNotEmpty()) put("wave", file.wave.joinToString("") { ('A' + (it / 4).coerceIn(0, 25)).toString() })
+            }
+            val label = when (file.kind) {
+                AttachmentKind.VOICE -> "🎤 " + duration(file.durationMs / 1000)
+                AttachmentKind.VIDEO -> "🎬 " + (if (file.durationMs > 0) duration(file.durationMs / 1000) else "")
+                AttachmentKind.FILE -> "📄 " + file.name
+            }.trim()
+            sendMessage(
+                other = other,
+                text = caption,
+                share = null,
+                replyTo = replyTo,
+                images = null,
+                preview = if (caption.isBlank()) label else "$label $caption",
+                extra = mapOf("attachment" to attachment),
+                fixedId = messageId,
+            )
+        } finally {
+            removeOutbox(chatId, messageId)
+        }
+    }
+
+    /** Our own recordings: the media link → the file on the phone. */
+    val localCopies = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun openLocation(location: String): java.io.InputStream =
+        if (location.startsWith("content:") || location.startsWith("file:")) {
+            app.contentResolver.openInputStream(android.net.Uri.parse(location)) ?: error("cannot read")
+        } else {
+            java.io.FileInputStream(location)
+        }
+
+    // ------------------------------------------------------------------ pinned, archived
+
+    override suspend fun setPinned(chatId: String, pinned: Boolean) {
+        root.child("userChats").child(me()).child(chatId).child("pinned").setValue(if (pinned) ServerValue.TIMESTAMP else null)
+    }
+
+    override suspend fun setArchived(chatId: String, archived: Boolean) {
+        root.child("userChats").child(me()).child(chatId).child("archived").setValue(if (archived) true else null)
+    }
+
+    // ------------------------------------------------------------------ groups
+    //
+    //   groups/{id} = {name, photo, createdBy, createdAt, members: {uid: {name, username, photo, role: admin|member}}}
+    //   messages, read marks, reactions and typing as for two people, under the group's id
+
+    private val groups = java.util.concurrent.ConcurrentHashMap<String, GroupInfo>()
+
+    private fun DataSnapshot.toGroup(): GroupInfo? {
+        val id = key ?: return null
+        val name = child("name").getValue(String::class.java) ?: return null
+        val members = child("members").children.mapNotNull { m ->
+            val uid = m.key ?: return@mapNotNull null
+            GroupMember(
+                user = ChatUser(uid, m.child("name").getValue(String::class.java) ?: "?", m.child("username").getValue(String::class.java).orEmpty(), m.child("photo").getValue(String::class.java)),
+                admin = m.child("role").getValue(String::class.java) == "admin",
+            )
+        }.sortedWith(compareByDescending<GroupMember> { it.admin }.thenBy { it.user.name.lowercase() })
+        return GroupInfo(id, name, child("photo").getValue(String::class.java), members, child("createdBy").getValue(String::class.java))
+    }
+
+    /** The group as last seen (kept fresh by [group]); read from the server the first time. */
+    private suspend fun groupInfo(groupId: String, fresh: Boolean = false): GroupInfo? {
+        if (!fresh) groups[groupId]?.let { return it }
+        val info = runCatching { root.child("groups").child(groupId).get().await().toGroup() }.getOrNull()
+        if (info != null) groups[groupId] = info
+        return info ?: groups[groupId]
+    }
+
+    override fun group(groupId: String): Flow<GroupInfo?> = callbackFlow {
+        val ref = root.child("groups").child(groupId)
+        ref.keepSynced(true)
+        val job = launch {
+            listen(ref).collect { snap ->
+                val info = snap.toGroup()
+                if (info != null) groups[groupId] = info else groups.remove(groupId)
+                trySend(info)
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    private fun ChatUser.asMember(role: String) = mapOf("name" to name, "username" to username, "photo" to photo, "role" to role)
+
+    /** A line about the group itself, sent like a message (who did what to whom). */
+    private suspend fun systemMessage(group: ChatUser, code: String, whom: String = "") {
+        val me = (_account.value as? ChatAccount.Ready)?.me ?: return
+        val tr = app.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+        val who = me.name.substringBefore(' ')
+        val preview = when (code) {
+            "created" -> if (tr) "$who grubu oluşturdu" else "$who created the group"
+            "added" -> if (tr) "$who, $whom kişisini ekledi" else "$who added $whom"
+            "removed" -> if (tr) "$who, $whom kişisini çıkardı" else "$who removed $whom"
+            "left" -> if (tr) "$who gruptan ayrıldı" else "$who left"
+            "renamed" -> if (tr) "$who grup adını \"$whom\" yaptı" else "$who renamed the group to \"$whom\""
+            else -> ""
+        }
+        runCatching { sendMessage(group, preview, null, null, null, preview, extra = mapOf("system" to code, "who" to who, "whom" to whom)) }
+    }
+
+    override suspend fun createGroup(name: String, members: List<ChatUser>): Result<ChatUser> = runCatching {
+        val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
+        val clean = name.trim().take(50)
+        require(clean.isNotEmpty()) { "name" }
+        val alphabet = ('a'..'z') + ('A'..'Z') + ('0'..'9')
+        val random = java.security.SecureRandom()
+        val id = GROUP_PREFIX + (1..20).map { alphabet[random.nextInt(alphabet.size)] }.joinToString("")
+        val memberMap = HashMap<String, Any?>()
+        memberMap[me.uid] = me.asMember("admin")
+        members.filter { it.uid != me.uid && !it.isGroup && it.uid != CLAUDE_BOT_UID }.forEach { memberMap[it.uid] = it.asMember("member") }
+        root.child("groups").child(id).setValue(
+            mapOf("name" to clean, "createdBy" to me.uid, "createdAt" to ServerValue.TIMESTAMP, "members" to memberMap),
+        ).await()
+        val group = ChatUser(id, clean, "", null)
+        groupInfo(id, fresh = true)
+        systemMessage(group, "created")
+        group
+    }
+
+    override suspend fun addMembers(groupId: String, members: List<ChatUser>): Result<Unit> = runCatching {
+        val current = groupInfo(groupId, fresh = true) ?: error("no group")
+        val fresh = members.filter { m -> current.members.none { it.user.uid == m.uid } && !m.isGroup && m.uid != CLAUDE_BOT_UID }
+        if (fresh.isEmpty()) return@runCatching
+        root.updateChildren(fresh.associate { "groups/$groupId/members/${it.uid}" to it.asMember("member") }).await()
+        val info = groupInfo(groupId, fresh = true) ?: return@runCatching
+        systemMessage(ChatUser(groupId, info.name, "", info.photo), "added", fresh.joinToString(", ") { it.name.substringBefore(' ') })
+    }
+
+    override suspend fun removeMember(groupId: String, member: ChatUser): Result<Unit> = runCatching {
+        root.updateChildren(mapOf("groups/$groupId/members/${member.uid}" to null, "userChats/${member.uid}/$groupId" to null)).await()
+        val info = groupInfo(groupId, fresh = true) ?: return@runCatching
+        systemMessage(ChatUser(groupId, info.name, "", info.photo), "removed", member.name.substringBefore(' '))
+    }
+
+    override suspend fun leaveGroup(groupId: String): Result<Unit> = runCatching {
+        val uid = me()
+        val info = groupInfo(groupId, fresh = true)
+        if (info != null) systemMessage(ChatUser(groupId, info.name, "", info.photo), "left")
+        root.updateChildren(mapOf("groups/$groupId/members/$uid" to null, "userChats/$uid/$groupId" to null)).await()
+        groups.remove(groupId)
+    }
+
+    override suspend fun renameGroup(groupId: String, name: String): Result<Unit> = runCatching {
+        val clean = name.trim().take(50)
+        require(clean.isNotEmpty()) { "name" }
+        root.child("groups").child(groupId).child("name").setValue(clean).await()
+        val info = groupInfo(groupId, fresh = true) ?: return@runCatching
+        systemMessage(ChatUser(groupId, info.name, "", info.photo), "renamed", clean)
+    }
+
+    // ------------------------------------------------------------------ together
+
+    override fun together(chatId: String): Flow<TogetherState?> = callbackFlow {
+        val job = launch {
+            listen(root.child("together").child(chatId)).collect { snap ->
+                val kind = runCatching { ShareKind.valueOf(snap.child("kind").getValue(String::class.java).orEmpty()) }.getOrNull()
+                val id = snap.child("id").getValue(String::class.java)
+                trySend(
+                    if (kind == null || id == null) null else TogetherState(
+                        chatId = chatId,
+                        item = SharedItem(
+                            kind = kind,
+                            id = id,
+                            title = snap.child("title").getValue(String::class.java).orEmpty(),
+                            subtitle = snap.child("subtitle").getValue(String::class.java).orEmpty(),
+                            thumbnail = snap.child("thumbnail").getValue(String::class.java),
+                        ),
+                        playing = snap.child("playing").getValue(Boolean::class.java) == true,
+                        positionMs = snap.child("pos").getValue(Long::class.java) ?: 0L,
+                        at = snap.child("at").getValue(Long::class.java) ?: 0L,
+                        by = snap.child("by").getValue(String::class.java).orEmpty(),
+                        byName = snap.child("byName").getValue(String::class.java).orEmpty(),
+                    ),
+                )
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override suspend fun sendTogetherInvite(other: ChatUser, item: SharedItem, text: String): Result<Unit> = runCatching {
+        sendMessage(other, text, item, null, null, (if (item.kind == ShareKind.SONG) "🎧 " else "🍿 ") + text, extra = mapOf("together" to true))
+    }
+
+    override suspend fun setTogether(chatId: String, state: TogetherState?) {
+        val ref = root.child("together").child(chatId)
+        if (state == null) {
+            ref.removeValue()
+            return
+        }
+        val me = (_account.value as? ChatAccount.Ready)?.me ?: return
+        ref.setValue(
+            mapOf(
+                "kind" to state.item.kind.name,
+                "id" to state.item.id,
+                "title" to state.item.title,
+                "subtitle" to state.item.subtitle,
+                "thumbnail" to state.item.thumbnail,
+                "playing" to state.playing,
+                "pos" to state.positionMs,
+                "at" to ServerValue.TIMESTAMP,
+                "by" to me.uid,
+                "byName" to me.name.substringBefore(' '),
+            ),
         )
     }
+
+    private val _serverOffset = MutableStateFlow(0L)
+    override val serverOffset: StateFlow<Long> = _serverOffset.asStateFlow()
 
     // ------------------------------------------------------------------ friends
     //
@@ -617,11 +948,30 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     /** Photos already fetched: memory first, then the app's cache folder. */
     private val imageCache = android.util.LruCache<String, ByteArray>(24)
 
+    override suspend fun imageBytes(chatId: String, image: ChatImage): ByteArray? {
+        val url = image.url ?: return imageBytes(chatId, image.id)
+        imageCache.get(url)?.let { return it }
+        // Our own photo, still going up or just sent: the phone's copy.
+        imageCache.get("$chatId/${image.id}")?.let { return it }
+        val file = java.io.File(java.io.File(app.cacheDir, "chat_media").apply { mkdirs() }, url.substringAfterLast('/'))
+        if (file.exists()) return file.readBytes().also { imageCache.put(url, it) }
+        val bytes = kotlinx.coroutines.withContext(Dispatchers.IO) { MediaUpload.download(url) } ?: return null
+        runCatching { file.writeBytes(bytes) }
+        imageCache.put(url, bytes)
+        return bytes
+    }
+
     override suspend fun imageBytes(chatId: String, id: String): ByteArray? {
         val key = "$chatId/$id"
         imageCache.get(key)?.let { return it }
         val file = java.io.File(java.io.File(app.cacheDir, "chat_media").apply { mkdirs() }, key.replace('/', '_') + ".jpg")
         if (file.exists()) return file.readBytes().also { imageCache.put(key, it) }
+        // Older photos were copied to the media server under their id.
+        kotlinx.coroutines.withContext(Dispatchers.IO) { MediaUpload.download("${MediaUpload.BASE}/m/$chatId/$id.jpg") }?.let { bytes ->
+            runCatching { file.writeBytes(bytes) }
+            imageCache.put(key, bytes)
+            return bytes
+        }
         val snap = runCatching { root.child("media").child(chatId).child(id).get().await() }.getOrNull() ?: return null
         val data = snap.child("data").getValue(String::class.java) ?: return null
         val bytes = runCatching { android.util.Base64.decode(data, android.util.Base64.DEFAULT) }.getOrNull() ?: return null
@@ -697,12 +1047,24 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         awaitClose { job.cancel() }
     }
 
-    override fun typing(chatId: String, otherUid: String): Flow<Boolean> = callbackFlow {
+    override fun typing(chatId: String, otherUid: String): Flow<Boolean> = if (isGroupId(chatId)) groupTyping(chatId) else callbackFlow {
         val job = launch {
             listen(root.child("typing").child(chatId).child(otherUid)).collect { snap ->
                 // A mark older than a few seconds is from a phone that went away mid-word.
                 val at = snap.getValue(Long::class.java)
                 trySend(at != null && System.currentTimeMillis() - at < TYPING_FRESH_MS)
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    /** Someone other than the person typing in a group. */
+    private fun groupTyping(chatId: String): Flow<Boolean> = callbackFlow {
+        val uid = me()
+        val job = launch {
+            listen(root.child("typing").child(chatId)).collect { snap ->
+                val now = System.currentTimeMillis()
+                trySend(snap.children.any { it.key != uid && now - (it.getValue(Long::class.java) ?: 0L) < TYPING_FRESH_MS })
             }
         }
         awaitClose { job.cancel() }
@@ -800,6 +1162,13 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
 
     // Last, so that everything above (the calls included) exists when the first sign-in state arrives.
     init {
+        db.getReference(".info/serverTimeOffset").addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snap: DataSnapshot) {
+                _serverOffset.value = (snap.getValue(Double::class.java) ?: 0.0).toLong()
+            }
+
+            override fun onCancelled(error: DatabaseError) {}
+        })
         auth.addAuthStateListener { onUser(it.currentUser) }
     }
 

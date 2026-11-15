@@ -25,6 +25,10 @@ sealed interface ChatRoute {
     data object Friends : ChatRoute
     data class Profile(val user: ChatUser) : ChatRoute
     data class Conversation(val other: ChatUser) : ChatRoute
+    data object NewGroup : ChatRoute
+    data class GroupInfo(val group: ChatUser) : ChatRoute
+    data class AddMembers(val group: ChatUser) : ChatRoute
+    data object Archived : ChatRoute
 }
 
 /**
@@ -51,16 +55,99 @@ class ChatController(
         .flatMapLatest { if (it == null) flowOf(emptySet()) else backend.blocked().catch { emit(emptySet()) } }
         .stateIn(scope, SharingStarted.Eagerly, emptySet())
 
-    /** Conversations, newest first (without the people blocked). */
-    val threads: StateFlow<List<ChatThread>?> = ready
+    /** Every conversation, pinned ones first, then newest first (without the people blocked). */
+    private val allThreads: StateFlow<List<ChatThread>?> = ready
         .flatMapLatest { if (it == null) flowOf(null) else backend.threads().catch { emit(emptyList()) } }
-        .combine(blockedIds) { list, blocked -> list?.filter { it.other.uid !in blocked } }
+        .combine(blockedIds) { list, blocked ->
+            list?.filter { it.other.uid !in blocked }
+                ?.sortedWith(compareByDescending<ChatThread> { it.pinned }.thenByDescending { it.lastAt })
+        }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
-    /** How many conversations have something not read: the badge on the entry button. */
+    /** The list: conversations not archived. */
+    val threads: StateFlow<List<ChatThread>?> = allThreads
+        .map { list -> list?.filter { !it.archived } }
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
+    /** The conversations moved to "Archived". */
+    val archived: StateFlow<List<ChatThread>> = allThreads
+        .map { list -> list.orEmpty().filter { it.archived } }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** How many conversations have something not read: the badge on the entry button (archived ones do not count). */
     val unreadCount: StateFlow<Int> = threads
         .map { list -> list?.count { it.unread } ?: 0 }
         .stateIn(scope, SharingStarted.Eagerly, 0)
+
+    fun setPinned(thread: ChatThread, pinned: Boolean) {
+        scope.launch { runCatching { backend.setPinned(thread.id, pinned) } }
+    }
+
+    fun setArchived(thread: ChatThread, archived: Boolean) {
+        scope.launch { runCatching { backend.setArchived(thread.id, archived) } }
+    }
+
+    fun openArchived() = _routes.update { list -> list.filter { it !is ChatRoute.Archived } + ChatRoute.Archived }
+
+    // ------------------------------------------------------------------ groups
+
+    fun openNewGroup() = _routes.update { list -> list.filter { it !is ChatRoute.NewGroup } + ChatRoute.NewGroup }
+
+    fun openGroupInfo(group: ChatUser) = _routes.update { list -> list.filterNot { it is ChatRoute.GroupInfo } + ChatRoute.GroupInfo(group) }
+
+    fun openAddMembers(group: ChatUser) = _routes.update { list -> list.filterNot { it is ChatRoute.AddMembers } + ChatRoute.AddMembers(group) }
+
+    /** People who can be put in a group: friends, and the people of the conversations. */
+    val groupCandidates: StateFlow<List<ChatUser>> = combine(friends(), allThreads) { f, t ->
+        (f + t.orEmpty().map { it.other }.filter { !it.isGroup && it.uid != CLAUDE_BOT_UID })
+            .distinctBy { it.uid }
+            .sortedBy { it.name.lowercase() }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    fun group(group: ChatUser) = backend.group(group.uid).catch { emit(null) }
+
+    fun createGroup(name: String, members: List<ChatUser>) {
+        run {
+            backend.createGroup(name, members).onSuccess { group ->
+                _routes.update { list -> list.filter { it !is ChatRoute.NewGroup } + ChatRoute.Conversation(group) }
+            }
+        }
+    }
+
+    fun addMembers(group: ChatUser, members: List<ChatUser>) {
+        scope.launch { backend.addMembers(group.uid, members).onFailure { _error.value = it.message } }
+        _routes.update { list -> list.filterNot { it is ChatRoute.AddMembers } }
+    }
+
+    fun removeMember(group: ChatUser, member: ChatUser) {
+        scope.launch { backend.removeMember(group.uid, member).onFailure { _error.value = it.message } }
+    }
+
+    fun renameGroup(group: ChatUser, name: String) {
+        scope.launch { backend.renameGroup(group.uid, name).onFailure { _error.value = it.message } }
+    }
+
+    fun leaveGroup(group: ChatUser) {
+        scope.launch { backend.leaveGroup(group.uid).onFailure { _error.value = it.message } }
+        _routes.update { list -> list.filterNot { (it is ChatRoute.Conversation && it.other.uid == group.uid) || (it is ChatRoute.GroupInfo && it.group.uid == group.uid) } }
+    }
+
+    // ------------------------------------------------------------------ together
+
+    /** Listening / watching together (set by the app, which has the players). */
+    var together: TogetherController? = null
+
+    fun startTogether(other: ChatUser, item: SharedItem, inviteText: String) {
+        val chatId = chatIdWith(other) ?: return
+        together?.start(chatId, item) { backend.sendTogetherInvite(other, item, inviteText) }
+    }
+
+    fun joinTogether(other: ChatUser) {
+        val chatId = chatIdWith(other) ?: return
+        together?.join(chatId)
+    }
+
+    private fun friends() = ready.flatMapLatest { if (it == null) flowOf(emptyList()) else backend.friends().catch { emit(emptyList()) } }
 
     private val _routes = MutableStateFlow<List<ChatRoute>>(emptyList())
     val routes: StateFlow<List<ChatRoute>> = _routes.asStateFlow()
@@ -201,13 +288,13 @@ class ChatController(
 
     // ------------------------------------------------------------------ a conversation
 
-    fun chatIdWith(other: ChatUser): String? = (account.value as? ChatAccount.Ready)?.me?.uid?.let { chatIdOf(it, other.uid) }
+    fun chatIdWith(other: ChatUser): String? = (account.value as? ChatAccount.Ready)?.me?.uid?.let { conversationId(it, other) }
 
     fun messages(other: ChatUser) = chatIdWith(other)?.let { id -> backend.messages(id).catch { emit(emptyList()) } } ?: emptyFlow()
 
-    fun otherReadAt(other: ChatUser) = chatIdWith(other)?.let { id -> backend.otherReadAt(id, other.uid).catch { emit(0L) } } ?: flowOf(0L)
+    fun otherReadAt(other: ChatUser) = if (other.isGroup) flowOf(0L) else chatIdWith(other)?.let { id -> backend.otherReadAt(id, other.uid).catch { emit(0L) } } ?: flowOf(0L)
 
-    fun otherDeliveredAt(other: ChatUser) = chatIdWith(other)?.let { id -> backend.otherDeliveredAt(id, other.uid).catch { emit(0L) } } ?: flowOf(0L)
+    fun otherDeliveredAt(other: ChatUser) = if (other.isGroup) flowOf(0L) else chatIdWith(other)?.let { id -> backend.otherDeliveredAt(id, other.uid).catch { emit(0L) } } ?: flowOf(0L)
 
     fun markRead(other: ChatUser) {
         val id = chatIdWith(other) ?: return
@@ -225,6 +312,16 @@ class ChatController(
             backend.send(other, body, share, replyTo).onFailure { e -> if (e !is CancellationException) _error.value = e.message }
         }
         return true
+    }
+
+    fun sendFile(other: ChatUser, file: PickedFile, caption: String = "", replyTo: ChatReply? = null) {
+        if (file.size > MAX_FILE_BYTES) {
+            _error.value = "max 100 MB"
+            return
+        }
+        scope.launch {
+            backend.sendFile(other, file, caption.trim(), replyTo).onFailure { e -> if (e !is CancellationException) _error.value = e.message }
+        }
     }
 
     fun sendImages(other: ChatUser, images: List<PickedImage>, caption: String, replyTo: ChatReply? = null) {
@@ -247,9 +344,9 @@ class ChatController(
         scope.launch { runCatching { backend.resetClaude() } }
     }
 
-    suspend fun imageBytes(other: ChatUser, id: String): ByteArray? = chatIdWith(other)?.let { backend.imageBytes(it, id) }
+    suspend fun imageBytes(other: ChatUser, image: ChatImage): ByteArray? = chatIdWith(other)?.let { backend.imageBytes(it, image) }
 
-    fun presence(other: ChatUser) = backend.presence(other.uid).catch { emit(null) }
+    fun presence(other: ChatUser) = if (other.isGroup) flowOf(null) else backend.presence(other.uid).catch { emit(null) }
 
     fun assist(other: ChatUser) = chatIdWith(other)?.let { id -> backend.assist(id).catch { emit(null) } } ?: flowOf(null)
 
@@ -301,6 +398,7 @@ class ChatController(
     companion object {
         const val MAX_LENGTH = 4000
         const val MAX_PHOTOS = 10
+        const val MAX_FILE_BYTES = 100L * 1024 * 1024
         private const val TYPING_EVERY_MS = 3_000L
         private const val TYPING_IDLE_MS = 5_000L
         private const val SEARCH_DELAY_MS = 300L

@@ -85,8 +85,7 @@ fun QMusicWordmark(
 }
 
 /**
- * Header lockup, read as "qMusic": the symbol is the q, so only "Music" follows it (the way YouTube Music puts
- * "Music" after its play mark), in one colour and weight.
+ * Header lockup, read as "qeyf": the symbol is the q, so only "eyf" follows it, in one colour and weight.
  */
 @Composable
 fun QMusicHeaderLogo(
@@ -97,7 +96,7 @@ fun QMusicHeaderLogo(
         QMusicLogo(size = 30.dp, tint = color)
         Spacer(Modifier.width(1.dp))
         Text(
-            text = "Music",
+            text = "eyf",
             color = color,
             fontSize = 21.sp,
             fontWeight = FontWeight.Bold,

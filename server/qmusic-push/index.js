@@ -86,8 +86,48 @@ async function reportCallPush(n, ok) {
   await db.ref(`calls/${n.chatId}/push`).set({ id: String(n.callId || ""), ok, at: admin.database.ServerValue.TIMESTAMP }).catch(() => {});
 }
 
+const GROUP = /^grp[A-Za-z0-9]{20}$/;
+
+/** A message in a group: every member but the sender gets it, titled with the group, "Name: text" as the body. */
+async function handleGroup(n) {
+  if (n.type !== "chat" || n.to !== n.chatId) return;
+  if (Date.now() - (Number(n.at) || 0) > MESSAGE_MAX_AGE_MS) return;
+  const group = (await db.ref(`groups/${n.chatId}`).get()).val();
+  if (!group || !group.members) return;
+  if (n.from !== "claudebot" && !group.members[n.from]) return;
+  const senderName = n.from === "claudebot" ? "Claude" : String((group.members[n.from] || {}).name || "");
+  const data = {
+    type: "chat",
+    chatId: n.chatId,
+    from: n.chatId,
+    name: String(group.name || "Grup"),
+    username: "",
+    photo: String(group.photo || ""),
+    body: (senderName ? senderName + ": " : "") + String(n.body || "").replace(/^Claude: /, "").slice(0, 280),
+    group: "1",
+  };
+  const targets = Object.keys(group.members).filter((uid) => uid !== n.from);
+  await Promise.all(targets.map((uid) => deliver(uid, data, 24 * 3600 * 1000).catch((e) => log("group push failed:", e.message))));
+}
+
+/** Sends [data] to every phone of [uid]; drops the addresses of phones that are gone. Resolves how many got it. */
+async function deliver(uid, data, ttl) {
+  const tokensByKey = (await db.ref(`pushTokens/${uid}`).get()).val() || {};
+  const keys = Object.keys(tokensByKey);
+  if (keys.length === 0) return 0;
+  const result = await sendWithRetry({ tokens: keys.map((k) => tokensByKey[k]), data, android: { priority: "high", ttl } });
+  const removals = {};
+  result.responses.forEach((r, i) => {
+    if (!r.success && r.error && DEAD_TOKEN.has(r.error.code)) removals[keys[i]] = null;
+  });
+  if (Object.keys(removals).length > 0) await db.ref(`pushTokens/${uid}`).update(removals);
+  log(`${data.type} group -> ${result.successCount}/${keys.length}`);
+  return result.successCount;
+}
+
 async function handle(n) {
   if (!n || typeof n.from !== "string" || typeof n.to !== "string" || typeof n.chatId !== "string") return;
+  if (GROUP.test(n.chatId)) return handleGroup(n);
   if (n.from === n.to || !isMember(n.chatId, n.to)) return;
   // The owner's Claude speaks in the owner's conversations without being a member of them.
   if (n.from !== "claudebot" && !isMember(n.chatId, n.from)) return;

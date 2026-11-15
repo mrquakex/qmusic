@@ -194,6 +194,68 @@ fun QMusicApp(
             val chatBackend = com.qmusic.ui.chat.rememberChatBackend()
             val chatScope = rememberCoroutineScope()
             val chatController = remember(chatBackend) { chatBackend?.let { com.qmusic.ui.chat.ChatController(it, chatScope) } }
+            // Listening / watching together: the music player and the video player as the session sees them.
+            LaunchedEffect(chatController) {
+                val controller = chatController ?: return@LaunchedEffect
+                if (controller.together != null) return@LaunchedEffect
+                val music = object : com.qmusic.ui.chat.TogetherPlayer {
+                    override fun current() = viewModel.currentTrack.value?.let { song ->
+                        com.qmusic.ui.chat.SharedItem(com.qmusic.ui.chat.ShareKind.SONG, song.id, song.title, song.artists.joinToString(", ") { it.name }, song.thumbnail)
+                    }
+                    override fun isPlaying() = viewModel.isPlaying.value
+                    override fun positionMs() = viewModel.playbackPosition.value
+                    override fun open(item: com.qmusic.ui.chat.SharedItem, positionMs: Long, play: Boolean) {
+                        viewModel.playAt(
+                            com.qmusic.engine.models.SongItem(
+                                id = item.id,
+                                title = item.title,
+                                artists = item.subtitle.takeIf { it.isNotBlank() }?.let { listOf(com.qmusic.engine.models.Artist(it)) }.orEmpty(),
+                                thumbnail = item.thumbnail,
+                            ),
+                            positionMs,
+                        )
+                        if (!play) viewModel.pause()
+                    }
+                    override fun seekTo(ms: Long) = viewModel.seekTo(ms)
+                    override fun play() = viewModel.resume()
+                    override fun pause() = viewModel.pause()
+                }
+                val video = object : com.qmusic.ui.chat.TogetherPlayer {
+                    // A video asked for before its player was ready: where to put it once it is.
+                    var waiting: Triple<String, Long, Boolean>? = null
+                    val playback get() = com.qmusic.ui.chat.TogetherVideo.playback
+                    override fun current() = videosController.watch.value?.video?.let { v ->
+                        com.qmusic.ui.chat.SharedItem(com.qmusic.ui.chat.ShareKind.VIDEO, v.id, v.title, v.channelName.orEmpty(), v.thumbnail)
+                    }
+                    override fun isPlaying() = playback?.isPlaying?.value == true
+                    override fun positionMs() = playback?.positionMs?.value ?: 0L
+                    override fun open(item: com.qmusic.ui.chat.SharedItem, positionMs: Long, play: Boolean) {
+                        waiting = Triple(item.id, positionMs, play)
+                        chatOpen = false
+                        videosOpen = true
+                        videosController.open(
+                            com.qmusic.engine.video.VideoItem(id = item.id, title = item.title, channelName = item.subtitle.ifBlank { null }, thumbnail = item.thumbnail),
+                        )
+                    }
+                    override fun seekTo(ms: Long) { playback?.seekTo(ms) }
+                    override fun play() { if (playback?.isPlaying?.value == false) playback?.togglePlay() }
+                    override fun pause() { playback?.pause() }
+                    override fun tick() {
+                        val (id, pos, play) = waiting ?: return
+                        val p = playback ?: return
+                        if (current()?.id != id || p.durationMs.value <= 0) return
+                        waiting = null
+                        p.seekTo(pos)
+                        if (!play) p.pause()
+                    }
+                }
+                controller.together = com.qmusic.ui.chat.TogetherController(
+                    backend = chatBackend!!,
+                    scope = chatScope,
+                    myUid = { (controller.account.value as? com.qmusic.ui.chat.ChatAccount.Ready)?.me?.uid },
+                    players = { kind -> if (kind == com.qmusic.ui.chat.ShareKind.SONG) music else video },
+                )
+            }
             val chatLaunch by com.qmusic.ui.chat.ChatLaunch.request.collectAsState()
             LaunchedEffect(chatLaunch, chatController) {
                 val request = chatLaunch ?: return@LaunchedEffect

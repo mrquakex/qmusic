@@ -99,6 +99,7 @@ kotlin {
                 implementation(libs.firebase.auth)
                 implementation(libs.firebase.database)
                 implementation(libs.firebase.messaging)
+                implementation(libs.firebase.crashlytics)
                 implementation(libs.androidx.credentials)
                 implementation(libs.androidx.credentials.play)
                 implementation(libs.googleid)
