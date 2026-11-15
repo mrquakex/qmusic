@@ -22,8 +22,10 @@ import kotlinx.coroutines.launch
  * Everything here is best effort: where the phone does not take the call (an old or unusual system), [available] is
  * false or [start] fails, and the call goes on exactly as without it, with the app routing its own sound.
  */
+// Every use of the system's calls goes through [manager], which is there from Android 8 only.
+@android.annotation.SuppressLint("NewApi")
 internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
-    private val manager: CallsManager? = runCatching {
+    private val manager: CallsManager? = if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) null else runCatching {
         CallsManager(app).also { it.registerAppWithTelecom(CallsManager.CAPABILITY_BASELINE or CallsManager.CAPABILITY_SUPPORTS_VIDEO_CALLING) }
     }.getOrNull()
 

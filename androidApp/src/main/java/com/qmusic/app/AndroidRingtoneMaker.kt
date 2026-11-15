@@ -206,7 +206,7 @@ class AndroidRingtoneMaker(private val context: Context) : RingtoneMaker {
             return
         }
         mp.setOnPreparedListener { prepared ->
-            prepared.seekTo(clip.startMs, MediaPlayer.SEEK_CLOSEST)
+            prepared.seekClosest(clip.startMs)
             prepared.start()
             loop = scope.launch {
                 while (isActive && player === prepared) {
@@ -214,7 +214,7 @@ class AndroidRingtoneMaker(private val context: Context) : RingtoneMaker {
                     val range = clip
                     if (position >= range.endMs || position < range.startMs - SEEK_TOLERANCE_MS) {
                         // The end of the part: round again, from its start.
-                        runCatching { prepared.seekTo(range.startMs, MediaPlayer.SEEK_CLOSEST) }
+                        runCatching { prepared.seekClosest(range.startMs) }
                     } else {
                         // The fades, as they will sound in the finished ringtone.
                         val into = (position - range.startMs).coerceAtLeast(0L)
@@ -231,7 +231,7 @@ class AndroidRingtoneMaker(private val context: Context) : RingtoneMaker {
         mp.setOnCompletionListener { done ->
             // The part reaches the very end of the song: start it again.
             runCatching {
-                done.seekTo(clip.startMs, MediaPlayer.SEEK_CLOSEST)
+                done.seekClosest(clip.startMs)
                 done.start()
             }
         }
@@ -376,4 +376,9 @@ class AndroidRingtoneMaker(private val context: Context) : RingtoneMaker {
         const val POLL_MS = 40L
         const val SEEK_TOLERANCE_MS = 400L
     }
+}
+
+/** To [ms] exactly where the system can (Android 8+), else to the nearest point it can. */
+private fun MediaPlayer.seekClosest(ms: Long) {
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) seekTo(ms, MediaPlayer.SEEK_CLOSEST) else seekTo(ms.toInt())
 }

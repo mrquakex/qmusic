@@ -48,7 +48,7 @@ class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
         if (info.downloadUrl.isBlank() || !info.downloadUrl.endsWith(".apk", ignoreCase = true)) {
             error(getString(R.string.update_no_apk))
         }
-        if (!context.packageManager.canRequestPackageInstalls()) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
             // Ask once; the person turns the switch on and taps the update button again.
             context.startActivity(
                 Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))

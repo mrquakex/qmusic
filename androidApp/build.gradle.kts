@@ -24,7 +24,7 @@ android {
 
     defaultConfig {
         applicationId = "com.qmusic.app"
-        minSdk = 26
+        minSdk = 25
         targetSdk = 35
         // Both come from gradle.properties, which the app's update check reads too.
         versionCode = providers.gradleProperty("qmusic.versionCode").get().toInt()

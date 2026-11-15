@@ -157,7 +157,7 @@ android {
     namespace = "com.qmusic.ui"
     compileSdk = 35
     defaultConfig {
-        minSdk = 26
+        minSdk = 25
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21

@@ -126,7 +126,7 @@ class AutoUpdateJob : JobService() {
         val context = applicationContext
         // Without silent installs (older Android, or installs from the app not allowed) the update is still
         // downloaded: the banner, or the system's own install screen on Xiaomi, takes it from there.
-        if (!AutoUpdate.canBeSilent(context) && !isXiaomi() && !context.packageManager.canRequestPackageInstalls()) return false
+        if (!AutoUpdate.canBeSilent(context) && !isXiaomi() && !(android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls())) return false
         work = scope.launch {
             try {
                 if (AutoUpdate.ready(context) == null) {

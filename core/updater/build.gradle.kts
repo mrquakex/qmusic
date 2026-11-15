@@ -51,7 +51,7 @@ android {
     namespace = "com.qmusic.updater"
     compileSdk = 35
     defaultConfig {
-        minSdk = 26
+        minSdk = 25
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21

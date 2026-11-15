@@ -74,7 +74,7 @@ android {
     namespace = "com.qmusic.engine"
     compileSdk = 35
     defaultConfig {
-        minSdk = 26
+        minSdk = 25
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
