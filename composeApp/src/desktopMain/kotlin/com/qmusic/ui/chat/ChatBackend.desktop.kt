@@ -70,3 +70,5 @@ actual fun rememberTextFileShare(): (fileName: String, text: String) -> Unit = {
 
 @androidx.compose.runtime.Composable
 actual fun rememberAnimatedImageLoader(): coil3.ImageLoader = coil3.SingletonImageLoader.get(coil3.compose.LocalPlatformContext.current)
+
+actual val callBlurWorks: Boolean = true

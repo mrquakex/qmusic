@@ -107,3 +107,6 @@ expect fun rememberCamera(onPicked: (PickedImage?) -> Unit): () -> Unit
  */
 @Composable
 expect fun CallPictureInPicture(armed: Boolean): Boolean
+
+/** Whether this system blurs pictures (Android 12 and later; on older ones a blur does nothing). */
+expect val callBlurWorks: Boolean

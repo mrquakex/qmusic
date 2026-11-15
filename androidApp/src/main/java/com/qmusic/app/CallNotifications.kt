@@ -103,30 +103,52 @@ object CallNotifications {
             .putString("ring_photo", peer.photo.orEmpty())
             .putBoolean("ring_video", video)
             .apply()
-        val notification = NotificationCompat.Builder(context, ringChannelId(context))
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val text = if (video) (if (tr) "Görüntülü arama" else "Video call") else (if (tr) "Sesli arama" else "Voice call")
+        fun base() = NotificationCompat.Builder(context, ringChannelId(context))
             .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
             .setLargeIcon(NotificationAvatars.bitmap(peer.uid, peer.name, peer.photo))
             .setContentTitle(peer.name)
-            .setContentText(if (video) (if (tr) "Görüntülü arama" else "Video call") else (if (tr) "Sesli arama" else "Voice call"))
-            .setStyle(
-                NotificationCompat.CallStyle.forIncomingCall(
-                    caller,
-                    action(context, CallActionReceiver.DECLINE, 11),
-                    openApp(context, EXTRA_ACCEPT, 12),
-                ).setIsVideo(video),
-            )
+            .setContentText(text)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
             // Putting the photo in later does not start the ringing over.
             .setOnlyAlertOnce(true)
-            .setFullScreenIntent(openApp(context, EXTRA_OPEN, 13), true)
             .setContentIntent(openApp(context, EXTRA_OPEN, 14))
             .setTimeoutAfter(50_000)
-            .build()
-        // Rings until it is answered, declined or cancelled (not just once).
-        notification.flags = notification.flags or Notification.FLAG_INSISTENT
-        runCatching { context.getSystemService(NotificationManager::class.java).notify(RING_ID, notification) }
+        // Android 12+ refuses a call-style notification that may not open full screen (and is not a foreground
+        // service): it is then not shown at all. Without that permission, or if it is refused anyway, the ringing
+        // call comes as an ordinary notification with Decline and Answer.
+        val fullScreen = Build.VERSION.SDK_INT < 34 || manager.canUseFullScreenIntent()
+        val callStyle = if (!fullScreen) null else runCatching {
+            base()
+                .setStyle(
+                    NotificationCompat.CallStyle.forIncomingCall(
+                        caller,
+                        action(context, CallActionReceiver.DECLINE, 11),
+                        openApp(context, EXTRA_ACCEPT, 12),
+                    ).setIsVideo(video),
+                )
+                .setFullScreenIntent(openApp(context, EXTRA_OPEN, 13), true)
+                .build()
+        }.getOrNull()
+        val plain = {
+            base()
+                .addAction(0, if (tr) "Reddet" else "Decline", action(context, CallActionReceiver.DECLINE, 11))
+                .addAction(0, if (tr) "Cevapla" else "Answer", openApp(context, EXTRA_ACCEPT, 12))
+                .apply { if (fullScreen) setFullScreenIntent(openApp(context, EXTRA_OPEN, 13), true) }
+                .build()
+        }
+        fun post(n: Notification): Boolean {
+            // Rings until it is answered, declined or cancelled (not just once).
+            n.flags = n.flags or Notification.FLAG_INSISTENT
+            return runCatching { manager.notify(RING_ID, n) }
+                .onFailure { android.util.Log.w("QeyfCall", "ring notification refused: ${it.message}") }
+                .isSuccess
+        }
+        if (callStyle == null || !post(callStyle)) post(plain())
     }
 
     /** The caller gave up (the push said so): if this phone was still ringing for that call, it is a missed call. */

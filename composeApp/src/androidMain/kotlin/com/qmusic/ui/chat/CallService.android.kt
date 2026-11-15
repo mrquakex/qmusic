@@ -1210,3 +1210,5 @@ actual fun CallPictureInPicture(armed: Boolean): Boolean {
     val inside by com.qmusic.ui.videos.VideoPip.active.collectAsState()
     return inside
 }
+
+actual val callBlurWorks: Boolean get() = android.os.Build.VERSION.SDK_INT >= 31

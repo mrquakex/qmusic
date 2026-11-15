@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -82,6 +83,9 @@ fun CallScreen(
     }
 
     Box(modifier.fillMaxSize().background(BgRoot)) {
+        // No picture of them on screen: their photo fills the back, blurred, over a wash of its own colour.
+        val picture = showVideo && ((call.remoteVideo && (call.phase == CallPhase.ACTIVE || call.phase == CallPhase.CONNECTING)) || (call.cameraOn && call.phase != CallPhase.INCOMING))
+        if (!picture) CallBackdrop(call.peer.photo)
         if (showVideo && call.remoteVideo && (call.phase == CallPhase.ACTIVE || call.phase == CallPhase.CONNECTING)) {
             CallVideo(service, remote = true, modifier = Modifier.fillMaxSize())
         } else if (showVideo && call.cameraOn && call.phase != CallPhase.INCOMING) {
@@ -277,5 +281,38 @@ private fun Toggle(icon: ImageVector, label: String, on: Boolean, onClick: () ->
         }
         Spacer(Modifier.height(8.dp))
         Text(label, color = TextSecondary, fontSize = 11.sp, maxLines = 1)
+    }
+}
+
+
+/**
+ * Behind a call: the person's photo, large and blurred, with their photo's main colour glowing from the top and a dark
+ * fall to the bottom, so the name and the buttons always read. No photo: a quiet dark glow.
+ */
+@androidx.compose.runtime.Composable
+private fun CallBackdrop(photo: String?) {
+    val tint = com.qmusic.ui.rememberDominantColor(photo)
+    val glow = tint ?: Color(0xFF2A2A35)
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        if (photo != null) {
+            coil3.compose.AsyncImage(
+                model = photo.replace("=s96-c", "=s512-c"),
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                alpha = 0.55f,
+                modifier = Modifier.fillMaxSize().blur(48.dp),
+            )
+        }
+        Box(
+            Modifier.fillMaxSize().background(
+                androidx.compose.ui.graphics.Brush.verticalGradient(
+                    0f to glow.copy(alpha = 0.55f),
+                    0.45f to glow.copy(alpha = 0.18f),
+                    1f to Color.Black.copy(alpha = 0.92f),
+                ),
+            ),
+        )
+        // Phones without blur (before Android 12) see the photo sharp: a darker veil keeps it a background.
+        if (photo != null) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (callBlurWorks) 0.15f else 0.5f)))
     }
 }
