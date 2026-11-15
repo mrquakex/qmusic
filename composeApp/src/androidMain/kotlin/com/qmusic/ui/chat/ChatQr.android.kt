@@ -92,3 +92,26 @@ actual fun StatusVideo(url: String, paused: Boolean, modifier: Modifier, onReady
         modifier = modifier,
     )
 }
+
+@Composable
+actual fun rememberTextFileShare(): (fileName: String, text: String) -> Unit {
+    val context = LocalContext.current
+    return remember(context) {
+        { fileName, text ->
+            runCatching {
+                // In the cache, shared through the app's file provider (only this file, read once by the app picked).
+                val dir = File(context.cacheDir, "exports").apply { mkdirs() }
+                dir.listFiles()?.forEach { it.delete() }
+                val safe = fileName.replace(Regex("[\\/:*?\"<>|]"), "_")
+                val file = File(dir, safe).apply { writeText(text) }
+                val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".updates", file)
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                    .putExtra(android.content.Intent.EXTRA_SUBJECT, safe.removeSuffix(".txt"))
+                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                context.startActivity(android.content.Intent.createChooser(send, null).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+        }
+    }
+}

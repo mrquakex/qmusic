@@ -191,13 +191,17 @@
         "createdAt": {},
         "members": {
           "$uid": {
-            ".write": "auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).exists() && (newData.exists() ? ((!data.exists() && (newData.child('role').val() === 'member' || root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin')) || (data.exists() && root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin') || (auth.uid === $uid && newData.child('role').val() === data.child('role').val())) : (auth.uid === $uid || root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin'))",
-            ".validate": "newData.hasChildren(['name', 'role']) && newData.child('name').isString() && (newData.child('role').val() === 'admin' || newData.child('role').val() === 'member')"
+            ".write": "(auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).exists() && (newData.exists() ? ((!data.exists() && (newData.child('role').val() === 'member' || root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin')) || (data.exists() && root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin') || (auth.uid === $uid && newData.child('role').val() === data.child('role').val())) : (auth.uid === $uid || root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin'))) || (auth != null && auth.uid === $uid && !data.exists() && newData.child('role').val() === 'member' && root.child('groups').child($chatId).child('invite').exists() && newData.child('via').val() === root.child('groups').child($chatId).child('invite').val())",
+            ".validate": "newData.hasChildren(['name', 'role']) && newData.child('name').isString() && (newData.child('role').val() === 'admin' || newData.child('role').val() === 'member') && (data.exists() || auth.uid === $uid || root.child('users').child($uid).child('privacy').child('groupAdd').val() !== 'FRIENDS' || root.child('friends').child($uid).child(auth.uid).exists())"
           }
         },
         "description": {
           ".write": "auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).exists()",
           ".validate": "newData.isString() && newData.val().length <= 500"
+        },
+        "invite": {
+          ".write": "auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin'",
+          ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9]{10,40}$/)"
         }
       }
     },
@@ -266,6 +270,35 @@
       }
     },
     "statusPrivacy": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "groupInvites": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && ((data.exists() && root.child('groups').child(data.child('group').val()).child('members').child(auth.uid).child('role').val() === 'admin') || (!data.exists() && newData.child('group').isString() && root.child('groups').child(newData.child('group').val()).child('members').child(auth.uid).child('role').val() === 'admin'))"
+      }
+    },
+    "privateProfile": {
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid",
+        "photo": {
+          ".read": "auth != null && (auth.uid === $uid || (root.child('friends').child($uid).child(auth.uid).exists() && root.child('users').child($uid).child('privacy').child('photo').val() === 'FRIENDS'))"
+        },
+        "about": {
+          ".read": "auth != null && (auth.uid === $uid || (root.child('friends').child($uid).child(auth.uid).exists() && root.child('users').child($uid).child('privacy').child('about').val() === 'FRIENDS'))"
+        }
+      }
+    },
+    "statusMuted": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "broadcasts": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null && auth.uid === $uid"

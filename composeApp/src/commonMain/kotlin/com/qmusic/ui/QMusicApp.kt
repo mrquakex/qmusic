@@ -275,6 +275,8 @@ fun QMusicApp(
                     if (request.profile) chatController.openProfileOf(user.uid, user) else chatController.openConversation(user)
                 }
                 request.username?.let { chatController.openByUsername(it) }
+                request.invite?.let { chatController.openInvite(it) }
+                request.callUsername?.let { chatController.openCallLink(it) }
             }
             // A ringing group call's notification: open the group; with Join, join its call (if it is still going on:
             // a call that ended meanwhile is not started again, which would ring everyone).

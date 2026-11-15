@@ -15,7 +15,25 @@ data class ChatUser(
 )
 
 /** What the person shares: their last seen (and being online), and whether they tell others they read. */
-data class Privacy(val hideLastSeen: Boolean = false, val hideReadReceipts: Boolean = false)
+/** Who sees something: everyone, friends only, or nobody. */
+enum class Visibility { EVERYONE, FRIENDS, NOBODY }
+
+data class Privacy(
+    val hideLastSeen: Boolean = false,
+    val hideReadReceipts: Boolean = false,
+    /** Who sees the profile photo. */
+    val photo: Visibility = Visibility.EVERYONE,
+    /** Who sees the about line. */
+    val about: Visibility = Visibility.EVERYONE,
+    /** Who may add the person to a group (FRIENDS or EVERYONE). */
+    val groupAdd: Visibility = Visibility.EVERYONE,
+)
+
+/** A list the person sends one message to many through: each gets it in their own conversation. */
+data class Broadcast(val id: String, val name: String, val members: List<ChatUser>, val log: List<Pair<String, Long>> = emptyList())
+
+/** What an invite link shows before joining. */
+data class GroupInvite(val code: String, val groupId: String, val name: String, val photo: String?)
 
 enum class StatusKind { PHOTO, VIDEO, TEXT }
 
@@ -33,6 +51,8 @@ data class StatusItem(
     val width: Int = 0,
     val height: Int = 0,
     val durationMs: Long = 0,
+    /** The typeface of a text status (an index into the status fonts). */
+    val font: Int = 0,
 )
 
 /** Someone's statuses, oldest first, and whether the person has seen all of them. */
@@ -224,7 +244,8 @@ val CLAUDE_MODELS = listOf("opus", "sonnet", "haiku")
 data class ClaudeAssist(val target: String, val phase: String)
 
 /** The message a message answers: shown quoted above it. */
-data class ChatReply(val id: String, val from: String, val text: String)
+/** A quoted message; [thumb] is a tiny base64 picture (a status answered). */
+data class ChatReply(val id: String, val from: String, val text: String, val thumb: String = "")
 
 /** Whether someone has the app open now, and when they last had. */
 data class Presence(val online: Boolean, val lastSeen: Long)
@@ -297,6 +318,8 @@ data class ChatThread(
     val typingName: String = "",
     /** Marked as a favourite (the Favourites filter of the list). */
     val favorite: Boolean = false,
+    /** Kept in the locked chats (opened with the phone's lock; notifications do not show it). */
+    val locked: Boolean = false,
 ) {
     fun muted(now: Long): Boolean = mutedUntil == -1L || mutedUntil > now
 
@@ -535,7 +558,7 @@ interface ChatBackend {
     /** Friends' statuses the person may see, the ones with something unseen first. */
     fun friendStatuses(): Flow<List<StatusGroup>> = kotlinx.coroutines.flow.flowOf(emptyList())
 
-    suspend fun postTextStatus(text: String, background: Long): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun postTextStatus(text: String, background: Long, font: Int = 0): Result<Unit> = Result.failure(UnsupportedOperationException())
     suspend fun postPhotoStatus(image: PickedImage, caption: String): Result<Unit> = Result.failure(UnsupportedOperationException())
     suspend fun postVideoStatus(file: PickedFile, caption: String): Result<Unit> = Result.failure(UnsupportedOperationException())
     suspend fun deleteStatus(id: String) {}
@@ -548,6 +571,27 @@ interface ChatBackend {
 
     val statusPrivacy: StateFlow<StatusPrivacy> get() = kotlinx.coroutines.flow.MutableStateFlow(StatusPrivacy())
     suspend fun setStatusPrivacy(privacy: StatusPrivacy) {}
+
+    /** Whose statuses the person muted (they go to the bottom, without a ring). */
+    fun mutedStatuses(): Flow<Set<String>> = kotlinx.coroutines.flow.flowOf(emptySet())
+    suspend fun setStatusMuted(owner: String, muted: Boolean) {}
+
+    // ------------------------------------------------------------------ more
+
+    suspend fun setLocked(chatId: String, locked: Boolean) {}
+
+    /** The group's invite code (made when there is none; admins only). */
+    suspend fun groupInviteCode(groupId: String, renew: Boolean = false): Result<String> = Result.failure(UnsupportedOperationException())
+    suspend fun groupInvite(code: String): GroupInvite? = null
+    suspend fun joinByInvite(code: String): Result<ChatUser> = Result.failure(UnsupportedOperationException())
+
+    fun broadcasts(): Flow<List<Broadcast>> = kotlinx.coroutines.flow.flowOf(emptyList())
+    suspend fun saveBroadcast(id: String?, name: String, members: List<ChatUser>): Result<String> = Result.failure(UnsupportedOperationException())
+    suspend fun deleteBroadcast(id: String) {}
+    suspend fun logBroadcast(id: String, text: String) {}
+
+    /** Every message of a conversation, oldest first (for exporting it). */
+    suspend fun allMessages(chatId: String): List<ChatMessage> = emptyList()
 }
 
 /** A conversation's id: both people's ids in order, so each pair has exactly one. */
@@ -557,7 +601,15 @@ fun chatIdOf(a: String, b: String): String = if (a < b) "${a}_$b" else "${b}_$a"
 fun isValidUsername(name: String): Boolean = name.length in 3..20 && name.all { it in 'a'..'z' || it in '0'..'9' || it == '.' || it == '_' }
 
 /** Asks the app to open the messages section (a tapped notification); [user] opens their conversation. */
-data class ChatLaunchRequest(val user: ChatUser?, val profile: Boolean = false, val username: String? = null)
+data class ChatLaunchRequest(
+    val user: ChatUser?,
+    val profile: Boolean = false,
+    val username: String? = null,
+    /** A group invite link was opened (qeyf://g/<code>). */
+    val invite: String? = null,
+    /** A call link was opened (qeyf://c/<username>). */
+    val callUsername: String? = null,
+)
 
 object ChatLaunch {
     val request = kotlinx.coroutines.flow.MutableStateFlow<ChatLaunchRequest?>(null)

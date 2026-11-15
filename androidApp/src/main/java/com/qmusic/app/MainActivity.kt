@@ -253,8 +253,8 @@ class MainActivity : AppCompatActivity() {
     private fun openLinkIfAny(intent: Intent?) {
         // A Qeyf code (qeyf://u/<username>): that person's profile in the messages section.
         if (intent?.action == Intent.ACTION_VIEW && intent.data?.scheme == "qeyf") {
-            com.qmusic.ui.chat.qeyfUsernameOf(intent.dataString.orEmpty())?.let { name ->
-                com.qmusic.ui.chat.ChatLaunch.request.value = com.qmusic.ui.chat.ChatLaunchRequest(null, username = name)
+            com.qmusic.ui.chat.qeyfLaunchOf(intent.dataString.orEmpty())?.let { request ->
+                com.qmusic.ui.chat.ChatLaunch.request.value = request
             }
             intent.action = Intent.ACTION_MAIN
             return

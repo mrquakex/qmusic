@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -43,6 +44,11 @@ sealed interface ChatRoute {
     data object TextStatus : ChatRoute
     data object StatusPrivacyPage : ChatRoute
     data object MyQr : ChatRoute
+    data object LockedFolder : ChatRoute
+    data class JoinGroup(val code: String) : ChatRoute
+    data object Broadcasts : ChatRoute
+    data class BroadcastEdit(val id: String?) : ChatRoute
+    data class BroadcastChat(val id: String) : ChatRoute
     data object Settings : ChatRoute
 }
 
@@ -86,15 +92,29 @@ class ChatController(
         }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
-    /** The list: conversations not archived. */
+    /** The list: conversations not archived and not locked. */
     val threads: StateFlow<List<ChatThread>?> = allThreads
-        .map { list -> list?.filter { !it.archived } }
+        .map { list -> list?.filter { !it.archived && !it.locked } }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
-    /** The conversations moved to "Archived". */
+    /** The conversations moved to "Archived" (locked ones stay in the locked folder). */
     val archived: StateFlow<List<ChatThread>> = allThreads
-        .map { list -> list.orEmpty().filter { it.archived } }
+        .map { list -> list.orEmpty().filter { it.archived && !it.locked } }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** The locked conversations: opened with the phone's lock, hidden from the list and from notifications. */
+    val lockedThreads: StateFlow<List<ChatThread>> = allThreads
+        .map { list -> list.orEmpty().filter { it.locked } }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    init {
+        // The app keeps the locked ones' ids so a notification for them shows no name and no text.
+        scope.launch { lockedThreads.collect { list -> LockedChats.update(list.map { it.id }.toSet()) } }
+    }
+
+    fun setLocked(thread: ChatThread, locked: Boolean) {
+        scope.launch { runCatching { backend.setLocked(thread.id, locked) } }
+    }
 
     /** How many conversations have something not read: the badge on the entry button (archived ones do not count). */
     val unreadCount: StateFlow<Int> = threads
@@ -155,9 +175,18 @@ class ChatController(
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     /** People with a status the person has not seen yet: their picture gets a ring. */
-    val unseenStatusOwners: StateFlow<Set<String>> = friendStatuses
-        .map { list -> list.filter { !it.seenAll }.map { it.owner.uid }.toSet() }
+    /** Whose statuses the person muted. */
+    val mutedStatuses: StateFlow<Set<String>> = ready
+        .flatMapLatest { if (it == null) flowOf(emptySet()) else backend.mutedStatuses().catch { emit(emptySet()) } }
         .stateIn(scope, SharingStarted.Eagerly, emptySet())
+
+    fun setStatusMuted(owner: ChatUser, muted: Boolean) {
+        scope.launch { runCatching { backend.setStatusMuted(owner.uid, muted) } }
+    }
+
+    val unseenStatusOwners: StateFlow<Set<String>> = combine(friendStatuses, mutedStatuses) { list, muted ->
+        list.filter { !it.seenAll && it.owner.uid !in muted }.map { it.owner.uid }.toSet()
+    }.stateIn(scope, SharingStarted.Eagerly, emptySet())
 
     private val _posting = MutableStateFlow(false)
 
@@ -172,7 +201,7 @@ class ChatController(
         }
     }
 
-    fun postTextStatus(text: String, background: Long) = post { backend.postTextStatus(text, background) }
+    fun postTextStatus(text: String, background: Long, font: Int = 0) = post { backend.postTextStatus(text, background, font) }
     fun postPhotoStatus(image: PickedImage, caption: String) = post { backend.postPhotoStatus(image, caption) }
     fun postVideoStatus(file: PickedFile, caption: String) = post { backend.postVideoStatus(file, caption) }
 
@@ -194,7 +223,103 @@ class ChatController(
 
     /** Answers a status: a message to its owner, quoting it. */
     fun replyToStatus(item: StatusItem, text: String, quote: String) {
-        send(item.owner, text, replyTo = ChatReply("status_" + item.id, item.owner.uid, quote))
+        send(item.owner, text, replyTo = ChatReply("status_" + item.id, item.owner.uid, quote, item.thumb))
+    }
+
+    // ------------------------------------------------------------------ group invite links
+
+    suspend fun inviteCode(group: ChatUser, renew: Boolean = false): String? =
+        backend.groupInviteCode(group.uid, renew).onFailure { _error.value = it.message }.getOrNull()
+
+    suspend fun groupInvite(code: String): GroupInvite? = backend.groupInvite(code)
+
+    fun openInvite(code: String) = push(ChatRoute.JoinGroup(code))
+
+    fun joinGroup(code: String) {
+        scope.launch {
+            backend.joinByInvite(code)
+                .onSuccess { group ->
+                    _routes.update { list -> list.filterNot { it is ChatRoute.JoinGroup } }
+                    openConversation(group)
+                }
+                .onFailure { _error.value = it.message }
+        }
+    }
+
+    // ------------------------------------------------------------------ broadcast lists
+
+    val broadcasts: StateFlow<List<Broadcast>> = ready
+        .flatMapLatest { if (it == null) flowOf(emptyList()) else backend.broadcasts().catch { emit(emptyList()) } }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    fun saveBroadcast(id: String?, name: String, members: List<ChatUser>) {
+        scope.launch {
+            backend.saveBroadcast(id, name, members)
+                .onSuccess { key ->
+                    _routes.update { list -> list.filterNot { it is ChatRoute.BroadcastEdit } }
+                    if (id == null) push(ChatRoute.BroadcastChat(key))
+                }
+                .onFailure { _error.value = it.message }
+        }
+    }
+
+    fun deleteBroadcast(id: String) {
+        _routes.update { list -> list.filterNot { it is ChatRoute.BroadcastChat || it is ChatRoute.BroadcastEdit } }
+        scope.launch { runCatching { backend.deleteBroadcast(id) } }
+    }
+
+    /** One message to everyone on the list, each in their own conversation (they do not see each other). */
+    fun sendBroadcast(list: Broadcast, text: String) {
+        val body = text.trim()
+        if (body.isEmpty()) return
+        list.members.forEach { send(it, body) }
+        scope.launch { runCatching { backend.logBroadcast(list.id, body) } }
+    }
+
+    // ------------------------------------------------------------------ export
+
+    /** The whole conversation as plain text: "15.11.2026 14:03 - Name: text". */
+    suspend fun exportText(other: ChatUser, me: ChatUser, s: ChatStrings): String {
+        val id = chatIdWith(other) ?: return ""
+        val names = if (other.isGroup) {
+            runCatching { kotlinx.coroutines.withTimeoutOrNull(5_000) { backend.group(id).first { it != null } }?.members?.associate { it.user.uid to it.user.name } }.getOrNull().orEmpty()
+        } else {
+            mapOf(other.uid to other.name)
+        }
+        val all = runCatching { backend.allMessages(id) }.getOrDefault(emptyList())
+        return buildString {
+            all.forEach { m ->
+                if (m.deleted) return@forEach
+                val who = when {
+                    m.system -> ""
+                    m.from == me.uid -> me.name
+                    else -> names[m.from] ?: other.name
+                }
+                val body = buildList {
+                    if (m.text.isNotBlank()) add(m.text)
+                    if (m.images.isNotEmpty()) add("<" + s.photo + " ×" + m.images.size + ">")
+                    m.attachment?.let { add("<" + it.name.ifBlank { it.kind.name.lowercase() } + ">") }
+                    m.location?.let { add("<" + it.lat + ", " + it.lng + ">") }
+                    m.contact?.let { add("<" + it.name + " " + it.phone + ">") }
+                    m.poll?.let { add("<" + it.question + ">") }
+                }.joinToString(" ")
+                append(exportTime(m.at)).append(" - ")
+                if (who.isNotEmpty()) append(who).append(": ")
+                append(body).append('\n')
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ call links
+
+    /** A call link (qeyf://c/<username>) was opened: that person, with the voice and video buttons. */
+    fun openCallLink(username: String) {
+        val name = username.trim().removePrefix("@").lowercase()
+        if (!isValidUsername(name)) return
+        scope.launch {
+            val found = backend.findUsers(name).getOrNull().orEmpty().firstOrNull { it.username == name }
+            if (found != null) push(ChatRoute.CallDetails(found)) else _error.value = "@$name"
+        }
     }
 
     // ------------------------------------------------------------------ QR

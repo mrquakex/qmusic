@@ -103,7 +103,7 @@ internal fun ChatHome(
                 ChatTab.CHATS -> ChatsTab(controller, s, me, onExit)
                 ChatTab.STATUS -> StatusTab(controller, s, me, onExit)
                 ChatTab.GROUPS -> GroupsTab(controller, s, me, onExit)
-                ChatTab.CALLS -> CallsTab(controller, s, onExit, onCall, onGroupCall)
+                ChatTab.CALLS -> CallsTab(controller, s, me, onExit, onCall, onGroupCall)
             }
         }
         HomeBar(controller, s, tab)
@@ -296,7 +296,7 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
     var muteFor by remember { mutableStateOf<ChatThread?>(null) }
     var cameraShot by remember { mutableStateOf<PickedImage?>(null) }
     val camera = rememberCamera { shot -> cameraShot = shot }
-    val scan = rememberQrScanner { text -> qeyfUsername(text)?.let { controller.openByUsername(it) } ?: controller.reportError(s.notFoundUser) }
+    val scan = rememberQrScanner { text -> controller.openQeyfCode(text, s) }
     val now = rememberNow()
     val withStatus = remember(statusGroups) { statusGroups.map { it.owner.uid }.toSet() }
     val source = if (filter == ChatFilter.ARCHIVED) archived else all
@@ -312,6 +312,7 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
         }
     }
     val unreadTotal = all.orEmpty().count { it.unread }
+    val lockedCount = controller.lockedThreads.collectAsState().value.size
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
             item(key = "title") {
@@ -333,7 +334,9 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
                         IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Color.White) }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
                             DropdownMenuItem(text = { Text(s.newGroup, color = TextPrimary) }, onClick = { menu = false; controller.openNewGroup() })
+                            DropdownMenuItem(text = { Text(s.broadcastsTitle, color = TextPrimary) }, onClick = { menu = false; controller.push(ChatRoute.Broadcasts) })
                             DropdownMenuItem(text = { Text(s.starredShort, color = TextPrimary) }, onClick = { menu = false; controller.openStarred() })
+                            DropdownMenuItem(text = { Text(s.lockedChats, color = TextPrimary) }, onClick = { menu = false; controller.push(ChatRoute.LockedFolder) })
                             if (scan != null) DropdownMenuItem(text = { Text(s.scanQr, color = TextPrimary) }, onClick = { menu = false; scan() })
                             DropdownMenuItem(text = { Text(s.settings, color = TextPrimary) }, onClick = { menu = false; controller.openSettings() })
                             DropdownMenuItem(text = { Text(s.signOut, color = TextPrimary) }, onClick = { menu = false; controller.signOut() })
@@ -356,6 +359,19 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
                 }
             }
             item(key = "readiness") { ReadinessCard(s) }
+            if (lockedCount > 0 && filter == ChatFilter.ALL && search.isBlank()) {
+                item(key = "locked") {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { controller.push(ChatRoute.LockedFolder) }.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) { Icon(QMusicIcons.Archive, null, tint = TextSecondary) }
+                        Spacer(Modifier.width(14.dp))
+                        Text(s.lockedChats, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Text(lockedCount.toString(), color = TextMuted, fontSize = 13.sp)
+                    }
+                }
+            }
             togetherState?.let { state ->
                 item(key = "together") {
                     val thread = all?.firstOrNull { it.id == state.chatId }
@@ -400,8 +416,8 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
     }
     muteFor?.let { t -> MuteChoice(controller, s, t, now) { muteFor = null } }
     cameraShot?.let { shot ->
-        StatusMediaComposer(s, image = shot, video = null, onCancel = { cameraShot = null }) { caption ->
-            controller.postPhotoStatus(shot, caption)
+        StatusMediaComposer(s, image = shot, video = null, onCancel = { cameraShot = null }) { caption, edited ->
+            controller.postPhotoStatus(edited ?: shot, caption)
             cameraShot = null
             controller.selectTab(ChatTab.STATUS)
         }
@@ -424,6 +440,7 @@ private fun threadActions(controller: ChatController, s: ChatStrings, t: ChatThr
     (if (t.favorite) s.removeFavorite else s.addFavorite) to { controller.setFavorite(t, !t.favorite) },
     (if (t.muted(now)) s.unmute else s.mute) to { if (t.muted(now)) controller.setMuted(t.other, 0L) else onMute() },
     (if (t.archived) s.unarchive else s.archive) to { controller.setArchived(t, !t.archived) },
+    s.lockChat to { controller.setLocked(t, true) },
 )
 
 @Composable
@@ -533,6 +550,7 @@ internal fun CallArrow(c: CallLogEntry) {
 private fun CallsTab(
     controller: ChatController,
     s: ChatStrings,
+    me: ChatUser,
     onExit: () -> Unit,
     onCall: ((ChatUser, Boolean) -> Unit)?,
     onGroupCall: ((ChatUser, Boolean) -> Unit)?,
@@ -543,6 +561,7 @@ private fun CallsTab(
     var menu by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
     var showFavorites by remember { mutableStateOf(false) }
+    val share = com.qmusic.ui.rememberShare()
     val runs = remember(calls, search) {
         val q = search.trim()
         runsOf(if (q.isEmpty()) calls else calls.filter { it.peer.name.contains(q, ignoreCase = true) || it.peer.username.contains(q, ignoreCase = true) })
@@ -557,6 +576,7 @@ private fun CallsTab(
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Color.White) }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
+                            DropdownMenuItem(text = { Text(s.callLink, color = TextPrimary) }, onClick = { menu = false; share(s.callLinkText + ": " + qeyfCallLink(me.username)) })
                             DropdownMenuItem(text = { Text(s.clearCalls, color = TextPrimary) }, enabled = calls.isNotEmpty(), onClick = { menu = false; confirmClear = true })
                             DropdownMenuItem(text = { Text(s.settings, color = TextPrimary) }, onClick = { menu = false; controller.openSettings() })
                         }

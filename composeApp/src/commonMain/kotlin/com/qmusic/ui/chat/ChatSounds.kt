@@ -47,6 +47,7 @@ object ChatSoundCatalog {
             SoundOption("kus", "Kuş", "Chirp"),
         ),
         SoundKind.RECEIVE to listOf(
+            SoundOption("yeni", "Qeyf mesajı", "Qeyf message"),
             SoundOption("cit", "Çıt", "Click"),
             SoundOption("ikinota", "İki nota", "Two notes"),
             SoundOption("pit", "Pıt", "Pip"),
@@ -55,6 +56,7 @@ object ChatSoundCatalog {
             SoundOption("yumusak", "Yumuşak", "Soft"),
         ),
         SoundKind.NOTIFY to listOf(
+            SoundOption("yeni", "Qeyf mesajı", "Qeyf message"),
             SoundOption("soru", "Soru", "Question"),
             SoundOption("qeyf", "Qeyf", "Qeyf"),
             SoundOption("cay", "Çay kaşığı", "Tea spoon"),
@@ -83,8 +85,8 @@ object ChatSoundCatalog {
      */
     val defaults: Map<SoundKind, String> = mapOf(
         SoundKind.SEND to "anahtar",
-        SoundKind.RECEIVE to "cit",
-        SoundKind.NOTIFY to "soru",
+        SoundKind.RECEIVE to "yeni",
+        SoundKind.NOTIFY to "yeni",
         SoundKind.RING to "plucky",
         SoundKind.RINGBACK to "klasik",
     )

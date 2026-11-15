@@ -150,6 +150,11 @@ fun ChatApp(
                 ChatRoute.TextStatus -> TextStatusPage(controller, s)
                 ChatRoute.StatusPrivacyPage -> StatusPrivacyPage(controller, s)
                 ChatRoute.MyQr -> MyQrPage(controller, s, a.me)
+                ChatRoute.LockedFolder -> LockedFolderPage(controller, s, a.me)
+                is ChatRoute.JoinGroup -> JoinGroupPage(controller, s, top.code)
+                ChatRoute.Broadcasts -> BroadcastsPage(controller, s)
+                is ChatRoute.BroadcastEdit -> BroadcastEditPage(controller, s, top.id)
+                is ChatRoute.BroadcastChat -> BroadcastChatPage(controller, s, top.id)
                 ChatRoute.Settings -> SettingsPage(controller, s, a.me)
                 ChatRoute.Friends -> FriendsPage(controller, s)
                 is ChatRoute.Profile -> ProfilePage(controller, s, a.me, top.user, onCall)
@@ -590,6 +595,8 @@ private fun ConversationPage(
     var votersFor by remember { mutableStateOf<ChatMessage?>(null) }
     var reactionsFor by remember { mutableStateOf<ChatMessage?>(null) }
     val saveContact = rememberContactSaver()
+    val shareTextFile = rememberTextFileShare()
+    val exportScope = androidx.compose.runtime.rememberCoroutineScope()
     val pickContact = rememberContactPicker { contact -> controller.sendContact(other, contact) }
     val groupCalls = controller.groupCalls
     val callPeople by remember(other.uid) { if (other.isGroup) controller.groupCallParticipants(other) else kotlinx.coroutines.flow.flowOf(emptyList()) }.collectAsState(initial = emptyList())
@@ -880,6 +887,23 @@ private fun ConversationPage(
                                 )
                             }
                         }
+                        thread?.let { t ->
+                            DropdownMenuItem(
+                                text = { Text(if (t.locked) s.unlockChat else s.lockChat, color = TextPrimary) },
+                                onClick = { menu = false; controller.setLocked(t, !t.locked) },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text(s.exportChat, color = TextPrimary) },
+                            onClick = {
+                                menu = false
+                                controller.reportInfo(s.exporting)
+                                exportScope.launch {
+                                    val body = controller.exportText(other, me, s)
+                                    if (body.isNotEmpty()) shareTextFile("Qeyf - " + title.take(40) + ".txt", body)
+                                }
+                            },
+                        )
                         if (!isGroup) {
                             DropdownMenuItem(
                                 text = { Text(if (isBlocked) s.unblock else s.block, color = TextPrimary) },
@@ -997,7 +1021,16 @@ private fun ConversationPage(
                                     } else null,
                                     onStar = { controller.setStarred(other, m, if (mine) me.name else memberNames[m.from] ?: other.name, title, m.id !in starredIds) },
                                     onInfo = if (mine && !m.deleted) ({ infoFor = m }) else null,
-                                    onQuoteTap = { id -> jumpTo = id },
+                                    onQuoteTap = { id ->
+                                        if (id.startsWith("status:")) {
+                                            val owner = id.removePrefix("status:")
+                                            val mine = owner == me.uid
+                                            val there = if (mine) controller.myStatuses.value.isNotEmpty() else controller.friendStatuses.value.any { it.owner.uid == owner }
+                                            if (there) controller.push(ChatRoute.StatusViewer(owner, mine)) else controller.reportInfo(s.statusGone)
+                                        } else {
+                                            jumpTo = id
+                                        }
+                                    },
                                     loadPreview = { url -> controller.linkPreview(url) },
                                     pollVotes = pollVotes[m.id].orEmpty(),
                                     onVote = { picks -> controller.vote(other, m, picks) },
@@ -2026,7 +2059,7 @@ private fun Bubble(
                         .padding(start = 8.dp, end = 8.dp, top = 8.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(if (mine) Color.Black.copy(alpha = 0.07f) else Color.White.copy(alpha = 0.07f))
-                        .clickable(enabled = !selecting) { onQuoteTap(quoted.id) }
+                        .clickable(enabled = !selecting) { onQuoteTap(if (quoted.id.startsWith("status_")) "status:" + quoted.from else quoted.id) }
                         .padding(end = 10.dp),
                 ) {
                     Box(Modifier.width(3.dp).height(40.dp).background(if (mine) Color.Black else Color.White))
@@ -2039,6 +2072,7 @@ private fun Bubble(
                         )
                         Text(quoted.text, color = fgSoft, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
+                    if (quoted.thumb.isNotEmpty()) QuoteThumb(quoted.thumb)
                 }
             }
             // Claude's answers: who (in other conversations) and which model.
@@ -2250,6 +2284,22 @@ private fun dayLabel(ms: Long, s: ChatStrings): String = when (daysAgo(ms)) {
     1 -> s.yesterday
     else -> local(ms).let { "${two(it.dayOfMonth)}.${two(it.monthNumber)}.${it.year}" }
 }
+
+/** The tiny picture of a quoted status. */
+@OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
+@Composable
+private fun QuoteThumb(thumb: String) {
+    val bytes = remember(thumb) { runCatching { kotlin.io.encoding.Base64.decode(thumb) }.getOrNull() } ?: return
+    AsyncImage(
+        model = bytes,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier.padding(start = 8.dp, top = 4.dp, bottom = 4.dp).size(40.dp).clip(RoundedCornerShape(6.dp)),
+    )
+}
+
+/** "15.11.2026 14:03": a line's time in an exported conversation. */
+internal fun exportTime(ms: Long): String = local(ms).let { "${two(it.dayOfMonth)}.${two(it.monthNumber)}.${it.year} ${two(it.hour)}:${two(it.minute)}" }
 
 internal fun listTime(ms: Long, s: ChatStrings): String = when (daysAgo(ms)) {
     0 -> clock(ms)

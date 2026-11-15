@@ -210,6 +210,8 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
         item {
             MenuRow(s.myQrTitle, s.myQrNote) { controller.push(ChatRoute.MyQr) }
             MenuRow(s.starredShort, null) { controller.openStarred() }
+            MenuRow(s.lockedChats, s.lockedChatsNote) { controller.push(ChatRoute.LockedFolder) }
+            MenuRow(s.broadcastsTitle, null) { controller.push(ChatRoute.Broadcasts) }
             MenuRow(s.statusPrivacyTitle, s.statusPrivacyNote) { controller.push(ChatRoute.StatusPrivacyPage) }
         }
         item { SectionTitle(s.soundsTitle) }
@@ -218,6 +220,10 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
         item {
             SettingSwitch(s.hideLastSeen, s.hideLastSeenNote, privacy.hideLastSeen) { controller.setPrivacy(privacy.copy(hideLastSeen = it)) }
             SettingSwitch(s.hideReadReceipts, s.hideReadReceiptsNote, privacy.hideReadReceipts) { controller.setPrivacy(privacy.copy(hideReadReceipts = it)) }
+            val all = listOf(Visibility.EVERYONE, Visibility.FRIENDS, Visibility.NOBODY)
+            VisibilityRow(s.privacyPhoto, null, privacy.photo, all, s) { controller.setPrivacy(privacy.copy(photo = it)) }
+            VisibilityRow(s.privacyAbout, null, privacy.about, all, s) { controller.setPrivacy(privacy.copy(about = it)) }
+            VisibilityRow(s.privacyGroups, s.privacyGroupsNote, privacy.groupAdd, listOf(Visibility.EVERYONE, Visibility.FRIENDS), s) { controller.setPrivacy(privacy.copy(groupAdd = it)) }
             val lock = rememberAppLock()
             if (lock != null) {
                 val lockOn by lock.enabled.collectAsState()

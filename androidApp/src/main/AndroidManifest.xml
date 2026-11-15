@@ -97,7 +97,10 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="qeyf" android:host="u" />
+                <data android:scheme="qeyf" />
+                <data android:host="u" />
+                <data android:host="g" />
+                <data android:host="c" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

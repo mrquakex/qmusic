@@ -153,6 +153,21 @@ object ChatPush {
             background.launch { runCatching { com.qmusic.ui.chat.ChatNotificationActions.delivered(context.applicationContext, chatId) } }
         }
         if (ChatPresence.openChatId == chatId) return
+        // A locked conversation: neither who nor what, and a tap opens the messages (the lock asks first).
+        if (chatId in com.qmusic.ui.chat.LockedChats.ids) {
+            val tr = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+            val hidden = ChatUser(LOCKED_UID, "Qeyf", "", null)
+            val line = Line(if (tr) "Yeni mesaj" else "New message", System.currentTimeMillis(), false, LOCKED_UID, "Qeyf", null)
+            val (lines, count) = synchronized(history) {
+                val list = history.getOrPut(chatId) { ArrayDeque() }
+                list.clear()
+                list.addLast(line)
+                unread[chatId] = (unread[chatId] ?: 0) + 1
+                list.toList() to unread.getValue(chatId)
+            }
+            show(context, chatId, hidden, false, lines, count, alert = true)
+            return
+        }
         val conversation = ChatUser(from, data["name"].orEmpty().ifBlank { "Qeyf" }, data["username"].orEmpty(), data["photo"]?.ifBlank { null })
         val group = data["group"] == "1"
         // In a group each line has its writer; one-to-one, the other person (or Claude speaking in the conversation).
@@ -307,6 +322,11 @@ object ChatPush {
     /** A tapped message notification (or conversation shortcut): the app opens that conversation. */
     fun openIfAsked(intent: Intent?) {
         val uid = intent?.getStringExtra(EXTRA_UID) ?: return
+        if (uid == LOCKED_UID) {
+            intent.removeExtra(EXTRA_UID)
+            ChatLaunch.request.value = ChatLaunchRequest(null)
+            return
+        }
         val user = ChatUser(
             uid = uid,
             name = intent.getStringExtra(EXTRA_NAME).orEmpty(),
@@ -318,6 +338,9 @@ object ChatPush {
         intent.removeExtra(EXTRA_PROFILE)
         ChatLaunch.request.value = ChatLaunchRequest(user, profile)
     }
+
+    /** Who a locked conversation's notification is "from". */
+    private const val LOCKED_UID = "__locked"
 
     /** Android's own category for conversation shortcuts (ShortcutInfo.SHORTCUT_CATEGORY_CONVERSATION). */
     private const val SHORTCUT_CATEGORY = "android.shortcut.conversation"

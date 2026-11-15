@@ -33,7 +33,7 @@ internal object VideoCompressor {
     private const val TARGET_BITRATE = 2_500_000
 
     /** The smaller copy (in the cache), or null when it is not needed or could not be made. */
-    suspend fun compress(context: Context, location: String, onProgress: (Float) -> Unit): File? {
+    suspend fun compress(context: Context, location: String, maxMs: Long = 0L, onProgress: (Float) -> Unit): File? {
         val uri = if (location.startsWith("/")) Uri.fromFile(File(location)) else Uri.parse(location)
         val (shortSide, bitrate) = withContext(Dispatchers.IO) {
             runCatching {
@@ -49,7 +49,7 @@ internal object VideoCompressor {
                 }
             }.getOrDefault(0 to 0)
         }
-        if (shortSide in 1..TARGET_SHORT_SIDE && bitrate in 1..(TARGET_BITRATE * 3 / 2)) return null
+        if (maxMs <= 0 && shortSide in 1..TARGET_SHORT_SIDE && bitrate in 1..(TARGET_BITRATE * 3 / 2)) return null
         val out = File(File(context.cacheDir, "video_out").apply { mkdirs() }, "v_${System.currentTimeMillis()}.mp4")
         return withContext(Dispatchers.Main) {
             suspendCancellableCoroutine { cont ->
@@ -78,7 +78,13 @@ internal object VideoCompressor {
                 } else {
                     Effects.EMPTY
                 }
-                val item = EditedMediaItem.Builder(MediaItem.fromUri(uri)).setEffects(effects).build()
+                // [maxMs]: only the start is kept (a status video is its first minute).
+                val media = if (maxMs > 0) {
+                    MediaItem.Builder().setUri(uri).setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setEndPositionMs(maxMs).build()).build()
+                } else {
+                    MediaItem.fromUri(uri)
+                }
+                val item = EditedMediaItem.Builder(media).setEffects(effects).build()
                 transformer.start(item, out.absolutePath)
                 // How far it is, read from the transformer's own thread (the main one) while it works.
                 val holder = ProgressHolder()

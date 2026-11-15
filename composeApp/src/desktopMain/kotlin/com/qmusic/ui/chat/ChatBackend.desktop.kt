@@ -64,3 +64,6 @@ actual fun rememberQrScanner(onResult: (String) -> Unit): (() -> Unit)? = null
 
 @androidx.compose.runtime.Composable
 actual fun StatusVideo(url: String, paused: Boolean, modifier: androidx.compose.ui.Modifier, onReady: (Long) -> Unit) = Unit
+
+@androidx.compose.runtime.Composable
+actual fun rememberTextFileShare(): (fileName: String, text: String) -> Unit = { _, _ -> }

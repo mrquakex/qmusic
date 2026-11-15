@@ -76,11 +76,22 @@ import com.qmusic.ui.theme.TextMuted
 import com.qmusic.ui.theme.TextPrimary
 import com.qmusic.ui.theme.TextSecondary
 import kotlinx.datetime.Clock
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.text.font.FontFamily
+import kotlin.math.abs
+import androidx.compose.ui.draw.alpha
 
 /** The colours a text status can stand on (dark, so white text reads on all of them). */
 internal val StatusColors = listOf(
     0xFF1E1E1E, 0xFF3A3A3A, 0xFF5B2A86, 0xFF1F4E79, 0xFF0F5E4F, 0xFF7A2E2E, 0xFF8A4B08, 0xFF243B55, 0xFF6A1B4D, 0xFF2E4B2E,
 )
+
+/** The typefaces a text status can be written in. */
+internal val StatusFonts = listOf(FontFamily.Default, FontFamily.Serif, FontFamily.Monospace, FontFamily.Cursive, FontFamily.SansSerif)
+internal val StatusFontWeights = listOf(FontWeight.SemiBold, FontWeight.Normal, FontWeight.Medium, FontWeight.Normal, FontWeight.Black)
 
 /** How long a photo or a text stays on screen. */
 private const val STILL_MS = 5_000L
@@ -111,8 +122,10 @@ internal fun StatusTab(controller: ChatController, s: ChatStrings, me: ChatUser,
     val camera = rememberCamera { shot -> if (shot != null) pendingImage = shot }
     val gallery = rememberImagePicker { photos -> photos.firstOrNull()?.let { pendingImage = it } }
     val video = rememberFilePicker(video = true) { file -> if (file != null) pendingVideo = file }
-    val unseen = friends.filter { !it.seenAll }
-    val seen = friends.filter { it.seenAll }
+    val muted by controller.mutedStatuses.collectAsState()
+    val unseen = friends.filter { !it.seenAll && it.owner.uid !in muted }
+    val seen = friends.filter { it.seenAll && it.owner.uid !in muted }
+    val quiet = friends.filter { it.owner.uid in muted }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 160.dp)) {
             item(key = "title") {
@@ -165,9 +178,11 @@ internal fun StatusTab(controller: ChatController, s: ChatStrings, me: ChatUser,
                 }
             }
             if (unseen.isNotEmpty()) item(key = "recentHead") { SectionTitle(s.recentUpdates) }
-            items(unseen, key = { "u_" + it.owner.uid }) { g -> StatusRow(g, RingUnseen, now, s) { controller.push(ChatRoute.StatusViewer(g.owner.uid, mine = false)) } }
+            items(unseen, key = { "u_" + it.owner.uid }) { g -> StatusRow(g, RingUnseen, now, s, false, { controller.setStatusMuted(g.owner, true) }) { controller.push(ChatRoute.StatusViewer(g.owner.uid, mine = false)) } }
             if (seen.isNotEmpty()) item(key = "seenHead") { SectionTitle(s.viewedUpdates) }
-            items(seen, key = { "s_" + it.owner.uid }) { g -> StatusRow(g, RingSeen, now, s) { controller.push(ChatRoute.StatusViewer(g.owner.uid, mine = false)) } }
+            items(seen, key = { "s_" + it.owner.uid }) { g -> StatusRow(g, RingSeen, now, s, false, { controller.setStatusMuted(g.owner, true) }) { controller.push(ChatRoute.StatusViewer(g.owner.uid, mine = false)) } }
+            if (quiet.isNotEmpty()) item(key = "mutedHead") { SectionTitle(s.mutedUpdates) }
+            items(quiet, key = { "m_" + it.owner.uid }) { g -> StatusRow(g, RingSeen, now, s, true, { controller.setStatusMuted(g.owner, false) }) { controller.push(ChatRoute.StatusViewer(g.owner.uid, mine = false)) } }
             if (friends.isEmpty()) {
                 item(key = "empty") {
                     Text(s.noStatuses, color = TextSecondary, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 40.dp))
@@ -196,23 +211,29 @@ internal fun StatusTab(controller: ChatController, s: ChatStrings, me: ChatUser,
         ) { addMenu = false }
     }
     pendingImage?.let { img ->
-        StatusMediaComposer(s, image = img, video = null, onCancel = { pendingImage = null }) { caption ->
-            controller.postPhotoStatus(img, caption)
+        StatusMediaComposer(s, image = img, video = null, onCancel = { pendingImage = null }) { caption, edited ->
+            controller.postPhotoStatus(edited ?: img, caption)
             pendingImage = null
         }
     }
     pendingVideo?.let { file ->
-        StatusMediaComposer(s, image = null, video = file, onCancel = { pendingVideo = null }) { caption ->
+        StatusMediaComposer(s, image = null, video = file, onCancel = { pendingVideo = null }) { caption, _ ->
             controller.postVideoStatus(file, caption)
             pendingVideo = null
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun StatusRow(g: StatusGroup, ring: Color, now: Long, s: ChatStrings, onClick: () -> Unit) {
+private fun StatusRow(g: StatusGroup, ring: Color, now: Long, s: ChatStrings, muted: Boolean, onToggleMute: () -> Unit, onClick: () -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    Box {
+    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
+        DropdownMenuItem(text = { Text(if (muted) s.statusUnmute else s.statusMute, color = TextPrimary) }, onClick = { menu = false; onToggleMute() })
+    }
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = { menu = true }).padding(horizontal = 16.dp, vertical = 10.dp).then(if (muted) Modifier.graphicsLayerAlpha(0.55f) else Modifier),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StatusRinged(ring) { StatusPreview(g.items.last(), g.owner, 50.dp) }
@@ -222,7 +243,10 @@ private fun StatusRow(g: StatusGroup, ring: Color, now: Long, s: ChatStrings, on
             Text(agoText(g.items.last().at, now, s), color = TextSecondary, fontSize = 14.sp)
         }
     }
+    }
 }
+
+private fun Modifier.graphicsLayerAlpha(a: Float): Modifier = this.alpha(a)
 
 /** A status in small: the photo's or video's first frame, the text on its colour, or the person's picture. */
 @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
@@ -231,7 +255,7 @@ private fun StatusPreview(item: StatusItem, owner: ChatUser, size: androidx.comp
     val thumb = remember(item.thumb) { runCatching { kotlin.io.encoding.Base64.decode(item.thumb) }.getOrNull() }
     when {
         item.kind == StatusKind.TEXT -> Box(Modifier.size(size).clip(CircleShape).background(Color(item.background)), contentAlignment = Alignment.Center) {
-            Text(item.text, color = Color.White, fontSize = 7.sp, maxLines = 3, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(6.dp))
+            Text(item.text, color = Color.White, fontSize = 7.sp, maxLines = 3, fontFamily = StatusFonts.getOrElse(item.font) { FontFamily.Default }, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(6.dp))
         }
         thumb != null || item.kind == StatusKind.PHOTO -> Box(Modifier.size(size).clip(CircleShape).background(DarkSurfaceVariant)) {
             if (thumb != null) AsyncImage(model = thumb, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -248,6 +272,9 @@ private fun StatusPreview(item: StatusItem, owner: ChatUser, size: androidx.comp
 internal fun TextStatusPage(controller: ChatController, s: ChatStrings) {
     var text by remember { mutableStateOf("") }
     var colour by remember { mutableIntStateOf(0) }
+    var font by remember { mutableIntStateOf(0) }
+    var emoji by remember { mutableStateOf(false) }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     val bg = Color(StatusColors[colour])
@@ -255,7 +282,19 @@ internal fun TextStatusPage(controller: ChatController, s: ChatStrings) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { controller.pop() }) { Icon(QMusicIcons.Close, contentDescription = s.cancel, tint = Color.White) }
             Spacer(Modifier.weight(1f))
-            // The palette: the next colour.
+            // Emoji, the typeface ("Aa" in the next one), and the palette (the next colour).
+            IconButton(onClick = {
+                emoji = !emoji
+                if (emoji) keyboard?.hide() else runCatching { focus.requestFocus() }.also { keyboard?.show() }
+            }) { Text("☺", color = Color.White, fontSize = 22.sp) }
+            Text(
+                "Aa",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontFamily = StatusFonts[(font + 1) % StatusFonts.size],
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clip(CircleShape).clickable { font = (font + 1) % StatusFonts.size }.padding(horizontal = 10.dp, vertical = 6.dp),
+            )
             Box(
                 Modifier.padding(8.dp).size(30.dp).clip(CircleShape).background(Color(StatusColors[(colour + 1) % StatusColors.size])).clickable { colour = (colour + 1) % StatusColors.size },
             )
@@ -265,17 +304,26 @@ internal fun TextStatusPage(controller: ChatController, s: ChatStrings) {
             BasicTextField(
                 value = text,
                 onValueChange = { text = it.take(700) },
-                textStyle = TextStyle(color = Color.White, fontSize = if (text.length > 120) 24.sp else 32.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center),
+                textStyle = TextStyle(
+                    color = Color.White,
+                    fontSize = if (text.length > 120) 24.sp else 32.sp,
+                    fontWeight = StatusFontWeights[font],
+                    fontFamily = StatusFonts[font],
+                    textAlign = TextAlign.Center,
+                ),
                 cursorBrush = SolidColor(Color.White),
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 modifier = Modifier.fillMaxWidth().focusRequester(focus),
             )
         }
+        if (emoji) {
+            EmojiPanel(onEmoji = { e -> text = (text + e).take(700) }, modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 88.dp))
+        }
         if (text.isNotBlank()) {
             Box(
                 Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(20.dp).size(56.dp).clip(CircleShape).background(Color.White)
                     .clickable {
-                        controller.postTextStatus(text, StatusColors[colour])
+                        controller.postTextStatus(text, StatusColors[colour], font)
                         controller.pop()
                         controller.selectTab(ChatTab.STATUS)
                     },
@@ -288,16 +336,35 @@ internal fun TextStatusPage(controller: ChatController, s: ChatStrings) {
 /** A photo or a video before it goes up: shown full screen with a caption box. */
 @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
 @Composable
-internal fun StatusMediaComposer(s: ChatStrings, image: PickedImage?, video: PickedFile?, onCancel: () -> Unit, onShare: (String) -> Unit) {
+internal fun StatusMediaComposer(s: ChatStrings, image: PickedImage?, video: PickedFile?, onCancel: () -> Unit, onShare: (String, PickedImage?) -> Unit) {
     var caption by remember { mutableStateOf("") }
+    var photo by remember(image) { mutableStateOf(image) }
+    var editing by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = onCancel, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val shown = photo
+        if (editing && shown != null) {
+            PhotoEditor(shown, onDone = { photo = it; editing = false }, onCancel = { editing = false })
+            return@Dialog
+        }
         Box(Modifier.fillMaxSize().background(Color.Black).imePadding()) {
             when {
-                image != null -> AsyncImage(model = image.jpeg, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                shown != null -> AsyncImage(model = shown.jpeg, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
                 video != null -> VideoMessagePlayer(video.location, Modifier.fillMaxSize())
             }
-            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(4.dp)) {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onCancel) { Icon(QMusicIcons.Close, contentDescription = s.cancel, tint = Color.White) }
+                Spacer(Modifier.weight(1f))
+                if (shown != null) {
+                    IconButton(onClick = { editing = true }) { Icon(QMusicIcons.Edit, contentDescription = s.statusEdit, tint = Color.White) }
+                }
+            }
+            if (video != null && video.durationMs > 60_000L) {
+                Text(
+                    s.statusVideoLimit,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 60.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.6f)).padding(horizontal = 12.dp, vertical = 6.dp),
+                )
             }
             Row(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(12.dp),
@@ -315,7 +382,7 @@ internal fun StatusMediaComposer(s: ChatStrings, image: PickedImage?, video: Pic
                     )
                 }
                 Spacer(Modifier.width(10.dp))
-                Box(Modifier.size(52.dp).clip(CircleShape).background(Color.White).clickable { onShare(caption) }, contentAlignment = Alignment.Center) {
+                Box(Modifier.size(52.dp).clip(CircleShape).background(Color.White).clickable { onShare(caption, photo.takeIf { it !== image }) }, contentAlignment = Alignment.Center) {
                     Icon(QMusicIcons.Send, contentDescription = s.statusShare, tint = Color.Black)
                 }
             }
@@ -356,10 +423,16 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
     }
     val at = index.coerceIn(0, items.lastIndex)
     val item = items[at]
+    val muted by controller.mutedStatuses.collectAsState()
     val nextOwner: () -> Unit = {
         val i = order.indexOf(owner)
-        val next = order.drop(i + 1).firstOrNull { uid -> groups.any { it.owner.uid == uid && !it.seenAll } }
+        val next = order.drop(i + 1).firstOrNull { uid -> uid !in muted && groups.any { it.owner.uid == uid && !it.seenAll } }
         if (mine || next == null) controller.pop() else owner = next
+    }
+    val previousOwner: () -> Unit = {
+        val i = order.indexOf(owner)
+        val previous = order.take(i.coerceAtLeast(0)).lastOrNull { uid -> groups.any { it.owner.uid == uid } }
+        if (!mine && previous != null) owner = previous
     }
     val goNext: () -> Unit = { if (at < items.lastIndex) index = at + 1 else nextOwner() }
     val goBack: () -> Unit = { if (at > 0) index = at - 1 }
@@ -386,14 +459,28 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
         // What is shown, with the taps and the hold over it.
         Box(
             Modifier.fillMaxSize().pointerInput(item.id) {
+                // A tap goes on or back, holding pauses, sideways changes person, down closes.
                 awaitEachGesture {
                     val down = awaitFirstDown()
                     val started = Clock.System.now().toEpochMilliseconds()
                     held = true
-                    val up = waitForUpOrCancellation()
+                    var moved = Offset.Zero
+                    var lifted = false
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) {
+                            lifted = true
+                            break
+                        }
+                        moved += change.positionChange()
+                    }
                     held = false
-                    if (up != null && Clock.System.now().toEpochMilliseconds() - started < 250) {
-                        if (down.position.x < size.width / 3f) goBack() else goNext()
+                    val quick = Clock.System.now().toEpochMilliseconds() - started < 250
+                    when {
+                        moved.y > 220f && abs(moved.y) > abs(moved.x) -> controller.pop()
+                        abs(moved.x) > 160f && abs(moved.x) > abs(moved.y) -> if (moved.x < 0) nextOwner() else previousOwner()
+                        lifted && quick && moved.getDistance() < 40f -> if (down.position.x < size.width / 3f) goBack() else goNext()
                     }
                 }
             },
@@ -404,7 +491,8 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
                     item.text,
                     color = Color.White,
                     fontSize = if (item.text.length > 120) 24.sp else 32.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = StatusFontWeights.getOrElse(item.font) { FontWeight.SemiBold },
+                    fontFamily = StatusFonts.getOrElse(item.font) { FontFamily.Default },
                     textAlign = TextAlign.Center,
                     lineHeight = if (item.text.length > 120) 32.sp else 42.sp,
                     modifier = Modifier.padding(28.dp),

@@ -48,8 +48,33 @@ internal fun qeyfUsername(text: String): String? {
     return name.takeIf { isValidUsername(it) }
 }
 
-/** The same, for the app outside the messages section (a tapped qeyf:// link). */
-fun qeyfUsernameOf(text: String): String? = qeyfUsername(text)
+/** A group's invite link. */
+internal fun qeyfGroupLink(code: String) = "qeyf://g/$code"
+
+/** A call link: opening it shows the person with the voice and video buttons. */
+internal fun qeyfCallLink(username: String) = "qeyf://c/$username"
+
+/** What a qeyf:// link (tapped, or scanned) opens; null for anything else. */
+fun qeyfLaunchOf(text: String): ChatLaunchRequest? {
+    val t = text.trim()
+    fun tail(prefix: String) = t.substring(prefix.length).substringBefore('?').substringBefore('/')
+    return when {
+        t.startsWith("qeyf://g/", ignoreCase = true) -> tail("qeyf://g/").takeIf { it.matches(Regex("^[A-Za-z0-9]{10,40}$")) }?.let { ChatLaunchRequest(null, invite = it) }
+        t.startsWith("qeyf://c/", ignoreCase = true) -> tail("qeyf://c/").lowercase().takeIf { isValidUsername(it) }?.let { ChatLaunchRequest(null, callUsername = it) }
+        else -> qeyfUsername(t)?.let { ChatLaunchRequest(null, username = it) }
+    }
+}
+
+/** A scanned code: a person, a group invite or a call link; anything else says so. */
+internal fun ChatController.openQeyfCode(text: String, s: ChatStrings) {
+    val request = qeyfLaunchOf(text)
+    when {
+        request?.invite != null -> openInvite(request.invite)
+        request?.callUsername != null -> openCallLink(request.callUsername)
+        request?.username != null -> openByUsername(request.username)
+        else -> reportError(s.notFoundUser)
+    }
+}
 
 /** [text] as a QR code, black on white. */
 @Composable
@@ -67,7 +92,7 @@ expect fun StatusVideo(url: String, paused: Boolean, modifier: Modifier, onReady
 @Composable
 internal fun MyQrPage(controller: ChatController, s: ChatStrings, me: ChatUser) {
     val share = rememberShare()
-    val scan = rememberQrScanner { text -> qeyfUsername(text)?.let { controller.openByUsername(it) } ?: controller.reportError(s.notFoundUser) }
+    val scan = rememberQrScanner { text -> controller.openQeyfCode(text, s) }
     Column(Modifier.fillMaxSize().background(BgRoot)) {
         TopBar(s.myQrTitle, { controller.pop() })
         Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {

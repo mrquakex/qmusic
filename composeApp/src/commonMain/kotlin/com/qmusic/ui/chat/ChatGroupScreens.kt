@@ -188,6 +188,21 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
                 }
             }
         }
+        item {
+            var inviteOpen by remember { mutableStateOf(false) }
+            Row(
+                Modifier.fillMaxWidth().clickable { inviteOpen = true }.padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(44.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) { QrGlyph(Color.Black) }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(s.inviteLink, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(s.inviteLinkNote, color = TextSecondary, fontSize = 12.sp)
+                }
+            }
+            if (inviteOpen) InviteDialog(controller, s, group, iAmAdmin) { inviteOpen = false }
+        }
         item { SectionTitle(s.members) }
         items(g?.members.orEmpty(), key = { it.user.uid }) { m ->
             PersonRow(m.user, onClick = { if (m.user.uid != me.uid) memberMenu = m.user }) {

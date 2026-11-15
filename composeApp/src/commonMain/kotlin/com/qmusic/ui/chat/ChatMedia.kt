@@ -111,3 +111,24 @@ object ChatLock {
 
     private const val RELOCK_AFTER_MS = 60_000L
 }
+
+/**
+ * The ids of the locked conversations, kept by the app on the phone too: a notification for one of them shows
+ * neither who wrote nor what (the app sets [onChanged] to save them).
+ */
+object LockedChats {
+    var ids: Set<String> = emptySet()
+        private set
+    var onChanged: ((Set<String>) -> Unit)? = null
+
+    fun update(next: Set<String>) {
+        if (next == ids) return
+        ids = next
+        onChanged?.invoke(next)
+    }
+
+    /** Read back at start (from what the app saved). */
+    fun restore(saved: Set<String>) {
+        ids = saved
+    }
+}
