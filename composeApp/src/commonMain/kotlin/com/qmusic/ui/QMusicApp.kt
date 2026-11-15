@@ -1,5 +1,8 @@
 package com.qmusic.ui
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.first
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -1421,18 +1424,7 @@ fun QMusicApp(
                 )
             }
             updateProgress?.let { progress ->
-                AlertDialog(
-                    onDismissRequest = {},
-                    title = { Text(strings.updatingTitle) },
-                    text = {
-                        Column {
-                            Text(strings.updatingBody)
-                            Spacer(Modifier.height(16.dp))
-                            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                        }
-                    },
-                    confirmButton = {},
-                )
+                UpdatingDialog(progress = progress, info = updateInfo, english = language == "en")
             }
 
             // The first opening after an update: what changed, once.
@@ -1487,8 +1479,9 @@ private fun WhatsNewDialog(news: com.qmusic.ui.viewmodel.MainViewModel.WhatsNew,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
-                if (news.notes.isNotBlank()) {
-                    com.mikepenz.markdown.m3.Markdown(content = news.notes)
+                val notes = cleanReleaseNotes(news.notes)
+                if (notes.isNotBlank()) {
+                    com.mikepenz.markdown.m3.Markdown(content = notes)
                 } else {
                     Text(if (english) "Fixes and improvements." else "Düzeltmeler ve iyileştirmeler.")
                 }
@@ -1496,6 +1489,121 @@ private fun WhatsNewDialog(news: com.qmusic.ui.viewmodel.MainViewModel.WhatsNew,
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(if (english) "Got it" else "Tamam") } },
     )
+}
+
+/**
+ * The box shown while a new version downloads and installs: which version, how far it is, and what it brings (its
+ * release notes from GitHub, without emoji).
+ */
+@Composable
+private fun UpdatingDialog(progress: Float, info: com.qmusic.updater.model.UpdateInfo?, english: Boolean) {
+    val done = progress >= 0.999f
+    val notes = remember(info?.changelog) { cleanReleaseNotes(info?.changelog.orEmpty()) }
+    AlertDialog(
+        onDismissRequest = {},
+        properties = androidx.compose.ui.window.DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+        title = {
+            Column {
+                Text(
+                    if (english) "UPDATING" else "GÜNCELLENİYOR",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    letterSpacing = 1.5.sp,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Qeyf " + (info?.versionName ?: ""),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                )
+            }
+        },
+        text = {
+            Column {
+                LinearProgressIndicator(
+                    progress = { progress.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    strokeCap = androidx.compose.ui.graphics.StrokeCap.Round,
+                    gapSize = 0.dp,
+                    drawStopIndicator = {},
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        when {
+                            done -> if (english) "Installing…" else "Kuruluyor…"
+                            else -> if (english) "Downloading" else "İndiriliyor"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "%" + (progress.coerceIn(0f, 1f) * 100).toInt(),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                    )
+                }
+                if (notes.isNotBlank()) {
+                    Spacer(Modifier.height(20.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        if (english) "In this version" else "Bu sürümde",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                    Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
+                        com.mikepenz.markdown.m3.Markdown(content = notes)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    if (english) "Qeyf restarts by itself when it is done." else "Bitince Qeyf kendiliğinden yeniden açılır.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {},
+    )
+}
+
+/**
+ * Release notes as shown in the app: no emoji (a clean, quiet look), and without the "## Qeyf 2.8.1" line the dialog
+ * already says.
+ */
+fun cleanReleaseNotes(markdown: String): String {
+    val out = StringBuilder()
+    var i = 0
+    while (i < markdown.length) {
+        val c = markdown[i]
+        val cp: Int
+        val size: Int
+        if (c.isHighSurrogate() && i + 1 < markdown.length && markdown[i + 1].isLowSurrogate()) {
+            cp = ((c.code - 0xD800) shl 10) + (markdown[i + 1].code - 0xDC00) + 0x10000
+            size = 2
+        } else {
+            cp = c.code
+            size = 1
+        }
+        val emoji = cp >= 0x1F000 || cp in 0x2600..0x27BF || cp in 0x2B00..0x2BFF || cp == 0xFE0F || cp == 0x200D || cp in 0x2300..0x23FF
+        if (!emoji) out.append(markdown, i, i + size)
+        i += size
+    }
+    val versionLine = Regex("""^#+\s*Qeyf\s+[0-9.]+\s*$""", RegexOption.IGNORE_CASE)
+    return out.lines()
+        // Where an emoji stood: "**🔔 Title**" became "** Title**", "- 🎵 x" became "-  x"; the space goes.
+        .map { line ->
+            line.replace(Regex("""^(\s*)\*\*\s+"""), "$1**")
+                .replace(Regex("""^(\s*(?:#+|[-*]))\s{2,}"""), "$1 ")
+                .replace(Regex(""" {2,}"""), " ")
+                .trimEnd()
+        }
+        .filterNot { line -> versionLine.matches(line.trim()) }
+        .joinToString("\n")
+        .trim()
 }
 
 /** The "Sana Özel" tab (song samples to swipe through); hidden for now, true brings it back. */
