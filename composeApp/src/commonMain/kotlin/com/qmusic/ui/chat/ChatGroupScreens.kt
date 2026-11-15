@@ -492,7 +492,7 @@ internal fun TogetherBanner(state: TogetherState, s: ChatStrings, onOpen: () -> 
 
 /** Recording a voice message: a red dot, the time, the loudness, and how to cancel. */
 @Composable
-internal fun RecordingBar(elapsedMs: Long, level: Float, s: ChatStrings, cancelling: Boolean, modifier: Modifier) {
+internal fun RecordingBar(elapsedMs: Long, level: Float, hint: String, cancelling: Boolean, modifier: Modifier) {
     val pulse = androidx.compose.animation.core.rememberInfiniteTransition()
         .animateFloat(0.3f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(600), androidx.compose.animation.core.RepeatMode.Reverse))
     Row(
@@ -505,6 +505,6 @@ internal fun RecordingBar(elapsedMs: Long, level: Float, s: ChatStrings, cancell
         Spacer(Modifier.width(10.dp))
         Box(Modifier.width((6 + level * 40).dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.7f)))
         Spacer(Modifier.weight(1f))
-        Text(s.voiceSlideCancel, color = if (cancelling) Color(0xFFFF6B6B) else TextMuted, fontSize = 13.sp)
+        Text(hint, color = if (cancelling) Color(0xFFFF6B6B) else TextMuted, fontSize = 13.sp, maxLines = 1)
     }
 }

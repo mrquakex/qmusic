@@ -1254,7 +1254,7 @@ private fun ConversationPage(
                             locked = false
                         }) { Icon(QMusicIcons.Trash, contentDescription = null, tint = Color(0xFFFF6B6B)) }
                     }
-                    RecordingBar(elapsed, level, if (locked) s.copy(voiceSlideCancel = s.voiceLocked) else s.copy(voiceSlideCancel = s.voiceSlideCancel + "   " + s.voiceSlideLock), cancelling, Modifier.weight(1f))
+                    RecordingBar(elapsed, level, if (locked) s.voiceLocked else s.voiceSlideCancel + "   " + s.voiceSlideLock, cancelling, Modifier.weight(1f))
                 } else {
                     Box {
                         IconButton(onClick = { attach = true }) { Icon(QMusicIcons.Add, contentDescription = null, tint = Color.White) }
