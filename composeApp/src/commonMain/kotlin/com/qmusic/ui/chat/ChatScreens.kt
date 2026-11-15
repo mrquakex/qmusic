@@ -125,6 +125,9 @@ fun ChatApp(
     val onCall: ((ChatUser, Boolean) -> Unit)? = calls?.let { service ->
         { other, video -> askPermissions(video) { granted -> if (granted) service.call(other, video) else controller.reportError(s.callPermission) } }
     }
+    val onGroupCall: ((ChatUser, Boolean) -> Unit)? = controller.groupCalls?.let { service ->
+        { group, video -> askPermissions(video) { granted -> if (granted) service.join(group, video) else controller.reportError(s.callPermission) } }
+    }
 
     Box(modifier.fillMaxSize().background(BgRoot)) {
         when (val a = account) {
@@ -141,10 +144,16 @@ fun ChatApp(
                 ChatRoute.Archived -> ArchivedPage(controller, s, a.me)
                 ChatRoute.Starred -> StarredPage(controller, s)
                 ChatRoute.Calls -> CallsPage(controller, s, onCall)
+                is ChatRoute.CallDetails -> CallDetailsPage(controller, s, top.peer, onCall, onGroupCall)
+                is ChatRoute.NewCall -> NewCallPage(controller, s, top.group, onCall, onGroupCall)
+                is ChatRoute.StatusViewer -> StatusViewerPage(controller, s, a.me, top.ownerUid, top.mine)
+                ChatRoute.TextStatus -> TextStatusPage(controller, s)
+                ChatRoute.StatusPrivacyPage -> StatusPrivacyPage(controller, s)
+                ChatRoute.MyQr -> MyQrPage(controller, s, a.me)
                 ChatRoute.Settings -> SettingsPage(controller, s, a.me)
                 ChatRoute.Friends -> FriendsPage(controller, s)
                 is ChatRoute.Profile -> ProfilePage(controller, s, a.me, top.user, onCall)
-                null -> ThreadListPage(controller, s, a.me, onExit)
+                null -> ChatHome(controller, s, a.me, onExit, onCall, onGroupCall)
             }
         }
         val info by controller.info.collectAsState()
@@ -383,155 +392,9 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, a: ChatAccou
 
 // ------------------------------------------------------------------ the list
 
-@Composable
-private fun ThreadListPage(controller: ChatController, s: ChatStrings, me: ChatUser, onExit: () -> Unit) {
-    val all by controller.threads.collectAsState()
-    val archived by controller.archived.collectAsState()
-    val togetherState by (controller.together?.active ?: remember { kotlinx.coroutines.flow.MutableStateFlow<TogetherState?>(null) }).collectAsState()
-    var menu by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
-    var searching by remember { mutableStateOf(false) }
-    var search by remember { mutableStateOf("") }
-    val threads = remember(all, search) {
-        val q = search.trim()
-        if (q.isEmpty()) all else all?.filter { it.other.name.contains(q, ignoreCase = true) || it.lastText.contains(q, ignoreCase = true) || it.other.username.contains(q, ignoreCase = true) }
-    }
-    Column(Modifier.fillMaxSize()) {
-        TopBar(
-            title = s.title,
-            onBack = onExit,
-            actions = {
-                val incoming by controller.friendRequests.collectAsState()
-                IconButton(onClick = { controller.openFriends() }) {
-                    Box {
-                        Icon(QMusicIcons.Account, contentDescription = s.friends, tint = Color.White)
-                        if (incoming.isNotEmpty()) {
-                            Box(
-                                Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-6).dp).size(16.dp).clip(CircleShape).background(ClaudeCoral),
-                                contentAlignment = Alignment.Center,
-                            ) { Text(incoming.size.coerceAtMost(9).toString(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
-                        }
-                    }
-                }
-                IconButton(onClick = { controller.openCalls() }) { Icon(QMusicIcons.Phone, contentDescription = s.callsTitle, tint = Color.White) }
-                IconButton(onClick = { searching = !searching; if (!searching) search = "" }) { Icon(QMusicIcons.Search, contentDescription = s.search, tint = Color.White) }
-                IconButton(onClick = { controller.openNewChat() }) { Icon(QMusicIcons.Edit, contentDescription = s.newChat, tint = Color.White) }
-                Box {
-                    IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Color.White) }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
-                        DropdownMenuItem(text = { Text("@${me.username}", color = TextSecondary) }, onClick = {}, enabled = false)
-                        DropdownMenuItem(
-                            leadingIcon = { Icon(QMusicIcons.Group, null, tint = Color.White) },
-                            text = { Text(s.newGroup, color = TextPrimary) },
-                            onClick = { menu = false; controller.openNewGroup() },
-                        )
-                        DropdownMenuItem(
-                            leadingIcon = { Text("★", color = Color(0xFFFFB800), fontSize = 18.sp) },
-                            text = { Text(s.starredTitle, color = TextPrimary) },
-                            onClick = { menu = false; controller.openStarred() },
-                        )
-                        DropdownMenuItem(
-                            leadingIcon = { Icon(QMusicIcons.Account, null, tint = Color.White) },
-                            text = { Text(s.settings, color = TextPrimary) },
-                            onClick = { menu = false; controller.openSettings() },
-                        )
-                        DropdownMenuItem(text = { Text(s.signOut, color = TextPrimary) }, onClick = { menu = false; controller.signOut() })
-                        DropdownMenuItem(text = { Text(s.deleteAccount, color = TextPrimary) }, onClick = { menu = false; confirmDelete = true })
-                    }
-                }
-            },
-        )
-        if (searching) {
-            val focus = remember { FocusRequester() }
-            LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
-            PlatformBackHandler(enabled = true) { searching = false; search = "" }
-            Field(search, { search = it }, s.searchChats, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).focusRequester(focus))
-        }
-        ReadinessCard(s)
-        togetherState?.let { state ->
-            val thread = all?.firstOrNull { it.id == state.chatId }
-            TogetherBanner(state, s, onOpen = { thread?.let { controller.openConversation(it.other) } }, onLeave = { controller.together?.leave() })
-        }
-        val list = threads
-        // "typing…" in the list fades by itself: the clock moves on every couple of seconds.
-        var now by remember { mutableStateOf(Clock.System.now().toEpochMilliseconds()) }
-        LaunchedEffect(Unit) {
-            while (true) {
-                kotlinx.coroutines.delay(2_000)
-                now = Clock.System.now().toEpochMilliseconds()
-            }
-        }
-        var muteFor by remember { mutableStateOf<ChatThread?>(null) }
-        muteFor?.let { t ->
-            ChoiceDialog(
-                s.mute,
-                listOf(
-                    s.mute8h to { controller.setMuted(t.other, now + 8 * 3600_000L) },
-                    s.mute1w to { controller.setMuted(t.other, now + 7 * 24 * 3600_000L) },
-                    s.muteAlways to { controller.setMuted(t.other, -1L) },
-                ),
-                s,
-            ) { muteFor = null }
-        }
-        when {
-            list == null -> Centered { CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp) }
-            list.isEmpty() && search.isNotBlank() -> Centered { Text(s.noResults, color = TextSecondary, fontSize = 15.sp) }
-            list.isEmpty() && archived.isEmpty() -> Column(
-                Modifier.fillMaxSize().padding(32.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Icon(QMusicIcons.Chat, contentDescription = null, tint = TextMuted, modifier = Modifier.size(48.dp))
-                Spacer(Modifier.height(16.dp))
-                Text(s.noChats, color = TextSecondary, fontSize = 15.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                Spacer(Modifier.height(24.dp))
-                Box(Modifier.width(220.dp)) { WhiteButton(s.newChat) { controller.openNewChat() } }
-            }
-            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp)) {
-                if (archived.isNotEmpty() && search.isBlank()) {
-                    item(key = "archived") {
-                        Row(
-                            Modifier.fillMaxWidth().clickable { controller.openArchived() }.padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) { Icon(QMusicIcons.Archive, null, tint = TextSecondary) }
-                            Spacer(Modifier.width(14.dp))
-                            Text(s.archivedTitle, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                            val unread = archived.count { it.unread }
-                            Text(if (unread > 0) unread.toString() else archived.size.toString(), color = if (unread > 0) TextPrimary else TextMuted, fontSize = 13.sp)
-                        }
-                    }
-                }
-                items(list, key = { it.id }) { t ->
-                    ThreadRow(
-                        t, me, s,
-                        onAvatar = { if (t.isGroup) controller.openGroupInfo(t.other) else controller.openProfile(t.other) },
-                        actions = listOf(
-                            (if (t.pinned > 0) s.unpin else s.pin) to { controller.setPinned(t, t.pinned == 0L) },
-                            (if (t.muted(now)) s.unmute else s.mute) to { if (t.muted(now)) controller.setMuted(t.other, 0L) else muteFor = t },
-                            s.archive to { controller.setArchived(t, true) },
-                        ),
-                        now = now,
-                    ) { controller.openConversation(t.other) }
-                }
-            }
-        }
-    }
-    if (confirmDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            containerColor = DarkSurfaceVariant,
-            title = { Text(s.deleteAccount, color = TextPrimary) },
-            text = { Text(s.deleteAccountConfirm, color = TextSecondary) },
-            confirmButton = { TextButton(onClick = { confirmDelete = false; controller.deleteAccount() }) { Text(s.delete, color = Color.White) } },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(s.cancel, color = TextSecondary) } },
-        )
-    }
-}
-
 /** What on this phone keeps calls and messages from arriving, each a tap away from its settings page. */
 @Composable
-private fun ReadinessCard(s: ChatStrings) {
+internal fun ReadinessCard(s: ChatStrings) {
     val readiness = rememberReadiness()
     if (readiness.issues.isEmpty()) return
     Column(
@@ -580,6 +443,7 @@ internal fun ThreadRow(
     onAvatar: () -> Unit,
     actions: List<Pair<String, () -> Unit>> = emptyList(),
     now: Long = 0L,
+    ring: Color? = null,
     onClick: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -592,7 +456,7 @@ internal fun ThreadRow(
         modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = { if (actions.isNotEmpty()) menu = true }).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.clip(CircleShape).clickable(onClick = onAvatar)) { ChatAvatar(t.other, 52.dp) }
+        Box(Modifier.clip(CircleShape).clickable(onClick = onAvatar)) { StatusRinged(ring) { ChatAvatar(t.other, if (ring != null) 46.dp else 52.dp) } }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

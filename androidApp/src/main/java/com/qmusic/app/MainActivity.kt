@@ -251,6 +251,14 @@ class MainActivity : AppCompatActivity() {
 
     /** A YouTube / YouTube Music link tapped elsewhere, or shared to the app. */
     private fun openLinkIfAny(intent: Intent?) {
+        // A Qeyf code (qeyf://u/<username>): that person's profile in the messages section.
+        if (intent?.action == Intent.ACTION_VIEW && intent.data?.scheme == "qeyf") {
+            com.qmusic.ui.chat.qeyfUsernameOf(intent.dataString.orEmpty())?.let { name ->
+                com.qmusic.ui.chat.ChatLaunch.request.value = com.qmusic.ui.chat.ChatLaunchRequest(null, username = name)
+            }
+            intent.action = Intent.ACTION_MAIN
+            return
+        }
         val text = when (intent?.action) {
             Intent.ACTION_VIEW -> intent.dataString
             Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)

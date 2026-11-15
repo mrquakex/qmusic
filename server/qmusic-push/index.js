@@ -283,6 +283,22 @@ async function sweepExpired() {
       }
     }
     if (removed > 0) log(`expired messages removed: ${removed}`);
+    // Statuses older than a day: gone, with who saw them and their file on the media server.
+    const statuses = (await db.ref("statuses").get()).val() || {};
+    const gone = {};
+    for (const [uid, items] of Object.entries(statuses)) {
+      for (const [id, st] of Object.entries(items || {})) {
+        if (!st || Number(st.expireAt || 0) > Date.now()) continue;
+        gone[`statuses/${uid}/${id}`] = null;
+        gone[`statusViews/${uid}/${id}`] = null;
+        const file = String(st.url || "").match(/\/m\/(u_[A-Za-z0-9]+)\/([0-9a-f]{32}\.[a-z0-9]+)$/);
+        if (file) fs.rm(`/var/lib/qeyf-media/${file[1]}/${file[2]}`, { force: true }, () => {});
+      }
+    }
+    if (Object.keys(gone).length > 0) {
+      await db.ref().update(gone);
+      log(`expired statuses removed: ${Object.keys(gone).length / 2}`);
+    }
   } catch (e) {
     log("sweep failed:", e.message);
   }

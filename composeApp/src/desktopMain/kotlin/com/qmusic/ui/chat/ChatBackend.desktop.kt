@@ -55,3 +55,12 @@ actual fun rememberChatSounds(): ChatSounds? = null
 
 @androidx.compose.runtime.Composable
 actual fun CallPictureInPicture(armed: Boolean): Boolean = false
+
+@androidx.compose.runtime.Composable
+actual fun QrCode(text: String, modifier: androidx.compose.ui.Modifier) = Unit
+
+@androidx.compose.runtime.Composable
+actual fun rememberQrScanner(onResult: (String) -> Unit): (() -> Unit)? = null
+
+@androidx.compose.runtime.Composable
+actual fun StatusVideo(url: String, paused: Boolean, modifier: androidx.compose.ui.Modifier, onReady: (Long) -> Unit) = Unit

@@ -239,6 +239,37 @@
           "at"
         ]
       }
+    },
+    "statuses": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || (root.child('friends').child($uid).child(auth.uid).exists() && (root.child('statusPrivacy').child($uid).child('mode').val() !== 'ONLY' || root.child('statusPrivacy').child($uid).child('people').child(auth.uid).exists()) && (root.child('statusPrivacy').child($uid).child('mode').val() !== 'EXCEPT' || !root.child('statusPrivacy').child($uid).child('people').child(auth.uid).exists())))",
+        "$id": {
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "!newData.exists() || (newData.hasChildren(['kind', 'at', 'expireAt']) && newData.child('at').val() === now && newData.child('expireAt').val() <= now + 90000000)"
+        }
+      }
+    },
+    "statusViews": {
+      "$owner": {
+        ".read": "auth != null && auth.uid === $owner",
+        "$id": {
+          "$viewer": {
+            ".write": "auth != null && auth.uid === $viewer && root.child('statuses').child($owner).child($id).exists()"
+          }
+        }
+      }
+    },
+    "statusSeen": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "statusPrivacy": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
     }
   }
 }

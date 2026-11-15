@@ -20,6 +20,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** The pages of the messages section, the last one on screen. */
+/** The tabs of the messages section's bottom bar. */
+enum class ChatTab { CHATS, STATUS, GROUPS, CALLS }
+
+/** The filters over the conversation list. */
+enum class ChatFilter { ALL, UNREAD, FAVORITES, GROUPS, ARCHIVED }
+
 sealed interface ChatRoute {
     data object NewChat : ChatRoute
     data object Friends : ChatRoute
@@ -31,6 +37,12 @@ sealed interface ChatRoute {
     data object Archived : ChatRoute
     data object Starred : ChatRoute
     data object Calls : ChatRoute
+    data class CallDetails(val peer: ChatUser) : ChatRoute
+    data class NewCall(val group: Boolean) : ChatRoute
+    data class StatusViewer(val ownerUid: String, val mine: Boolean) : ChatRoute
+    data object TextStatus : ChatRoute
+    data object StatusPrivacyPage : ChatRoute
+    data object MyQr : ChatRoute
     data object Settings : ChatRoute
 }
 
@@ -101,7 +113,101 @@ class ChatController(
 
     fun openStarred() = _routes.update { list -> list.filter { it !is ChatRoute.Starred } + ChatRoute.Starred }
 
-    fun openCalls() = _routes.update { list -> list.filter { it !is ChatRoute.Calls } + ChatRoute.Calls }
+    fun openCalls() = selectTab(ChatTab.CALLS)
+
+    private val _tab = MutableStateFlow(ChatTab.CHATS)
+    val tab: StateFlow<ChatTab> = _tab.asStateFlow()
+
+    fun selectTab(tab: ChatTab) {
+        _tab.value = tab
+        if (tab == ChatTab.CALLS) scope.launch { runCatching { backend.setCallsSeen() } }
+    }
+
+    private val _filter = MutableStateFlow(ChatFilter.ALL)
+    val filter: StateFlow<ChatFilter> = _filter.asStateFlow()
+    fun setFilter(filter: ChatFilter) { _filter.value = filter }
+
+    fun push(route: ChatRoute) = _routes.update { list -> list.filterNot { it::class == route::class } + route }
+
+    fun setFavorite(thread: ChatThread, favorite: Boolean) {
+        scope.launch { runCatching { backend.setFavorite(thread.id, favorite) } }
+    }
+
+    private val callsSeenAt: StateFlow<Long> = ready
+        .flatMapLatest { if (it == null) flowOf(0L) else backend.callsSeenAt().catch { emit(0L) } }
+        .stateIn(scope, SharingStarted.Eagerly, 0L)
+
+    /** Missed calls since the person last looked at the Calls tab: its badge. */
+    val missedCalls: StateFlow<Int> = combine(callLogFlow(), callsSeenAt) { log, seen ->
+        log.count { it.outcome == CallOutcome.MISSED && it.at > seen }
+    }.stateIn(scope, SharingStarted.Eagerly, 0)
+
+    private fun callLogFlow() = ready.flatMapLatest { if (it == null) flowOf(emptyList()) else backend.callLog().catch { emit(emptyList()) } }
+
+    // ------------------------------------------------------------------ status
+
+    val myStatuses: StateFlow<List<StatusItem>> = ready
+        .flatMapLatest { if (it == null) flowOf(emptyList()) else backend.myStatuses().catch { emit(emptyList()) } }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    val friendStatuses: StateFlow<List<StatusGroup>> = ready
+        .flatMapLatest { if (it == null) flowOf(emptyList()) else backend.friendStatuses().catch { emit(emptyList()) } }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** People with a status the person has not seen yet: their picture gets a ring. */
+    val unseenStatusOwners: StateFlow<Set<String>> = friendStatuses
+        .map { list -> list.filter { !it.seenAll }.map { it.owner.uid }.toSet() }
+        .stateIn(scope, SharingStarted.Eagerly, emptySet())
+
+    private val _posting = MutableStateFlow(false)
+
+    /** A status going up now. */
+    val posting: StateFlow<Boolean> = _posting.asStateFlow()
+
+    private fun post(block: suspend () -> Result<Unit>) {
+        _posting.value = true
+        scope.launch {
+            block().onFailure { _error.value = it.message }
+            _posting.value = false
+        }
+    }
+
+    fun postTextStatus(text: String, background: Long) = post { backend.postTextStatus(text, background) }
+    fun postPhotoStatus(image: PickedImage, caption: String) = post { backend.postPhotoStatus(image, caption) }
+    fun postVideoStatus(file: PickedFile, caption: String) = post { backend.postVideoStatus(file, caption) }
+
+    fun deleteStatus(item: StatusItem) {
+        scope.launch { runCatching { backend.deleteStatus(item.id) } }
+    }
+
+    fun markStatusSeen(item: StatusItem) {
+        scope.launch { runCatching { backend.markStatusSeen(item) } }
+    }
+
+    fun statusViewers(item: StatusItem) = backend.statusViewers(item.id).catch { emit(emptyList()) }
+
+    val statusPrivacy: StateFlow<StatusPrivacy> = backend.statusPrivacy
+
+    fun setStatusPrivacy(privacy: StatusPrivacy) {
+        scope.launch { runCatching { backend.setStatusPrivacy(privacy) } }
+    }
+
+    /** Answers a status: a message to its owner, quoting it. */
+    fun replyToStatus(item: StatusItem, text: String, quote: String) {
+        send(item.owner, text, replyTo = ChatReply("status_" + item.id, item.owner.uid, quote))
+    }
+
+    // ------------------------------------------------------------------ QR
+
+    /** Someone's Qeyf code was scanned (qeyf://u/<username>): their profile opens. */
+    fun openByUsername(username: String) {
+        val name = username.trim().removePrefix("@").lowercase()
+        if (!isValidUsername(name)) return
+        scope.launch {
+            val found = backend.findUsers(name).getOrNull().orEmpty().firstOrNull { it.username == name }
+            if (found != null) openProfile(found) else _error.value = "@$name"
+        }
+    }
 
     /** The person's calls, newest first. */
     val callLog: StateFlow<List<CallLogEntry>> = ready

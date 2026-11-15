@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -124,6 +125,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         profileListener?.let { profileRef?.removeEventListener(it) }
         profileListener = null
         runCatching { com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().setUserId(user?.uid.orEmpty()) }
+        runCatching { watchStatusPrivacy(user?.uid) }
         runCatching { calls.listenFor(user?.uid) }
         trackPresence(user?.uid)
         runCatching { watchDeliveries(user?.uid) }
@@ -323,6 +325,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             mutedUntil = child("mutedUntil").getValue(Long::class.java) ?: 0L,
             typingAt = child("typingAt").getValue(Long::class.java) ?: 0L,
             typingName = child("typingName").getValue(String::class.java).orEmpty(),
+            favorite = child("favorite").getValue(Boolean::class.java) == true,
         )
     }
 
@@ -1542,7 +1545,203 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     }
 
     override suspend fun clearCallLog() {
-        root.child("callLog").child(me()).removeValue()
+        val uid = me()
+        root.child("callLog").child(uid).removeValue()
+        root.child("callLog").child(uid).child("_seen").setValue(ServerValue.TIMESTAMP)
+    }
+
+    override fun callsSeenAt(): Flow<Long> = callbackFlow {
+        val job = launch {
+            listen(root.child("callLog").child(me()).child("_seen")).collect { trySend(it.getValue(Long::class.java) ?: 0L) }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override suspend fun setCallsSeen() {
+        root.child("callLog").child(me()).child("_seen").setValue(ServerValue.TIMESTAMP)
+    }
+
+    override suspend fun setFavorite(chatId: String, favorite: Boolean) {
+        root.child("userChats").child(me()).child(chatId).child("favorite").setValue(if (favorite) true else null)
+    }
+
+    // ------------------------------------------------------------------ status
+    //
+    //   statuses/{uid}/{id}            {kind: PHOTO|VIDEO|TEXT, url, text, bg, at, expireAt, thumb, w, h, dur}
+    //   statusViews/{owner}/{id}/{uid} when they saw it (only the owner reads it)
+    //   statusSeen/{uid}/{owner}/{id}  what the person saw (their own, to know what is new)
+    //   statusPrivacy/{uid}            {mode: FRIENDS|ONLY|EXCEPT, people: {uid: true}}
+    // A status is for friends (as the privacy says); the server removes it, and its file, after 24 hours.
+
+    private fun DataSnapshot.toStatus(owner: ChatUser, now: Long): StatusItem? {
+        val id = key ?: return null
+        val expireAt = child("expireAt").getValue(Long::class.java) ?: return null
+        if (expireAt <= now) return null
+        return StatusItem(
+            id = id,
+            owner = owner,
+            kind = runCatching { StatusKind.valueOf(child("kind").getValue(String::class.java).orEmpty()) }.getOrDefault(StatusKind.TEXT),
+            url = child("url").getValue(String::class.java).orEmpty(),
+            text = child("text").getValue(String::class.java).orEmpty(),
+            background = child("bg").getValue(Long::class.java) ?: 0xFF1E1E1E,
+            at = child("at").getValue(Long::class.java) ?: 0L,
+            thumb = child("thumb").getValue(String::class.java).orEmpty(),
+            width = child("w").getValue(Int::class.java) ?: 0,
+            height = child("h").getValue(Int::class.java) ?: 0,
+            durationMs = child("dur").getValue(Long::class.java) ?: 0L,
+        )
+    }
+
+    private fun statusesOf(owner: ChatUser): Flow<List<StatusItem>> = callbackFlow {
+        val job = launch {
+            runCatching {
+                listen(root.child("statuses").child(owner.uid)).collect { snap ->
+                    val now = System.currentTimeMillis() + _serverOffset.value
+                    trySend(snap.children.mapNotNull { it.toStatus(owner, now) }.sortedBy { it.at })
+                }
+            }.onFailure { trySend(emptyList()) }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override fun myStatuses(): Flow<List<StatusItem>> {
+        val me = (_account.value as? ChatAccount.Ready)?.me ?: return kotlinx.coroutines.flow.flowOf(emptyList())
+        return statusesOf(me)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    override fun friendStatuses(): Flow<List<StatusGroup>> {
+        val uid = auth.currentUser?.uid ?: return kotlinx.coroutines.flow.flowOf(emptyList())
+        val seen = callbackFlow {
+            val job = launch {
+                listen(root.child("statusSeen").child(uid)).collect { snap ->
+                    trySend(snap.children.associate { o -> o.key.orEmpty() to o.children.mapNotNull { it.key }.toSet() })
+                }
+            }
+            awaitClose { job.cancel() }
+        }
+        return friends().flatMapLatest { people ->
+            if (people.isEmpty()) {
+                kotlinx.coroutines.flow.flowOf(emptyList())
+            } else {
+                combine(people.map { statusesOf(it) }) { lists -> lists.toList() }.combine(seen) { lists, seenBy ->
+                    lists.filter { it.isNotEmpty() }.map { items ->
+                        val ids = seenBy[items.first().owner.uid].orEmpty()
+                        StatusGroup(items.first().owner, items, items.all { it.id in ids }, ids)
+                    }.sortedWith(compareBy<StatusGroup> { it.seenAll }.thenByDescending { it.items.last().at })
+                }
+            }
+        }
+    }
+
+    private suspend fun postStatus(fields: Map<String, Any?>) {
+        val uid = me()
+        val id = root.child("statuses").child(uid).push().key ?: error("no id")
+        val now = System.currentTimeMillis() + _serverOffset.value
+        root.child("statuses").child(uid).child(id).setValue(fields + mapOf("at" to ServerValue.TIMESTAMP, "expireAt" to now + STATUS_LIFE_MS)).await()
+    }
+
+    override suspend fun postTextStatus(text: String, background: Long): Result<Unit> = runCatching {
+        val body = text.trim().take(700)
+        require(body.isNotEmpty()) { "text" }
+        postStatus(mapOf("kind" to StatusKind.TEXT.name, "text" to body, "bg" to background))
+    }
+
+    override suspend fun postPhotoStatus(image: PickedImage, caption: String): Result<Unit> = runCatching {
+        val uid = me()
+        val url = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            MediaUpload.upload(token(), "u_$uid", "jpg", "image/jpeg", image.jpeg.size.toLong(), { image.jpeg.inputStream() }) {}
+        }
+        imageCache.put(url, image.jpeg)
+        postStatus(mapOf("kind" to StatusKind.PHOTO.name, "url" to url, "text" to caption.trim().take(700), "thumb" to image.thumb, "w" to image.width, "h" to image.height))
+    }
+
+    override suspend fun postVideoStatus(file: PickedFile, caption: String): Result<Unit> = runCatching {
+        val uid = me()
+        // Made small first, like a video in a message.
+        var source = file.location
+        var size = file.size
+        VideoCompressor.compress(app, file.location) {}?.let { small ->
+            if (small.length() in 1 until size) {
+                source = small.absolutePath
+                size = small.length()
+            }
+        }
+        require(size <= MediaUpload.MAX_BYTES) { "max 100 MB" }
+        val url = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            MediaUpload.upload(token(), "u_$uid", "mp4", "video/mp4", size, { openLocation(source) }) {}
+        }
+        if (source != file.location) runCatching { java.io.File(source).delete() }
+        postStatus(
+            mapOf(
+                "kind" to StatusKind.VIDEO.name, "url" to url, "text" to caption.trim().take(700), "thumb" to file.thumb,
+                "w" to file.width, "h" to file.height, "dur" to file.durationMs,
+            ),
+        )
+    }
+
+    override suspend fun deleteStatus(id: String) {
+        val uid = me()
+        root.updateChildren(mapOf("statuses/$uid/$id" to null, "statusViews/$uid/$id" to null))
+    }
+
+    override suspend fun markStatusSeen(item: StatusItem) {
+        val uid = auth.currentUser?.uid ?: return
+        if (item.owner.uid == uid) return
+        root.updateChildren(
+            mapOf(
+                "statusSeen/$uid/${item.owner.uid}/${item.id}" to true,
+                "statusViews/${item.owner.uid}/${item.id}/$uid" to ServerValue.TIMESTAMP,
+            ),
+        )
+    }
+
+    override fun statusViewers(id: String): Flow<List<Pair<ChatUser, Long>>> = combine(
+        callbackFlow {
+            val job = launch {
+                listen(root.child("statusViews").child(me()).child(id)).collect { snap ->
+                    trySend(snap.children.mapNotNull { v -> v.key?.let { it to (v.getValue(Long::class.java) ?: 0L) } })
+                }
+            }
+            awaitClose { job.cancel() }
+        },
+        friends(),
+    ) { views, people ->
+        val byId = people.associateBy { it.uid }
+        views.map { (uid, at) -> (byId[uid] ?: ChatUser(uid, "?", "")) to at }.sortedByDescending { it.second }
+    }
+
+    private val _statusPrivacy = MutableStateFlow(StatusPrivacy())
+    override val statusPrivacy: StateFlow<StatusPrivacy> = _statusPrivacy.asStateFlow()
+    private var statusPrivacyListener: ValueEventListener? = null
+    private var statusPrivacyRef: DatabaseReference? = null
+
+    /** Keeps [statusPrivacy] up to date for the signed-in person. */
+    private fun watchStatusPrivacy(uid: String?) {
+        statusPrivacyListener?.let { l -> runCatching { statusPrivacyRef?.removeEventListener(l) } }
+        statusPrivacyListener = null
+        statusPrivacyRef = null
+        if (uid == null) return
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snap: DataSnapshot) {
+                _statusPrivacy.value = StatusPrivacy(
+                    audience = runCatching { StatusAudience.valueOf(snap.child("mode").getValue(String::class.java).orEmpty()) }.getOrDefault(StatusAudience.FRIENDS),
+                    people = snap.child("people").children.mapNotNull { it.key }.toSet(),
+                )
+            }
+
+            override fun onCancelled(error: DatabaseError) {}
+        }
+        val ref = root.child("statusPrivacy").child(uid)
+        ref.addValueEventListener(listener)
+        statusPrivacyRef = ref
+        statusPrivacyListener = listener
+    }
+
+    override suspend fun setStatusPrivacy(privacy: StatusPrivacy) {
+        root.child("statusPrivacy").child(me()).setValue(
+            mapOf("mode" to privacy.audience.name, "people" to privacy.people.associateWith { true }.ifEmpty { null }),
+        )
     }
 
     /** Writes one line of the person's call list (the same call twice only updates it). */
@@ -1648,6 +1847,9 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         /** A photo as base64 must stay under this (the rules allow 1.5 MB). */
         private const val MEDIA_MAX_CHARS = 1_450_000
         private const val TYPING_FRESH_MS = 8_000L
+
+        /** A status stays a day. */
+        private const val STATUS_LIFE_MS = 24 * 3600_000L
 
         /** Where the database is when the config file does not name one (created in Belgium, europe-west1). */
         private const val DATABASE_URL = "https://qmusic-2552b-default-rtdb.europe-west1.firebasedatabase.app"

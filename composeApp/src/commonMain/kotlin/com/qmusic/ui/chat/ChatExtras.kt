@@ -173,11 +173,24 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
     val pickPhoto = rememberImagePicker { photos -> photos.firstOrNull()?.let { controller.setProfilePhoto(it) } }
     val changed = name.trim() != me.name || about.trim() != me.about
     LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(bottom = 32.dp)) {
-        item { TopBar(s.settings, { controller.pop() }) }
         item {
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.clip(CircleShape).clickable { pickPhoto() }) { ChatAvatar(me, 112.dp) }
-                Text(s.changePhoto, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { pickPhoto() }.padding(10.dp))
+            TopBar(s.settings, { controller.pop() }, actions = {
+                IconButton(onClick = { controller.push(ChatRoute.MyQr) }) { QrGlyph(Color.White) }
+            })
+        }
+        item {
+            // The big picture with a camera on it, like a profile card.
+            Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.clip(CircleShape).clickable { pickPhoto() }) {
+                    ChatAvatar(me, 132.dp)
+                    Box(
+                        Modifier.align(Alignment.BottomEnd).size(38.dp).clip(CircleShape).background(Color.White),
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(QMusicIcons.Camera, contentDescription = s.changePhoto, tint = Color.Black, modifier = Modifier.size(20.dp)) }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(me.name, color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text("@" + me.username, color = TextSecondary, fontSize = 14.sp)
             }
         }
         item {
@@ -187,12 +200,17 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
                 Spacer(Modifier.height(14.dp))
                 Text(s.about, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
                 Field(about, { about = it.take(140) }, s.aboutHint, capitalize = false)
-                Text("@" + me.username, color = TextMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
                 if (changed) {
                     Spacer(Modifier.height(12.dp))
                     WhiteButton(s.save, enabled = name.isNotBlank()) { controller.updateProfile(name, about) }
                 }
             }
+        }
+        item { SectionTitle(s.accountSection) }
+        item {
+            MenuRow(s.myQrTitle, s.myQrNote) { controller.push(ChatRoute.MyQr) }
+            MenuRow(s.starredShort, null) { controller.openStarred() }
+            MenuRow(s.statusPrivacyTitle, s.statusPrivacyNote) { controller.push(ChatRoute.StatusPrivacyPage) }
         }
         item { SectionTitle(s.soundsTitle) }
         item { SoundSettings(s) }
@@ -219,6 +237,30 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
             }
             Text(s.e2eNote, color = TextMuted, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(16.dp))
         }
+    }
+}
+
+@Composable
+private fun MenuRow(title: String, note: String?, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = TextPrimary, fontSize = 15.sp)
+            if (note != null) Text(note, color = TextSecondary, fontSize = 12.sp)
+        }
+        Icon(QMusicIcons.ChevronRight, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(20.dp))
+    }
+}
+
+/** A small QR sign: three corner squares and a dot. */
+@Composable
+internal fun QrGlyph(tint: Color) {
+    androidx.compose.foundation.Canvas(Modifier.size(22.dp)) {
+        val u = size.minDimension / 7f
+        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = u * 0.8f)
+        listOf(0f to 0f, 4f to 0f, 0f to 4f).forEach { (x, y) ->
+            drawRect(tint, topLeft = androidx.compose.ui.geometry.Offset(x * u + u * 0.4f, y * u + u * 0.4f), size = androidx.compose.ui.geometry.Size(u * 2.2f, u * 2.2f), style = stroke)
+        }
+        drawRect(tint, topLeft = androidx.compose.ui.geometry.Offset(4.6f * u, 4.6f * u), size = androidx.compose.ui.geometry.Size(u * 1.8f, u * 1.8f))
     }
 }
 

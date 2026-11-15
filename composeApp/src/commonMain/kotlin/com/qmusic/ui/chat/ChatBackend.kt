@@ -17,6 +17,32 @@ data class ChatUser(
 /** What the person shares: their last seen (and being online), and whether they tell others they read. */
 data class Privacy(val hideLastSeen: Boolean = false, val hideReadReceipts: Boolean = false)
 
+enum class StatusKind { PHOTO, VIDEO, TEXT }
+
+/** One status: a photo, a video or a text on a colour, gone 24 hours after [at]. */
+data class StatusItem(
+    val id: String,
+    val owner: ChatUser,
+    val kind: StatusKind,
+    val url: String = "",
+    val text: String = "",
+    /** The background of a text status (ARGB). */
+    val background: Long = 0xFF1E1E1E,
+    val at: Long,
+    val thumb: String = "",
+    val width: Int = 0,
+    val height: Int = 0,
+    val durationMs: Long = 0,
+)
+
+/** Someone's statuses, oldest first, and whether the person has seen all of them. */
+data class StatusGroup(val owner: ChatUser, val items: List<StatusItem>, val seenAll: Boolean, val seen: Set<String>)
+
+/** Who sees the person's statuses: all friends, only the chosen ones, or all friends but the chosen ones. */
+enum class StatusAudience { FRIENDS, ONLY, EXCEPT }
+
+data class StatusPrivacy(val audience: StatusAudience = StatusAudience.FRIENDS, val people: Set<String> = emptySet())
+
 enum class CallDirection { IN, OUT, GROUP }
 
 /** How a call went for the person: talked, missed (not answered here), declined, or not answered by them. */
@@ -269,6 +295,8 @@ data class ChatThread(
     /** Someone is typing in it (when they last typed, and who, for groups). */
     val typingAt: Long = 0,
     val typingName: String = "",
+    /** Marked as a favourite (the Favourites filter of the list). */
+    val favorite: Boolean = false,
 ) {
     fun muted(now: Long): Boolean = mutedUntil == -1L || mutedUntil > now
 
@@ -492,6 +520,34 @@ interface ChatBackend {
     /** The person's calls, newest first. */
     fun callLog(): Flow<List<CallLogEntry>> = kotlinx.coroutines.flow.flowOf(emptyList())
     suspend fun clearCallLog() {}
+
+    /** Until when the person looked at their calls (missed ones after it make the Calls tab's badge). */
+    fun callsSeenAt(): Flow<Long> = kotlinx.coroutines.flow.flowOf(0L)
+    suspend fun setCallsSeen() {}
+
+    suspend fun setFavorite(chatId: String, favorite: Boolean) {}
+
+    // ------------------------------------------------------------------ status
+
+    /** The person's own statuses (the last 24 hours), oldest first. */
+    fun myStatuses(): Flow<List<StatusItem>> = kotlinx.coroutines.flow.flowOf(emptyList())
+
+    /** Friends' statuses the person may see, the ones with something unseen first. */
+    fun friendStatuses(): Flow<List<StatusGroup>> = kotlinx.coroutines.flow.flowOf(emptyList())
+
+    suspend fun postTextStatus(text: String, background: Long): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun postPhotoStatus(image: PickedImage, caption: String): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun postVideoStatus(file: PickedFile, caption: String): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun deleteStatus(id: String) {}
+
+    /** The person saw [item]: its owner's list of viewers gets them. */
+    suspend fun markStatusSeen(item: StatusItem) {}
+
+    /** Who saw the person's status [id], and when. */
+    fun statusViewers(id: String): Flow<List<Pair<ChatUser, Long>>> = kotlinx.coroutines.flow.flowOf(emptyList())
+
+    val statusPrivacy: StateFlow<StatusPrivacy> get() = kotlinx.coroutines.flow.MutableStateFlow(StatusPrivacy())
+    suspend fun setStatusPrivacy(privacy: StatusPrivacy) {}
 }
 
 /** A conversation's id: both people's ids in order, so each pair has exactly one. */
@@ -501,7 +557,7 @@ fun chatIdOf(a: String, b: String): String = if (a < b) "${a}_$b" else "${b}_$a"
 fun isValidUsername(name: String): Boolean = name.length in 3..20 && name.all { it in 'a'..'z' || it in '0'..'9' || it == '.' || it == '_' }
 
 /** Asks the app to open the messages section (a tapped notification); [user] opens their conversation. */
-data class ChatLaunchRequest(val user: ChatUser?, val profile: Boolean = false)
+data class ChatLaunchRequest(val user: ChatUser?, val profile: Boolean = false, val username: String? = null)
 
 object ChatLaunch {
     val request = kotlinx.coroutines.flow.MutableStateFlow<ChatLaunchRequest?>(null)

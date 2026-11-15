@@ -93,6 +93,9 @@ kotlin {
                 implementation(libs.media3.database)
                 implementation("androidx.media3:media3-transformer:1.5.1")
                 implementation("androidx.media3:media3-effect:1.5.1")
+                // Qeyf codes: drawn with ZXing, scanned with Google's code scanner (no camera permission).
+                implementation("com.google.zxing:core:3.5.3")
+                implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
                 implementation("androidx.biometric:biometric:1.1.0")
                 implementation(libs.okhttp)
                 implementation("androidx.appcompat:appcompat:1.7.0")
