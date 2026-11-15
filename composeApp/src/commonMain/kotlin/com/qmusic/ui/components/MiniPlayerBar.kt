@@ -1,5 +1,6 @@
 package com.qmusic.ui.components
 
+import com.qmusic.ui.theme.Ink
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -166,7 +167,7 @@ fun MiniPlayerBar(
                         contentScale = ContentScale.Crop,
                     )
                 } else {
-                    QMusicLogo(size = 26.dp, tint = Color.White.copy(alpha = 0.85f))
+                    QMusicLogo(size = 26.dp, tint = Ink.copy(alpha = 0.85f))
                 }
             }
 
@@ -192,14 +193,14 @@ fun MiniPlayerBar(
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = Color.White,
+                    color = Ink,
                 )
                 Text(
                     text = currentTrack.artists.joinToString { it.name }.ifEmpty { s.unknownArtist },
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = Color.White.copy(alpha = 0.6f),
+                    color = Ink.copy(alpha = 0.6f),
                 )
             }
 
@@ -207,7 +208,7 @@ fun MiniPlayerBar(
                 Icon(
                     imageVector = if (isPlaying) QMusicIcons.Pause else QMusicIcons.Play,
                     contentDescription = if (isPlaying) s.pause else s.play,
-                    tint = Color.White,
+                    tint = Ink,
                     modifier = Modifier.size(30.dp),
                 )
             }
@@ -215,7 +216,7 @@ fun MiniPlayerBar(
                 Icon(
                     imageVector = QMusicIcons.Next,
                     contentDescription = s.next,
-                    tint = Color.White,
+                    tint = Ink,
                     modifier = Modifier.size(26.dp),
                 )
             }
@@ -230,13 +231,13 @@ fun MiniPlayerBar(
                 .fillMaxWidth()
                 .height(PROGRESS_HEIGHT)
                 .graphicsLayer { alpha = contentAlpha() }
-                .background(Color.White.copy(alpha = 0.12f)),
+                .background(Ink.copy(alpha = 0.12f)),
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth(progress)
                     .fillMaxHeight()
-                    .background(Color.White),
+                    .background(Ink),
             )
         }
     }

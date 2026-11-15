@@ -38,7 +38,7 @@
             "expireAt"
           ],
           "$messageId": {
-            ".write": "((auth != null && $chatId.matches(/^[A-Za-z0-9]+_[A-Za-z0-9]+$/) && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) && ((!data.exists() && newData.child('from').val() === auth.uid && root.child('blocked').child($chatId.replace(auth.uid, '').replace('_', '')).child(auth.uid).val() !== true) || (data.exists() && !newData.exists() && data.child('from').val() === auth.uid))) || (auth != null && $chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists() && ((!data.exists() && newData.child('from').val() === auth.uid) || (data.exists() && !newData.exists() && data.child('from').val() === auth.uid)))) || (auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists())) && data.exists() && newData.exists() && data.child('from').val() === auth.uid && newData.child('from').val() === auth.uid)",
+            ".write": "((auth != null && $chatId.matches(/^[A-Za-z0-9]+_[A-Za-z0-9]+$/) && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) && ((!data.exists() && newData.child('from').val() === auth.uid && root.child('blocked').child($chatId.replace(auth.uid, '').replace('_', '')).child(auth.uid).val() !== true) || (data.exists() && !newData.exists() && data.child('from').val() === auth.uid))) || (auth != null && $chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists() && ((!data.exists() && newData.child('from').val() === auth.uid && (root.child('groups').child($chatId).child('settings').child('sendAdmins').val() !== true || root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin')) || (data.exists() && !newData.exists() && data.child('from').val() === auth.uid)))) || (auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists())) && data.exists() && newData.exists() && data.child('from').val() === auth.uid && newData.child('from').val() === auth.uid)",
             ".validate": "!newData.exists() || (newData.child('text').isString() && newData.child('text').val().length <= 4000 && (data.exists() ? newData.child('at').val() === data.child('at').val() : newData.child('at').val() === now))"
           }
         },
@@ -71,6 +71,19 @@
             "$uid": {
               ".write": "auth != null && auth.uid === $uid && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))",
               ".validate": "!newData.exists() || (newData.isString() && newData.val().matches(/^[0-9]{1,2}(,[0-9]{1,2}){0,11}$/))"
+            }
+          }
+        },
+        "pinned": {
+          "$messageId": {
+            ".write": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists())) && (!$chatId.matches(/^grp[A-Za-z0-9]{20}$/) || (root.child('groups').child($chatId).child('settings').child('editAdmins').val() !== true || root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin'))",
+            ".validate": "!newData.exists() || (newData.hasChildren(['text', 'from', 'at']) && newData.child('text').isString() && newData.child('text').val().length <= 300)"
+          }
+        },
+        "opened": {
+          "$messageId": {
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists())) && !data.exists()"
             }
           }
         }
@@ -169,7 +182,7 @@
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
         "$other": {
-          ".write": "auth != null && (auth.uid === $uid || (auth.uid === $other && (!newData.exists() || root.child('sentRequests').child($uid).child(auth.uid).exists())))"
+          ".write": "(auth != null && (auth.uid === $uid || (auth.uid === $other && (!newData.exists() || root.child('sentRequests').child($uid).child(auth.uid).exists())))) || (auth != null && auth.uid === $other && data.exists() && newData.exists())"
         }
       }
     },
@@ -179,11 +192,11 @@
         ".write": "auth != null && $chatId.matches(/^grp[A-Za-z0-9]{20}$/) && !data.exists() && newData.child('members').child(auth.uid).child('role').val() === 'admin'",
         ".validate": "newData.hasChild('name')",
         "name": {
-          ".write": "auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).exists()",
+          ".write": "auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).exists() && (root.child('groups').child($chatId).child('settings').child('editAdmins').val() !== true || root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin')",
           ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 50"
         },
         "photo": {
-          ".write": "auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).exists()"
+          ".write": "auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).exists() && (root.child('groups').child($chatId).child('settings').child('editAdmins').val() !== true || root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin')"
         },
         "createdBy": {
           ".validate": "newData.isString()"
@@ -196,12 +209,21 @@
           }
         },
         "description": {
-          ".write": "auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).exists()",
+          ".write": "auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).exists() && (root.child('groups').child($chatId).child('settings').child('editAdmins').val() !== true || root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin')",
           ".validate": "newData.isString() && newData.val().length <= 500"
         },
         "invite": {
           ".write": "auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin'",
           ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9]{10,40}$/)"
+        },
+        "settings": {
+          ".write": "auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin'",
+          "sendAdmins": {
+            ".validate": "newData.isBoolean()"
+          },
+          "editAdmins": {
+            ".validate": "newData.isBoolean()"
+          }
         }
       }
     },
@@ -299,6 +321,24 @@
       }
     },
     "broadcasts": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "statusLikes": {
+      "$owner": {
+        ".read": "auth != null && auth.uid === $owner",
+        "$id": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && root.child('statuses').child($owner).child($id).exists()",
+            ".validate": "!newData.exists() || newData.isNumber()",
+            ".read": "auth != null && auth.uid === $uid"
+          }
+        }
+      }
+    },
+    "chatPrefs": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null && auth.uid === $uid"

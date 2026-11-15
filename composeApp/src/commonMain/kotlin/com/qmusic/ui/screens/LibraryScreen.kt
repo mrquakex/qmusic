@@ -1,5 +1,6 @@
 package com.qmusic.ui.screens
 
+import com.qmusic.ui.theme.Ink
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -218,7 +219,7 @@ fun LibraryScreen(
                     color = if (selected) BgRoot else MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
-                        .background(if (selected) Color.White else DarkSurfaceVariant)
+                        .background(if (selected) Ink else DarkSurfaceVariant)
                         .clickable { selectedTabIndex = index }
                         .padding(horizontal = 16.dp, vertical = 9.dp),
                 )
@@ -494,8 +495,8 @@ private fun OfflineCard(
                 LinearProgressIndicator(
                     progress = { if (songs.isEmpty()) 0f else saved.toFloat() / songs.size },
                     modifier = Modifier.fillMaxWidth(),
-                    color = Color.White,
-                    trackColor = Color.White.copy(alpha = 0.18f),
+                    color = Ink,
+                    trackColor = Ink.copy(alpha = 0.18f),
                 )
                 OutlinedButton(onClick = onCancel, shape = RoundedCornerShape(12.dp)) { Text(s.cancelDownloads) }
             } else if (missing > 0) {
@@ -542,10 +543,10 @@ private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onChang
             onCheckedChange = onChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = BgRoot,
-                checkedTrackColor = Color.White,
-                uncheckedThumbColor = Color.White.copy(alpha = 0.7f),
+                checkedTrackColor = Ink,
+                uncheckedThumbColor = Ink.copy(alpha = 0.7f),
                 uncheckedTrackColor = DarkSurfaceVariant,
-                uncheckedBorderColor = Color.White.copy(alpha = 0.3f),
+                uncheckedBorderColor = Ink.copy(alpha = 0.3f),
             ),
         )
     }

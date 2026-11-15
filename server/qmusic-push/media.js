@@ -92,8 +92,85 @@ async function upload(req, res, url) {
   });
 }
 
+// ------------------------------------------------------------------ GIFs and stickers (KLIPY)
+//
+//   GET /media/gifs?kind=gifs|stickers&q=<words>&page=<n>   Authorization: Bearer <Firebase ID token>
+//     → 200 {"items": [{"id", "preview", "url", "w", "h"}], "more": bool}
+//
+// The KLIPY key stays here (/etc/qmusic/klipy-key); the app never holds it. Each person is a stable, anonymous
+// customer id (a hash of their uid) so KLIPY can keep their recent ones without learning who they are.
+const KLIPY = "https://api.klipy.com/api/v1";
+const gifCache = new Map();
+
+function klipyKey() {
+  try {
+    return fs.readFileSync("/etc/qmusic/klipy-key", "utf8").trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+/** The best of a KLIPY item's files for a size: an animated picture (GIF or WebP) the phone can show. */
+function pick(file, sizes) {
+  for (const size of sizes) {
+    const f = file && file[size];
+    if (!f) continue;
+    const one = f.webp || f.gif;
+    if (one && one.url) return { url: one.url, w: Number(one.width) || 0, h: Number(one.height) || 0 };
+  }
+  return null;
+}
+
+async function gifs(req, res, url) {
+  const token = (req.headers.authorization || "").replace(/^Bearer /, "");
+  let uid;
+  try {
+    uid = (await admin.auth().verifyIdToken(token)).uid;
+  } catch (_) {
+    return reply(res, 401, { error: "sign in" });
+  }
+  const key = klipyKey();
+  if (!key) return reply(res, 503, { error: "no gif key" });
+  const kind = url.searchParams.get("kind") === "stickers" ? "stickers" : "gifs";
+  const q = (url.searchParams.get("q") || "").trim().slice(0, 60);
+  const page = Math.max(1, Math.min(20, Number(url.searchParams.get("page")) || 1));
+  const customer = crypto.createHash("sha256").update("qeyf:" + uid).digest("hex").slice(0, 32);
+  const query = new URLSearchParams({ page: String(page), per_page: "30", customer_id: customer, locale: "tr", content_filter: "medium" });
+  if (q) query.set("q", q);
+  const target = `${KLIPY}/${key}/${kind}/${q ? "search" : "trending"}?${query}`;
+  const cacheKey = `${kind}|${q.toLowerCase()}|${page}`;
+  const hit = gifCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return reply(res, 200, hit.body);
+  try {
+    const r = await fetch(target, { signal: AbortSignal.timeout(8000) });
+    const json = await r.json();
+    const list = (json && json.data && json.data.data) || [];
+    const items = list
+      .map((it) => {
+        const preview = pick(it.file, ["sm", "xs", "md"]);
+        const full = pick(it.file, ["md", "hd", "sm"]);
+        if (!preview || !full) return null;
+        return { id: String(it.slug || it.id), preview: preview.url, url: full.url, w: full.w, h: full.h };
+      })
+      .filter(Boolean);
+    const body = { items, more: !!(json && json.data && json.data.has_next) };
+    gifCache.set(cacheKey, { at: Date.now(), body });
+    if (gifCache.size > 500) gifCache.delete(gifCache.keys().next().value);
+    reply(res, 200, body);
+  } catch (e) {
+    log("gifs failed:", e.message);
+    reply(res, 502, { error: "gif service" });
+  }
+}
+
 http
   .createServer((req, res) => {
+    if (req.method === "GET" && req.url.startsWith("/media/gifs")) {
+      gifs(req, res, new URL(req.url, "http://localhost")).catch(() => {
+        if (!res.headersSent) reply(res, 500, { error: "failed" });
+      });
+      return;
+    }
     const url = new URL(req.url, "http://localhost");
     if (req.method === "POST" && url.pathname === "/media/upload") {
       upload(req, res, url).catch((e) => {

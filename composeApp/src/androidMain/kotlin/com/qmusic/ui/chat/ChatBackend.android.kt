@@ -215,6 +215,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         ).await()
         // The photo and the about line move to where only the chosen people can read them.
         if (mine != null) placeProfile(uid, mine.photo, mine.about, privacy)
+        _privacy.value = privacy
+        refreshMyCopies()
     }
 
     /** users/{uid} (everyone reads it) holds the photo and about only when everyone may see them; else privateProfile. */
@@ -256,6 +258,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val mine = (_account.value as? ChatAccount.Ready)?.me
         placeProfile(uid, url, mine?.about.orEmpty(), _privacy.value)
         if (mine != null) _account.value = ChatAccount.Ready(mine.copy(photo = url))
+        refreshMyCopies()
     }
 
     // ------------------------------------------------------------------ account
@@ -751,6 +754,16 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             contact = child("contact").takeIf { it.exists() }?.let { c ->
                 ChatContact(c.child("name").getValue(String::class.java).orEmpty(), c.child("phone").getValue(String::class.java) ?: return@let null)
             },
+            viewOnce = child("viewOnce").getValue(Boolean::class.java) == true,
+            mentions = child("mentions").children.mapNotNull { it.key }.toSet(),
+            gif = child("gif").takeIf { it.exists() }?.let { g ->
+                ChatGif(
+                    url = g.child("url").getValue(String::class.java) ?: return@let null,
+                    width = g.child("w").getValue(Int::class.java) ?: 0,
+                    height = g.child("h").getValue(Int::class.java) ?: 0,
+                    sticker = g.child("sticker").getValue(Boolean::class.java) == true,
+                )
+            },
         )
     }
 
@@ -927,14 +940,22 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         }
         updates["userChats/${me.uid}/$groupId/unread"] = 0
         updates["userChats/${me.uid}/$groupId/read"] = ServerValue.TIMESTAMP
-        updates["notify/${root.child("notify").push().key}"] = mapOf(
-            "from" to me.uid, "to" to groupId, "chatId" to groupId, "type" to "chat", "body" to preview, "at" to ServerValue.TIMESTAMP,
-        )
+        @Suppress("UNCHECKED_CAST")
+        val mentions = (message["mentions"] as? Map<String, Boolean>)?.takeIf { it.isNotEmpty() }
+        updates["notify/${root.child("notify").push().key}"] = buildMap<String, Any?> {
+            put("from", me.uid)
+            put("to", groupId)
+            put("chatId", groupId)
+            put("type", "chat")
+            put("body", preview)
+            put("at", ServerValue.TIMESTAMP)
+            if (mentions != null) put("mentions", mentions)
+        }
         pendingIds.update { it + messageId }
         root.updateChildren(updates).addOnCompleteListener { pendingIds.update { it - messageId } }
     }
 
-    override suspend fun sendImages(other: ChatUser, images: List<PickedImage>, caption: String, replyTo: ChatReply?): Result<Unit> = runCatching {
+    override suspend fun sendImages(other: ChatUser, images: List<PickedImage>, caption: String, replyTo: ChatReply?, viewOnce: Boolean): Result<Unit> = runCatching {
         val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
         val chatId = conversationId(me.uid, other)
         val messageId = root.child("chats").child(chatId).child("messages").push().key ?: error("no id")
@@ -957,18 +978,25 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                             _uploads.update { it + (messageId to sent.sum().toFloat() / total) }
                         }
                         imageCache.put(url, image.jpeg)
-                        mapOf("id" to local[i].id, "url" to url, "w" to image.width, "h" to image.height, "thumb" to image.thumb)
+                        // A view-once photo has no blurred preview: nothing of it shows before it is opened.
+                        mapOf("id" to local[i].id, "url" to url, "w" to image.width, "h" to image.height, "thumb" to if (viewOnce) "" else image.thumb)
                     }
                 }.map { it.await() }
             }
-            val label = if (entries.size == 1) "📷" else "📷 ×${entries.size}"
+            val tr = app.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+            val label = when {
+                viewOnce -> if (tr) "📷 Tek seferlik fotoğraf" else "📷 View once photo"
+                entries.size == 1 -> "📷"
+                else -> "📷 ×${entries.size}"
+            }
             sendMessage(
                 other = other,
                 text = caption,
                 share = null,
                 replyTo = replyTo,
                 images = entries,
-                preview = if (caption.isBlank()) label else "$label $caption",
+                preview = if (caption.isBlank() || viewOnce) label else "$label $caption",
+                extra = if (viewOnce) mapOf("viewOnce" to true) else emptyMap(),
                 fixedId = messageId,
             )
         } finally {
@@ -1099,6 +1127,10 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         return GroupInfo(
             id, name, child("photo").getValue(String::class.java), members, child("createdBy").getValue(String::class.java),
             description = child("description").getValue(String::class.java).orEmpty(),
+            settings = GroupSettings(
+                sendAdmins = child("settings").child("sendAdmins").getValue(Boolean::class.java) == true,
+                editAdmins = child("settings").child("editAdmins").getValue(Boolean::class.java) == true,
+            ),
         )
     }
 
@@ -1115,6 +1147,168 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
 
     override suspend fun setGroupDescription(groupId: String, text: String): Result<Unit> = runCatching {
         root.child("groups").child(groupId).child("description").setValue(text.trim().take(500)).await()
+    }
+
+    override suspend fun searchGifs(stickers: Boolean, query: String, page: Int): Result<List<GifItem>> = runCatching {
+        val idToken = token()
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val q = java.net.URLEncoder.encode(query.trim().take(60), "UTF-8")
+            val url = java.net.URL("${MediaUpload.BASE}/media/gifs?kind=${if (stickers) "stickers" else "gifs"}&q=$q&page=$page")
+            val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
+                connectTimeout = 8_000
+                readTimeout = 10_000
+                setRequestProperty("Authorization", "Bearer $idToken")
+            }
+            try {
+                val code = conn.responseCode
+                if (code == 503) error("gif-key")
+                require(code == 200) { "gifs $code" }
+                val json = org.json.JSONObject(conn.inputStream.bufferedReader().readText())
+                val items = json.optJSONArray("items") ?: org.json.JSONArray()
+                (0 until items.length()).mapNotNull { i ->
+                    val it = items.optJSONObject(i) ?: return@mapNotNull null
+                    GifItem(it.optString("id"), it.optString("preview"), it.optString("url"), it.optInt("w"), it.optInt("h"))
+                        .takeIf { g -> g.url.startsWith("https://") && g.preview.startsWith("https://") }
+                }
+            } finally {
+                conn.disconnect()
+            }
+        }
+    }
+
+    override suspend fun sendGif(other: ChatUser, gif: ChatGif, replyTo: ChatReply?): Result<Unit> = runCatching {
+        require(gif.url.startsWith("https://")) { "gif" }
+        val tr = app.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+        val label = if (gif.sticker) (if (tr) "Çıkartma" else "Sticker") else "GIF"
+        sendMessage(
+            other, "", null, replyTo, images = null, preview = label,
+            extra = mapOf("gif" to mapOf("url" to gif.url, "w" to gif.width, "h" to gif.height, "sticker" to gif.sticker)),
+        )
+    }
+
+    override suspend fun setGroupSettings(groupId: String, settings: GroupSettings): Result<Unit> = runCatching {
+        root.child("groups").child(groupId).child("settings").setValue(mapOf("sendAdmins" to settings.sendAdmins, "editAdmins" to settings.editAdmins)).await()
+        groupInfo(groupId, fresh = true)
+    }
+
+    // ------------------------------------------------------------------ pins, view once, mentions, likes
+    //
+    //   chats/{id}/pinned/{messageId}        {text, from, at}: at most three, newest kept
+    //   chats/{id}/opened/{messageId}/{uid}  when a view-once photo was opened
+    //   statusLikes/{owner}/{id}/{uid}       a heart on a status (only its owner reads them)
+
+    override fun pinned(chatId: String): Flow<List<PinnedMessage>> = callbackFlow {
+        val job = launch {
+            runCatching {
+                listen(root.child("chats").child(chatId).child("pinned")).collect { snap ->
+                    trySend(
+                        snap.children.mapNotNull { p ->
+                            val id = p.key ?: return@mapNotNull null
+                            PinnedMessage(id, p.child("text").getValue(String::class.java).orEmpty(), p.child("from").getValue(String::class.java).orEmpty(), p.child("at").getValue(Long::class.java) ?: 0L)
+                        }.sortedByDescending { it.at },
+                    )
+                }
+            }.onFailure { trySend(emptyList()) }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override suspend fun pin(chatId: String, message: ChatMessage, preview: String, pinned: Boolean): Result<Unit> = runCatching {
+        val ref = root.child("chats").child(chatId).child("pinned")
+        if (!pinned) {
+            ref.child(message.id).removeValue().await()
+            return@runCatching
+        }
+        // Three at most: the oldest pin makes room.
+        val current = ref.get().await().children.mapNotNull { c -> c.key?.let { it to (c.child("at").getValue(Long::class.java) ?: 0L) } }
+        val updates = HashMap<String, Any?>()
+        current.filter { it.first != message.id }.sortedByDescending { it.second }.drop(2).forEach { updates[it.first] = null }
+        updates[message.id] = mapOf("text" to preview.take(300), "from" to message.from, "at" to ServerValue.TIMESTAMP)
+        ref.updateChildren(updates).await()
+    }
+
+    override fun opened(chatId: String): Flow<Map<String, Set<String>>> = callbackFlow {
+        val job = launch {
+            runCatching {
+                listen(root.child("chats").child(chatId).child("opened")).collect { snap ->
+                    trySend(snap.children.associate { m -> m.key.orEmpty() to m.children.mapNotNull { it.key }.toSet() })
+                }
+            }.onFailure { trySend(emptyMap()) }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override suspend fun markOpened(chatId: String, messageId: String) {
+        root.child("chats").child(chatId).child("opened").child(messageId).child(me()).setValue(ServerValue.TIMESTAMP)
+    }
+
+    override suspend fun sendMentioning(other: ChatUser, text: String, replyTo: ChatReply?, mentions: Set<String>): Result<Unit> = runCatching {
+        if (mentions.isEmpty()) {
+            send(other, text, null, replyTo).getOrThrow()
+            return@runCatching
+        }
+        sendMessage(other, text, null, replyTo, images = null, preview = null, extra = mapOf("mentions" to mentions.associateWith { true }))
+    }
+
+    override fun statusLikes(id: String): Flow<Set<String>> = callbackFlow {
+        val job = launch {
+            runCatching { listen(root.child("statusLikes").child(me()).child(id)).collect { snap -> trySend(snap.children.mapNotNull { it.key }.toSet()) } }
+                .onFailure { trySend(emptySet()) }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override fun likedStatus(item: StatusItem): Flow<Boolean> = callbackFlow {
+        val job = launch {
+            runCatching { listen(root.child("statusLikes").child(item.owner.uid).child(item.id).child(me())).collect { trySend(it.exists()) } }
+                .onFailure { trySend(false) }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override fun wallpaper(): Flow<Int> = callbackFlow {
+        val job = launch {
+            runCatching { listen(root.child("chatPrefs").child(me()).child("wallpaper")).collect { trySend(it.getValue(Int::class.java) ?: 0) } }
+                .onFailure { trySend(0) }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override suspend fun setWallpaper(index: Int) {
+        root.child("chatPrefs").child(me()).child("wallpaper").setValue(index.takeIf { it > 0 })
+    }
+
+    override suspend fun likeStatus(item: StatusItem, liked: Boolean) {
+        root.child("statusLikes").child(item.owner.uid).child(item.id).child(me()).setValue(if (liked) ServerValue.TIMESTAMP else null)
+    }
+
+    override suspend fun refreshMyCopies() {
+        val me = (_account.value as? ChatAccount.Ready)?.me ?: return
+        val updates = HashMap<String, Any?>()
+        // Groups: everyone in them sees the public photo.
+        runCatching {
+            root.child("userChats").child(me.uid).get().await().children.forEach { c ->
+                val chatId = c.key ?: return@forEach
+                if (isGroupId(chatId)) {
+                    updates["groups/$chatId/members/${me.uid}/photo"] = me.publicPhoto()
+                } else {
+                    val other = c.child("other").getValue(String::class.java) ?: return@forEach
+                    updates["userChats/$other/$chatId/photo"] = me.publicPhoto()
+                }
+            }
+        }
+        // Friends: their card of the person shows the photo unless it is for nobody.
+        runCatching {
+            root.child("friends").child(me.uid).get().await().children.forEach { f ->
+                val uid = f.key ?: return@forEach
+                updates["friends/$uid/${me.uid}/photo"] = me.friendPhoto()
+                // A friend's chat with the person shows the friend version too.
+                updates["userChats/$uid/${chatIdOf(me.uid, uid)}/photo"] = me.friendPhoto()
+            }
+        }
+        if (updates.isEmpty()) return
+        // One by one: a line the rules refuse (a conversation that is gone) does not stop the others.
+        updates.forEach { (path, value) -> runCatching { root.child(path).setValue(value) } }
     }
 
     override suspend fun setAdmin(groupId: String, member: ChatUser, admin: Boolean): Result<Unit> = runCatching {

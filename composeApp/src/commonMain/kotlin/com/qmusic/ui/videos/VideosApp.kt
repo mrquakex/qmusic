@@ -1,5 +1,7 @@
 package com.qmusic.ui.videos
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -308,7 +310,7 @@ private fun androidx.compose.foundation.layout.BoxScope.FloatingMiniPlayer(w: Wa
             .onSizeChanged { card = it }
             .shadow(14.dp, RoundedCornerShape(10.dp))
             .clip(RoundedCornerShape(10.dp))
-            .background(Color.Black)
+            .background(InkInverse)
             .pointerInput(minX, minY) {
                 detectDragGestures(
                     onDragEnd = { offset = Offset(if (offset.x < minX / 2) minX else 0f, offset.y) },
@@ -323,17 +325,17 @@ private fun androidx.compose.foundation.layout.BoxScope.FloatingMiniPlayer(w: Wa
         if (playback != null && w.quality != null) VideoPlaybackSurface(playback, Modifier.fillMaxSize())
         Box(
             Modifier.fillMaxWidth().height(44.dp).background(
-                androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent)),
+                androidx.compose.ui.graphics.Brush.verticalGradient(listOf(InkInverse.copy(alpha = 0.55f), Color.Transparent)),
             ),
         )
         IconButton(onClick = { playback?.togglePlay() }, modifier = Modifier.align(Alignment.TopStart).size(40.dp)) {
-            Icon(if (playing) QMusicIcons.Pause else QMusicIcons.Play, null, tint = Color.White, modifier = Modifier.size(22.dp))
+            Icon(if (playing) QMusicIcons.Pause else QMusicIcons.Play, null, tint = Ink, modifier = Modifier.size(22.dp))
         }
         IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).size(40.dp)) {
-            Icon(QMusicIcons.Close, null, tint = Color.White, modifier = Modifier.size(20.dp))
+            Icon(QMusicIcons.Close, null, tint = Ink, modifier = Modifier.size(20.dp))
         }
         val fraction = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
-        Box(modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Color.White.copy(alpha = 0.25f))) {
+        Box(modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Ink.copy(alpha = 0.25f))) {
             Box(modifier = Modifier.fillMaxWidth(fraction).height(3.dp).background(VideoColors.Red))
         }
     }
@@ -345,7 +347,7 @@ private fun TopBar(s: VideoStrings, onSearch: () -> Unit, onAccount: () -> Unit)
         modifier = Modifier.fillMaxWidth().background(VideoColors.Background).padding(start = 12.dp, end = 4.dp).height(52.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        com.qmusic.ui.theme.QMusicLogo(size = 30.dp, tint = Color.White)
+        com.qmusic.ui.theme.QMusicLogo(size = 30.dp, tint = Ink)
         Spacer(Modifier.width(8.dp))
         Text(s.section, color = VideoColors.Text, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         IconButton(onClick = onSearch) { Icon(QMusicIcons.Search, s.searchHint, tint = VideoColors.Text) }
@@ -721,7 +723,7 @@ private fun ChannelPage(controller: VideosController, s: VideoStrings, onSignIn:
                             }
                             Text(
                                 if (c.subscribed) s.subscribed else s.subscribe,
-                                color = if (c.subscribed) VideoColors.Text else Color.Black,
+                                color = if (c.subscribed) VideoColors.Text else InkInverse,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier
                                     .padding(horizontal = 16.dp)
@@ -805,7 +807,7 @@ internal fun SwitchRow(label: String, hint: String?, checked: Boolean, onChange:
         androidx.compose.material3.Switch(
             checked = checked,
             onCheckedChange = onChange,
-            colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = VideoColors.Red, checkedThumbColor = Color.White),
+            colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = VideoColors.Red, checkedThumbColor = Ink),
         )
     }
 }

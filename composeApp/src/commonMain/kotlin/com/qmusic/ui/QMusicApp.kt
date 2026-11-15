@@ -117,7 +117,13 @@ fun QMusicApp(
     modifier: Modifier = Modifier,
 ) {
     val amoled by viewModel.amoledTheme.collectAsState()
+    val themeMode by viewModel.themeMode.collectAsState()
+    val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val light = themeMode == "light" || (themeMode == "system" && !systemDark)
+    // Set before the first frame is drawn, so the app never flashes the other theme.
+    if (com.qmusic.ui.theme.lightTheme != light) com.qmusic.ui.theme.lightTheme = light
     androidx.compose.runtime.SideEffect { com.qmusic.ui.theme.amoledTheme = amoled }
+    SystemBarsTheme(light)
     QMusicTheme {
         var showSplash by remember { mutableStateOf(!com.qmusic.ui.components.SplashState.shown) }
 
@@ -790,6 +796,8 @@ fun QMusicApp(
                         onCrossfadeChange = { viewModel.setCrossfadeDuration(it) },
                         onOpenEqualizerClick = { viewModel.setShowEqualizerDialog(true) },
                         onCheckUpdateClick = { viewModel.checkForUpdates() },
+                        themeMode = themeMode,
+                        onThemeMode = { viewModel.setThemeMode(it) },
                         crashReport = crashReport,
                         onBackupExport = backupFiles?.save,
                         onBackupImport = backupFiles?.open,

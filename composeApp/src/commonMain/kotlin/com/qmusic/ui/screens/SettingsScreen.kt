@@ -1,5 +1,9 @@
 package com.qmusic.ui.screens
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -72,6 +76,8 @@ fun SettingsScreen(
     onCheckUpdateClick: () -> Unit,
     onOpenSpotifyImport: () -> Unit,
     modifier: Modifier = Modifier,
+    themeMode: String = "system",
+    onThemeMode: (String) -> Unit = {},
     crashReport: String? = null,
     onBackupExport: (() -> Unit)? = null,
     onBackupImport: (() -> Unit)? = null,
@@ -216,8 +222,8 @@ fun SettingsScreen(
                     valueRange = 0f..12f,
                     steps = 11,
                     colors = SliderDefaults.colors(
-                        thumbColor = Color.White,
-                        activeTrackColor = Color.White,
+                        thumbColor = Ink,
+                        activeTrackColor = Ink,
                         inactiveTrackColor = DarkSurfaceVariant,
                     ),
                 )
@@ -359,6 +365,26 @@ fun SettingsScreen(
         }
 
         Section(s.sectionAppearance) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text(s.themeTitle, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("system" to s.themeSystem, "dark" to s.themeDark, "light" to s.themeLight).forEach { (mode, label) ->
+                        val on = themeMode == mode
+                        Text(
+                            label,
+                            color = if (on) InkInverse else Ink,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(if (on) Ink else com.qmusic.ui.theme.DarkSurfaceVariant)
+                                .clickable { onThemeMode(mode) }
+                                .padding(horizontal = 16.dp, vertical = 9.dp),
+                        )
+                    }
+                }
+            }
             SwitchRow(
                 icon = null,
                 title = s.amoledTitle,
@@ -383,7 +409,7 @@ fun SettingsScreen(
                     }
                     OutlinedButton(onClick = onCheckUpdateClick, enabled = !isCheckingUpdate && updateProgress == null) {
                         if (isCheckingUpdate) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Ink)
                         } else {
                             Text(s.checkUpdate)
                         }
@@ -403,8 +429,8 @@ fun SettingsScreen(
                         LinearProgressIndicator(
                             progress = { updateProgress },
                             modifier = Modifier.fillMaxWidth(),
-                            color = Color.White,
-                            trackColor = Color.White.copy(alpha = 0.18f),
+                            color = Ink,
+                            trackColor = Ink.copy(alpha = 0.18f),
                         )
                     } else {
                         Button(onClick = onInstallUpdate, modifier = Modifier.fillMaxWidth()) {
@@ -584,10 +610,10 @@ private fun PillRow(title: String, subtitle: String, options: List<Pair<String, 
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelLarge,
-                    color = if (selected) Color.Black else MaterialTheme.colorScheme.onSurface,
+                    color = if (selected) InkInverse else MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
-                        .background(if (selected) Color.White else DarkSurfaceVariant)
+                        .background(if (selected) Ink else DarkSurfaceVariant)
                         .clickable { onChange(key) }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                 )
@@ -615,10 +641,10 @@ private fun QualityRow(title: String, value: String, onChange: (String) -> Unit)
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelLarge,
-                    color = if (selected) Color.Black else MaterialTheme.colorScheme.onSurface,
+                    color = if (selected) InkInverse else MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
-                        .background(if (selected) Color.White else DarkSurfaceVariant)
+                        .background(if (selected) Ink else DarkSurfaceVariant)
                         .clickable { onChange(key) }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                 )
@@ -645,7 +671,7 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 
 @Composable
 private fun RowDivider() {
-    HorizontalDivider(modifier = Modifier.padding(start = 56.dp), color = Color.White.copy(alpha = 0.06f))
+    HorizontalDivider(modifier = Modifier.padding(start = 56.dp), color = Ink.copy(alpha = 0.06f))
 }
 
 /** A row with an icon, a title and a caption; tappable when [onClick] is given, with an optional button at the end. */
@@ -702,10 +728,10 @@ private fun SwitchRow(
             onCheckedChange = onChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = BgRoot,
-                checkedTrackColor = Color.White,
-                uncheckedThumbColor = Color.White.copy(alpha = 0.7f),
+                checkedTrackColor = Ink,
+                uncheckedThumbColor = Ink.copy(alpha = 0.7f),
                 uncheckedTrackColor = DarkSurfaceVariant,
-                uncheckedBorderColor = Color.White.copy(alpha = 0.3f),
+                uncheckedBorderColor = Ink.copy(alpha = 0.3f),
             ),
         )
     }

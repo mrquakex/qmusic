@@ -85,6 +85,9 @@ object SettingKeys {
     /** Pure black instead of near-black, for OLED screens. */
     const val AMOLED = "amoled_theme"
 
+    /** "system" (follow the phone), "dark" or "light". */
+    const val THEME_MODE = "theme_mode"
+
     /** Playback carries on when headphones (Bluetooth or wired) connect. */
     const val HEADSET_RESUME = "resume_on_headset"
 

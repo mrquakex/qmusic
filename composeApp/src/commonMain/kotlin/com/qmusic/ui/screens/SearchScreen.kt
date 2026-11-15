@@ -1,5 +1,7 @@
 package com.qmusic.ui.screens
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -273,8 +275,8 @@ private fun FilterRow(
                 shape = RoundedCornerShape(10.dp),
                 border = null,
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = Color.White,
-                    selectedLabelColor = Color.Black,
+                    selectedContainerColor = Ink,
+                    selectedLabelColor = InkInverse,
                     containerColor = DarkSurfaceVariant,
                     labelColor = MaterialTheme.colorScheme.onSurface,
                 ),

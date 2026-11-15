@@ -1,5 +1,6 @@
 package com.qmusic.ui.screens
 
+import com.qmusic.ui.theme.Ink
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -138,7 +139,7 @@ private fun MoodTile(button: MoodButton, modifier: Modifier, onClick: () -> Unit
             modifier = Modifier
                 .width(6.dp)
                 .fillMaxHeight()
-                .background(button.color?.let { Color(it.toInt()) } ?: Color.White.copy(alpha = 0.3f)),
+                .background(button.color?.let { Color(it.toInt()) } ?: Ink.copy(alpha = 0.3f)),
         )
         Text(
             text = button.text,

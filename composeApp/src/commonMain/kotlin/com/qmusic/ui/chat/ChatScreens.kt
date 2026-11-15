@@ -1,5 +1,7 @@
 package com.qmusic.ui.chat
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import androidx.compose.animation.core.tween
@@ -131,7 +133,7 @@ fun ChatApp(
 
     Box(modifier.fillMaxSize().background(BgRoot)) {
         when (val a = account) {
-            ChatAccount.Loading -> Centered { CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp) }
+            ChatAccount.Loading -> Centered { CircularProgressIndicator(color = Ink, strokeWidth = 2.dp) }
             is ChatAccount.Unavailable -> MessagePage(s, onExit, if (a.reason == "setup") s.setupNeeded else s.unavailable)
             ChatAccount.SignedOut -> SignInPage(controller, s, onExit)
             is ChatAccount.NeedsProfile -> ProfilePage(controller, s, a, onExit)
@@ -169,14 +171,14 @@ fun ChatApp(
             }
             Text(
                 text = info.orEmpty(),
-                color = Color.Black,
+                color = InkInverse,
                 fontSize = 14.sp,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
                     .padding(bottom = 80.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color.White)
+                    .background(Ink)
                     .padding(horizontal = 16.dp, vertical = 10.dp),
             )
         }
@@ -187,14 +189,14 @@ fun ChatApp(
             }
             Text(
                 text = s.failed + (error?.takeIf { it.length < 120 }?.let { ": $it" } ?: ""),
-                color = Color.Black,
+                color = InkInverse,
                 fontSize = 14.sp,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
                     .padding(16.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color.White)
+                    .background(Ink)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
             )
         }
@@ -214,7 +216,7 @@ internal fun TopBar(title: String, onBack: () -> Unit, actions: @Composable () -
         modifier = Modifier.fillMaxWidth().statusBarsPadding().height(56.dp).padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBack) { Icon(QMusicIcons.Back, contentDescription = null, tint = Color.White) }
+        IconButton(onClick = onBack) { Icon(QMusicIcons.Back, contentDescription = null, tint = Ink) }
         if (leading != null) {
             leading()
         } else {
@@ -229,7 +231,7 @@ fun ChatAvatar(user: ChatUser, size: androidx.compose.ui.unit.Dp) {
     when {
         user.uid == CLAUDE_BOT_UID -> ClaudeAvatar(size)
         user.isGroup && user.photo == null -> Box(Modifier.size(size).clip(CircleShape).background(DarkSurfaceVariant), contentAlignment = Alignment.Center) {
-            Icon(QMusicIcons.Group, contentDescription = null, tint = Color.White, modifier = Modifier.size(size * 0.5f))
+            Icon(QMusicIcons.Group, contentDescription = null, tint = Ink, modifier = Modifier.size(size * 0.5f))
         }
         else -> ChatAvatar(user.name, user.photo, size)
     }
@@ -282,14 +284,14 @@ internal fun WhiteButton(text: String, enabled: Boolean = true, busy: Boolean = 
             .fillMaxWidth()
             .height(52.dp)
             .clip(RoundedCornerShape(26.dp))
-            .background(if (enabled) Color.White else Color.White.copy(alpha = 0.3f))
+            .background(if (enabled) Ink else Ink.copy(alpha = 0.3f))
             .clickable(enabled = enabled && !busy, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         if (busy) {
-            CircularProgressIndicator(color = Color.Black, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+            CircularProgressIndicator(color = InkInverse, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
         } else {
-            Text(text, color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(text, color = InkInverse, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -312,7 +314,7 @@ internal fun Field(value: String, onValue: (String) -> Unit, hint: String, prefi
                 onValueChange = onValue,
                 singleLine = true,
                 textStyle = TextStyle(color = TextPrimary, fontSize = 16.sp),
-                cursorBrush = SolidColor(Color.White),
+                cursorBrush = SolidColor(Ink),
                 keyboardOptions = KeyboardOptions(capitalization = if (capitalize) KeyboardCapitalization.Words else KeyboardCapitalization.None, autoCorrectEnabled = capitalize),
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -341,7 +343,7 @@ private fun SignInPage(controller: ChatController, s: ChatStrings, onExit: () ->
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(Modifier.size(88.dp).clip(CircleShape).background(DarkSurfaceVariant), contentAlignment = Alignment.Center) {
-                Icon(QMusicIcons.Chat, contentDescription = null, tint = Color.White, modifier = Modifier.size(40.dp))
+                Icon(QMusicIcons.Chat, contentDescription = null, tint = Ink, modifier = Modifier.size(40.dp))
             }
             Spacer(Modifier.height(24.dp))
             Text(s.signInTitle, color = TextPrimary, fontSize = 26.sp, fontWeight = FontWeight.Bold)
@@ -387,7 +389,7 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, a: ChatAccou
                 capitalize = false,
             )
             Spacer(Modifier.height(8.dp))
-            Text(if (taken) s.usernameTaken else s.usernameRules, color = if (taken) Color.White else TextMuted, fontSize = 12.sp)
+            Text(if (taken) s.usernameTaken else s.usernameRules, color = if (taken) Ink else TextMuted, fontSize = 12.sp)
         }
         Box(Modifier.padding(24.dp)) {
             WhiteButton(s.continueButton, enabled = valid, busy = busy) { controller.saveProfile(name, username) }
@@ -425,12 +427,12 @@ internal fun ReadinessCard(s: ChatStrings) {
                         ReadinessIssue.BATTERY -> s.readinessBattery
                         ReadinessIssue.AUTOSTART -> s.readinessAutostart
                     },
-                    color = Color.Black,
+                    color = InkInverse,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
-                        .background(Color.White)
+                        .background(Ink)
                         .clickable { readiness.fix(issue) }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                 )
@@ -511,7 +513,7 @@ internal fun ThreadRow(
                         Modifier.padding(start = 8.dp).height(20.dp).widthIn(min = 20.dp).clip(CircleShape)
                             .background(if (t.muted(if (now > 0) now else Clock.System.now().toEpochMilliseconds())) TextMuted else TickRead).padding(horizontal = 6.dp),
                         contentAlignment = Alignment.Center,
-                    ) { Text(if (n > 99) "99+" else n.toString(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                    ) { Text(if (n > 99) "99+" else n.toString(), color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                 }
             }
         }
@@ -585,6 +587,7 @@ private fun ConversationPage(
     var muteDialog by remember { mutableStateOf(false) }
     var ttlDialog by remember { mutableStateOf(false) }
     var pendingPhotos by remember { mutableStateOf<List<PickedImage>?>(null) }
+    var sendViewOnce by remember { mutableStateOf(false) }
     var locked by remember { mutableStateOf(false) }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val sounds = rememberChatSounds()
@@ -605,6 +608,15 @@ private fun ConversationPage(
     val title = group?.name ?: other.name
     val blocked by controller.blocked.collectAsState()
     val isBlocked = !isGroup && other.uid in blocked
+    val pins by remember(other.uid) { controller.pinned(other) }.collectAsState(initial = emptyList())
+    val openedMap by remember(other.uid) { controller.opened(other) }.collectAsState(initial = emptyMap())
+    val iAmAdmin = group?.members?.any { it.user.uid == me.uid && it.admin } == true
+    // A group where only admins write: the box gives way to a note for everyone else.
+    val writeLocked = isGroup && group?.settings?.sendAdmins == true && !iAmAdmin
+    val canPin = !isGroup || group?.settings?.editAdmins != true || iAmAdmin
+    var viewOnceOpen by remember { mutableStateOf<ChatMessage?>(null) }
+    // Who is named with @ in the box, by the name written for them.
+    var mentionNames by remember(other.uid) { mutableStateOf(mapOf<String, String>()) }
     var text by remember(other.uid) { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
     var attach by remember { mutableStateOf(false) }
@@ -747,14 +759,14 @@ private fun ConversationPage(
     Column(Modifier.fillMaxSize().imePadding()) {
         if (selected.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().statusBarsPadding().height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { selected = emptySet() }) { Icon(QMusicIcons.Close, null, tint = Color.White) }
+                IconButton(onClick = { selected = emptySet() }) { Icon(QMusicIcons.Close, null, tint = Ink) }
                 Text("${selected.size} ${s.selected}", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 if (selectedMessages.any { it.text.isNotEmpty() }) {
                     TextButton(onClick = {
                         clipboard.setText(androidx.compose.ui.text.AnnotatedString(selectedMessages.sortedBy { it.at }.filter { it.text.isNotEmpty() }.joinToString("\n") { it.text }))
                         controller.reportInfo(s.copied)
                         selected = emptySet()
-                    }) { Text(s.copy, color = Color.White) }
+                    }) { Text(s.copy, color = Ink) }
                 }
                 IconButton(onClick = {
                     val chatName = title
@@ -762,8 +774,8 @@ private fun ConversationPage(
                     selectedMessages.forEach { m -> controller.setStarred(other, m, if (m.from == me.uid) me.name else memberNames[m.from] ?: other.name, chatName, !allStarred) }
                     selected = emptySet()
                 }) { Text("★", color = Color(0xFFFFB800), fontSize = 20.sp) }
-                TextButton(onClick = { forwarding = selectedMessages.filter { !it.deleted } }) { Text(s.forward, color = Color.White) }
-                IconButton(onClick = { deleting = selectedMessages }) { Icon(QMusicIcons.Trash, null, tint = Color.White) }
+                TextButton(onClick = { forwarding = selectedMessages.filter { !it.deleted } }) { Text(s.forward, color = Ink) }
+                IconButton(onClick = { deleting = selectedMessages }) { Icon(QMusicIcons.Trash, null, tint = Ink) }
             }
         } else
         TopBar(
@@ -826,8 +838,8 @@ private fun ConversationPage(
             },
             actions = {
                 if (onCall != null && !isBlocked && !isClaude && !isGroup) {
-                    IconButton(onClick = { onCall(other, true) }) { Icon(QMusicIcons.Camera, contentDescription = s.callVideo, tint = Color.White) }
-                    IconButton(onClick = { onCall(other, false) }) { Icon(QMusicIcons.Phone, contentDescription = s.callVoice, tint = Color.White) }
+                    IconButton(onClick = { onCall(other, true) }) { Icon(QMusicIcons.Camera, contentDescription = s.callVideo, tint = Ink) }
+                    IconButton(onClick = { onCall(other, false) }) { Icon(QMusicIcons.Phone, contentDescription = s.callVoice, tint = Ink) }
                 }
                 if (isGroup && groupCalls != null) {
                     val startGroupCall: (Boolean) -> Unit = { video ->
@@ -837,27 +849,27 @@ private fun ConversationPage(
                             askMic(video) { granted -> if (granted) groupCalls.join(other.copy(name = title), video) else controller.reportError(s.callPermission) }
                         }
                     }
-                    IconButton(onClick = { startGroupCall(true) }) { Icon(QMusicIcons.Camera, contentDescription = s.callVideo, tint = Color.White) }
-                    IconButton(onClick = { startGroupCall(false) }) { Icon(QMusicIcons.Phone, contentDescription = s.callVoice, tint = Color.White) }
+                    IconButton(onClick = { startGroupCall(true) }) { Icon(QMusicIcons.Camera, contentDescription = s.callVideo, tint = Ink) }
+                    IconButton(onClick = { startGroupCall(false) }) { Icon(QMusicIcons.Phone, contentDescription = s.callVoice, tint = Ink) }
                 }
                 Box {
-                    IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Color.White) }
+                    IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Ink) }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
                         if (isGroup) {
                             DropdownMenuItem(
-                                leadingIcon = { Icon(QMusicIcons.Group, null, tint = Color.White) },
+                                leadingIcon = { Icon(QMusicIcons.Group, null, tint = Ink) },
                                 text = { Text(s.groupInfo, color = TextPrimary) },
                                 onClick = { menu = false; controller.openGroupInfo(other) },
                             )
                         }
                         DropdownMenuItem(
-                            leadingIcon = { Icon(QMusicIcons.Search, null, tint = Color.White) },
+                            leadingIcon = { Icon(QMusicIcons.Search, null, tint = Ink) },
                             text = { Text(s.searchMessages, color = TextPrimary) },
                             onClick = { menu = false; searching = true },
                         )
                         val muted = thread?.muted(Clock.System.now().toEpochMilliseconds()) == true
                         DropdownMenuItem(
-                            leadingIcon = { Icon(if (muted) QMusicIcons.Bell else QMusicIcons.VolumeMute, null, tint = Color.White) },
+                            leadingIcon = { Icon(if (muted) QMusicIcons.Bell else QMusicIcons.VolumeMute, null, tint = Ink) },
                             text = { Text(if (muted) s.unmute else s.mute, color = TextPrimary) },
                             onClick = { menu = false; if (muted) controller.setMuted(other, 0L) else muteDialog = true },
                         )
@@ -917,6 +929,31 @@ private fun ConversationPage(
                 }
             },
         )
+        if (pins.isNotEmpty() && !searching) {
+            var pinIndex by remember(other.uid) { mutableStateOf(0) }
+            val pin = pins[pinIndex.coerceIn(0, pins.lastIndex)]
+            Row(
+                Modifier.fillMaxWidth().background(DarkSurface).clickable {
+                    jumpTo = pin.messageId
+                    pinIndex = (pinIndex + 1) % pins.size
+                }.padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // One bar per pin, the shown one bright.
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    pins.indices.forEach { i ->
+                        Box(Modifier.width(3.dp).height((24 / pins.size).dp).background(if (i == pinIndex.coerceIn(0, pins.lastIndex)) Ink else TextMuted))
+                    }
+                }
+                Spacer(Modifier.width(10.dp))
+                Icon(QMusicIcons.Pin, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(s.pinnedMessages + if (pins.size > 1) " · ${pinIndex.coerceIn(0, pins.lastIndex) + 1}/${pins.size}" else "", color = TextSecondary, fontSize = 11.sp)
+                    Text(pin.text, color = TextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
         if (searching) {
             val searchFocus = remember { FocusRequester() }
             LaunchedEffect(Unit) { runCatching { searchFocus.requestFocus() } }
@@ -929,8 +966,8 @@ private fun ConversationPage(
                     fontSize = 12.sp,
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
-                IconButton(enabled = matchIndex < matches.size - 1, onClick = { matchIndex++ }) { Icon(QMusicIcons.ChevronUp, null, tint = Color.White) }
-                IconButton(enabled = matchIndex > 0, onClick = { matchIndex-- }) { Icon(QMusicIcons.ChevronDown, null, tint = Color.White) }
+                IconButton(enabled = matchIndex < matches.size - 1, onClick = { matchIndex++ }) { Icon(QMusicIcons.ChevronUp, null, tint = Ink) }
+                IconButton(enabled = matchIndex > 0, onClick = { matchIndex-- }) { Icon(QMusicIcons.ChevronDown, null, tint = Ink) }
                 IconButton(onClick = { searching = false; query = "" }) { Icon(QMusicIcons.Close, null, tint = TextSecondary) }
             }
         }
@@ -949,7 +986,7 @@ private fun ConversationPage(
             val list = messages
             val shown = rows
             if (list == null || shown == null) {
-                Centered { CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp) }
+                Centered { CircularProgressIndicator(color = Ink, strokeWidth = 2.dp) }
             } else {
                 // A new message: ours always comes into view; theirs only when we are at the bottom already (reading
                 // further up, the place is kept).
@@ -975,9 +1012,10 @@ private fun ConversationPage(
                     val line = shown.indexOfFirst { it is ListRow.Unread }
                     if (line > 3) listState.scrollToItem(line, -200)
                 }
+                val wallpaperIndex by controller.wallpaper.collectAsState()
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().background(ChatWallpapers.getOrNull(wallpaperIndex) ?: Color.Transparent),
                     reverseLayout = true,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -1015,7 +1053,12 @@ private fun ConversationPage(
                                         clipboard.setText(androidx.compose.ui.text.AnnotatedString(m.text))
                                         controller.reportInfo(s.copied)
                                     },
-                                    onForward = { forwarding = listOf(m) },
+                                    onForward = if (m.viewOnce) null else ({ forwarding = listOf(m) }),
+                                    pinned = pins.any { it.messageId == m.id },
+                                    onPin = if (canPin && !m.deleted && !m.pending) ({ controller.pin(other, m, quoteText(m), pins.none { it.messageId == m.id }) }) else null,
+                                    openedOnce = if (mine) openedMap[m.id].orEmpty().any { it != me.uid } else me.uid in openedMap[m.id].orEmpty(),
+                                    onOpenOnce = { viewOnceOpen = m },
+                                    mentionsMe = me.uid in m.mentions,
                                     onEdit = if (mine && !m.deleted && m.attachment == null && m.images.isEmpty() && m.share == null && m.text.isNotEmpty() && !m.pending) {
                                         { editing = m; text = m.text; replyTo = null }
                                     } else null,
@@ -1071,12 +1114,12 @@ private fun ConversationPage(
                             .clickable { downScope.launch { listState.animateScrollToItem(0) }; newBelow = 0 },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(QMusicIcons.ChevronDown, contentDescription = s.scrollDown, tint = Color.White)
+                        Icon(QMusicIcons.ChevronDown, contentDescription = s.scrollDown, tint = Ink)
                         if (newBelow > 0) {
                             Box(
                                 Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp).height(18.dp).widthIn(min = 18.dp).clip(CircleShape).background(TickRead).padding(horizontal = 4.dp),
                                 contentAlignment = Alignment.Center,
-                            ) { Text(if (newBelow > 99) "99+" else newBelow.toString(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                            ) { Text(if (newBelow > 99) "99+" else newBelow.toString(), color = Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
                         }
                     }
                 }
@@ -1084,7 +1127,32 @@ private fun ConversationPage(
         }
         if (isBlocked) {
             Text(s.blockedNote, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp))
+        } else if (writeLocked) {
+            Text(s.onlyAdminsCanSend, color = TextSecondary, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp))
         } else {
+            // "@" at the end of the box in a group: its members to name.
+            val typedMention = if (isGroup) Regex("(^|\\s)@([^\\s@]*)$").find(text)?.groupValues?.get(2) else null
+            if (typedMention != null) {
+                val people = group?.members.orEmpty().map { it.user }.filter { it.uid != me.uid && it.name.contains(typedMention, ignoreCase = true) }.take(6)
+                if (people.isNotEmpty()) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(14.dp)).background(DarkSurfaceVariant)) {
+                        people.forEach { person ->
+                            Row(
+                                Modifier.fillMaxWidth().clickable {
+                                    val name = person.name.substringBefore(' ')
+                                    text = text.dropLast(typedMention.length) + name + " "
+                                    mentionNames = mentionNames + (person.uid to name)
+                                }.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                ChatAvatar(person, 30.dp)
+                                Spacer(Modifier.width(10.dp))
+                                Text(person.name, color = TextPrimary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+            }
             editing?.let { e ->
                 Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.width(3.dp).height(36.dp).background(ClaudeCoral))
@@ -1130,7 +1198,7 @@ private fun ConversationPage(
                     modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(Modifier.width(3.dp).height(36.dp).background(Color.White))
+                    Box(Modifier.width(3.dp).height(36.dp).background(Ink))
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(if (q.from == me.uid) s.you else memberNames[q.from] ?: nameOf(q.from, me.uid, title, s), color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
@@ -1154,26 +1222,26 @@ private fun ConversationPage(
                     RecordingBar(elapsed, level, if (locked) s.voiceLocked else s.voiceSlideCancel + "   " + s.voiceSlideLock, cancelling, Modifier.weight(1f))
                 } else {
                     Box {
-                        IconButton(onClick = { attach = true }) { Icon(QMusicIcons.Add, contentDescription = null, tint = Color.White) }
+                        IconButton(onClick = { attach = true }) { Icon(QMusicIcons.Add, contentDescription = null, tint = Ink) }
                         DropdownMenu(expanded = attach, onDismissRequest = { attach = false }, containerColor = DarkSurfaceVariant) {
                             val options = remember(attach) { if (attach) shareables() else emptyList() }
                             DropdownMenuItem(
-                                leadingIcon = { Icon(QMusicIcons.Add, null, tint = Color.White) },
+                                leadingIcon = { Icon(QMusicIcons.Add, null, tint = Ink) },
                                 text = { Text(s.photo, color = TextPrimary, fontSize = 14.sp) },
                                 onClick = { attach = false; pickPhoto() },
                             )
                             DropdownMenuItem(
-                                leadingIcon = { Icon(QMusicIcons.Camera, null, tint = Color.White) },
+                                leadingIcon = { Icon(QMusicIcons.Camera, null, tint = Ink) },
                                 text = { Text(s.camera, color = TextPrimary, fontSize = 14.sp) },
                                 onClick = { attach = false; takePhoto() },
                             )
                             DropdownMenuItem(
-                                leadingIcon = { Icon(QMusicIcons.VideoPlay, null, tint = Color.White) },
+                                leadingIcon = { Icon(QMusicIcons.VideoPlay, null, tint = Ink) },
                                 text = { Text(s.videoAttach, color = TextPrimary, fontSize = 14.sp) },
                                 onClick = { attach = false; pickVideo() },
                             )
                             DropdownMenuItem(
-                                leadingIcon = { Icon(QMusicIcons.File, null, tint = Color.White) },
+                                leadingIcon = { Icon(QMusicIcons.File, null, tint = Ink) },
                                 text = { Text(s.fileAttach, color = TextPrimary, fontSize = 14.sp) },
                                 onClick = { attach = false; pickFile() },
                             )
@@ -1200,7 +1268,7 @@ private fun ConversationPage(
                             )
                             options.forEach { item ->
                                 DropdownMenuItem(
-                                    leadingIcon = { Icon(if (item.kind == ShareKind.SONG) QMusicIcons.Headphones else QMusicIcons.VideoPlay, null, tint = Color.White) },
+                                    leadingIcon = { Icon(if (item.kind == ShareKind.SONG) QMusicIcons.Headphones else QMusicIcons.VideoPlay, null, tint = Ink) },
                                     text = {
                                         Column {
                                             Text(if (item.kind == ShareKind.SONG) s.shareSong else s.shareVideo, color = TextPrimary, fontSize = 14.sp)
@@ -1240,7 +1308,7 @@ private fun ConversationPage(
                                 if (v.isNotBlank()) controller.onTyping(other, Clock.System.now().toEpochMilliseconds()) else controller.stopTyping(other)
                             },
                             textStyle = TextStyle(color = TextPrimary, fontSize = 16.sp),
-                            cursorBrush = SolidColor(Color.White),
+                            cursorBrush = SolidColor(Ink),
                             maxLines = 6,
                             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                             modifier = Modifier.fillMaxWidth().focusRequester(inputFocus).onFocusChanged { if (it.isFocused) emojiOpen = false },
@@ -1253,7 +1321,7 @@ private fun ConversationPage(
                 if (locked && recordingSince != null) {
                     // Locked: the button sends.
                     Box(
-                        modifier = Modifier.size(44.dp).clip(CircleShape).background(Color.White).clickable {
+                        modifier = Modifier.size(44.dp).clip(CircleShape).background(Ink).clickable {
                             recordingSince = null
                             locked = false
                             recorder?.stop()?.let { voice ->
@@ -1263,7 +1331,7 @@ private fun ConversationPage(
                             }
                         },
                         contentAlignment = Alignment.Center,
-                    ) { Icon(QMusicIcons.Send, contentDescription = null, tint = Color.Black, modifier = Modifier.size(20.dp)) }
+                    ) { Icon(QMusicIcons.Send, contentDescription = null, tint = InkInverse, modifier = Modifier.size(20.dp)) }
                 } else if (!canSend && recorder != null && !isClaude && editing == null) {
                     val density = androidx.compose.ui.platform.LocalDensity.current
                     val cancelAt = with(density) { 110.dp.toPx() }
@@ -1272,7 +1340,7 @@ private fun ConversationPage(
                         modifier = Modifier
                             .size(if (recordingSince != null) 56.dp else 44.dp)
                             .clip(CircleShape)
-                            .background(if (recordingSince != null) (if (cancelling) Color(0xFF555555) else Color(0xFFFF4D4D)) else Color.White)
+                            .background(if (recordingSince != null) (if (cancelling) Color(0xFF555555) else Color(0xFFFF4D4D)) else Ink)
                             .pointerInput(micReady) {
                                 awaitEachGesture {
                                     val down = awaitFirstDown()
@@ -1315,37 +1383,56 @@ private fun ConversationPage(
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(QMusicIcons.Mic, contentDescription = s.voiceHold, tint = if (recordingSince != null) Color.White else Color.Black, modifier = Modifier.size(22.dp))
+                        Icon(QMusicIcons.Mic, contentDescription = s.voiceHold, tint = if (recordingSince != null) Ink else InkInverse, modifier = Modifier.size(22.dp))
                     }
                 } else {
                     Box(
                         modifier = Modifier
                             .size(44.dp)
                             .clip(CircleShape)
-                            .background(if (canSend) Color.White else DarkSurfaceVariant)
+                            .background(if (canSend) Ink else DarkSurfaceVariant)
                             .clickable(enabled = canSend) {
                                 val e = editing
                                 if (e != null) {
                                     if (text.trim() != e.text) controller.edit(other, e, text)
                                     editing = null
                                     text = ""
-                                } else if (controller.send(other, text, replyTo = quoted())) {
+                                } else if (controller.send(other, text, replyTo = quoted(), mentions = mentionNames.filter { (_, name) -> text.contains("@$name") }.keys)) {
                                     text = ""
+                                    mentionNames = emptyMap()
                                     replyTo = null
                                     controller.stopTyping(other)
                                 }
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(QMusicIcons.Send, contentDescription = null, tint = if (canSend) Color.Black else TextMuted, modifier = Modifier.size(20.dp))
+                        Icon(QMusicIcons.Send, contentDescription = null, tint = if (canSend) InkInverse else TextMuted, modifier = Modifier.size(20.dp))
                     }
                 }
             }
         }
-        if (emojiOpen && !isBlocked) EmojiPanel(onEmoji = { e -> text = (text + e).take(ChatController.MAX_LENGTH) }, modifier = Modifier.navigationBarsPadding())
+        if (emojiOpen && !isBlocked && !writeLocked) {
+            MediaKeyboard(
+                controller, s,
+                onEmoji = { e -> text = (text + e).take(ChatController.MAX_LENGTH) },
+                onGif = { item, sticker ->
+                    controller.sendGif(other, item, sticker, quoted())
+                    replyTo = null
+                    emojiOpen = false
+                },
+                modifier = Modifier.navigationBarsPadding(),
+            )
+        }
     }
     viewing?.let { (images, index) ->
         PhotoViewer(images, index, load = { image -> controller.imageBytes(other, image) }) { viewing = null }
+    }
+    viewOnceOpen?.let { m ->
+        // Shown once: closing it marks it opened, and it does not open again.
+        PhotoViewer(m.images.take(1), 0, load = { image -> controller.imageBytes(other, image) }) {
+            if (m.from != me.uid) controller.markOpened(other, m)
+            viewOnceOpen = null
+        }
     }
     videoOpen?.let { url -> VideoViewer(url) { videoOpen = null } }
     pendingPhotos?.let { photos ->
@@ -1354,12 +1441,18 @@ private fun ConversationPage(
             s = s,
             caption = text,
             onSend = { list, caption ->
-                controller.sendImages(other, list, caption, quoted())
+                controller.sendImages(other, list, caption, quoted(), viewOnce = sendViewOnce && list.size == 1)
+                sendViewOnce = false
                 text = ""
                 replyTo = null
                 pendingPhotos = null
             },
-            onCancel = { pendingPhotos = null },
+            onCancel = { pendingPhotos = null; sendViewOnce = false },
+            viewOnce = sendViewOnce,
+            onViewOnce = { on ->
+                sendViewOnce = on
+                if (on) controller.reportInfo(s.viewOnceNote)
+            },
         )
     }
     forwarding?.let { list ->
@@ -1503,7 +1596,7 @@ internal fun PhotoCell(image: ChatImage, load: suspend (ChatImage) -> ByteArray?
     }
 }
 
-private val ClaudeBubble = Color(0xFF2B201C)
+private val ClaudeBubble: Color get() = if (com.qmusic.ui.theme.lightTheme) Color(0xFFFBEDE7) else Color(0xFF2B201C)
 
 /** Claude reading a photo: a coral band sweeps down and up over it, inside corner marks. */
 @Composable
@@ -1533,8 +1626,8 @@ private fun PhotoScan(modifier: Modifier) {
             androidx.compose.ui.geometry.Offset(m, size.height - m) to (1f to -1f),
             androidx.compose.ui.geometry.Offset(size.width - m, size.height - m) to (-1f to -1f),
         ).forEach { (p, d) ->
-            drawLine(Color.White, p, androidx.compose.ui.geometry.Offset(p.x + l * d.first, p.y), strokeWidth = w, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-            drawLine(Color.White, p, androidx.compose.ui.geometry.Offset(p.x, p.y + l * d.second), strokeWidth = w, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+            drawLine(Ink, p, androidx.compose.ui.geometry.Offset(p.x + l * d.first, p.y), strokeWidth = w, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+            drawLine(Ink, p, androidx.compose.ui.geometry.Offset(p.x, p.y + l * d.second), strokeWidth = w, cap = androidx.compose.ui.graphics.StrokeCap.Round)
         }
     }
 }
@@ -1636,8 +1729,8 @@ private fun ClaudeMarkdown(text: String, streaming: Boolean, modifier: Modifier)
         colors = com.mikepenz.markdown.m3.markdownColor(
             text = TextPrimary,
             codeText = TextPrimary,
-            codeBackground = Color(0xFF15100E),
-            inlineCodeBackground = Color(0xFF15100E),
+            codeBackground = if (com.qmusic.ui.theme.lightTheme) Color(0xFFF6EEEA) else Color(0xFF15100E),
+            inlineCodeBackground = if (com.qmusic.ui.theme.lightTheme) Color(0xFFF6EEEA) else Color(0xFF15100E),
             linkText = ClaudeCoral,
         ),
         typography = com.mikepenz.markdown.m3.markdownTypography(
@@ -1685,10 +1778,10 @@ internal fun Pill(text: String, primary: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(18.dp))
-            .background(if (primary) Color.White else DarkSurfaceVariant)
+            .background(if (primary) Ink else DarkSurfaceVariant)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
-    ) { Text(text, color = if (primary) Color.Black else TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+    ) { Text(text, color = if (primary) InkInverse else TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
 }
 
 /** Add / requested (tap to take back) / accept / friends, as fits. */
@@ -1711,7 +1804,7 @@ private fun FriendsPage(controller: ChatController, s: ChatStrings) {
     val incoming by controller.friendRequests.collectAsState()
     Column(Modifier.fillMaxSize()) {
         TopBar(s.friends, { controller.pop() }, actions = {
-            IconButton(onClick = { controller.openNewChat() }) { Icon(QMusicIcons.Search, contentDescription = s.findFriends, tint = Color.White) }
+            IconButton(onClick = { controller.openNewChat() }) { Icon(QMusicIcons.Search, contentDescription = s.findFriends, tint = Ink) }
         })
         LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp)) {
             if (incoming.isNotEmpty()) {
@@ -1737,7 +1830,7 @@ private fun FriendsPage(controller: ChatController, s: ChatStrings) {
             }
             items(friends, key = { "f" + it.uid }) { user ->
                 PersonRow(user, onClick = { controller.openProfile(user) }) {
-                    IconButton(onClick = { controller.openConversation(user) }) { Icon(QMusicIcons.Chat, contentDescription = s.message, tint = Color.White) }
+                    IconButton(onClick = { controller.openConversation(user) }) { Icon(QMusicIcons.Chat, contentDescription = s.message, tint = Ink) }
                 }
             }
         }
@@ -1825,7 +1918,7 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
         }
         if (bigPhoto && user.photo != null) {
             PlatformBackHandler(enabled = true) { bigPhoto = false }
-            Box(Modifier.fillMaxSize().background(Color.Black).clickable { bigPhoto = false }, contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().background(InkInverse).clickable { bigPhoto = false }, contentAlignment = Alignment.Center) {
                 AsyncImage(model = user.photo.replace("=s96-c", "=s1024-c"), contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth())
             }
         }
@@ -1840,7 +1933,7 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
 private fun ProfileAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(76.dp).clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 8.dp)) {
         Box(Modifier.size(52.dp).clip(CircleShape).background(DarkSurfaceVariant), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.size(22.dp))
+            Icon(icon, contentDescription = label, tint = Ink, modifier = Modifier.size(22.dp))
         }
         Spacer(Modifier.height(6.dp))
         Text(label, color = TextSecondary, fontSize = 12.sp, maxLines = 1)
@@ -1955,6 +2048,12 @@ private fun Bubble(
     onShowVoters: () -> Unit = {},
     onSaveContact: (ChatContact) -> Unit = {},
     onShowReactions: () -> Unit = {},
+    pinned: Boolean = false,
+    onPin: (() -> Unit)? = null,
+    /** A view-once photo: opened (by the other side, on the sender's phone; by this person, on theirs). */
+    openedOnce: Boolean = false,
+    onOpenOnce: () -> Unit = {},
+    mentionsMe: Boolean = false,
 ) {
     if (m.system) {
         SystemLine(m.text)
@@ -1962,7 +2061,8 @@ private fun Bubble(
     }
     var menu by remember { mutableStateOf(false) }
     // One to three emoji alone: big, without a bubble, as people expect.
-    val bigEmoji = !m.deleted && m.images.isEmpty() && m.attachment == null && m.share == null && m.replyTo == null && m.poll == null && m.location == null && m.contact == null && isBigEmoji(m.text)
+    val bigEmoji = !m.deleted && m.images.isEmpty() && m.attachment == null && m.share == null && m.replyTo == null && m.poll == null && m.location == null && m.contact == null &&
+        (isBigEmoji(m.text) || (m.gif?.sticker == true && m.text.isBlank()))
     val hasCard = m.share != null || m.images.isNotEmpty() || m.attachment != null || m.poll != null || m.location != null || m.contact != null
     val fromClaude = m.from == CLAUDE_BOT_UID
     // Pull a message to the right to answer it.
@@ -1980,7 +2080,7 @@ private fun Bubble(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (selected) Color.White.copy(alpha = 0.10f) else Color.Transparent)
+            .background(if (selected) Ink.copy(alpha = 0.10f) else Color.Transparent)
             .pointerInput(m.id, selecting) {
                 if (selecting) return@pointerInput
                 detectHorizontalDragGestures(
@@ -2005,7 +2105,7 @@ private fun Bubble(
             Icon(
                 QMusicIcons.Back,
                 contentDescription = null,
-                tint = Color.White.copy(alpha = (swipe.value / threshold).coerceIn(0f, 1f)),
+                tint = Ink.copy(alpha = (swipe.value / threshold).coerceIn(0f, 1f)),
                 modifier = Modifier.align(Alignment.CenterStart).padding(start = 8.dp).size(20.dp).graphicsLayer { rotationZ = 180f },
             )
         }
@@ -2014,7 +2114,7 @@ private fun Bubble(
                 .offset { androidx.compose.ui.unit.IntOffset(swipe.value.roundToInt(), 0) }
                 .widthIn(max = 300.dp)
                 .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp))
-                .background(if (bigEmoji) Color.Transparent else if (m.deleted) DarkSurface else if (mine) Color.White else if (fromClaude) ClaudeBubble else DarkSurfaceVariant)
+                .background(if (bigEmoji) Color.Transparent else if (m.deleted) DarkSurface else if (mine) Ink else if (fromClaude) ClaudeBubble else DarkSurfaceVariant)
                 .then(
                     if (highlight) {
                         Modifier.border(2.dp, ClaudeCoral, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp))
@@ -2030,8 +2130,8 @@ private fun Bubble(
                 )
                 .padding(if (hasCard) 4.dp else 0.dp),
         ) {
-            val fg = if (mine && !m.deleted && !bigEmoji) Color.Black else TextPrimary
-            val fgSoft = if (mine && !m.deleted && !bigEmoji) Color.Black.copy(alpha = 0.55f) else TextSecondary
+            val fg = if (mine && !m.deleted && !bigEmoji) InkInverse else TextPrimary
+            val fgSoft = if (mine && !m.deleted && !bigEmoji) InkInverse.copy(alpha = 0.55f) else TextSecondary
             if (m.forwarded && !m.deleted) {
                 Text("↪ " + s.forwarded, color = fgSoft, fontSize = 11.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, modifier = Modifier.padding(start = 10.dp, end = 12.dp, top = 6.dp))
             }
@@ -2058,15 +2158,15 @@ private fun Bubble(
                     modifier = Modifier
                         .padding(start = 8.dp, end = 8.dp, top = 8.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (mine) Color.Black.copy(alpha = 0.07f) else Color.White.copy(alpha = 0.07f))
+                        .background(if (mine) InkInverse.copy(alpha = 0.07f) else Ink.copy(alpha = 0.07f))
                         .clickable(enabled = !selecting) { onQuoteTap(if (quoted.id.startsWith("status_")) "status:" + quoted.from else quoted.id) }
                         .padding(end = 10.dp),
                 ) {
-                    Box(Modifier.width(3.dp).height(40.dp).background(if (mine) Color.Black else Color.White))
+                    Box(Modifier.width(3.dp).height(40.dp).background(if (mine) InkInverse else Ink))
                     Column(Modifier.padding(start = 8.dp, top = 4.dp, bottom = 4.dp)) {
                         Text(
                             if (quoted.from == myUid) s.you else names[quoted.from] ?: nameOf(quoted.from, myUid, otherName, s),
-                            color = if (mine) Color.Black else TextPrimary,
+                            color = if (mine) InkInverse else TextPrimary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -2086,12 +2186,15 @@ private fun Bubble(
             } else if (!mine && m.model != null) {
                 Text(m.model, color = fgSoft, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp))
             }
-            if (m.images.isNotEmpty()) {
+            if (!m.deleted) m.gif?.let { g -> GifView(g) }
+            if (m.images.isNotEmpty() && m.viewOnce && !m.deleted) {
+                ViewOnceCard(mine, openedOnce, s, onOpenOnce)
+            } else if (m.images.isNotEmpty()) {
                 ChatAlbum(m.images, loadImage, { index -> onOpenImages(m.images, index) }, scanning = assisting != null)
                 m.progress?.let { p ->
                     androidx.compose.material3.LinearProgressIndicator(
                         progress = { p },
-                        color = if (mine) Color.Black else Color.White,
+                        color = if (mine) InkInverse else Ink,
                         trackColor = Color.Transparent,
                         modifier = Modifier.width(260.dp).padding(top = 4.dp),
                     )
@@ -2158,7 +2261,7 @@ private fun Bubble(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(CircleShape)
-                            .background(if (chosen) Color.White.copy(alpha = 0.18f) else Color.Transparent)
+                            .background(if (chosen) Ink.copy(alpha = 0.18f) else Color.Transparent)
                             .clickable {
                                 menu = false
                                 onReact(if (chosen) null else emoji)
@@ -2171,7 +2274,8 @@ private fun Bubble(
             if (onCopy != null && m.text.isNotEmpty() && !m.deleted) DropdownMenuItem(text = { Text(s.copy, color = TextPrimary) }, onClick = { menu = false; onCopy() })
             if (onForward != null && !m.deleted && m.poll == null) DropdownMenuItem(text = { Text(s.forward, color = TextPrimary) }, onClick = { menu = false; onForward() })
             if (onEdit != null) DropdownMenuItem(text = { Text(s.edit, color = TextPrimary) }, onClick = { menu = false; onEdit() })
-            if (!m.deleted) DropdownMenuItem(text = { Text(if (starred) s.unstar else s.star, color = TextPrimary) }, onClick = { menu = false; onStar() })
+            if (!m.deleted && !m.viewOnce) DropdownMenuItem(text = { Text(if (starred) s.unstar else s.star, color = TextPrimary) }, onClick = { menu = false; onStar() })
+            if (onPin != null) DropdownMenuItem(text = { Text(if (pinned) s.unpinMessage else s.pinMessage, color = TextPrimary) }, onClick = { menu = false; onPin() })
             if (onInfo != null) DropdownMenuItem(text = { Text(s.info, color = TextPrimary) }, onClick = { menu = false; onInfo() })
             DropdownMenuItem(text = { Text(s.select, color = TextPrimary) }, onClick = { menu = false; onToggleSelect() })
             DropdownMenuItem(text = { Text(s.deleteMessage, color = TextPrimary) }, onClick = { menu = false; onDelete() })
@@ -2247,18 +2351,18 @@ internal fun ShareCard(item: SharedItem, mine: Boolean, s: ChatStrings) {
             modifier = Modifier
                 .size(width = if (video) 96.dp else 56.dp, height = 56.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color.Black),
+                .background(InkInverse),
             contentAlignment = Alignment.Center,
         ) {
             if (item.thumbnail != null) AsyncImage(model = item.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-            Box(Modifier.size(26.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)), contentAlignment = Alignment.Center) {
-                Icon(QMusicIcons.Play, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+            Box(Modifier.size(26.dp).clip(CircleShape).background(InkInverse.copy(alpha = 0.55f)), contentAlignment = Alignment.Center) {
+                Icon(QMusicIcons.Play, contentDescription = null, tint = Ink, modifier = Modifier.size(14.dp))
             }
         }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            val fg = if (mine) Color.Black else TextPrimary
-            val soft = if (mine) Color.Black.copy(alpha = 0.55f) else TextSecondary
+            val fg = if (mine) InkInverse else TextPrimary
+            val soft = if (mine) InkInverse.copy(alpha = 0.55f) else TextSecondary
             Text(if (video) s.video else s.song, color = soft, fontSize = 11.sp)
             Text(item.title, color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (item.subtitle.isNotBlank()) Text(item.subtitle, color = soft, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -2283,6 +2387,36 @@ private fun dayLabel(ms: Long, s: ChatStrings): String = when (daysAgo(ms)) {
     0 -> s.today
     1 -> s.yesterday
     else -> local(ms).let { "${two(it.dayOfMonth)}.${two(it.monthNumber)}.${it.year}" }
+}
+
+/** A view-once photo in its bubble: nothing of it shows; a tap opens it once (for whoever got it). */
+@Composable
+private fun ViewOnceCard(mine: Boolean, opened: Boolean, s: ChatStrings, onOpen: () -> Unit) {
+    val canOpen = !mine && !opened
+    Row(
+        Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp).widthIn(min = 200.dp).clip(RoundedCornerShape(12.dp))
+            .background(if (mine) InkInverse.copy(alpha = 0.07f) else Ink.copy(alpha = 0.07f))
+            .clickable(enabled = canOpen, onClick = onOpen).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val fg = if (mine) InkInverse else TextPrimary
+        Box(Modifier.size(30.dp).clip(CircleShape).background(if (opened) Color.Transparent else fg.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+            Text("1", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(s.viewOncePhoto, color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                when {
+                    opened -> s.viewOnceOpened
+                    mine -> s.viewOnce
+                    else -> s.viewOnceTap
+                },
+                color = fg.copy(alpha = 0.6f),
+                fontSize = 12.sp,
+            )
+        }
+    }
 }
 
 /** The tiny picture of a quoted status. */

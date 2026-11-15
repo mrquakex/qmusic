@@ -95,6 +95,8 @@ kotlin {
                 implementation("androidx.media3:media3-effect:1.5.1")
                 // Qeyf codes: drawn with ZXing, scanned with Google's code scanner (no camera permission).
                 implementation("com.google.zxing:core:3.5.3")
+                // GIFs and stickers move (animated GIF and WebP).
+                implementation("io.coil-kt.coil3:coil-gif:3.0.4")
                 implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
                 implementation("androidx.biometric:biometric:1.1.0")
                 implementation(libs.okhttp)

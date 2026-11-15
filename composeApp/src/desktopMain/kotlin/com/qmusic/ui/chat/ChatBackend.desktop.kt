@@ -67,3 +67,6 @@ actual fun StatusVideo(url: String, paused: Boolean, modifier: androidx.compose.
 
 @androidx.compose.runtime.Composable
 actual fun rememberTextFileShare(): (fileName: String, text: String) -> Unit = { _, _ -> }
+
+@androidx.compose.runtime.Composable
+actual fun rememberAnimatedImageLoader(): coil3.ImageLoader = coil3.SingletonImageLoader.get(coil3.compose.LocalPlatformContext.current)

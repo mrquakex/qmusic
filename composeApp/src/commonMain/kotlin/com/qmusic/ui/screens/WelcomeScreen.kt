@@ -1,5 +1,7 @@
 package com.qmusic.ui.screens
 
+import com.qmusic.ui.theme.InkInverse
+import com.qmusic.ui.theme.Ink
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -65,26 +67,26 @@ fun WelcomeScreen(
             modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            QMusicLogo(size = 72.dp, tint = Color.White)
+            QMusicLogo(size = 72.dp, tint = Ink)
             Spacer(Modifier.height(28.dp))
             Text(
                 text = s.welcomeTitle,
                 style = MaterialTheme.typography.headlineLarge.copy(fontSize = 30.sp, lineHeight = 36.sp),
-                color = Color.White,
+                color = Ink,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(10.dp))
             Text(
                 text = s.welcomeSubtitle,
                 style = MaterialTheme.typography.bodyLarge,
-                color = Color.White.copy(alpha = 0.65f),
+                color = Ink.copy(alpha = 0.65f),
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(40.dp))
             ServiceButton(
                 label = s.continueWithYouTube,
-                container = Color.White,
-                content = Color(0xFF0B0B0F),
+                container = Ink,
+                content = InkInverse,
                 mark = { YouTubeMusicMark() },
                 onClick = onYouTube,
             )
@@ -100,12 +102,12 @@ fun WelcomeScreen(
             Text(
                 text = s.welcomeNote,
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.White.copy(alpha = 0.45f),
+                color = Ink.copy(alpha = 0.45f),
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(18.dp))
             TextButton(onClick = onWithoutAccount) {
-                Text(s.continueWithoutAccount, color = Color.White.copy(alpha = 0.8f))
+                Text(s.continueWithoutAccount, color = Ink.copy(alpha = 0.8f))
             }
         }
     }
@@ -137,7 +139,7 @@ private fun YouTubeMusicMark() {
         val r = size.minDimension / 2
         val c = Offset(size.width / 2, size.height / 2)
         drawCircle(Color(0xFFFF0033), r, c)
-        drawCircle(Color.White, r * 0.58f, c, style = Stroke(width = r * 0.11f))
+        drawCircle(Ink, r * 0.58f, c, style = Stroke(width = r * 0.11f))
         val t = r * 0.3f
         drawPath(
             Path().apply {
@@ -146,7 +148,7 @@ private fun YouTubeMusicMark() {
                 lineTo(c.x - t * 0.75f, c.y + t)
                 close()
             },
-            Color.White,
+            Ink,
         )
     }
 }

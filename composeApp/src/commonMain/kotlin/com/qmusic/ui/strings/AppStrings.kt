@@ -145,6 +145,10 @@ interface AppStrings {
     val sectionAppearance: String
     val amoledTitle: String
     val amoledSubtitle: String
+    val themeTitle: String get() = if (this === EnglishStrings) "Theme" else "Tema"
+    val themeSystem: String get() = if (this === EnglishStrings) "System" else "Sistem"
+    val themeDark: String get() = if (this === EnglishStrings) "Dark" else "Karanlık"
+    val themeLight: String get() = if (this === EnglishStrings) "Light" else "Aydınlık"
     val headsetResumeTitle: String
     val headsetResumeSubtitle: String
     val notificationLyricsTitle: String

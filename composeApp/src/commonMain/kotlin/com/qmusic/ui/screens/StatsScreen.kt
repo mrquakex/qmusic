@@ -1,5 +1,7 @@
 package com.qmusic.ui.screens
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -110,10 +112,10 @@ fun StatsScreen(
                             Text(
                                 text = label,
                                 style = MaterialTheme.typography.labelLarge,
-                                color = if (selected) Color.Black else MaterialTheme.colorScheme.onSurface,
+                                color = if (selected) InkInverse else MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(50))
-                                    .background(if (selected) Color.White else DarkSurfaceVariant)
+                                    .background(if (selected) Ink else DarkSurfaceVariant)
                                     .clickable { onPeriodChange(value) }
                                     .padding(horizontal = 14.dp, vertical = 8.dp),
                             )
@@ -137,14 +139,14 @@ fun StatsScreen(
                             .background(Brush.linearGradient(listOf(Color(0xFF5B2A86), Color(0xFF1E1240))))
                             .padding(22.dp),
                     ) {
-                        Text(periodLabel, style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.75f))
+                        Text(periodLabel, style = MaterialTheme.typography.labelLarge, color = Ink.copy(alpha = 0.75f))
                         Spacer(Modifier.height(6.dp))
                         Text(
                             text = stats.minutes.toString(),
                             style = MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.Black, fontSize = 56.sp),
-                            color = Color.White,
+                            color = Ink,
                         )
-                        Text(s.statsMinutes, style = MaterialTheme.typography.titleMedium, color = Color.White)
+                        Text(s.statsMinutes, style = MaterialTheme.typography.titleMedium, color = Ink)
                         Spacer(Modifier.height(14.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                             Figure(stats.plays.toString(), s.statsPlays)
@@ -178,8 +180,8 @@ fun StatsScreen(
 @Composable
 private fun Figure(value: String, label: String) {
     Column {
-        Text(value, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = Color.White)
-        Text(label, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.75f))
+        Text(value, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = Ink)
+        Text(label, style = MaterialTheme.typography.bodySmall, color = Ink.copy(alpha = 0.75f))
     }
 }
 

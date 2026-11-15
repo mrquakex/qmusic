@@ -1,5 +1,7 @@
 package com.qmusic.ui.screens
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -227,22 +229,22 @@ fun CollectionScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(QMusicIcons.Back, contentDescription = s.back, tint = Color.White)
+                Icon(QMusicIcons.Back, contentDescription = s.back, tint = Ink)
             }
             Text(
                 text = page?.title?.ifBlank { item.title } ?: item.title,
                 style = MaterialTheme.typography.titleMedium,
-                color = Color.White,
+                color = Ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).graphicsLayer { alpha = barAlpha },
             )
             IconButton(onClick = onShare) {
-                Icon(QMusicIcons.Share, contentDescription = s.share, tint = Color.White)
+                Icon(QMusicIcons.Share, contentDescription = s.share, tint = Ink)
             }
             if (editable) {
                 IconButton(onClick = { confirmDelete = true }) {
-                    Icon(QMusicIcons.Trash, contentDescription = s.delete, tint = Color.White)
+                    Icon(QMusicIcons.Trash, contentDescription = s.delete, tint = Ink)
                 }
             }
         }
@@ -289,7 +291,7 @@ private fun Header(
         Box(
             Modifier
                 .matchParentSize()
-                .background(Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.3f), 0.6f to BgRoot.copy(alpha = 0.6f), 1f to BgRoot)),
+                .background(Brush.verticalGradient(0f to InkInverse.copy(alpha = 0.3f), 0.6f to BgRoot.copy(alpha = 0.6f), 1f to BgRoot)),
         )
         Column(
             modifier = Modifier
@@ -313,17 +315,17 @@ private fun Header(
             Text(
                 text = page?.title?.ifBlank { item.title } ?: item.title,
                 style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                color = Color.White,
+                color = Ink,
                 textAlign = TextAlign.Center,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             (page?.subtitle ?: item.subtitle)?.let {
                 Spacer(Modifier.height(6.dp))
-                Text(it, style = MaterialTheme.typography.titleSmall, color = Color.White, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(it, style = MaterialTheme.typography.titleSmall, color = Ink, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             listOfNotNull(page?.kindLine, page?.countLine).forEach { line ->
-                Text(line, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.65f), textAlign = TextAlign.Center, maxLines = 1)
+                Text(line, style = MaterialTheme.typography.bodyMedium, color = Ink.copy(alpha = 0.65f), textAlign = TextAlign.Center, maxLines = 1)
             }
             Spacer(Modifier.height(18.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(28.dp)) {
@@ -332,11 +334,11 @@ private fun Header(
                     modifier = Modifier
                         .size(68.dp)
                         .clip(CircleShape)
-                        .background(if (songs.isNotEmpty()) Color.White else Color.White.copy(alpha = 0.3f))
+                        .background(if (songs.isNotEmpty()) Ink else Ink.copy(alpha = 0.3f))
                         .clickable(enabled = songs.isNotEmpty(), onClick = onPlay),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(QMusicIcons.Play, contentDescription = s.play, tint = Color.Black, modifier = Modifier.size(34.dp))
+                    Icon(QMusicIcons.Play, contentDescription = s.play, tint = InkInverse, modifier = Modifier.size(34.dp))
                 }
                 RoundAction(QMusicIcons.Shuffle, s.shuffle, enabled = songs.isNotEmpty(), onClick = onShuffle)
             }
@@ -346,7 +348,7 @@ private fun Header(
                 Text(
                     text = description,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.7f),
+                    color = Ink.copy(alpha = 0.7f),
                     maxLines = if (expanded) Int.MAX_VALUE else 3,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.clickable(
@@ -365,11 +367,11 @@ private fun RoundAction(icon: androidx.compose.ui.graphics.vector.ImageVector, l
         modifier = Modifier
             .size(48.dp)
             .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.12f))
+            .background(Ink.copy(alpha = 0.12f))
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = label, tint = Color.White.copy(alpha = if (enabled) 1f else 0.4f), modifier = Modifier.size(24.dp))
+        Icon(icon, contentDescription = label, tint = Ink.copy(alpha = if (enabled) 1f else 0.4f), modifier = Modifier.size(24.dp))
     }
 }
 

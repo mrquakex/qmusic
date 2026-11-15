@@ -109,9 +109,9 @@ import com.qmusic.engine.models.SongItem
 import com.qmusic.player.RepeatMode
 import com.qmusic.player.SleepTimerState
 import com.qmusic.ui.strings.LocalStrings
-import com.qmusic.ui.theme.BgRoot
+import com.qmusic.ui.theme.NightBgRoot as BgRoot
 import com.qmusic.ui.theme.BgSurface
-import com.qmusic.ui.theme.DarkSurfaceVariant
+import com.qmusic.ui.theme.NightSurfaceVariant as DarkSurfaceVariant
 import com.qmusic.ui.theme.QMusicIcons
 import com.qmusic.ui.theme.QMusicLogo
 import com.qmusic.ui.viewmodel.LyricsState

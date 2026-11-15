@@ -1,5 +1,7 @@
 package com.qmusic.ui.chat
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -116,7 +118,7 @@ internal fun JoinGroupPage(controller: ChatController, s: ChatStrings, code: Str
         TopBar(s.joinGroupTitle, { controller.pop() })
         val g = invite
         when {
-            !loaded -> Centered { CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp) }
+            !loaded -> Centered { CircularProgressIndicator(color = Ink, strokeWidth = 2.dp) }
             g == null -> Text(s.inviteInvalid, color = TextSecondary, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(32.dp))
             else -> Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 ChatAvatar(ChatUser(g.groupId, g.name, "", g.photo), 112.dp)
@@ -150,7 +152,7 @@ internal fun InviteDialog(controller: ChatController, s: ChatStrings, group: Cha
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 val c = code
                 if (c == null) {
-                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.padding(24.dp))
+                    CircularProgressIndicator(color = Ink, strokeWidth = 2.dp, modifier = Modifier.padding(24.dp))
                 } else {
                     Box(Modifier.clip(RoundedCornerShape(16.dp)).background(Color.White).padding(12.dp)) { QrCode(qeyfGroupLink(c), Modifier.size(200.dp)) }
                     Spacer(Modifier.height(10.dp))
@@ -208,7 +210,7 @@ internal fun BroadcastsPage(controller: ChatController, s: ChatStrings) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(Modifier.size(50.dp).clip(CircleShape).background(DarkSurfaceVariant), contentAlignment = Alignment.Center) {
-                        Icon(QMusicIcons.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                        Icon(QMusicIcons.Send, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
                     }
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
@@ -246,8 +248,8 @@ internal fun BroadcastEditPage(controller: ChatController, s: ChatStrings, id: S
                     ChatAvatar(user, 44.dp)
                     Spacer(Modifier.width(14.dp))
                     Text(user.name, color = TextPrimary, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    Box(Modifier.size(24.dp).clip(CircleShape).background(if (on) Color.White else DarkSurfaceVariant), contentAlignment = Alignment.Center) {
-                        if (on) Icon(QMusicIcons.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                    Box(Modifier.size(24.dp).clip(CircleShape).background(if (on) Ink else DarkSurfaceVariant), contentAlignment = Alignment.Center) {
+                        if (on) Icon(QMusicIcons.Check, contentDescription = null, tint = InkInverse, modifier = Modifier.size(16.dp))
                     }
                 }
             }
@@ -273,7 +275,7 @@ internal fun BroadcastChatPage(controller: ChatController, s: ChatStrings, id: S
     Column(Modifier.fillMaxSize().background(BgRoot).imePadding()) {
         TopBar(list?.name?.ifBlank { null } ?: s.broadcastsTitle, { controller.pop() }, actions = {
             Box {
-                IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Color.White) }
+                IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Ink) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
                     DropdownMenuItem(text = { Text(s.broadcastEdit, color = TextPrimary) }, onClick = { menu = false; controller.push(ChatRoute.BroadcastEdit(id)) })
                     DropdownMenuItem(text = { Text(s.broadcastDelete, color = TextPrimary) }, onClick = { menu = false; confirmDelete = true })
@@ -296,9 +298,9 @@ internal fun BroadcastChatPage(controller: ChatController, s: ChatStrings, id: S
             items(log.size) { i ->
                 val (body, at) = log[i]
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                    Column(Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(18.dp)).background(Color.White).padding(horizontal = 14.dp, vertical = 9.dp)) {
-                        Text(body, color = Color.Black, fontSize = 15.sp)
-                        Text(listTime(at, s) + " " + clock(at), color = Color.Black.copy(alpha = 0.5f), fontSize = 11.sp, modifier = Modifier.align(Alignment.End))
+                    Column(Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(18.dp)).background(Ink).padding(horizontal = 14.dp, vertical = 9.dp)) {
+                        Text(body, color = InkInverse, fontSize = 15.sp)
+                        Text(listTime(at, s) + " " + clock(at), color = InkInverse.copy(alpha = 0.5f), fontSize = 11.sp, modifier = Modifier.align(Alignment.End))
                     }
                 }
             }
@@ -310,20 +312,20 @@ internal fun BroadcastChatPage(controller: ChatController, s: ChatStrings, id: S
                     value = text,
                     onValueChange = { text = it.take(4000) },
                     textStyle = TextStyle(color = TextPrimary, fontSize = 16.sp),
-                    cursorBrush = SolidColor(Color.White),
+                    cursorBrush = SolidColor(Ink),
                     maxLines = 5,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
             Spacer(Modifier.width(8.dp))
             Box(
-                Modifier.size(48.dp).clip(CircleShape).background(if (text.isNotBlank() && list != null) Color.White else DarkSurfaceVariant)
+                Modifier.size(48.dp).clip(CircleShape).background(if (text.isNotBlank() && list != null) Ink else DarkSurfaceVariant)
                     .clickable(enabled = text.isNotBlank() && list != null) {
                         list?.let { controller.sendBroadcast(it, text) }
                         text = ""
                     },
                 contentAlignment = Alignment.Center,
-            ) { Icon(QMusicIcons.Send, contentDescription = s.send, tint = if (text.isNotBlank()) Color.Black else TextMuted, modifier = Modifier.size(20.dp)) }
+            ) { Icon(QMusicIcons.Send, contentDescription = s.send, tint = if (text.isNotBlank()) InkInverse else TextMuted, modifier = Modifier.size(20.dp)) }
         }
     }
     if (confirmDelete) {

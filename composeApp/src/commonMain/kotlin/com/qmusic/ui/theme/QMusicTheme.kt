@@ -17,32 +17,64 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// Monochrome design system: pure black / white, no colored accents.
+// Monochrome design system: black and white, no colored accents. Dark by default; light turns it over (black ink on
+// white paper). Every color here is read as state, so a change of theme redraws everything.
 
 /** Settings › Appearance › Pure black: the backgrounds go to #000 (OLED pixels off). Read as state, so it redraws. */
 var amoledTheme by mutableStateOf(false)
 
-val BgRoot: Color get() = if (amoledTheme) Color.Black else Color(0xFF050507)
-val DarkBackground: Color get() = BgRoot
-val BgSurface: Color get() = if (amoledTheme) Color.Black else Color(0xFF0B0B0F)
-val DarkSurface: Color get() = if (amoledTheme) Color(0xFF0A0A0A) else Color(0xFF101016)
-val DarkSurfaceVariant: Color get() = if (amoledTheme) Color(0xFF151515) else Color(0xFF181820)
-val TextPrimary = Color(0xFFFFFFFF)
-val TextSecondary = Color.White.copy(alpha = 0.65f)
-val TextMuted = Color.White.copy(alpha = 0.40f)
-val BorderSubtle = Color.White.copy(alpha = 0.08f)
-val BorderHover = Color.White.copy(alpha = 0.22f)
+/** Settings › Appearance › Theme: light (or the phone's light theme when it follows the system). */
+var lightTheme by mutableStateOf(false)
 
-val QMusicColorScheme get() = darkColorScheme(
-    primary = Color.White,
+/** The ink: white on the dark theme, black on the light one (text, icons, the main buttons' fill). */
+val Ink: Color get() = if (lightTheme) Color.Black else Color.White
+
+/** What stands on the ink: black on the dark theme, white on the light one (a main button's label). */
+val InkInverse: Color get() = if (lightTheme) Color.White else Color.Black
+
+val BgRoot: Color get() = when {
+    lightTheme -> Color(0xFFFFFFFF)
+    amoledTheme -> Color.Black
+    else -> Color(0xFF050507)
+}
+val DarkBackground: Color get() = BgRoot
+val BgSurface: Color get() = when {
+    lightTheme -> Color(0xFFF7F7F8)
+    amoledTheme -> Color.Black
+    else -> Color(0xFF0B0B0F)
+}
+val DarkSurface: Color get() = when {
+    lightTheme -> Color(0xFFF2F2F4)
+    amoledTheme -> Color(0xFF0A0A0A)
+    else -> Color(0xFF101016)
+}
+val DarkSurfaceVariant: Color get() = when {
+    lightTheme -> Color(0xFFEAEAEE)
+    amoledTheme -> Color(0xFF151515)
+    else -> Color(0xFF181820)
+}
+val TextPrimary: Color get() = if (lightTheme) Color(0xFF0A0A0C) else Color(0xFFFFFFFF)
+val TextSecondary: Color get() = Ink.copy(alpha = if (lightTheme) 0.62f else 0.65f)
+val TextMuted: Color get() = Ink.copy(alpha = if (lightTheme) 0.42f else 0.40f)
+val BorderSubtle: Color get() = Ink.copy(alpha = if (lightTheme) 0.10f else 0.08f)
+val BorderHover: Color get() = Ink.copy(alpha = if (lightTheme) 0.25f else 0.22f)
+
+// The always-dark screens (now playing, calls) keep these whatever the theme: what they show is a picture or a call.
+val NightBgRoot: Color get() = if (amoledTheme) Color.Black else Color(0xFF050507)
+val NightSurfaceVariant: Color get() = if (amoledTheme) Color(0xFF151515) else Color(0xFF181820)
+val NightTextPrimary: Color = Color(0xFFFFFFFF)
+val NightTextSecondary: Color = Color.White.copy(alpha = 0.65f)
+
+val QMusicColorScheme get() = (if (lightTheme) androidx.compose.material3.lightColorScheme() else darkColorScheme()).copy(
+    primary = Ink,
     onPrimary = BgRoot,
     primaryContainer = DarkSurfaceVariant,
-    onPrimaryContainer = Color.White,
-    secondary = Color.White.copy(alpha = 0.75f),
+    onPrimaryContainer = Ink,
+    secondary = Ink.copy(alpha = 0.75f),
     onSecondary = BgRoot,
     secondaryContainer = DarkSurfaceVariant,
-    onSecondaryContainer = Color.White,
-    tertiary = Color.White.copy(alpha = 0.65f),
+    onSecondaryContainer = Ink,
+    tertiary = Ink.copy(alpha = 0.65f),
     onTertiary = BgRoot,
     background = BgRoot,
     onBackground = TextPrimary,
@@ -54,8 +86,13 @@ val QMusicColorScheme get() = darkColorScheme(
     surfaceContainerHigh = DarkSurfaceVariant,
     outline = BorderHover,
     outlineVariant = BorderSubtle,
-    error = Color.White,
+    error = Ink,
     onError = BgRoot,
+    surfaceContainerLowest = BgRoot,
+    surfaceContainerLow = BgSurface,
+    surfaceContainerHighest = DarkSurfaceVariant,
+    inverseSurface = Ink,
+    inverseOnSurface = BgRoot,
 )
 
 val QMusicShapes = Shapes(
@@ -66,7 +103,7 @@ val QMusicShapes = Shapes(
     extraLarge = RoundedCornerShape(28.dp),
 )
 
-val QMusicTypography = Typography(
+val QMusicTypography get() = Typography(
     headlineLarge = TextStyle(
         fontWeight = FontWeight.Bold,
         fontSize = 28.sp,

@@ -529,6 +529,13 @@ class MainViewModel(
 
     val amoledTheme: StateFlow<Boolean> = settings.bool(SettingKeys.AMOLED, false)
 
+    /** Settings › Appearance › Theme: "system", "dark" or "light". */
+    val themeMode: StateFlow<String> = settings.string(SettingKeys.THEME_MODE, "system")
+
+    fun setThemeMode(mode: String) {
+        if (mode in setOf("system", "dark", "light")) settings.setString(SettingKeys.THEME_MODE, mode)
+    }
+
     /** The Settings rows without a property of their own: appearance, headphones, cache, Last.fm. */
     val moreSettings: StateFlow<MoreSettings> = combine(
         combine(

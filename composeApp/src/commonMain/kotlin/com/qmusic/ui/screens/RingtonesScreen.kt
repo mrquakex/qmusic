@@ -1,5 +1,7 @@
 package com.qmusic.ui.screens
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -177,13 +179,13 @@ private fun RingtoneRow(made: MadeRingtone, targets: Set<RingtoneTarget>, playin
         ) {
             made.thumbnail?.let { AsyncImage(it, made.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
             Box(
-                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (playing) 0.55f else 0.3f)),
+                modifier = Modifier.fillMaxSize().background(InkInverse.copy(alpha = if (playing) 0.55f else 0.3f)),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector = if (playing) QMusicIcons.Pause else QMusicIcons.Play,
                     contentDescription = if (playing) s.ringtoneStopPreview else s.ringtonePreview,
-                    tint = Color.White,
+                    tint = Ink,
                     modifier = Modifier.size(26.dp),
                 )
             }
@@ -217,10 +219,10 @@ private fun RingtoneRow(made: MadeRingtone, targets: Set<RingtoneTarget>, playin
                                 RingtoneTarget.ALARM -> s.ringtoneInUseAlarm
                             },
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.Black,
+                            color = InkInverse,
                             modifier = Modifier
                                 .clip(CircleShape)
-                                .background(Color.White)
+                                .background(Ink)
                                 .padding(horizontal = 8.dp, vertical = 2.dp),
                         )
                     }

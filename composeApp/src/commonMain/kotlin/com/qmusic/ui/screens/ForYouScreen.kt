@@ -1,5 +1,7 @@
 package com.qmusic.ui.screens
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -77,7 +79,7 @@ fun ForYouScreen(
     if (samples.isEmpty()) {
         Box(modifier.fillMaxSize().background(DarkBackground).padding(32.dp), contentAlignment = Alignment.Center) {
             if (isLoading) {
-                androidx.compose.material3.CircularProgressIndicator(color = Color.White)
+                androidx.compose.material3.CircularProgressIndicator(color = Ink)
             } else {
                 Text(s.forYouEmpty, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -91,7 +93,7 @@ fun ForYouScreen(
         if (pager.settledPage >= samples.size - NEAR_END) onNearEnd()
     }
 
-    Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = modifier.fillMaxSize().background(InkInverse)) {
         VerticalPager(state = pager, modifier = Modifier.fillMaxSize(), key = { samples[it].id }) { page ->
             val song = samples[page]
             SamplePage(
@@ -167,10 +169,10 @@ private fun SamplePage(
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 0.45f),
+                        0f to InkInverse.copy(alpha = 0.45f),
                         0.22f to Color.Transparent,
                         0.62f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.78f),
+                        1f to InkInverse.copy(alpha = 0.78f),
                     ),
                 ),
         )
@@ -179,7 +181,7 @@ private fun SamplePage(
             Icon(
                 imageVector = QMusicIcons.Play,
                 contentDescription = s.play,
-                tint = Color.White.copy(alpha = 0.9f),
+                tint = Ink.copy(alpha = 0.9f),
                 modifier = Modifier
                     .align(Alignment.Center)
                     .size(72.dp),
@@ -224,14 +226,14 @@ private fun SamplePage(
                 Text(
                     text = song.title,
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White,
+                    color = Ink,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = song.artists.joinToString { it.name },
                     style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White.copy(alpha = 0.78f),
+                    color = Ink.copy(alpha = 0.78f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -247,17 +249,17 @@ private fun SideButton(icon: ImageVector, label: String, onClick: () -> Unit) {
             modifier = Modifier
                 .size(54.dp)
                 .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.38f))
+                .background(InkInverse.copy(alpha = 0.38f))
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.size(26.dp))
+            Icon(icon, contentDescription = label, tint = Ink, modifier = Modifier.size(26.dp))
         }
         Spacer(Modifier.height(4.dp))
         Text(
             label,
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-            color = Color.White,
+            color = Ink,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

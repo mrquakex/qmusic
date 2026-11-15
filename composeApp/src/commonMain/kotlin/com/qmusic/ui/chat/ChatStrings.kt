@@ -381,6 +381,37 @@ data class ChatStrings(
     val callLink: String get() = if (english) "Share call link" else "Arama bağlantısı paylaş"
     val callLinkText: String get() = if (english) "Call me on Qeyf" else "Qeyf'te beni ara"
 
+    val pinMessage: String get() = if (english) "Pin" else "Sabitle"
+    val unpinMessage: String get() = if (english) "Unpin" else "Sabitlemeyi kaldır"
+    val pinnedMessages: String get() = if (english) "Pinned messages" else "Sabitlenen mesajlar"
+    val viewOnce: String get() = if (english) "View once" else "Tek seferlik"
+    val viewOnceNote: String get() = if (english) "Opens once, then it is gone. It cannot be forwarded or saved." else "Bir kez açılır, sonra kaybolur. İletilemez, kaydedilemez."
+    val viewOncePhoto: String get() = if (english) "View once photo" else "Tek seferlik fotoğraf"
+    val viewOnceOpened: String get() = if (english) "Opened" else "Açıldı"
+    val viewOnceTap: String get() = if (english) "Tap to view" else "Görmek için dokun"
+    val viewOnceSent: String get() = if (english) "View once photo" else "Tek seferlik fotoğraf"
+    val mentionedYou: String get() = if (english) "mentioned you" else "senden bahsetti"
+    val groupSettings: String get() = if (english) "Group settings" else "Grup ayarları"
+    val sendAdminsOnly: String get() = if (english) "Only admins send messages" else "Yalnızca yöneticiler mesaj gönderebilir"
+    val sendAdminsOnlyNote: String get() = if (english) "Members can read but not write." else "Üyeler okuyabilir ama yazamaz."
+    val editAdminsOnly: String get() = if (english) "Only admins edit group info" else "Grup bilgisini yalnızca yöneticiler değiştirir"
+    val editAdminsOnlyNote: String get() = if (english) "Name, photo, description and pinned messages." else "Ad, fotoğraf, açıklama ve sabitlenen mesajlar."
+    val onlyAdminsCanSend: String get() = if (english) "Only admins can send messages" else "Yalnızca yöneticiler mesaj gönderebilir"
+    val statusLike: String get() = if (english) "Like" else "Beğen"
+    val statusLikes: String get() = if (english) "likes" else "beğeni"
+    val wallpaper: String get() = if (english) "Wallpaper" else "Duvar kağıdı"
+    val wallpaperNone: String get() = if (english) "None" else "Yok"
+    val wallpaperNote: String get() = if (english) "Behind the messages of every chat." else "Tüm sohbetlerde mesajların arkasında."
+
+    val gifTab: String get() = if (english) "GIF" else "GIF"
+    val stickerTab: String get() = if (english) "Stickers" else "Çıkartma"
+    val emojiTab: String get() = if (english) "Emoji" else "Emoji"
+    val searchGifs: String get() = if (english) "Search GIFs" else "GIF ara"
+    val searchStickers: String get() = if (english) "Search stickers" else "Çıkartma ara"
+    val gifsUnavailable: String get() = if (english) "GIFs are not set up yet." else "GIF'ler henüz hazır değil."
+    val gifsFailed: String get() = if (english) "Could not load. Check the connection." else "Yüklenemedi. Bağlantını kontrol et."
+    val poweredByKlipy: String get() = if (english) "Powered by KLIPY" else "KLIPY ile"
+
     companion object {
         val Turkish = ChatStrings(
             title = "Mesajlar",

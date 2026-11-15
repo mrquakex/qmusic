@@ -1,7 +1,10 @@
 package com.qmusic.ui.chat
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -118,16 +121,16 @@ internal fun LinkPreviewCard(url: String, mine: Boolean, load: suspend (String) 
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     Column(
         Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp).width(260.dp).clip(RoundedCornerShape(12.dp))
-            .background(if (mine) Color.Black.copy(alpha = 0.06f) else Color.White.copy(alpha = 0.06f))
+            .background(if (mine) InkInverse.copy(alpha = 0.06f) else Ink.copy(alpha = 0.06f))
             .clickable { runCatching { uriHandler.openUri(c.url) } },
     ) {
         if (c.image != null) {
             AsyncImage(model = c.image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().aspectRatio(1.91f))
         }
         Column(Modifier.padding(10.dp)) {
-            val soft = if (mine) Color.Black.copy(alpha = 0.5f) else TextSecondary
+            val soft = if (mine) InkInverse.copy(alpha = 0.5f) else TextSecondary
             if (c.site.isNotBlank()) Text(c.site, color = soft, fontSize = 11.sp, maxLines = 1)
-            Text(c.title, color = if (mine) Color.Black else TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(c.title, color = if (mine) InkInverse else TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (c.description.isNotBlank()) Text(c.description, color = soft, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
@@ -175,7 +178,7 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
     LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item {
             TopBar(s.settings, { controller.pop() }, actions = {
-                IconButton(onClick = { controller.push(ChatRoute.MyQr) }) { QrGlyph(Color.White) }
+                IconButton(onClick = { controller.push(ChatRoute.MyQr) }) { QrGlyph(Ink) }
             })
         }
         item {
@@ -184,9 +187,9 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
                 Box(Modifier.clip(CircleShape).clickable { pickPhoto() }) {
                     ChatAvatar(me, 132.dp)
                     Box(
-                        Modifier.align(Alignment.BottomEnd).size(38.dp).clip(CircleShape).background(Color.White),
+                        Modifier.align(Alignment.BottomEnd).size(38.dp).clip(CircleShape).background(Ink),
                         contentAlignment = Alignment.Center,
-                    ) { Icon(QMusicIcons.Camera, contentDescription = s.changePhoto, tint = Color.Black, modifier = Modifier.size(20.dp)) }
+                    ) { Icon(QMusicIcons.Camera, contentDescription = s.changePhoto, tint = InkInverse, modifier = Modifier.size(20.dp)) }
                 }
                 Spacer(Modifier.height(12.dp))
                 Text(me.name, color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -216,6 +219,24 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
         }
         item { SectionTitle(s.soundsTitle) }
         item { SoundSettings(s) }
+        item { SectionTitle(s.wallpaper) }
+        item {
+            val current by controller.wallpaper.collectAsState()
+            Text(s.wallpaperNote, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                ChatWallpapers.forEachIndexed { i, colour ->
+                    Box(
+                        Modifier.size(width = 56.dp, height = 84.dp).clip(RoundedCornerShape(12.dp)).background(colour ?: BgRootColor)
+                            .border(2.dp, if (i == current) Ink else BorderLine, RoundedCornerShape(12.dp))
+                            .clickable { controller.setWallpaper(i) },
+                        contentAlignment = Alignment.Center,
+                    ) { if (colour == null) Text(s.wallpaperNone, color = TextSecondary, fontSize = 11.sp) }
+                }
+            }
+        }
         item { SectionTitle(s.privacyTitle) }
         item {
             SettingSwitch(s.hideLastSeen, s.hideLastSeenNote, privacy.hideLastSeen) { controller.setPrivacy(privacy.copy(hideLastSeen = it)) }
@@ -270,8 +291,17 @@ internal fun QrGlyph(tint: Color) {
     }
 }
 
+/** The wallpapers behind a chat's messages: none, then quiet dark tones that keep white and black bubbles readable. */
+internal val ChatWallpapers: List<Color?> get() = if (com.qmusic.ui.theme.lightTheme) {
+    listOf(null, Color(0xFFE6EEF6), Color(0xFFE7F2EA), Color(0xFFF5E8EC), Color(0xFFEFE9F6), Color(0xFFEEEEEE), Color(0xFFF6F0E4), Color(0xFFE4F2F2))
+} else {
+    listOf(null, Color(0xFF0E1621), Color(0xFF0F1A14), Color(0xFF1A0F12), Color(0xFF15101C), Color(0xFF161616), Color(0xFF1C1710), Color(0xFF0D1A1A))
+}
+private val BgRootColor: Color get() = com.qmusic.ui.theme.BgRoot
+private val BorderLine: Color get() = com.qmusic.ui.theme.BorderHover
+
 @Composable
-private fun SettingSwitch(title: String, note: String, on: Boolean, onChange: (Boolean) -> Unit) {
+internal fun SettingSwitch(title: String, note: String, on: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().clickable { onChange(!on) }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, color = TextPrimary, fontSize = 15.sp)
@@ -281,7 +311,7 @@ private fun SettingSwitch(title: String, note: String, on: Boolean, onChange: (B
         Switch(
             checked = on,
             onCheckedChange = onChange,
-            colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = Color.White, uncheckedThumbColor = TextSecondary, uncheckedTrackColor = DarkSurfaceVariant),
+            colors = SwitchDefaults.colors(checkedThumbColor = InkInverse, checkedTrackColor = Ink, uncheckedThumbColor = TextSecondary, uncheckedTrackColor = DarkSurfaceVariant),
         )
     }
 }
@@ -332,8 +362,8 @@ internal fun ForwardDialog(controller: ChatController, s: ChatStrings, onSend: (
                             ChatAvatar(user, 38.dp)
                             Spacer(Modifier.width(10.dp))
                             Text(user.name, color = TextPrimary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                            Box(Modifier.size(22.dp).clip(CircleShape).background(if (on) Color.White else DarkSurface), contentAlignment = Alignment.Center) {
-                                if (on) Icon(QMusicIcons.Check, null, tint = Color.Black, modifier = Modifier.size(14.dp))
+                            Box(Modifier.size(22.dp).clip(CircleShape).background(if (on) Ink else DarkSurface), contentAlignment = Alignment.Center) {
+                                if (on) Icon(QMusicIcons.Check, null, tint = InkInverse, modifier = Modifier.size(14.dp))
                             }
                         }
                     }
@@ -342,7 +372,7 @@ internal fun ForwardDialog(controller: ChatController, s: ChatStrings, onSend: (
         },
         confirmButton = {
             TextButton(enabled = picked.isNotEmpty(), onClick = { onDismiss(); onSend(targets.filter { it.uid in picked }) }) {
-                Text(s.send + if (picked.isNotEmpty()) " (${picked.size})" else "", color = if (picked.isNotEmpty()) Color.White else TextMuted)
+                Text(s.send + if (picked.isNotEmpty()) " (${picked.size})" else "", color = if (picked.isNotEmpty()) Ink else TextMuted)
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel, color = TextSecondary) } },
@@ -386,7 +416,7 @@ internal fun MessageInfoDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("OK", color = Color.White) } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("OK", color = Ink) } },
     )
 }
 
@@ -413,10 +443,10 @@ internal fun MediaTabs(
             listOf(s.photos to photos.size, s.videos to videos.size, s.files to files.size, s.linksTab to linkList.size).forEachIndexed { i, (label, n) ->
                 Text(
                     "$label${if (n > 0) " $n" else ""}",
-                    color = if (i == tab) Color.Black else TextPrimary,
+                    color = if (i == tab) InkInverse else TextPrimary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (i == tab) Color.White else DarkSurfaceVariant).clickable { tab = i }.padding(horizontal = 12.dp, vertical = 7.dp),
+                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (i == tab) Ink else DarkSurfaceVariant).clickable { tab = i }.padding(horizontal = 12.dp, vertical = 7.dp),
                 )
             }
         }
@@ -477,7 +507,15 @@ private fun VideoTile(a: ChatAttachment, onOpen: () -> Unit) {
 
 /** The photos picked, before they go: swipe between them, edit one (crop, turn, draw), write a caption, send. */
 @Composable
-internal fun SendPhotosPage(photos: List<PickedImage>, s: ChatStrings, caption: String, onSend: (List<PickedImage>, String) -> Unit, onCancel: () -> Unit) {
+internal fun SendPhotosPage(
+    photos: List<PickedImage>,
+    s: ChatStrings,
+    caption: String,
+    onSend: (List<PickedImage>, String) -> Unit,
+    onCancel: () -> Unit,
+    viewOnce: Boolean = false,
+    onViewOnce: ((Boolean) -> Unit)? = null,
+) {
     PlatformBackHandler(enabled = true) { onCancel() }
     var list by remember(photos) { mutableStateOf(photos) }
     var text by remember { mutableStateOf(caption) }
@@ -514,6 +552,16 @@ internal fun SendPhotosPage(photos: List<PickedImage>, s: ChatStrings, caption: 
                     )
                 }
                 Spacer(Modifier.width(6.dp))
+                // One photo: it can go as view once (the "1" lit up).
+                if (onViewOnce != null && list.size == 1) {
+                    Box(
+                        Modifier.size(44.dp).clip(CircleShape).background(if (viewOnce) Color.White else DarkSurfaceVariant).clickable {
+                            onViewOnce(!viewOnce)
+                        },
+                        contentAlignment = Alignment.Center,
+                    ) { Text("1", color = if (viewOnce) Color.Black else Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+                    Spacer(Modifier.width(6.dp))
+                }
                 Box(Modifier.size(44.dp).clip(CircleShape).background(Color.White).clickable { onSend(list, text) }, contentAlignment = Alignment.Center) {
                     Icon(QMusicIcons.Send, null, tint = Color.Black, modifier = Modifier.size(20.dp))
                 }
@@ -549,7 +597,7 @@ internal fun GroupCallBanner(people: List<ChatUser>, s: ChatStrings, onJoin: () 
         }
         Text(
             s.groupCallJoin,
-            color = Color.White,
+            color = Ink,
             fontSize = 14.sp,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(TickRead).clickable(onClick = onJoin).padding(horizontal = 16.dp, vertical = 8.dp),
@@ -584,7 +632,7 @@ fun GroupCallScreen(service: GroupCallService, s: ChatStrings, me: ChatUser?, mo
             Text(call.group.name, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 call.startedAt?.let { mmss(now - it) } ?: s.groupCallWaiting,
-                color = TextSecondary,
+                color = Color.White.copy(alpha = 0.65f),
                 fontSize = 14.sp,
             )
         }
@@ -598,7 +646,7 @@ fun GroupCallScreen(service: GroupCallService, s: ChatStrings, me: ChatUser?, mo
             tiles.chunked(columns).forEach { row ->
                 Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     row.forEach { member ->
-                        Box(Modifier.weight(1f).fillMaxSize().clip(RoundedCornerShape(16.dp)).background(DarkSurfaceVariant), contentAlignment = Alignment.Center) {
+                        Box(Modifier.weight(1f).fillMaxSize().clip(RoundedCornerShape(16.dp)).background(Color(0xFF181820)), contentAlignment = Alignment.Center) {
                             val user = member?.user ?: me
                             val showVideo = if (member == null) call.video && call.cameraOn else member.hasVideo && member.cameraOn && member.connected
                             if (showVideo) {
@@ -635,8 +683,8 @@ fun GroupCallScreen(service: GroupCallService, s: ChatStrings, me: ChatUser?, mo
 
 @Composable
 private fun CallRoundButton(icon: androidx.compose.ui.graphics.vector.ImageVector, on: Boolean, onClick: () -> Unit) {
-    Box(Modifier.size(54.dp).clip(CircleShape).background(if (on) Color.White else Color.White.copy(alpha = 0.14f)).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        Icon(icon, null, tint = if (on) Color.Black else Color.White, modifier = Modifier.size(24.dp))
+    Box(Modifier.size(54.dp).clip(CircleShape).background(if (on) Ink else Ink.copy(alpha = 0.14f)).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(icon, null, tint = if (on) InkInverse else Ink, modifier = Modifier.size(24.dp))
     }
 }
 
@@ -691,7 +739,7 @@ private fun SoundSettings(s: ChatStrings) {
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Box(Modifier.size(20.dp).clip(CircleShape).background(if (on) TickRead else DarkSurface), contentAlignment = Alignment.Center) {
-                                if (on) Box(Modifier.size(8.dp).clip(CircleShape).background(Color.White))
+                                if (on) Box(Modifier.size(8.dp).clip(CircleShape).background(Ink))
                             }
                             Spacer(Modifier.width(12.dp))
                             Text(option.name(english), color = TextPrimary, fontSize = 16.sp, modifier = Modifier.weight(1f))
@@ -700,7 +748,7 @@ private fun SoundSettings(s: ChatStrings) {
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { picking = null }) { Text("OK", color = Color.White) } },
+            confirmButton = { TextButton(onClick = { picking = null }) { Text("OK", color = Ink) } },
         )
     }
 }
@@ -769,7 +817,7 @@ internal fun CallsPage(controller: ChatController, s: ChatStrings, onCall: ((Cha
                                 )
                             }
                         }
-                        Icon(if (c.video) QMusicIcons.Camera else QMusicIcons.Phone, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                        Icon(if (c.video) QMusicIcons.Camera else QMusicIcons.Phone, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
                     }
                 }
             }

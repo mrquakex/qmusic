@@ -1,5 +1,7 @@
 package com.qmusic.ui.videos
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -58,14 +60,16 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 
 /** The Videos section looks like YouTube, not like the music app: its own blacks, greys and red. */
 object VideoColors {
-    val Background = Color(0xFF0F0F0F)
-    val Surface = Color(0xFF212121)
-    val Chip = Color(0xFF272727)
-    val ChipSelected = Color(0xFFF1F1F1)
+    // Light like YouTube's light theme, dark like its dark one.
+    val Background: Color get() = if (com.qmusic.ui.theme.lightTheme) Color(0xFFFFFFFF) else Color(0xFF0F0F0F)
+    val Surface: Color get() = if (com.qmusic.ui.theme.lightTheme) Color(0xFFF2F2F2) else Color(0xFF212121)
+    val Chip: Color get() = if (com.qmusic.ui.theme.lightTheme) Color(0xFFF2F2F2) else Color(0xFF272727)
+    val ChipSelected: Color get() = if (com.qmusic.ui.theme.lightTheme) Color(0xFF0F0F0F) else Color(0xFFF1F1F1)
+    val OnChipSelected: Color get() = if (com.qmusic.ui.theme.lightTheme) Color(0xFFFFFFFF) else Color(0xFF0F0F0F)
     val Red = Color(0xFFFF0000)
-    val Text = Color(0xFFF1F1F1)
-    val TextSecondary = Color(0xFFAAAAAA)
-    val Divider = Color(0xFF303030)
+    val Text: Color get() = if (com.qmusic.ui.theme.lightTheme) Color(0xFF0F0F0F) else Color(0xFFF1F1F1)
+    val TextSecondary: Color get() = if (com.qmusic.ui.theme.lightTheme) Color(0xFF606060) else Color(0xFFAAAAAA)
+    val Divider: Color get() = if (com.qmusic.ui.theme.lightTheme) Color(0xFFE5E5E5) else Color(0xFF303030)
     val Link = Color(0xFF3EA6FF)
 
     /** Qeyf's own warm colours (the opening's glow): the seek bar runs from one to the other. */
@@ -93,14 +97,14 @@ fun VideoThumbnail(item: VideoItem, s: VideoStrings, modifier: Modifier = Modifi
         if (badge != null) {
             Text(
                 text = badge,
-                color = Color.White,
+                color = Ink,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(6.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(if (item.isLive) VideoColors.Red else Color.Black.copy(alpha = 0.8f))
+                    .background(if (item.isLive) VideoColors.Red else InkInverse.copy(alpha = 0.8f))
                     .padding(horizontal = 5.dp, vertical = 2.dp),
             )
         }
@@ -209,9 +213,9 @@ fun PlaylistResultRow(playlist: VideoPlaylist, s: VideoStrings, onClick: () -> U
             playlist.videoCount?.let {
                 Text(
                     s.videosCount(it),
-                    color = Color.White,
+                    color = Ink,
                     fontSize = 12.sp,
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).clip(RoundedCornerShape(4.dp)).background(Color.Black.copy(alpha = 0.8f)).padding(horizontal = 5.dp, vertical = 2.dp),
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).clip(RoundedCornerShape(4.dp)).background(InkInverse.copy(alpha = 0.8f)).padding(horizontal = 5.dp, vertical = 2.dp),
                 )
             }
         }
@@ -236,7 +240,7 @@ fun ChipRow(chips: List<VideoChip>, onClick: (VideoChip) -> Unit) {
 fun LabelChip(text: String, selected: Boolean, onClick: () -> Unit) {
     Text(
         text = text,
-        color = if (selected) Color.Black else VideoColors.Text,
+        color = if (selected) InkInverse else VideoColors.Text,
         fontSize = 14.sp,
         fontWeight = FontWeight.Medium,
         maxLines = 1,
@@ -260,7 +264,7 @@ fun MessageBlock(title: String, body: String? = null, action: String? = null, on
         if (action != null && onAction != null) {
             Text(
                 action,
-                color = Color.Black,
+                color = InkInverse,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(top = 6.dp).clip(RoundedCornerShape(50)).background(VideoColors.ChipSelected).clickable(onClick = onAction).padding(horizontal = 22.dp, vertical = 10.dp),
             )

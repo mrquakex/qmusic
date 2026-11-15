@@ -313,7 +313,7 @@ private fun WatchDetails(
                 }
                 Text(
                     if (w.subscribed) s.subscribed else s.subscribe,
-                    color = if (w.subscribed) VideoColors.Text else Color.Black,
+                    color = if (w.subscribed) VideoColors.Text else VideoColors.OnChipSelected,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp,
                     modifier = Modifier

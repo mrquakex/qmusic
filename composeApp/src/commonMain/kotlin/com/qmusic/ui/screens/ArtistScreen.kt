@@ -1,5 +1,7 @@
 package com.qmusic.ui.screens
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -206,12 +208,12 @@ fun ArtistScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(imageVector = QMusicIcons.Back, contentDescription = s.back, tint = Color.White)
+                Icon(imageVector = QMusicIcons.Back, contentDescription = s.back, tint = Ink)
             }
             Text(
                 text = page?.name ?: name,
                 style = MaterialTheme.typography.titleLarge,
-                color = Color.White,
+                color = Ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
@@ -220,7 +222,7 @@ fun ArtistScreen(
             )
             if (page != null) {
                 IconButton(onClick = { onShare(page) }) {
-                    Icon(imageVector = QMusicIcons.Share, contentDescription = s.share, tint = Color.White)
+                    Icon(imageVector = QMusicIcons.Share, contentDescription = s.share, tint = Ink)
                 }
             }
         }
@@ -266,7 +268,7 @@ private fun Hero(page: ArtistPage, height: Dp, scrolled: () -> Float, heroPx: Fl
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 0.35f),
+                        0f to InkInverse.copy(alpha = 0.35f),
                         0.22f to Color.Transparent,
                         0.55f to Color.Transparent,
                         0.82f to BgRoot.copy(alpha = 0.75f),
@@ -282,7 +284,7 @@ private fun Hero(page: ArtistPage, height: Dp, scrolled: () -> Float, heroPx: Fl
             Text(
                 text = page.name,
                 style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold, fontSize = 44.sp, lineHeight = 48.sp),
-                color = Color.White,
+                color = Ink,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -291,7 +293,7 @@ private fun Hero(page: ArtistPage, height: Dp, scrolled: () -> Float, heroPx: Fl
                 Text(
                     text = audience,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White.copy(alpha = 0.72f),
+                    color = Ink.copy(alpha = 0.72f),
                 )
             }
         }
@@ -318,15 +320,15 @@ private fun ActionRow(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
-                    .background(if (page.subscribed) Color.Transparent else Color.White)
-                    .then(if (page.subscribed) Modifier.border(1.dp, Color.White.copy(alpha = 0.4f), RoundedCornerShape(50)) else Modifier)
+                    .background(if (page.subscribed) Color.Transparent else Ink)
+                    .then(if (page.subscribed) Modifier.border(1.dp, Ink.copy(alpha = 0.4f), RoundedCornerShape(50)) else Modifier)
                     .clickable(onClick = onToggleSubscribe)
                     .padding(horizontal = 20.dp, vertical = 11.dp),
             ) {
                 Text(
                     text = listOfNotNull(label, page.subscriberCount).joinToString("  "),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = if (page.subscribed) Color.White else Color.Black,
+                    color = if (page.subscribed) Ink else InkInverse,
                     maxLines = 1,
                 )
             }
@@ -334,18 +336,18 @@ private fun ActionRow(
         Spacer(Modifier.weight(1f))
         if (page.topSongs.isNotEmpty()) {
             IconButton(onClick = onRadio, modifier = Modifier.size(52.dp)) {
-                Icon(QMusicIcons.Radio, contentDescription = s.startRadio, tint = Color.White, modifier = Modifier.size(30.dp))
+                Icon(QMusicIcons.Radio, contentDescription = s.startRadio, tint = Ink, modifier = Modifier.size(30.dp))
             }
             Spacer(Modifier.width(12.dp))
             Box(
                 modifier = Modifier
                     .size(68.dp)
                     .clip(CircleShape)
-                    .background(Color.White)
+                    .background(Ink)
                     .clickable(onClick = onPlay),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(QMusicIcons.Play, contentDescription = s.play, tint = Color.Black, modifier = Modifier.size(34.dp))
+                Icon(QMusicIcons.Play, contentDescription = s.play, tint = InkInverse, modifier = Modifier.size(34.dp))
             }
         }
     }

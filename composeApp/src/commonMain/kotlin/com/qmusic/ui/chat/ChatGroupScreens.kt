@@ -1,5 +1,7 @@
 package com.qmusic.ui.chat
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -70,9 +72,9 @@ private fun PickList(people: List<ChatUser>, picked: Set<String>, onToggle: (Cha
             val on = user.uid in picked
             PersonRow(user, onClick = { onToggle(user) }) {
                 Box(
-                    Modifier.size(26.dp).clip(CircleShape).background(if (on) Color.White else DarkSurfaceVariant),
+                    Modifier.size(26.dp).clip(CircleShape).background(if (on) Ink else DarkSurfaceVariant),
                     contentAlignment = Alignment.Center,
-                ) { if (on) Icon(QMusicIcons.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp)) }
+                ) { if (on) Icon(QMusicIcons.Check, contentDescription = null, tint = InkInverse, modifier = Modifier.size(16.dp)) }
             }
         }
     }
@@ -89,7 +91,7 @@ internal fun NewGroupPage(controller: ChatController, s: ChatStrings) {
         TopBar(s.newGroup, { controller.pop() })
         Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(52.dp).clip(CircleShape).background(DarkSurfaceVariant), contentAlignment = Alignment.Center) {
-                Icon(QMusicIcons.Group, contentDescription = null, tint = Color.White)
+                Icon(QMusicIcons.Group, contentDescription = null, tint = Ink)
             }
             Spacer(Modifier.width(12.dp))
             Field(name, { name = it.take(50) }, s.groupName)
@@ -194,7 +196,7 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
                 Modifier.fillMaxWidth().clickable { inviteOpen = true }.padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(Modifier.size(44.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) { QrGlyph(Color.Black) }
+                Box(Modifier.size(44.dp).clip(CircleShape).background(Ink), contentAlignment = Alignment.Center) { QrGlyph(InkInverse) }
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(s.inviteLink, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
@@ -202,6 +204,13 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
                 }
             }
             if (inviteOpen) InviteDialog(controller, s, group, iAmAdmin) { inviteOpen = false }
+        }
+        if (iAmAdmin && g != null) {
+            item { SectionTitle(s.groupSettings) }
+            item {
+                SettingSwitch(s.sendAdminsOnly, s.sendAdminsOnlyNote, g.settings.sendAdmins) { controller.setGroupSettings(group, g.settings.copy(sendAdmins = it)) }
+                SettingSwitch(s.editAdminsOnly, s.editAdminsOnlyNote, g.settings.editAdmins) { controller.setGroupSettings(group, g.settings.copy(editAdmins = it)) }
+            }
         }
         item { SectionTitle(s.members) }
         items(g?.members.orEmpty(), key = { it.user.uid }) { m ->
@@ -265,7 +274,7 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
             title = { Text(s.rename, color = TextPrimary) },
             text = { Field(name, { name = it.take(50) }, s.groupName) },
             confirmButton = {
-                TextButton(enabled = name.isNotBlank(), onClick = { renaming = false; controller.renameGroup(group, name) }) { Text(s.save, color = Color.White) }
+                TextButton(enabled = name.isNotBlank(), onClick = { renaming = false; controller.renameGroup(group, name) }) { Text(s.save, color = Ink) }
             },
             dismissButton = { TextButton(onClick = { renaming = false }) { Text(s.cancel, color = TextSecondary) } },
         )
@@ -277,7 +286,7 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
             containerColor = DarkSurfaceVariant,
             title = { Text(s.groupDescription, color = TextPrimary) },
             text = { Field(text, { text = it.take(500) }, s.descriptionHint, capitalize = false) },
-            confirmButton = { TextButton(onClick = { describing = false; controller.setGroupDescription(group, text) }) { Text(s.save, color = Color.White) } },
+            confirmButton = { TextButton(onClick = { describing = false; controller.setGroupDescription(group, text) }) { Text(s.save, color = Ink) } },
             dismissButton = { TextButton(onClick = { describing = false }) { Text(s.cancel, color = TextSecondary) } },
         )
     }
@@ -344,17 +353,17 @@ internal fun VoiceBubble(a: ChatAttachment, mine: Boolean, player: VoicePlayer?,
     val playingUrl by (player?.playing ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
     val played by (player?.progress ?: remember { kotlinx.coroutines.flow.MutableStateFlow(0f) }).collectAsState()
     val isThis = playingUrl == a.url
-    val fg = if (mine) Color.Black else Color.White
-    val dim = if (mine) Color.Black.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.3f)
+    val fg = if (mine) InkInverse else Ink
+    val dim = if (mine) InkInverse.copy(alpha = 0.28f) else Ink.copy(alpha = 0.3f)
     Row(Modifier.width(250.dp).padding(start = 6.dp, end = 10.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(
-            Modifier.size(40.dp).clip(CircleShape).background(if (mine) Color.Black else Color.White).clickable(enabled = progress == null && player != null) { player?.toggle(a.url) },
+            Modifier.size(40.dp).clip(CircleShape).background(if (mine) InkInverse else Ink).clickable(enabled = progress == null && player != null) { player?.toggle(a.url) },
             contentAlignment = Alignment.Center,
         ) {
             if (progress != null) {
-                CircularProgressIndicator(progress = { progress }, color = if (mine) Color.White else Color.Black, strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
+                CircularProgressIndicator(progress = { progress }, color = if (mine) Ink else InkInverse, strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
             } else {
-                Icon(if (isThis) QMusicIcons.Pause else QMusicIcons.Play, contentDescription = null, tint = if (mine) Color.White else Color.Black, modifier = Modifier.size(18.dp))
+                Icon(if (isThis) QMusicIcons.Pause else QMusicIcons.Play, contentDescription = null, tint = if (mine) Ink else InkInverse, modifier = Modifier.size(18.dp))
             }
         }
         Spacer(Modifier.width(10.dp))
@@ -383,7 +392,7 @@ internal fun VoiceBubble(a: ChatAttachment, mine: Boolean, player: VoicePlayer?,
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     if (isThis) mmss((a.durationMs * played).toLong()) else mmss(a.durationMs),
-                    color = if (mine) Color.Black.copy(alpha = 0.55f) else TextSecondary,
+                    color = if (mine) InkInverse.copy(alpha = 0.55f) else TextSecondary,
                     fontSize = 11.sp,
                     modifier = Modifier.weight(1f),
                 )
@@ -392,10 +401,10 @@ internal fun VoiceBubble(a: ChatAttachment, mine: Boolean, player: VoicePlayer?,
                     val speed by player.speed.collectAsState()
                     Text(
                         (if (speed == 1f) "1" else if (speed == 1.5f) "1.5" else "2") + "×",
-                        color = if (mine) Color.White else Color.Black,
+                        color = if (mine) Ink else InkInverse,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (mine) Color.Black else Color.White).clickable { player.cycleSpeed() }.padding(horizontal = 6.dp, vertical = 1.dp),
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (mine) InkInverse else Ink).clickable { player.cycleSpeed() }.padding(horizontal = 6.dp, vertical = 1.dp),
                     )
                 }
             }
@@ -440,22 +449,22 @@ internal fun FileBubble(a: ChatAttachment, mine: Boolean, progress: Float?, s: C
             .clickable(enabled = progress == null, onClick = onOpen).padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(if (mine) Color.Black else DarkSurfaceVariant), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(if (mine) InkInverse else DarkSurfaceVariant), contentAlignment = Alignment.Center) {
             if (progress != null) {
-                CircularProgressIndicator(progress = { progress }, color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
+                CircularProgressIndicator(progress = { progress }, color = Ink, strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
             } else {
-                Icon(QMusicIcons.File, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                Icon(QMusicIcons.File, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
             }
         }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            val fg = if (mine) Color.Black else TextPrimary
-            val soft = if (mine) Color.Black.copy(alpha = 0.55f) else TextSecondary
+            val fg = if (mine) InkInverse else TextPrimary
+            val soft = if (mine) InkInverse.copy(alpha = 0.55f) else TextSecondary
             Text(a.name.ifBlank { "file" }, color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             val ext = a.name.substringAfterLast('.', "").uppercase().take(5)
             Text(listOf(ext, sizeLabel(a.size)).filter { it.isNotBlank() }.joinToString(" · "), color = soft, fontSize = 12.sp)
         }
-        if (progress == null) Icon(QMusicIcons.Download, contentDescription = s.download, tint = if (mine) Color.Black else Color.White, modifier = Modifier.size(20.dp))
+        if (progress == null) Icon(QMusicIcons.Download, contentDescription = s.download, tint = if (mine) InkInverse else Ink, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -493,7 +502,7 @@ internal fun TogetherBanner(state: TogetherState, s: ChatStrings, onOpen: () -> 
             .background(ClaudeCoral.copy(alpha = 0.16f)).clickable(onClick = onOpen).padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(38.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black)) {
+        Box(Modifier.size(38.dp).clip(RoundedCornerShape(8.dp)).background(InkInverse)) {
             if (state.item.thumbnail != null) AsyncImage(model = state.item.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
         Spacer(Modifier.width(10.dp))
@@ -518,7 +527,7 @@ internal fun RecordingBar(elapsedMs: Long, level: Float, hint: String, cancellin
         Spacer(Modifier.width(10.dp))
         Text(mmss(elapsedMs), color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.width(10.dp))
-        Box(Modifier.width((6 + level * 40).dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.7f)))
+        Box(Modifier.width((6 + level * 40).dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Ink.copy(alpha = 0.7f)))
         Spacer(Modifier.weight(1f))
         Text(hint, color = if (cancelling) Color(0xFFFF6B6B) else TextMuted, fontSize = 13.sp, maxLines = 1)
     }

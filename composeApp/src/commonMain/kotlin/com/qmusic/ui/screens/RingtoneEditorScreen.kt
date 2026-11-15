@@ -1,5 +1,7 @@
 package com.qmusic.ui.screens
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -167,8 +169,8 @@ private fun Loading(d: RingtoneDraft) {
         LinearProgressIndicator(
             progress = { overall },
             modifier = Modifier.fillMaxWidth(),
-            color = Color.White,
-            trackColor = Color.White.copy(alpha = 0.18f),
+            color = Ink,
+            trackColor = Ink.copy(alpha = 0.18f),
         )
         Spacer(Modifier.height(14.dp))
         Text(
@@ -219,10 +221,10 @@ private fun Editor(d: RingtoneDraft, playhead: Long?, studio: RingtoneStudio) {
         Text(
             text = s.ringtoneLength(((d.range.lengthMs + 500) / 1000).toInt()),
             style = MaterialTheme.typography.labelLarge,
-            color = Color.Black,
+            color = InkInverse,
             modifier = Modifier
                 .clip(RoundedCornerShape(50))
-                .background(Color.White)
+                .background(Ink)
                 .padding(horizontal = 12.dp, vertical = 4.dp),
         )
     }
@@ -239,7 +241,7 @@ private fun Editor(d: RingtoneDraft, playhead: Long?, studio: RingtoneStudio) {
             modifier = Modifier
                 .size(56.dp)
                 .clip(CircleShape)
-                .background(Color.White)
+                .background(Ink)
                 .clickable(enabled = !saving, onClick = studio::togglePreview),
             contentAlignment = Alignment.Center,
         ) {
@@ -295,8 +297,8 @@ private fun Editor(d: RingtoneDraft, playhead: Long?, studio: RingtoneStudio) {
         LinearProgressIndicator(
             progress = { d.progress },
             modifier = Modifier.fillMaxWidth(),
-            color = Color.White,
-            trackColor = Color.White.copy(alpha = 0.18f),
+            color = Ink,
+            trackColor = Ink.copy(alpha = 0.18f),
         )
         Text(s.ringtoneCreating, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     } else {
@@ -318,7 +320,7 @@ private fun Saved(d: RingtoneDraft, studio: RingtoneStudio, onOpenList: () -> Un
     val s = LocalStrings.current
     Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            modifier = Modifier.size(64.dp).clip(CircleShape).background(Color.White),
+            modifier = Modifier.size(64.dp).clip(CircleShape).background(Ink),
             contentAlignment = Alignment.Center,
         ) {
             Icon(QMusicIcons.Check, contentDescription = null, tint = BgRoot, modifier = Modifier.size(34.dp))
@@ -440,10 +442,10 @@ private fun OptionRow(title: String, subtitle: String, checked: Boolean, enabled
             enabled = enabled,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = BgRoot,
-                checkedTrackColor = Color.White,
-                uncheckedThumbColor = Color.White.copy(alpha = 0.7f),
+                checkedTrackColor = Ink,
+                uncheckedThumbColor = Ink.copy(alpha = 0.7f),
                 uncheckedTrackColor = DarkSurfaceVariant,
-                uncheckedBorderColor = Color.White.copy(alpha = 0.3f),
+                uncheckedBorderColor = Ink.copy(alpha = 0.3f),
             ),
         )
     }
@@ -520,7 +522,7 @@ private fun RingtoneWave(
         val xs = range.startMs.toFloat() / durationMs * w
         val xe = range.endMs.toFloat() / durationMs * w
 
-        drawRect(Color.White.copy(alpha = 0.07f), Offset(xs, 0f), Size(xe - xs, h))
+        drawRect(Ink.copy(alpha = 0.07f), Offset(xs, 0f), Size(xe - xs, h))
 
         val slot = w / bars.size
         val barWidth = slot * 0.6f
@@ -528,7 +530,7 @@ private fun RingtoneWave(
             val cx = slot * i + slot / 2
             val bh = max(4.dp.toPx(), v * h * 0.76f)
             drawRoundRect(
-                color = if (cx in xs..xe) Color.White else Color.White.copy(alpha = 0.3f),
+                color = if (cx in xs..xe) Ink else Ink.copy(alpha = 0.3f),
                 topLeft = Offset(cx - barWidth / 2, (h - bh) / 2),
                 size = Size(barWidth, bh),
                 cornerRadius = CornerRadius(barWidth / 2),
@@ -537,9 +539,9 @@ private fun RingtoneWave(
 
         val line = 2.dp.toPx()
         listOf(xs, xe).forEach { x ->
-            drawRect(Color.White, Offset(x - line / 2, 0f), Size(line, h))
+            drawRect(Ink, Offset(x - line / 2, 0f), Size(line, h))
             drawRoundRect(
-                color = Color.White,
+                color = Ink,
                 topLeft = Offset(x - 6.dp.toPx(), h / 2 - 17.dp.toPx()),
                 size = Size(12.dp.toPx(), 34.dp.toPx()),
                 cornerRadius = CornerRadius(6.dp.toPx()),
@@ -556,8 +558,8 @@ private fun RingtoneWave(
 
         playheadMs?.let { ms ->
             val x = ms.toFloat() / durationMs * w
-            drawLine(Color.White.copy(alpha = 0.9f), Offset(x, 0f), Offset(x, h), strokeWidth = 1.5.dp.toPx())
-            drawCircle(Color.White, 4.dp.toPx(), Offset(x, 6.dp.toPx()))
+            drawLine(Ink.copy(alpha = 0.9f), Offset(x, 0f), Offset(x, h), strokeWidth = 1.5.dp.toPx())
+            drawCircle(Ink, 4.dp.toPx(), Offset(x, 6.dp.toPx()))
         }
     }
 }

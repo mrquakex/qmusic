@@ -1,5 +1,7 @@
 package com.qmusic.ui.chat
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -103,14 +105,14 @@ internal fun PollDialog(s: ChatStrings, onSend: (ChatPoll) -> Unit, onDismiss: (
                     Switch(
                         checked = multiple,
                         onCheckedChange = { multiple = it },
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = Color.White, uncheckedThumbColor = TextSecondary, uncheckedTrackColor = DarkSurface),
+                        colors = SwitchDefaults.colors(checkedThumbColor = InkInverse, checkedTrackColor = Ink, uncheckedThumbColor = TextSecondary, uncheckedTrackColor = DarkSurface),
                     )
                 }
             }
         },
         confirmButton = {
             TextButton(enabled = ready, onClick = { onDismiss(); onSend(ChatPoll(question.trim(), filled, multiple)) }) {
-                Text(s.pollCreate, color = if (ready) Color.White else TextMuted)
+                Text(s.pollCreate, color = if (ready) Ink else TextMuted)
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel, color = TextSecondary) } },
@@ -131,8 +133,8 @@ internal fun PollCard(
     onVote: (List<Int>) -> Unit,
     onShowVoters: () -> Unit,
 ) {
-    val fg = if (mine) Color.Black else TextPrimary
-    val soft = if (mine) Color.Black.copy(alpha = 0.55f) else TextSecondary
+    val fg = if (mine) InkInverse else TextPrimary
+    val soft = if (mine) InkInverse.copy(alpha = 0.55f) else TextSecondary
     val myPicks = votes[myUid].orEmpty()
     val voters = votes.size
     Column(Modifier.width(270.dp).padding(start = 10.dp, end = 10.dp, top = 10.dp)) {
@@ -144,7 +146,7 @@ internal fun PollCard(
             val picked = i in myPicks
             Box(
                 Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(10.dp))
-                    .background(if (mine) Color.Black.copy(alpha = 0.06f) else Color.White.copy(alpha = 0.06f))
+                    .background(if (mine) InkInverse.copy(alpha = 0.06f) else Ink.copy(alpha = 0.06f))
                     .clickable {
                         val next = when {
                             poll.multiple -> if (picked) myPicks - i else myPicks + i
@@ -164,7 +166,7 @@ internal fun PollCard(
                             .background(if (picked) TickRead else Color.Transparent)
                             .then(if (picked) Modifier else Modifier.background(soft.copy(alpha = 0.25f))),
                         contentAlignment = Alignment.Center,
-                    ) { if (picked) Icon(QMusicIcons.Check, null, tint = Color.White, modifier = Modifier.size(12.dp)) }
+                    ) { if (picked) Icon(QMusicIcons.Check, null, tint = Ink, modifier = Modifier.size(12.dp)) }
                     Spacer(Modifier.width(10.dp))
                     Text(option, color = fg, fontSize = 14.sp, modifier = Modifier.weight(1f))
                     Text(count.toString(), color = soft, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
@@ -200,7 +202,7 @@ internal fun VotersDialog(poll: ChatPoll, votes: Map<String, List<Int>>, nameOf:
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("OK", color = Color.White) } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("OK", color = Ink) } },
     )
 }
 
@@ -279,9 +281,9 @@ internal fun LocationCard(location: ChatLocation, mine: Boolean, s: ChatStrings)
 @Composable
 internal fun ContactCard(contact: ChatContact, mine: Boolean, s: ChatStrings, onSave: () -> Unit) {
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
-    val fg = if (mine) Color.Black else TextPrimary
-    val soft = if (mine) Color.Black.copy(alpha = 0.55f) else TextSecondary
-    Column(Modifier.padding(4.dp).width(250.dp).clip(RoundedCornerShape(12.dp)).background(if (mine) Color.Black.copy(alpha = 0.06f) else Color.White.copy(alpha = 0.06f))) {
+    val fg = if (mine) InkInverse else TextPrimary
+    val soft = if (mine) InkInverse.copy(alpha = 0.55f) else TextSecondary
+    Column(Modifier.padding(4.dp).width(250.dp).clip(RoundedCornerShape(12.dp)).background(if (mine) InkInverse.copy(alpha = 0.06f) else Ink.copy(alpha = 0.06f))) {
         Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
             ChatAvatar(contact.name.ifBlank { "?" }, null, 42.dp)
             Spacer(Modifier.width(10.dp))
@@ -357,7 +359,7 @@ internal fun ReactionsDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("OK", color = Color.White) } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("OK", color = Ink) } },
     )
 }
 

@@ -190,7 +190,15 @@ class PickedFile(
 )
 
 /** A group: its name and picture, and who is in it. */
-data class GroupInfo(val id: String, val name: String, val photo: String?, val members: List<GroupMember>, val createdBy: String?, val description: String = "")
+data class GroupInfo(
+    val id: String,
+    val name: String,
+    val photo: String?,
+    val members: List<GroupMember>,
+    val createdBy: String?,
+    val description: String = "",
+    val settings: GroupSettings = GroupSettings(),
+)
 
 data class GroupMember(val user: ChatUser, val admin: Boolean)
 
@@ -288,7 +296,25 @@ data class ChatMessage(
     val poll: ChatPoll? = null,
     val location: ChatLocation? = null,
     val contact: ChatContact? = null,
+    /** A photo that opens once, then is gone for whoever got it. */
+    val viewOnce: Boolean = false,
+    /** Who the message names with @ (uids). */
+    val mentions: Set<String> = emptySet(),
+    /** A GIF or a sticker (KLIPY). */
+    val gif: ChatGif? = null,
 )
+
+/** A GIF or a sticker in a message: where it is and its size; a sticker shows without a bubble. */
+data class ChatGif(val url: String, val width: Int, val height: Int, val sticker: Boolean)
+
+/** One result of a GIF or sticker search: a small moving preview and the one that is sent. */
+data class GifItem(val id: String, val preview: String, val url: String, val width: Int, val height: Int)
+
+/** A message pinned to the top of its conversation. */
+data class PinnedMessage(val messageId: String, val text: String, val from: String, val at: Long)
+
+/** What a group lets its members do: only admins write, only admins change its name, photo and description. */
+data class GroupSettings(val sendAdmins: Boolean = false, val editAdmins: Boolean = false)
 
 /** A conversation as the list shows it. */
 data class ChatThread(
@@ -384,7 +410,7 @@ interface ChatBackend {
     suspend fun deleteAccount(): Result<Unit>
 
     /** Sends photos (one, or an album) with an optional caption. */
-    suspend fun sendImages(other: ChatUser, images: List<PickedImage>, caption: String, replyTo: ChatReply?): Result<Unit> =
+    suspend fun sendImages(other: ChatUser, images: List<PickedImage>, caption: String, replyTo: ChatReply?, viewOnce: Boolean = false): Result<Unit> =
         Result.failure(UnsupportedOperationException())
 
     /** The person's friends. */
@@ -589,6 +615,35 @@ interface ChatBackend {
     suspend fun saveBroadcast(id: String?, name: String, members: List<ChatUser>): Result<String> = Result.failure(UnsupportedOperationException())
     suspend fun deleteBroadcast(id: String) {}
     suspend fun logBroadcast(id: String, text: String) {}
+
+    /** GIFs or stickers for [query] (the popular ones when it is empty), through Qeyf's server. */
+    suspend fun searchGifs(stickers: Boolean, query: String, page: Int): Result<List<GifItem>> = Result.success(emptyList())
+    suspend fun sendGif(other: ChatUser, gif: ChatGif, replyTo: ChatReply?): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    // ------------------------------------------------------------------ pins, view once, mentions, group settings, likes
+
+    fun pinned(chatId: String): Flow<List<PinnedMessage>> = kotlinx.coroutines.flow.flowOf(emptyList())
+    suspend fun pin(chatId: String, message: ChatMessage, preview: String, pinned: Boolean): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    /** Who opened each view-once photo: message id to the uids. */
+    fun opened(chatId: String): Flow<Map<String, Set<String>>> = kotlinx.coroutines.flow.flowOf(emptyMap())
+    suspend fun markOpened(chatId: String, messageId: String) {}
+
+    /** Sends a text naming [mentions] (they hear it even in a muted group). */
+    suspend fun sendMentioning(other: ChatUser, text: String, replyTo: ChatReply?, mentions: Set<String>): Result<Unit> = send(other, text, null, replyTo)
+
+    suspend fun setGroupSettings(groupId: String, settings: GroupSettings): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    fun statusLikes(id: String): Flow<Set<String>> = kotlinx.coroutines.flow.flowOf(emptySet())
+    fun likedStatus(item: StatusItem): Flow<Boolean> = kotlinx.coroutines.flow.flowOf(false)
+
+    /** The wallpaper behind every chat's messages (an index into the wallpapers; 0 is none). */
+    fun wallpaper(): Flow<Int> = kotlinx.coroutines.flow.flowOf(0)
+    suspend fun setWallpaper(index: Int) {}
+    suspend fun likeStatus(item: StatusItem, liked: Boolean) {}
+
+    /** Puts the person's photo, as their privacy says, on what others keep of them (groups, friends, chats). */
+    suspend fun refreshMyCopies() {}
 
     /** Every message of a conversation, oldest first (for exporting it). */
     suspend fun allMessages(chatId: String): List<ChatMessage> = emptyList()

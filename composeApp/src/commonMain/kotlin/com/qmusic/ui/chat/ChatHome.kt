@@ -1,5 +1,7 @@
 package com.qmusic.ui.chat
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -68,7 +70,7 @@ import kotlinx.datetime.Clock
 private val CallRed = Color(0xFFFF5A5F)
 
 /** A status not seen yet rings white; a seen one grey. */
-internal val RingUnseen = Color.White
+internal val RingUnseen: Color get() = Ink
 internal val RingSeen = Color(0xFF5A5A5A)
 
 /** [content] (a picture) with a status ring around it when [ring] is set. */
@@ -157,14 +159,14 @@ private fun BarItem(
         Box(contentAlignment = Alignment.Center) {
             // The selected tab sits on a pill, like the system's own bars.
             Box(
-                Modifier.width(60.dp).height(32.dp).clip(RoundedCornerShape(16.dp)).background(if (selected) Color.White.copy(alpha = 0.14f) else Color.Transparent),
+                Modifier.width(60.dp).height(32.dp).clip(RoundedCornerShape(16.dp)).background(if (selected) Ink.copy(alpha = 0.14f) else Color.Transparent),
                 contentAlignment = Alignment.Center,
-            ) { icon(if (selected) Color.White else TextSecondary) }
+            ) { icon(if (selected) Ink else TextSecondary) }
             if (count > 0) {
                 Box(
                     Modifier.align(Alignment.TopEnd).offset(x = (-4).dp, y = (-2).dp).height(18.dp).widthIn(min = 18.dp).clip(CircleShape).background(badgeColor).padding(horizontal = 5.dp),
                     contentAlignment = Alignment.Center,
-                ) { Text(if (count > 99) "99+" else count.toString(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                ) { Text(if (count > 99) "99+" else count.toString(), color = Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
             } else if (dot) {
                 Box(Modifier.align(Alignment.TopEnd).offset(x = (-10).dp, y = 2.dp).size(9.dp).clip(CircleShape).background(TickRead))
             }
@@ -204,7 +206,7 @@ internal fun HomeTitle(title: String, onExit: () -> Unit, actions: @Composable (
         Modifier.fillMaxWidth().statusBarsPadding().height(60.dp).padding(start = 4.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onExit) { Icon(QMusicIcons.Back, contentDescription = null, tint = Color.White) }
+        IconButton(onClick = onExit) { Icon(QMusicIcons.Back, contentDescription = null, tint = Ink) }
         Text(title, color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         actions()
     }
@@ -226,7 +228,7 @@ internal fun SearchPill(value: String, onValue: (String) -> Unit, hint: String) 
                 onValueChange = onValue,
                 singleLine = true,
                 textStyle = TextStyle(color = TextPrimary, fontSize = 16.sp),
-                cursorBrush = SolidColor(Color.White),
+                cursorBrush = SolidColor(Ink),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -240,21 +242,21 @@ internal fun SearchPill(value: String, onValue: (String) -> Unit, hint: String) 
 @Composable
 internal fun HomeFab(icon: ImageVector, description: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(
-        modifier.padding(16.dp).size(56.dp).clip(RoundedCornerShape(18.dp)).background(Color.White).clickable(onClick = onClick),
+        modifier.padding(16.dp).size(56.dp).clip(RoundedCornerShape(18.dp)).background(Ink).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, contentDescription = description, tint = Color.Black, modifier = Modifier.size(24.dp)) }
+    ) { Icon(icon, contentDescription = description, tint = InkInverse, modifier = Modifier.size(24.dp)) }
 }
 
 @Composable
 private fun FilterChip(text: String, selected: Boolean, onClick: () -> Unit) {
     Text(
         text,
-        color = if (selected) Color.Black else TextPrimary,
+        color = if (selected) InkInverse else TextPrimary,
         fontSize = 14.sp,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier
             .clip(RoundedCornerShape(50))
-            .background(if (selected) Color.White else DarkSurfaceVariant)
+            .background(if (selected) Ink else DarkSurfaceVariant)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 7.dp),
     )
@@ -318,20 +320,20 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
             item(key = "title") {
                 HomeTitle(s.title, onExit) {
                     val incoming by controller.friendRequests.collectAsState()
-                    IconButton(onClick = { camera() }) { Icon(QMusicIcons.Camera, contentDescription = s.camera, tint = Color.White) }
+                    IconButton(onClick = { camera() }) { Icon(QMusicIcons.Camera, contentDescription = s.camera, tint = Ink) }
                     IconButton(onClick = { controller.openFriends() }) {
                         Box {
-                            Icon(QMusicIcons.Account, contentDescription = s.friends, tint = Color.White)
+                            Icon(QMusicIcons.Account, contentDescription = s.friends, tint = Ink)
                             if (incoming.isNotEmpty()) {
                                 Box(
                                     Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-6).dp).size(16.dp).clip(CircleShape).background(TickRead),
                                     contentAlignment = Alignment.Center,
-                                ) { Text(incoming.size.coerceAtMost(9).toString(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                                ) { Text(incoming.size.coerceAtMost(9).toString(), color = Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
                             }
                         }
                     }
                     Box {
-                        IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Color.White) }
+                        IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Ink) }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
                             DropdownMenuItem(text = { Text(s.newGroup, color = TextPrimary) }, onClick = { menu = false; controller.openNewGroup() })
                             DropdownMenuItem(text = { Text(s.broadcastsTitle, color = TextPrimary) }, onClick = { menu = false; controller.push(ChatRoute.Broadcasts) })
@@ -380,7 +382,7 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
             }
             when {
                 list == null -> item(key = "loading") {
-                    Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp) }
+                    Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Ink, strokeWidth = 2.dp) }
                 }
                 list.isEmpty() -> item(key = "empty") {
                     EmptyNote(
@@ -428,7 +430,7 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
             containerColor = DarkSurfaceVariant,
             title = { Text(s.deleteAccount, color = TextPrimary) },
             text = { Text(s.deleteAccountConfirm, color = TextSecondary) },
-            confirmButton = { TextButton(onClick = { confirmDelete = false; controller.deleteAccount() }) { Text(s.delete, color = Color.White) } },
+            confirmButton = { TextButton(onClick = { confirmDelete = false; controller.deleteAccount() }) { Text(s.delete, color = Ink) } },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(s.cancel, color = TextSecondary) } },
         )
     }
@@ -478,8 +480,8 @@ private fun GroupsTab(controller: ChatController, s: ChatStrings, me: ChatUser, 
                     Modifier.fillMaxWidth().clickable { controller.openNewGroup() }.padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(Color.White), contentAlignment = Alignment.Center) {
-                        Icon(QMusicIcons.Add, contentDescription = null, tint = Color.Black, modifier = Modifier.size(26.dp))
+                    Box(Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(Ink), contentAlignment = Alignment.Center) {
+                        Icon(QMusicIcons.Add, contentDescription = null, tint = InkInverse, modifier = Modifier.size(26.dp))
                     }
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
@@ -574,7 +576,7 @@ private fun CallsTab(
             item(key = "title") {
                 HomeTitle(s.tabCalls, onExit) {
                     Box {
-                        IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Color.White) }
+                        IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Ink) }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
                             DropdownMenuItem(text = { Text(s.callLink, color = TextPrimary) }, onClick = { menu = false; share(s.callLinkText + ": " + qeyfCallLink(me.username)) })
                             DropdownMenuItem(text = { Text(s.clearCalls, color = TextPrimary) }, enabled = calls.isNotEmpty(), onClick = { menu = false; confirmClear = true })
@@ -630,7 +632,7 @@ private fun CallsTab(
                             onCall != null -> onCall(c.peer, c.video)
                             else -> controller.openConversation(c.peer)
                         }
-                    }) { Icon(if (c.video) QMusicIcons.Camera else QMusicIcons.Phone, contentDescription = if (c.video) s.videoCall else s.voiceCall, tint = Color.White, modifier = Modifier.size(22.dp)) }
+                    }) { Icon(if (c.video) QMusicIcons.Camera else QMusicIcons.Phone, contentDescription = if (c.video) s.videoCall else s.voiceCall, tint = Ink, modifier = Modifier.size(22.dp)) }
                 }
             }
         }
@@ -652,9 +654,9 @@ private fun CallsTab(
 private fun QuickAction(label: String, icon: ImageVector, selected: Boolean = false, onClick: () -> Unit) {
     Column(Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            Modifier.size(56.dp).clip(CircleShape).background(if (selected) Color.White else DarkSurfaceVariant),
+            Modifier.size(56.dp).clip(CircleShape).background(if (selected) Ink else DarkSurfaceVariant),
             contentAlignment = Alignment.Center,
-        ) { Icon(icon, contentDescription = null, tint = if (selected) Color.Black else Color.White, modifier = Modifier.size(24.dp)) }
+        ) { Icon(icon, contentDescription = null, tint = if (selected) InkInverse else Ink, modifier = Modifier.size(24.dp)) }
         Spacer(Modifier.height(6.dp))
         Text(label, color = TextPrimary, fontSize = 13.sp)
     }
@@ -674,8 +676,8 @@ private fun CallPersonRow(user: ChatUser, s: ChatStrings, onCall: ((ChatUser, Bo
             if (user.username.isNotEmpty()) Text("@" + user.username, color = TextSecondary, fontSize = 13.sp, maxLines = 1)
         }
         if (onCall != null && user.uid != CLAUDE_BOT_UID) {
-            IconButton(onClick = { onCall(user, false) }) { Icon(QMusicIcons.Phone, contentDescription = s.voiceCall, tint = Color.White, modifier = Modifier.size(22.dp)) }
-            IconButton(onClick = { onCall(user, true) }) { Icon(QMusicIcons.Camera, contentDescription = s.videoCall, tint = Color.White, modifier = Modifier.size(22.dp)) }
+            IconButton(onClick = { onCall(user, false) }) { Icon(QMusicIcons.Phone, contentDescription = s.voiceCall, tint = Ink, modifier = Modifier.size(22.dp)) }
+            IconButton(onClick = { onCall(user, true) }) { Icon(QMusicIcons.Camera, contentDescription = s.videoCall, tint = Ink, modifier = Modifier.size(22.dp)) }
         }
     }
 }
@@ -759,7 +761,7 @@ private fun DetailAction(label: String, icon: ImageVector, onClick: () -> Unit) 
         Modifier.width(96.dp).clip(RoundedCornerShape(16.dp)).background(DarkSurfaceVariant).clickable(onClick = onClick).padding(vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
         Spacer(Modifier.height(6.dp))
         Text(label, color = TextPrimary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }

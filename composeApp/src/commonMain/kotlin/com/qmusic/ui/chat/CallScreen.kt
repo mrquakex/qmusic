@@ -42,11 +42,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.qmusic.ui.PlatformBackHandler
-import com.qmusic.ui.theme.BgRoot
-import com.qmusic.ui.theme.DarkSurfaceVariant
+import com.qmusic.ui.theme.NightBgRoot as BgRoot
+import com.qmusic.ui.theme.NightSurfaceVariant as DarkSurfaceVariant
 import com.qmusic.ui.theme.QMusicIcons
-import com.qmusic.ui.theme.TextPrimary
-import com.qmusic.ui.theme.TextSecondary
+import com.qmusic.ui.theme.NightTextPrimary as TextPrimary
+import com.qmusic.ui.theme.NightTextSecondary as TextSecondary
 import kotlinx.coroutines.delay
 
 private val EndRed = Color(0xFFE5484D)

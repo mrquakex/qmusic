@@ -1,5 +1,7 @@
 package com.qmusic.ui.screens
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -178,7 +180,7 @@ fun HomeScreen(
                         if (onChatClick != null) {
                             IconButton(onClick = onChatClick) {
                                 Box {
-                                    Icon(QMusicIcons.Chat, contentDescription = null, tint = Color.White)
+                                    Icon(QMusicIcons.Chat, contentDescription = null, tint = Ink)
                                     if (chatUnread > 0) {
                                         Box(
                                             modifier = Modifier
@@ -186,12 +188,12 @@ fun HomeScreen(
                                                 .offset(x = 6.dp, y = (-6).dp)
                                                 .size(16.dp)
                                                 .clip(androidx.compose.foundation.shape.CircleShape)
-                                                .background(Color.White),
+                                                .background(Ink),
                                             contentAlignment = Alignment.Center,
                                         ) {
                                             Text(
                                                 if (chatUnread > 9) "9+" else chatUnread.toString(),
-                                                color = Color.Black,
+                                                color = InkInverse,
                                                 fontSize = 10.sp,
                                                 fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                                             )
@@ -201,7 +203,7 @@ fun HomeScreen(
                             }
                         }
                         IconButton(onClick = onSearchClick) {
-                            Icon(QMusicIcons.Search, contentDescription = LocalStrings.current.tabSearch, tint = Color.White)
+                            Icon(QMusicIcons.Search, contentDescription = LocalStrings.current.tabSearch, tint = Ink)
                         }
                     }
                 }
@@ -289,16 +291,16 @@ fun HomeScreen(
                 item {
                     val hasTint = animatedTint.alpha > 0.01f
                     val chipContainer = if (hasTint) {
-                        androidx.compose.ui.graphics.lerp(Color.White, animatedTint.copy(alpha = 1f), 0.72f)
+                        androidx.compose.ui.graphics.lerp(Ink, animatedTint.copy(alpha = 1f), 0.72f)
                             .copy(alpha = 0.28f)
                     } else {
                         DarkSurfaceVariant
                     }
                     val chipBorder = if (hasTint) {
-                        androidx.compose.ui.graphics.lerp(Color.White, animatedTint.copy(alpha = 1f), 0.5f)
+                        androidx.compose.ui.graphics.lerp(Ink, animatedTint.copy(alpha = 1f), 0.5f)
                             .copy(alpha = 0.24f)
                     } else {
-                        Color.White.copy(alpha = 0.10f)
+                        Ink.copy(alpha = 0.10f)
                     }
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = horizontalPad),
@@ -309,10 +311,10 @@ fun HomeScreen(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(if (selected) Color.White else chipContainer)
+                                    .background(if (selected) Ink else chipContainer)
                                     .border(
                                         width = 1.dp,
-                                        color = if (selected) Color.White else chipBorder,
+                                        color = if (selected) Ink else chipBorder,
                                         shape = RoundedCornerShape(8.dp),
                                     )
                                     .clickable { onChipClick(chip) }
@@ -321,7 +323,7 @@ fun HomeScreen(
                                 Text(
                                     text = chip.text,
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = if (selected) Color.Black else Color.White,
+                                    color = if (selected) InkInverse else Ink,
                                     maxLines = 1,
                                 )
                             }
@@ -544,7 +546,7 @@ private fun SpeedDial(
                         .padding(horizontal = 3.dp)
                         .size(6.dp)
                         .clip(CircleShape)
-                        .background(Color.White.copy(alpha = if (dot == listState.firstVisibleItemIndex) 0.95f else 0.3f)),
+                        .background(Ink.copy(alpha = if (dot == listState.firstVisibleItemIndex) 0.95f else 0.3f)),
                 )
             }
         }
@@ -558,7 +560,7 @@ private fun SpeedDialTile(song: SongItem, framed: Boolean, onClick: () -> Unit) 
             .fillMaxSize()
             .clip(RoundedCornerShape(12.dp))
             .background(DarkSurfaceVariant)
-            .then(if (framed) Modifier.border(3.dp, Color.White, RoundedCornerShape(12.dp)) else Modifier)
+            .then(if (framed) Modifier.border(3.dp, Ink, RoundedCornerShape(12.dp)) else Modifier)
             .clickable(onClick = onClick),
     ) {
         AsyncImage(
@@ -571,13 +573,13 @@ private fun SpeedDialTile(song: SongItem, framed: Boolean, onClick: () -> Unit) 
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))))
+                .background(Brush.verticalGradient(listOf(Color.Transparent, InkInverse.copy(alpha = 0.75f))))
                 .padding(start = 10.dp, end = 10.dp, top = 18.dp, bottom = 8.dp),
         ) {
             Text(
                 text = song.title,
                 style = MaterialTheme.typography.labelLarge,
-                color = Color.White,
+                color = Ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -598,7 +600,7 @@ private fun DiceTile(description: String, onClick: () -> Unit) {
         Icon(
             imageVector = QMusicIcons.Dice,
             contentDescription = description,
-            tint = Color.White.copy(alpha = 0.85f),
+            tint = Ink.copy(alpha = 0.85f),
             modifier = Modifier.size(44.dp),
         )
     }
@@ -673,7 +675,7 @@ fun ExplicitBadge() {
             .padding(horizontal = 4.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text("E", style = MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Color.Black)
+        Text("E", style = MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = InkInverse)
     }
 }
 
@@ -931,14 +933,14 @@ private fun CarouselArrowButton(
         modifier = Modifier
             .size(36.dp)
             .clip(CircleShape)
-            .border(1.dp, Color.White.copy(alpha = if (enabled) 0.24f else 0.08f), CircleShape)
+            .border(1.dp, Ink.copy(alpha = if (enabled) 0.24f else 0.08f), CircleShape)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = Color.White.copy(alpha = if (enabled) 0.9f else 0.28f),
+            tint = Ink.copy(alpha = if (enabled) 0.9f else 0.28f),
             modifier = Modifier.size(18.dp),
         )
     }

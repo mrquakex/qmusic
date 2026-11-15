@@ -1,5 +1,7 @@
 package com.qmusic.ui.chat
 
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -131,7 +133,7 @@ internal fun StatusTab(controller: ChatController, s: ChatStrings, me: ChatUser,
             item(key = "title") {
                 HomeTitle(s.tabStatus, onExit) {
                     Box {
-                        IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Color.White) }
+                        IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Ink) }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
                             DropdownMenuItem(text = { Text(s.statusPrivacyTitle, color = TextPrimary) }, onClick = { menu = false; controller.push(ChatRoute.StatusPrivacyPage) })
                         }
@@ -149,9 +151,9 @@ internal fun StatusTab(controller: ChatController, s: ChatStrings, me: ChatUser,
                         StatusRinged(if (mine.isNotEmpty()) RingSeen else null) { ChatAvatar(me, if (mine.isNotEmpty()) 50.dp else 56.dp) }
                         if (mine.isEmpty()) {
                             Box(
-                                Modifier.align(Alignment.BottomEnd).size(22.dp).clip(CircleShape).background(BgRoot).padding(2.dp).clip(CircleShape).background(Color.White),
+                                Modifier.align(Alignment.BottomEnd).size(22.dp).clip(CircleShape).background(BgRoot).padding(2.dp).clip(CircleShape).background(Ink),
                                 contentAlignment = Alignment.Center,
-                            ) { Icon(QMusicIcons.Add, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp)) }
+                            ) { Icon(QMusicIcons.Add, contentDescription = null, tint = InkInverse, modifier = Modifier.size(16.dp)) }
                         }
                     }
                     Spacer(Modifier.width(14.dp))
@@ -164,14 +166,14 @@ internal fun StatusTab(controller: ChatController, s: ChatStrings, me: ChatUser,
                         )
                     }
                     if (mine.isNotEmpty()) {
-                        IconButton(onClick = { addMenu = true }) { Icon(QMusicIcons.Add, contentDescription = s.addStatus, tint = Color.White) }
+                        IconButton(onClick = { addMenu = true }) { Icon(QMusicIcons.Add, contentDescription = s.addStatus, tint = Ink) }
                     }
                 }
             }
             if (posting) {
                 item(key = "posting") {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                        CircularProgressIndicator(color = Ink, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(12.dp))
                         Text(s.statusPosting, color = TextSecondary, fontSize = 14.sp)
                     }
@@ -194,7 +196,7 @@ internal fun StatusTab(controller: ChatController, s: ChatStrings, me: ChatUser,
             Box(
                 Modifier.padding(end = 16.dp).size(44.dp).clip(RoundedCornerShape(14.dp)).background(DarkSurfaceVariant).clickable { controller.push(ChatRoute.TextStatus) },
                 contentAlignment = Alignment.Center,
-            ) { Icon(QMusicIcons.Edit, contentDescription = s.statusText, tint = Color.White, modifier = Modifier.size(20.dp)) }
+            ) { Icon(QMusicIcons.Edit, contentDescription = s.statusText, tint = Ink, modifier = Modifier.size(20.dp)) }
             HomeFab(QMusicIcons.Camera, s.camera) { addMenu = true }
         }
     }
@@ -371,11 +373,11 @@ internal fun StatusMediaComposer(s: ChatStrings, image: PickedImage?, video: Pic
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(24.dp)).background(Color(0xCC1E1E1E)).padding(horizontal = 18.dp, vertical = 13.dp)) {
-                    if (caption.isEmpty()) Text(s.statusCaption, color = TextMuted, fontSize = 16.sp)
+                    if (caption.isEmpty()) Text(s.statusCaption, color = Color.White.copy(alpha = 0.5f), fontSize = 16.sp)
                     BasicTextField(
                         value = caption,
                         onValueChange = { caption = it.take(700) },
-                        textStyle = TextStyle(color = TextPrimary, fontSize = 16.sp),
+                        textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
                         cursorBrush = SolidColor(Color.White),
                         maxLines = 4,
                         modifier = Modifier.fillMaxWidth(),
@@ -565,8 +567,18 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
                     Icon(QMusicIcons.ChevronUp, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("${s.statusViews} ${viewers.size}", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    val likes by remember(item.id) { controller.statusLikes(item) }.collectAsState(initial = emptySet())
+                    if (likes.isNotEmpty()) {
+                        Spacer(Modifier.width(14.dp))
+                        Icon(QMusicIcons.HeartFilled, contentDescription = null, tint = Color(0xFFFF5A5F), modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(likes.size.toString(), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
-                if (viewersOpen) ViewersDialog(viewers, s, now) { viewersOpen = false }
+                if (viewersOpen) {
+                    val likes by remember(item.id) { controller.statusLikes(item) }.collectAsState(initial = emptySet())
+                    ViewersDialog(viewers, likes, s, now) { viewersOpen = false }
+                }
             } else if (item.owner.uid != CLAUDE_BOT_UID) {
                 Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -581,6 +593,18 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
                             maxLines = 4,
                             modifier = Modifier.fillMaxWidth().onFocusChanged { typing = it.isFocused },
                         )
+                    }
+                    if (reply.isBlank()) {
+                        val liked by remember(item.id) { controller.likedStatus(item) }.collectAsState(initial = false)
+                        Spacer(Modifier.width(6.dp))
+                        IconButton(onClick = { controller.likeStatus(item, !liked) }) {
+                            Icon(
+                                if (liked) QMusicIcons.HeartFilled else QMusicIcons.Heart,
+                                contentDescription = s.statusLike,
+                                tint = if (liked) Color(0xFFFF5A5F) else Color.White,
+                                modifier = Modifier.size(28.dp),
+                            )
+                        }
                     }
                     if (reply.isNotBlank()) {
                         Spacer(Modifier.width(10.dp))
@@ -621,7 +645,7 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
 }
 
 @Composable
-private fun ViewersDialog(viewers: List<Pair<ChatUser, Long>>, s: ChatStrings, now: Long, onDismiss: () -> Unit) {
+private fun ViewersDialog(viewers: List<Pair<ChatUser, Long>>, likes: Set<String>, s: ChatStrings, now: Long, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DarkSurfaceVariant,
@@ -639,6 +663,7 @@ private fun ViewersDialog(viewers: List<Pair<ChatUser, Long>>, s: ChatStrings, n
                                 Text(user.name, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(agoText(at, now, s), color = TextSecondary, fontSize = 12.sp)
                             }
+                            if (user.uid in likes) Icon(QMusicIcons.HeartFilled, contentDescription = s.statusLike, tint = Color(0xFFFF5A5F), modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -693,9 +718,9 @@ internal fun StatusPrivacyPage(controller: ChatController, s: ChatStrings) {
                     Spacer(Modifier.width(14.dp))
                     Text(user.name, color = TextPrimary, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Box(
-                        Modifier.size(24.dp).clip(RoundedCornerShape(6.dp)).background(if (on) (if (privacy.audience == StatusAudience.EXCEPT) Color(0xFFFF5A5F) else Color.White) else DarkSurfaceVariant),
+                        Modifier.size(24.dp).clip(RoundedCornerShape(6.dp)).background(if (on) (if (privacy.audience == StatusAudience.EXCEPT) Color(0xFFFF5A5F) else Ink) else DarkSurfaceVariant),
                         contentAlignment = Alignment.Center,
-                    ) { if (on) Icon(if (privacy.audience == StatusAudience.EXCEPT) QMusicIcons.Close else QMusicIcons.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp)) }
+                    ) { if (on) Icon(if (privacy.audience == StatusAudience.EXCEPT) QMusicIcons.Close else QMusicIcons.Check, contentDescription = null, tint = InkInverse, modifier = Modifier.size(16.dp)) }
                 }
             }
         }
@@ -705,7 +730,7 @@ internal fun StatusPrivacyPage(controller: ChatController, s: ChatStrings) {
 @Composable
 private fun RadioDot(on: Boolean) {
     Box(
-        Modifier.size(22.dp).clip(CircleShape).background(if (on) Color.White else TextMuted).padding(2.dp).clip(CircleShape).background(BgRoot).padding(4.dp).clip(CircleShape)
-            .background(if (on) Color.White else BgRoot),
+        Modifier.size(22.dp).clip(CircleShape).background(if (on) Ink else TextMuted).padding(2.dp).clip(CircleShape).background(BgRoot).padding(4.dp).clip(CircleShape)
+            .background(if (on) Ink else BgRoot),
     )
 }

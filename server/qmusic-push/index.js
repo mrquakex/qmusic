@@ -129,10 +129,12 @@ async function handleGroup(n) {
     data.body = `${senderName || "Biri"} grup araması başlattı`;
   }
   const targets = Object.keys(group.members).filter((uid) => uid !== n.from);
+  // People named with @ in the message hear it even when the group is muted.
+  const mentioned = n.mentions && typeof n.mentions === "object" ? n.mentions : {};
   await Promise.all(
     targets.map(async (uid) => {
       // A muted group neither notifies nor rings.
-      if (await isMuted(uid, n.chatId)) return;
+      if (!(mentioned[uid] === true && !call) && (await isMuted(uid, n.chatId))) return;
       await deliver(uid, data, call ? 60 * 1000 : 24 * 3600 * 1000);
     }).map((p) => p.catch((e) => log("group push failed:", e.message))),
   );

@@ -1,5 +1,6 @@
 package com.qmusic.ui.components
 
+import com.qmusic.ui.theme.Ink
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -55,7 +56,7 @@ fun QMusicNavigationRail(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        com.qmusic.ui.theme.QMusicLogo(size = 34.dp, tint = Color.White)
+        com.qmusic.ui.theme.QMusicLogo(size = 34.dp, tint = Ink)
         Spacer(Modifier.height(8.dp))
         items.forEachIndexed { index, item ->
             val selected = index == selectedIndex
@@ -72,13 +73,13 @@ fun QMusicNavigationRail(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
-                        .background(if (selected) Color.White.copy(alpha = 0.14f) else Color.Transparent)
+                        .background(if (selected) Ink.copy(alpha = 0.14f) else Color.Transparent)
                         .padding(horizontal = 16.dp, vertical = 4.dp),
                 ) {
                     Icon(
                         imageVector = item.icon,
                         contentDescription = item.label,
-                        tint = if (selected) Color.White else Color.White.copy(alpha = 0.62f),
+                        tint = if (selected) Ink else Ink.copy(alpha = 0.62f),
                         modifier = Modifier.size(26.dp),
                     )
                 }
@@ -87,7 +88,7 @@ fun QMusicNavigationRail(
                     text = item.label,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (selected) Color.White else Color.White.copy(alpha = 0.62f),
+                    color = if (selected) Ink else Ink.copy(alpha = 0.62f),
                     maxLines = 1,
                 )
             }
@@ -132,7 +133,7 @@ fun QMusicNavigationBar(
                 Icon(
                     imageVector = item.icon,
                     contentDescription = item.label,
-                    tint = if (selected) Color.White else Color.White.copy(alpha = 0.62f),
+                    tint = if (selected) Ink else Ink.copy(alpha = 0.62f),
                     modifier = Modifier.size(28.dp),
                 )
                 Spacer(modifier = Modifier.height(3.dp))
@@ -140,7 +141,7 @@ fun QMusicNavigationBar(
                     text = item.label,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (selected) Color.White else Color.White.copy(alpha = 0.62f),
+                    color = if (selected) Ink else Ink.copy(alpha = 0.62f),
                     maxLines = 1,
                 )
             }

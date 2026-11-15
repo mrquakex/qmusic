@@ -688,7 +688,7 @@ class ChatController(
         scope.launch { runCatching { backend.markRead(id) } }
     }
 
-    fun send(other: ChatUser, text: String, share: SharedItem? = null, replyTo: ChatReply? = null): Boolean {
+    fun send(other: ChatUser, text: String, share: SharedItem? = null, replyTo: ChatReply? = null, mentions: Set<String> = emptySet()): Boolean {
         val body = text.trim()
         if (body.isEmpty() && share == null) return false
         if (body.length > MAX_LENGTH) {
@@ -696,9 +696,60 @@ class ChatController(
             return false
         }
         scope.launch {
-            backend.send(other, body, share, replyTo).onFailure { e -> if (e !is CancellationException) _error.value = e.message }
+            val sent = if (mentions.isNotEmpty() && share == null && other.isGroup) {
+                backend.sendMentioning(other, body, replyTo, mentions)
+            } else {
+                backend.send(other, body, share, replyTo)
+            }
+            sent.onFailure { e -> if (e !is CancellationException) _error.value = e.message }
         }
         return true
+    }
+
+    // ------------------------------------------------------------------ GIFs and stickers
+
+    suspend fun searchGifs(stickers: Boolean, query: String, page: Int = 1): Result<List<GifItem>> = backend.searchGifs(stickers, query, page)
+
+    fun sendGif(other: ChatUser, item: GifItem, sticker: Boolean, replyTo: ChatReply? = null) {
+        scope.launch {
+            backend.sendGif(other, ChatGif(item.url, item.width, item.height, sticker), replyTo)
+                .onFailure { e -> if (e !is CancellationException) _error.value = e.message }
+        }
+    }
+
+    // ------------------------------------------------------------------ pins, view once, group settings, likes
+
+    fun pinned(other: ChatUser) = chatIdWith(other)?.let { id -> backend.pinned(id).catch { emit(emptyList()) } } ?: flowOf(emptyList())
+
+    fun pin(other: ChatUser, message: ChatMessage, preview: String, pinned: Boolean) {
+        val id = chatIdWith(other) ?: return
+        scope.launch { backend.pin(id, message, preview, pinned).onFailure { _error.value = it.message } }
+    }
+
+    fun opened(other: ChatUser) = chatIdWith(other)?.let { id -> backend.opened(id).catch { emit(emptyMap()) } } ?: flowOf(emptyMap())
+
+    fun markOpened(other: ChatUser, message: ChatMessage) {
+        val id = chatIdWith(other) ?: return
+        scope.launch { runCatching { backend.markOpened(id, message.id) } }
+    }
+
+    fun setGroupSettings(group: ChatUser, settings: GroupSettings) {
+        scope.launch { backend.setGroupSettings(group.uid, settings).onFailure { _error.value = it.message } }
+    }
+
+    fun statusLikes(item: StatusItem) = backend.statusLikes(item.id).catch { emit(emptySet()) }
+    fun likedStatus(item: StatusItem) = backend.likedStatus(item).catch { emit(false) }
+
+    val wallpaper: StateFlow<Int> = ready
+        .flatMapLatest { if (it == null) flowOf(0) else backend.wallpaper().catch { emit(0) } }
+        .stateIn(scope, SharingStarted.Eagerly, 0)
+
+    fun setWallpaper(index: Int) {
+        scope.launch { runCatching { backend.setWallpaper(index) } }
+    }
+
+    fun likeStatus(item: StatusItem, liked: Boolean) {
+        scope.launch { runCatching { backend.likeStatus(item, liked) } }
     }
 
     fun sendFile(other: ChatUser, file: PickedFile, caption: String = "", replyTo: ChatReply? = null) {
@@ -711,10 +762,10 @@ class ChatController(
         }
     }
 
-    fun sendImages(other: ChatUser, images: List<PickedImage>, caption: String, replyTo: ChatReply? = null) {
+    fun sendImages(other: ChatUser, images: List<PickedImage>, caption: String, replyTo: ChatReply? = null, viewOnce: Boolean = false) {
         if (images.isEmpty()) return
         scope.launch {
-            backend.sendImages(other, images.take(MAX_PHOTOS), caption.trim(), replyTo).onFailure { e -> if (e !is CancellationException) _error.value = e.message }
+            backend.sendImages(other, if (viewOnce) images.take(1) else images.take(MAX_PHOTOS), caption.trim(), replyTo, viewOnce).onFailure { e -> if (e !is CancellationException) _error.value = e.message }
         }
     }
 
