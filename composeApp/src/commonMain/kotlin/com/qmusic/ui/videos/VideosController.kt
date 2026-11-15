@@ -231,9 +231,32 @@ class VideosController(
      * (YouTube's own home is then empty) it is made of a few searches picked at random, so it is different each time.
      */
     val home = FeedLoader(scope, service) {
+        coroutineScope {
+            // A row of Shorts is asked for alongside, for a home page that comes without one.
+            val shorts = async { discoverFeed(listOf(SHORTS_QUERY) + SHORTS_TOPICS, 2, VideoSearchFilter.SHORTS).getOrNull()?.shortItems().orEmpty() }
+            homeFeed().map { feed -> feed.copy(entries = withShortsRow(feed.entries, shorts.await())) }
+        }
+    }
+
+    /**
+     * YouTube's home has a row of Shorts a few videos down: the page keeps the one it came with there, and gets one
+     * (the clips not shown lately first) when it came without.
+     */
+    private fun withShortsRow(entries: List<VideoEntry>, extra: List<VideoItem>): List<VideoEntry> {
+        val rows = entries.filterIsInstance<VideoEntry.Shorts>()
+        val rest = entries.filter { it !is VideoEntry.Shorts }
+        val row = rows.firstOrNull() ?: extra.takeIf { it.size >= 3 }?.let { list ->
+            val (fresh, old) = list.distinctBy { it.id }.partition { it.id !in seen }
+            VideoEntry.Shorts((fresh + old).take(SHORTS_ROW))
+        } ?: return entries
+        val at = SHORTS_ROW_AT.coerceAtMost(rest.size)
+        return rest.take(at) + row + rest.drop(at) + rows.drop(1)
+    }
+
+    private suspend fun homeFeed(): Result<VideoFeed> {
         val r = service.home()
         val feed = r.getOrNull()
-        when {
+        return when {
             feed != null && !feed.isEmpty -> {
                 var entries = freshFirst(feed.entries)
                 // The account's home barely changed: a few searches fill the top with something new.
@@ -269,7 +292,7 @@ class VideosController(
 
     /** What was not shown lately first, in its own order; then the rest. */
     private fun freshFirst(entries: List<VideoEntry>): List<VideoEntry> {
-        val (fresh, old) = entries.partition { e -> e.ids().let { ids -> ids.isEmpty() || ids.any { it !in seen } } }
+        val (fresh, old) = entries.partition { e -> e is VideoEntry.Shorts || e.ids().let { ids -> ids.isEmpty() || ids.any { it !in seen } } }
         return fresh + old
     }
 
@@ -1338,6 +1361,8 @@ class VideosController(
         private const val SHORTS_QUERY = "#shorts"
         private const val SHORTS_MORE_ATTEMPTS = 3
         private const val SHORTS_MORE_MIN = 6
+        private const val SHORTS_ROW = 12
+        private const val SHORTS_ROW_AT = 3
         private val CACHE_LIFETIME = kotlin.time.Duration.parse("30m")
         private const val CACHE_SIZE = 12
         private const val PREFETCH_DELAY_MS = 2_500L
