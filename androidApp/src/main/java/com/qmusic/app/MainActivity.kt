@@ -83,6 +83,7 @@ class MainActivity : AppCompatActivity() {
         ChatPush.openIfAsked(intent)
         GroupCallNotifications.openIfAsked(this, intent)
         acceptCallIfAsked(intent)
+        CallNotifications.callBackIfAsked(this, intent)
         // While a call rings or goes on, the app shows over the lock screen and turns the screen on.
         likeWatcher.launch {
             while (com.qmusic.ui.chat.CallHooks.state == null) kotlinx.coroutines.delay(500)
@@ -155,7 +156,9 @@ class MainActivity : AppCompatActivity() {
         if (com.qmusic.ui.videos.VideoPip.armed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             runCatching {
                 enterPictureInPictureMode(
-                    android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build(),
+                    android.app.PictureInPictureParams.Builder()
+                        .setAspectRatio(if (com.qmusic.ui.videos.VideoPip.portrait) android.util.Rational(9, 16) else android.util.Rational(16, 9))
+                        .build(),
                 )
             }
         }
@@ -213,6 +216,7 @@ class MainActivity : AppCompatActivity() {
         ChatPush.openIfAsked(intent)
         GroupCallNotifications.openIfAsked(this, intent)
         acceptCallIfAsked(intent)
+        CallNotifications.callBackIfAsked(this, intent)
         openLinkIfAny(intent)
         openShortcutIfAny(intent)
     }

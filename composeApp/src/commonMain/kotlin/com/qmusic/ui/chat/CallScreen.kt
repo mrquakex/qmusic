@@ -29,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -65,6 +66,20 @@ fun CallScreen(
     // Back does not end a call by accident.
     PlatformBackHandler(enabled = true) {}
     val showVideo = call.video && call.phase != CallPhase.ENDED
+    val askCamera = rememberCallPermissions()
+    var routesOpen by remember { mutableStateOf(false) }
+    // Leaving the app during a video call: it goes on in a floating window, showing only the picture.
+    val inWindow = CallPictureInPicture(armed = showVideo && call.phase == CallPhase.ACTIVE)
+    if (inWindow) {
+        Box(modifier.fillMaxSize().background(Color.Black)) {
+            if (call.remoteVideo) {
+                CallVideo(service, remote = true, modifier = Modifier.fillMaxSize())
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { ChatAvatar(call.peer, 72.dp) }
+            }
+        }
+        return
+    }
 
     Box(modifier.fillMaxSize().background(BgRoot)) {
         if (showVideo && call.remoteVideo && (call.phase == CallPhase.ACTIVE || call.phase == CallPhase.CONNECTING)) {
@@ -113,8 +128,50 @@ fun CallScreen(
                         if (call.video) {
                             Toggle(QMusicIcons.CameraOff, s.callCameraOff, !call.cameraOn) { service.toggleCamera() }
                             Toggle(QMusicIcons.SwitchCamera, s.callFlip, false) { service.switchCamera() }
+                        } else if (call.phase == CallPhase.ACTIVE) {
+                            // A voice call becomes a video call: the camera asks for its permission first.
+                            Toggle(QMusicIcons.Camera, s.callCameraOn, false) {
+                                askCamera(true) { granted -> if (granted) service.toggleCamera() }
+                            }
                         }
-                        Toggle(QMusicIcons.Volume, s.callSpeaker, call.speaker) { service.toggleSpeaker() }
+                        // With a headset or Bluetooth there are more than two places for the sound: a list to pick from.
+                        Box {
+                            val current = call.routes.firstOrNull { it.id == call.route }
+                            val many = call.routes.size > 2
+                            Toggle(
+                                if (current?.kind == AudioRouteKind.BLUETOOTH || current?.kind == AudioRouteKind.WIRED) QMusicIcons.Headphones else QMusicIcons.Volume,
+                                if (many && current != null) routeName(current, s) else s.callSpeaker,
+                                call.speaker || (many && current?.kind != AudioRouteKind.EARPIECE),
+                            ) { if (many) routesOpen = true else service.toggleSpeaker() }
+                            androidx.compose.material3.DropdownMenu(
+                                expanded = routesOpen,
+                                onDismissRequest = { routesOpen = false },
+                                containerColor = DarkSurfaceVariant,
+                            ) {
+                                Text(s.soundOutput, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                                call.routes.forEach { r ->
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        leadingIcon = {
+                                            Icon(
+                                                when (r.kind) {
+                                                    AudioRouteKind.SPEAKER -> QMusicIcons.Volume
+                                                    AudioRouteKind.EARPIECE -> QMusicIcons.Phone
+                                                    else -> QMusicIcons.Headphones
+                                                },
+                                                null,
+                                                tint = Color.White,
+                                            )
+                                        },
+                                        text = { Text(routeName(r, s), color = TextPrimary, fontWeight = if (r.id == call.route) FontWeight.Bold else FontWeight.Normal) },
+                                        trailingIcon = { if (r.id == call.route) Icon(QMusicIcons.Check, null, tint = Color.White) },
+                                        onClick = {
+                                            routesOpen = false
+                                            service.setAudioRoute(r.id)
+                                        },
+                                    )
+                                }
+                            }
+                        }
                     }
                     Spacer(Modifier.height(28.dp))
                     RoundButton(QMusicIcons.PhoneEnd, s.callEnd, EndRed, Color.White, big = true) { service.hangUp() }
@@ -162,6 +219,14 @@ private fun statusText(call: CallState, s: ChatStrings): String = when (call.pha
         CallEnd.UNREACHABLE -> s.callUnreachable
         else -> s.callEnded
     }
+}
+
+/** "Telefon", "Hoparlör", "Kulaklık", or the Bluetooth device's own name. */
+internal fun routeName(r: AudioRoute, s: ChatStrings): String = when (r.kind) {
+    AudioRouteKind.EARPIECE -> s.routeEarpiece
+    AudioRouteKind.SPEAKER -> s.routeSpeaker
+    AudioRouteKind.WIRED -> s.routeWired
+    AudioRouteKind.BLUETOOTH -> r.name.ifBlank { s.routeBluetooth }
 }
 
 fun duration(seconds: Long): String {

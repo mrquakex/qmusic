@@ -514,6 +514,16 @@ internal fun GroupCallBanner(people: List<ChatUser>, s: ChatStrings, onJoin: () 
 fun GroupCallScreen(service: GroupCallService, s: ChatStrings, me: ChatUser?, modifier: Modifier = Modifier) {
     val state by service.state.collectAsState()
     val call = state ?: return
+    PlatformBackHandler(enabled = true) {}
+    // Leaving the app: the call goes on in a floating window with the first picture there is.
+    val inWindow = CallPictureInPicture(armed = call.video && call.startedAt != null)
+    if (inWindow) {
+        Box(modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            val shown = call.members.firstOrNull { it.connected && it.hasVideo && it.cameraOn }
+            if (shown != null) GroupCallVideo(service, shown.user.uid, Modifier.fillMaxSize()) else ChatAvatar(call.group, 72.dp)
+        }
+        return
+    }
     var now by remember { mutableStateOf(Clock.System.now().toEpochMilliseconds()) }
     LaunchedEffect(call.startedAt) {
         while (true) {
@@ -643,6 +653,88 @@ private fun SoundSettings(s: ChatStrings) {
                 }
             },
             confirmButton = { TextButton(onClick = { picking = null }) { Text("OK", color = Color.White) } },
+        )
+    }
+}
+
+// ------------------------------------------------------------------ the list of calls
+
+private val MissedRed = Color(0xFFFF5A5F)
+
+/**
+ * In and out, missed (red), declined, group calls; how long each lasted. A tap calls back the same way (voice or
+ * video); a group's opens the group.
+ */
+@Composable
+internal fun CallsPage(controller: ChatController, s: ChatStrings, onCall: ((ChatUser, Boolean) -> Unit)?) {
+    val calls by controller.callLog.collectAsState()
+    var confirmClear by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize()) {
+        TopBar(s.callsTitle, { controller.pop() }, actions = {
+            if (calls.isNotEmpty()) TextButton(onClick = { confirmClear = true }) { Text(s.clearCalls, color = TextSecondary, fontSize = 13.sp) }
+        })
+        if (calls.isEmpty()) {
+            Centered { Text(s.callsEmpty, color = TextSecondary, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(32.dp)) }
+        } else {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                items(calls, key = { it.id }) { c ->
+                    val missed = c.outcome == CallOutcome.MISSED
+                    val group = c.direction == CallDirection.GROUP
+                    Row(
+                        Modifier.fillMaxWidth().clickable {
+                            if (group || onCall == null) controller.openConversation(c.peer) else onCall(c.peer, c.video)
+                        }.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.clip(CircleShape).clickable { controller.openConversation(c.peer) }) { ChatAvatar(c.peer, 48.dp) }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(c.peer.name, color = if (missed) MissedRed else TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                // ↙ came in, ↗ went out.
+                                Text(
+                                    when (c.direction) {
+                                        CallDirection.IN -> "↙ "
+                                        CallDirection.OUT -> "↗ "
+                                        CallDirection.GROUP -> ""
+                                    },
+                                    color = if (missed) MissedRed else TickRead,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    listOf(
+                                        when {
+                                            group -> s.callGroupShort
+                                            missed -> s.callMissedShort
+                                            c.outcome == CallOutcome.DECLINED -> s.callDeclinedShort
+                                            c.outcome == CallOutcome.NOT_ANSWERED -> s.callNotAnswered
+                                            c.direction == CallDirection.IN -> s.callIn
+                                            else -> s.callOut
+                                        },
+                                        listTime(c.at, s) + " " + clock(c.at),
+                                        if (c.seconds > 0) duration(c.seconds) else null,
+                                    ).filterNotNull().joinToString(" · "),
+                                    color = TextSecondary,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                        Icon(if (c.video) QMusicIcons.Camera else QMusicIcons.Phone, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                }
+            }
+        }
+    }
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            containerColor = DarkSurfaceVariant,
+            title = { Text(s.clearCalls, color = TextPrimary) },
+            text = { Text(s.clearCallsConfirm, color = TextSecondary) },
+            confirmButton = { TextButton(onClick = { confirmClear = false; controller.clearCallLog() }) { Text(s.delete, color = MissedRed) } },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(s.cancel, color = TextSecondary) } },
         )
     }
 }

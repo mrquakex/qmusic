@@ -60,7 +60,7 @@ object GroupCallNotifications {
         val tr = tr(context)
         // The same loud channel as one-to-one calls (ringtone, vibration, over the lock screen).
         CallNotifications.ensureChannels(context)
-        val caller = Person.Builder().setName(group.name).setKey(groupId).setImportant(true).build()
+        val caller = Person.Builder().setName(group.name).setKey(groupId).setIcon(NotificationAvatars.icon(groupId, group.name, group.photo)).setImportant(true).build()
         val kind = if (video) (if (tr) "görüntülü" else "video") else (if (tr) "sesli" else "voice")
         val text = if (tr) "$starter grup araması başlattı ($kind)" else "$starter started a $kind group call"
         val decline = PendingIntent.getBroadcast(
@@ -69,6 +69,7 @@ object GroupCallNotifications {
         )
         val notification = NotificationCompat.Builder(context, CallNotifications.ringChannelId(context))
             .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
+            .setLargeIcon(NotificationAvatars.bitmap(groupId, group.name, group.photo))
             .setContentTitle(group.name)
             .setContentText(text)
             .setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, decline, open(context, group, video, join = true, code = 22)).setIsVideo(video))

@@ -22,6 +22,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 object VideoPip {
     @Volatile
     var armed: Boolean = false
+
+    /** An upright picture (a video call): the floating window is tall rather than wide. */
+    @Volatile
+    var portrait: Boolean = false
     val active = MutableStateFlow(false)
 }
 

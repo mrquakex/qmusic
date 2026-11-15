@@ -301,6 +301,24 @@ fun QMusicApp(
                     if (granted) service.join(request.group, request.video) else controller.reportError(chatStrings.callPermission)
                 }
             }
+            // "Call back" on a missed call: the conversation opens and the call starts (microphone, camera asked first).
+            val callBackAsked by com.qmusic.ui.chat.CallLaunch.callBack.collectAsState()
+            LaunchedEffect(callBackAsked, chatController) {
+                val (peer, video) = callBackAsked ?: return@LaunchedEffect
+                val controller = chatController ?: return@LaunchedEffect
+                com.qmusic.ui.chat.CallLaunch.callBack.value = null
+                videosOpen = false
+                chatOpen = true
+                controller.openConversation(peer)
+                val service = controller.calls ?: return@LaunchedEffect
+                kotlinx.coroutines.withTimeoutOrNull(15_000) {
+                    controller.account.first { it is com.qmusic.ui.chat.ChatAccount.Ready }
+                } ?: return@LaunchedEffect
+                askGroupCall(video) { granted ->
+                    val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
+                    if (granted) service.call(peer, video) else controller.reportError(chatStrings.callPermission)
+                }
+            }
             // A call (ringing, going on or just over) takes the whole screen, over any section.
             val callService = chatController?.calls
             val call by (callService?.state ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()

@@ -30,6 +30,7 @@ sealed interface ChatRoute {
     data class AddMembers(val group: ChatUser) : ChatRoute
     data object Archived : ChatRoute
     data object Starred : ChatRoute
+    data object Calls : ChatRoute
     data object Settings : ChatRoute
 }
 
@@ -99,6 +100,17 @@ class ChatController(
     fun openArchived() = _routes.update { list -> list.filter { it !is ChatRoute.Archived } + ChatRoute.Archived }
 
     fun openStarred() = _routes.update { list -> list.filter { it !is ChatRoute.Starred } + ChatRoute.Starred }
+
+    fun openCalls() = _routes.update { list -> list.filter { it !is ChatRoute.Calls } + ChatRoute.Calls }
+
+    /** The person's calls, newest first. */
+    val callLog: StateFlow<List<CallLogEntry>> = ready
+        .flatMapLatest { if (it == null) flowOf(emptyList()) else backend.callLog().catch { emit(emptyList()) } }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    fun clearCallLog() {
+        scope.launch { runCatching { backend.clearCallLog() } }
+    }
 
     fun openSettings() = _routes.update { list -> list.filter { it !is ChatRoute.Settings } + ChatRoute.Settings }
 
@@ -524,7 +536,17 @@ class ChatController(
 
     fun react(other: ChatUser, message: ChatMessage, emoji: String?) {
         val id = chatIdWith(other) ?: return
-        scope.launch { runCatching { backend.react(id, message.id, emoji) } }
+        // Its writer hears about it, with what the message said.
+        val preview = message.text.ifBlank {
+            when {
+                message.images.isNotEmpty() -> "📷"
+                message.attachment != null -> message.attachment.name.ifBlank { "📎" }
+                message.share != null -> message.share.title
+                message.poll != null -> message.poll.question
+                else -> ""
+            }
+        }
+        scope.launch { runCatching { backend.react(id, message.id, emoji, message.from, preview) } }
     }
 
     fun delete(other: ChatUser, message: ChatMessage) {

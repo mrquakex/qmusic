@@ -72,12 +72,33 @@ object CallNotifications {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-    fun showIncoming(context: Context, peer: ChatUser, video: Boolean) {
+    private const val PREFS = "qmusic_calls"
+    const val EXTRA_CALLBACK_UID = "callback_uid"
+    const val EXTRA_CALLBACK_NAME = "callback_name"
+    const val EXTRA_CALLBACK_USERNAME = "callback_username"
+    const val EXTRA_CALLBACK_PHOTO = "callback_photo"
+    const val EXTRA_CALLBACK_VIDEO = "callback_video"
+
+    /**
+     * Rings: full screen over the lock screen, Qeyf's ringtone, Answer and Decline, the caller's picture. What rings is
+     * remembered, so that if the caller gives up before the app has taken the call over it can still say "missed".
+     */
+    fun showIncoming(context: Context, peer: ChatUser, video: Boolean, callId: String = "") {
         channels(context)
         val tr = tr(context)
-        val caller = Person.Builder().setName(peer.name).setKey(peer.uid).setImportant(true).build()
+        val icon = NotificationAvatars.icon(peer.uid, peer.name, peer.photo)
+        val caller = Person.Builder().setName(peer.name).setKey(peer.uid).setIcon(icon).setImportant(true).build()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("ring_id", callId)
+            .putString("ring_uid", peer.uid)
+            .putString("ring_name", peer.name)
+            .putString("ring_username", peer.username)
+            .putString("ring_photo", peer.photo.orEmpty())
+            .putBoolean("ring_video", video)
+            .apply()
         val notification = NotificationCompat.Builder(context, ringChannelId(context))
             .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
+            .setLargeIcon(NotificationAvatars.bitmap(peer.uid, peer.name, peer.photo))
             .setContentTitle(peer.name)
             .setContentText(if (video) (if (tr) "Görüntülü arama" else "Video call") else (if (tr) "Sesli arama" else "Voice call"))
             .setStyle(
@@ -99,32 +120,82 @@ object CallNotifications {
         runCatching { context.getSystemService(NotificationManager::class.java).notify(RING_ID, notification) }
     }
 
-    /** "Missed call from X": tapping it opens the conversation, with the call button there. */
-    fun showMissed(context: Context, peer: ChatUser, video: Boolean) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(MISSED_CHANNEL, if (tr(context)) "Cevapsız aramalar" else "Missed calls", NotificationManager.IMPORTANCE_DEFAULT),
-            )
-        }
+    /** The caller gave up (the push said so): if this phone was still ringing for that call, it is a missed call. */
+    fun missedFromPush(context: Context, callId: String) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val ringing = prefs.getString("ring_id", null)
+        val uid = prefs.getString("ring_uid", null)
+        cancelIncoming(context)
+        if (ringing == null || uid == null || (callId.isNotEmpty() && ringing.isNotEmpty() && ringing != callId)) return
+        val peer = ChatUser(uid, prefs.getString("ring_name", null).orEmpty(), prefs.getString("ring_username", null).orEmpty(), prefs.getString("ring_photo", null)?.ifBlank { null })
+        val video = prefs.getBoolean("ring_video", false)
+        if (!com.qmusic.ui.chat.CallHooks.appVisible) showMissed(context, peer, video)
+        // In the list of calls too (the app was not running to write it).
+        com.qmusic.ui.chat.ChatCallActions.logMissed(context, peer, video, ringing.ifBlank { "push" + System.currentTimeMillis() })
+    }
+
+    /** Calls back [peer] from a notification: the app opens and dials. */
+    private fun callBack(context: Context, peer: ChatUser, video: Boolean, code: Int): PendingIntent = PendingIntent.getActivity(
+        context,
+        code,
+        Intent(context, MainActivity::class.java)
+            .putExtra(EXTRA_CALLBACK_UID, peer.uid)
+            .putExtra(EXTRA_CALLBACK_NAME, peer.name)
+            .putExtra(EXTRA_CALLBACK_USERNAME, peer.username)
+            .putExtra(EXTRA_CALLBACK_PHOTO, peer.photo.orEmpty())
+            .putExtra(EXTRA_CALLBACK_VIDEO, video)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
+    /**
+     * "Missed call from X" (or, with [busy], "X called while you were on another call"): their picture, and Call back
+     * and Message.
+     */
+    fun showMissed(context: Context, peer: ChatUser, video: Boolean, busy: Boolean = false) {
+        ensureMissedChannel(context)
         val tr = tr(context)
+        val kind = if (video) (if (tr) "Görüntülü arama" else "Video call") else (if (tr) "Sesli arama" else "Voice call")
+        val id = ("missed" + peer.uid).hashCode()
         runCatching {
             context.getSystemService(NotificationManager::class.java).notify(
-                ("missed" + peer.uid).hashCode(),
+                id,
                 NotificationCompat.Builder(context, MISSED_CHANNEL)
                     .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
-                    .setContentTitle(if (tr) "Cevapsız arama" else "Missed call")
+                    .setLargeIcon(NotificationAvatars.bitmap(peer.uid, peer.name, peer.photo))
+                    .setContentTitle(if (busy) (if (tr) "${peer.name} aradı" else "${peer.name} called") else (if (tr) "Cevapsız arama" else "Missed call"))
                     .setContentText(
-                        peer.name + " · " + if (video) (if (tr) "Görüntülü arama" else "Video call") else (if (tr) "Sesli arama" else "Voice call"),
+                        if (busy) (if (tr) "Sen başka bir aramadayken · $kind" else "While you were on another call · $kind")
+                        else "${peer.name} · $kind",
                     )
                     .setCategory(NotificationCompat.CATEGORY_MISSED_CALL)
                     .setAutoCancel(true)
                     .setContentIntent(ChatPush.openChat(context, peer))
+                    .addAction(android.R.drawable.ic_menu_call, if (tr) "Geri ara" else "Call back", callBack(context, peer, video, id + 1))
+                    .addAction(android.R.drawable.ic_menu_send, if (tr) "Mesaj" else "Message", ChatPush.openChat(context, peer))
                     .build(),
             )
         }
     }
 
+    /** Takes the "Call back" of a missed call: the app dials (the call screen asks for the microphone first). */
+    fun callBackIfAsked(context: Context, intent: Intent?) {
+        val uid = intent?.getStringExtra(EXTRA_CALLBACK_UID) ?: return
+        val peer = ChatUser(
+            uid,
+            intent.getStringExtra(EXTRA_CALLBACK_NAME).orEmpty(),
+            intent.getStringExtra(EXTRA_CALLBACK_USERNAME).orEmpty(),
+            intent.getStringExtra(EXTRA_CALLBACK_PHOTO)?.ifBlank { null },
+        )
+        val video = intent.getBooleanExtra(EXTRA_CALLBACK_VIDEO, false)
+        intent.removeExtra(EXTRA_CALLBACK_UID)
+        context.getSystemService(NotificationManager::class.java).cancel(("missed" + uid).hashCode())
+        com.qmusic.ui.chat.ChatCallActions.wake(context)
+        com.qmusic.ui.chat.CallLaunch.callBack.value = peer to video
+    }
+
     fun cancelIncoming(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
         context.getSystemService(NotificationManager::class.java).cancel(RING_ID)
     }
 

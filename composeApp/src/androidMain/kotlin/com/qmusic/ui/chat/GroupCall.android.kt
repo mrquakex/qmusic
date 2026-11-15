@@ -62,6 +62,8 @@ internal class FirebaseGroupCallService(
     private val root: DatabaseReference,
     private val me: () -> ChatUser?,
     private val calls: FirebaseCallService,
+    /** Writes the call in the person's list of calls (how long it lasted; 0 when nobody came). */
+    private val logEntry: (id: String, group: ChatUser, video: Boolean, seconds: Long) -> Unit = { _, _, _, _ -> },
 ) : GroupCallService {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow<GroupCallState?>(null)
@@ -79,6 +81,7 @@ internal class FirebaseGroupCallService(
     }
 
     private val peers = HashMap<String, Peer>()
+    private var joinedAt = 0L
     private var groupId: String? = null
     private var audio: AudioTrack? = null
     private var videoTrack: VideoTrack? = null
@@ -119,6 +122,7 @@ internal class FirebaseGroupCallService(
         // A one-to-one call going on comes first.
         if (calls.state.value != null) return
         groupId = group.uid
+        joinedAt = System.currentTimeMillis()
         _state.value = GroupCallState(group = group, video = video, members = emptyList(), cameraOn = video)
         scope.launch {
             ice = calls.iceServers()
@@ -404,6 +408,10 @@ internal class FirebaseGroupCallService(
         localTrack.value = null
         remoteTracks.value = emptyMap()
         if (_state.value?.startedAt != null) QeyfSounds.playSmall(app, SmallSound.ENDED, call = true)
+        _state.value?.let { st ->
+            val seconds = st.startedAt?.let { (System.currentTimeMillis() - it) / 1000 } ?: 0L
+            logEntry("g" + id + "_" + (joinedAt / 1000), st.group, st.video, seconds)
+        }
         stopAudio()
         CallHooks.onActive?.invoke(false, null, false)
         CallHooks.onGroupJoined?.invoke(null)

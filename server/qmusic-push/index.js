@@ -12,6 +12,7 @@ const fs = require("fs");
 
 const DATABASE_URL = "https://qmusic-2552b-default-rtdb.europe-west1.firebasedatabase.app";
 const TURN_HOST = "159.195.147.140";
+const TURN_TLS_HOST = "qeyf.159.195.147.140.sslip.io";
 const TURN_EVERY_MS = 12 * 3600 * 1000;
 const TURN_VALID_S = 24 * 3600;
 const MESSAGE_MAX_AGE_MS = 6 * 3600 * 1000;
@@ -37,7 +38,14 @@ function turnCredentials() {
   const username = `${expires}:qmusic`;
   const credential = crypto.createHmac("sha1", turnSecret).update(username).digest("base64");
   return {
-    urls: [`turn:${TURN_HOST}:3478?transport=udp`, `turn:${TURN_HOST}:3478?transport=tcp`, `stun:${TURN_HOST}:3478`],
+    // UDP 3478; UDP 443 (redirected to 3478 by the firewall) and TLS on 5349 for networks that block the rest.
+    urls: [
+      `turn:${TURN_HOST}:3478?transport=udp`,
+      `turn:${TURN_HOST}:443?transport=udp`,
+      `turn:${TURN_HOST}:3478?transport=tcp`,
+      `turns:${TURN_TLS_HOST}:5349?transport=tcp`,
+      `stun:${TURN_HOST}:3478`,
+    ],
     username,
     credential,
     expires: expires * 1000,
@@ -105,6 +113,11 @@ async function handleGroup(n) {
     photo: String(group.photo || ""),
     body: (senderName ? senderName + ": " : "") + String(n.body || "").replace(/^Claude: /, "").slice(0, 280),
     group: "1",
+    // Who wrote it: the notification shows each message under its writer's name and picture.
+    author: String(n.from),
+    authorName: senderName,
+    authorPhoto: n.from === "claudebot" ? "" : String((group.members[n.from] || {}).photo || ""),
+    text: String(n.body || "").replace(/^Claude: /, "").slice(0, 280),
   };
   const call = n.type === "groupcall";
   if (call) {
@@ -146,8 +159,41 @@ async function deliver(uid, data, ttl) {
   return result.successCount;
 }
 
+/** Someone put a reaction on a message: its writer hears about it ("Ali reacted ❤️ to: …"). */
+async function handleReaction(n) {
+  if (n.from === n.to) return;
+  if (Date.now() - (Number(n.at) || 0) > MESSAGE_MAX_AGE_MS) return;
+  const group = GROUP.test(n.chatId) ? (await db.ref(`groups/${n.chatId}`).get()).val() : null;
+  if (group) {
+    if (!group.members || !group.members[n.from] || !group.members[n.to]) return;
+  } else if (!isMember(n.chatId, n.from) || !isMember(n.chatId, n.to)) {
+    return;
+  }
+  if ((await db.ref(`blocked/${n.to}/${n.from}`).get()).val() === true) return;
+  if (await isMuted(n.to, n.chatId)) return;
+  const who = (await db.ref(`users/${n.from}`).get()).val() || {};
+  const emoji = String(n.emoji || "").slice(0, 8);
+  const quote = String(n.body || "").slice(0, 120);
+  const data = {
+    type: "reaction",
+    chatId: n.chatId,
+    sender: group ? n.chatId : n.from,
+    name: group ? String(group.name || "Grup") : String(who.name || ""),
+    username: group ? "" : String(who.username || ""),
+    photo: group ? String(group.photo || "") : String(who.photo || ""),
+    body: `${group ? String(who.name || "") + " " : ""}${emoji} tepki verdi: "${quote}"`.trim(),
+    emoji,
+    author: String(n.from),
+    authorName: String(who.name || ""),
+    authorPhoto: String(who.photo || ""),
+  };
+  if (group) data.group = "1";
+  await deliver(n.to, data, 6 * 3600 * 1000);
+}
+
 async function handle(n) {
   if (!n || typeof n.from !== "string" || typeof n.to !== "string" || typeof n.chatId !== "string") return;
+  if (n.type === "reaction") return handleReaction(n);
   if (GROUP.test(n.chatId)) return handleGroup(n);
   if (n.from === n.to || !isMember(n.chatId, n.to)) return;
   // The owner's Claude speaks in the owner's conversations without being a member of them.

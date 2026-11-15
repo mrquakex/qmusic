@@ -17,6 +17,22 @@ data class ChatUser(
 /** What the person shares: their last seen (and being online), and whether they tell others they read. */
 data class Privacy(val hideLastSeen: Boolean = false, val hideReadReceipts: Boolean = false)
 
+enum class CallDirection { IN, OUT, GROUP }
+
+/** How a call went for the person: talked, missed (not answered here), declined, or not answered by them. */
+enum class CallOutcome { ANSWERED, MISSED, DECLINED, NOT_ANSWERED }
+
+/** One line of the person's call list. */
+data class CallLogEntry(
+    val id: String,
+    val peer: ChatUser,
+    val video: Boolean,
+    val direction: CallDirection,
+    val outcome: CallOutcome,
+    val at: Long,
+    val seconds: Long,
+)
+
 /** A poll: a question, its choices (2-12), and whether more than one can be picked. */
 data class ChatPoll(val question: String, val options: List<String>, val multiple: Boolean)
 
@@ -364,8 +380,8 @@ interface ChatBackend {
     /** The reactions of a conversation: message id → (person → emoji). */
     fun reactions(chatId: String): Flow<Map<String, Map<String, String>>> = kotlinx.coroutines.flow.flowOf(emptyMap())
 
-    /** Puts [emoji] on a message (null takes ours away). */
-    suspend fun react(chatId: String, messageId: String, emoji: String?) {}
+    /** Puts [emoji] on a message (null takes ours away); [author] and [preview] tell its writer about it. */
+    suspend fun react(chatId: String, messageId: String, emoji: String?, author: String? = null, preview: String = "") {}
 
     /** Voice and video calls, where this platform has them. */
     val calls: CallService? get() = null
@@ -472,6 +488,10 @@ interface ChatBackend {
 
     suspend fun sendLocation(other: ChatUser, location: ChatLocation): Result<Unit> = Result.failure(UnsupportedOperationException())
     suspend fun sendContact(other: ChatUser, contact: ChatContact): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    /** The person's calls, newest first. */
+    fun callLog(): Flow<List<CallLogEntry>> = kotlinx.coroutines.flow.flowOf(emptyList())
+    suspend fun clearCallLog() {}
 }
 
 /** A conversation's id: both people's ids in order, so each pair has exactly one. */

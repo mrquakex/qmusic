@@ -42,6 +42,12 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
     /** The system could not take the call: the app routes its own sound. */
     var onUnavailable: (() -> Unit)? = null
 
+    /** Where the call's sound can go now, and where it goes (the system's list). */
+    var onRoutes: ((routes: List<AudioRoute>, current: String?) -> Unit)? = null
+
+    /** A place the person picked by hand: kept while it is there (a headset coming does not undo it). */
+    private var picked: String? = null
+
     /** Whether the system has the call now (then the sound's route is its job). */
     val active: Boolean get() = control != null
 
@@ -81,9 +87,15 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
                         availableEndpoints.collect { list ->
                             endpoints = list
                             route()
+                            publish()
                         }
                     }
-                    launch { currentCallEndpoint.collect { current = it } }
+                    launch {
+                        currentCallEndpoint.collect {
+                            current = it
+                            publish()
+                        }
+                    }
                     launch { isMuted.collect { onMuteChanged?.invoke(it) } }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -109,10 +121,46 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
         return true
     }
 
+    private fun idOf(e: CallEndpointCompat) = e.identifier.toString()
+
+    private fun publish() {
+        val routes = endpoints.map { e ->
+            AudioRoute(
+                id = idOf(e),
+                kind = when (e.type) {
+                    CallEndpointCompat.TYPE_SPEAKER -> AudioRouteKind.SPEAKER
+                    CallEndpointCompat.TYPE_BLUETOOTH -> AudioRouteKind.BLUETOOTH
+                    CallEndpointCompat.TYPE_WIRED_HEADSET -> AudioRouteKind.WIRED
+                    else -> AudioRouteKind.EARPIECE
+                },
+                name = e.name.toString(),
+            )
+        }
+        onRoutes?.invoke(routes, current?.let(::idOf))
+    }
+
+    /** The person picked where the sound goes. False when the system does not have the call. */
+    fun select(id: String): Boolean {
+        val c = control ?: return false
+        val target = endpoints.firstOrNull { idOf(it) == id } ?: return false
+        picked = id
+        wantSpeaker = target.type == CallEndpointCompat.TYPE_SPEAKER
+        scope.launch {
+            val result = runCatching { c.requestEndpointChange(target) }.getOrNull()
+            if (result is CallControlResult.Success) {
+                current = target
+                publish()
+            }
+        }
+        return true
+    }
+
     /** Sends the sound where it should go: speaker if asked, else a headset or Bluetooth if one is there, else the earpiece. */
     private fun route() {
         val c = control ?: return
         val list = endpoints.ifEmpty { return }
+        // What the person picked stays as long as it is there.
+        picked?.let { id -> if (list.any { idOf(it) == id }) return else picked = null }
         val target = if (wantSpeaker) {
             list.firstOrNull { it.type == CallEndpointCompat.TYPE_SPEAKER }
         } else {
@@ -135,6 +183,7 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
         job = null
         endpoints = emptyList()
         current = null
+        picked = null
         if (c == null && j == null) return
         scope.launch {
             if (c != null) runCatching { c.disconnect(DisconnectCause(cause)) }

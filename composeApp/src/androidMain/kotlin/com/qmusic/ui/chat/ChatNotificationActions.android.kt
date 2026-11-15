@@ -14,14 +14,14 @@ object ChatNotificationActions {
         val me = backend.awaitMe() ?: return false
         if (text.isBlank()) return false
         val sent = backend.send(peer, text.trim(), null, null).isSuccess
-        if (sent) backend.markRead(chatIdOf(me.uid, peer.uid))
+        if (sent) backend.markRead(conversationId(me.uid, peer))
         return sent
     }
 
     suspend fun markRead(context: Context, peerUid: String) {
         val backend = FirebaseChatBackend.get(context.applicationContext) ?: return
         val me = backend.awaitMe() ?: return
-        backend.markRead(chatIdOf(me.uid, peerUid))
+        backend.markRead(if (isGroupId(peerUid)) peerUid else chatIdOf(me.uid, peerUid))
     }
 
     /** A message notification arrived: this phone has it, the sender sees two ticks. */

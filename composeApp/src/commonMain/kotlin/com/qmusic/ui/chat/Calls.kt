@@ -40,7 +40,15 @@ data class CallState(
     val weak: Boolean = false,
     /** We are calling and the other phone rings now ("Ringing…" instead of "Calling…"). */
     val reached: Boolean = false,
+    /** Where the sound can go now (earpiece, speaker, a headset, Bluetooth), and where it goes. */
+    val routes: List<AudioRoute> = emptyList(),
+    val route: String? = null,
 )
+
+enum class AudioRouteKind { EARPIECE, SPEAKER, WIRED, BLUETOOTH }
+
+/** A place the call's sound can go: [name] is the device's own name for a headset or Bluetooth. */
+data class AudioRoute(val id: String, val kind: AudioRouteKind, val name: String = "")
 
 /** One-to-one voice and video calls. On Android: WebRTC, with signalling through the messages database. */
 interface CallService {
@@ -54,11 +62,17 @@ interface CallService {
     fun toggleSpeaker()
     fun toggleCamera()
     fun switchCamera()
+
+    /** Sends the call's sound to [id] (one of [CallState.routes]). */
+    fun setAudioRoute(id: String) {}
 }
 
 /** The answer button of the ringing notification was tapped: the call screen answers as soon as it is up. */
 object CallLaunch {
     val acceptRequested = kotlinx.coroutines.flow.MutableStateFlow(false)
+
+    /** "Call back" was tapped on a missed call: the app dials this person (voice or video). */
+    val callBack = kotlinx.coroutines.flow.MutableStateFlow<Pair<ChatUser, Boolean>?>(null)
 }
 
 /** Draws the other person's picture ([remote]) or our own camera. */
@@ -79,3 +93,10 @@ expect fun rememberImagePicker(onPicked: (List<PickedImage>) -> Unit): () -> Uni
 /** Opens the camera; [onPicked] gets the photo ready to send (null when none was taken). */
 @Composable
 expect fun rememberCamera(onPicked: (PickedImage?) -> Unit): () -> Unit
+
+/**
+ * A video call shrinks into a floating window when the person leaves the app while it goes on ([armed]); returns
+ * whether it is in that window now (the screen then shows only the picture).
+ */
+@Composable
+expect fun CallPictureInPicture(armed: Boolean): Boolean

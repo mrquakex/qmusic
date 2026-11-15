@@ -81,6 +81,9 @@ object CallHooks {
     /** A call rang out unanswered while the app was out of sight: the "missed call" notification. */
     var onMissed: ((peer: ChatUser, video: Boolean) -> Unit)? = null
 
+    /** Someone called while the person was on another call (they heard "busy"): "X called". */
+    var onBusy: ((peer: ChatUser, video: Boolean) -> Unit)? = null
+
     /** The person joined (or started) a group's call here, or left it (null): that group's ringing notification goes. */
     var onGroupJoined: ((groupId: String?) -> Unit)? = null
 
@@ -117,6 +120,15 @@ object ChatCallActions {
     fun hangUp(context: Context) {
         FirebaseChatBackend.get(context.applicationContext)?.calls?.hangUp()
     }
+
+    /** A call that rang here while the app was not running and the caller gave up: it goes in the list of calls. */
+    fun logMissed(context: Context, peer: ChatUser, video: Boolean, callId: String) {
+        val backend = FirebaseChatBackend.get(context.applicationContext) ?: return
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            backend.awaitMe() ?: return@launch
+            backend.logCall(callId, peer, video, CallDirection.IN, CallOutcome.MISSED, 0)
+        }
+    }
 }
 
 /**
@@ -139,6 +151,8 @@ internal class FirebaseCallService(
     private val me: () -> ChatUser?,
     /** Writes the call's line in the conversation: [seconds] it lasted, or null when it was not answered. */
     private val logCall: (peer: ChatUser, video: Boolean, seconds: Long?) -> Unit,
+    /** Writes the call in the person's list of calls. */
+    private val logEntry: (id: String, peer: ChatUser, video: Boolean, direction: CallDirection, outcome: CallOutcome, seconds: Long) -> Unit = { _, _, _, _, _, _ -> },
 ) : CallService {
     private val auth = FirebaseAuth.getInstance()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -192,6 +206,10 @@ internal class FirebaseCallService(
         var lastReoffer: String? = null
         var lastReanswer: String? = null
         var unreachableJob: Job? = null
+        /** Where our picture goes: there from the start, in voice calls too, so the camera can come on mid-call. */
+        var videoSender: org.webrtc.RtpSender? = null
+        /** A voice call where a camera came on. */
+        var upgraded = false
         val callRef: DatabaseReference get() = root.child("calls").child(chatId)
     }
 
@@ -209,6 +227,11 @@ internal class FirebaseCallService(
             }
         }
         t.onUnavailable = { scope.launch { if (session != null) routeAudio(_state.value?.speaker == true) } }
+        t.onRoutes = { routes, current ->
+            scope.launch {
+                _state.update { st -> st?.copy(routes = routes, route = current, speaker = routes.firstOrNull { it.id == current }?.kind == AudioRouteKind.SPEAKER) }
+            }
+        }
     }
 
     /** How far the phone's clock is from the server's: "is this call still ringing" is asked in the server's time. */
@@ -284,9 +307,20 @@ internal class FirebaseCallService(
             return
         }
         if (current != null) {
-            // Already in a call: the other one hears "busy".
+            // Already in a call: the other one hears "busy", and this person is told who called.
             root.child("calls").child(chatId).child("state").setValue("busy")
             snap.ref.removeValue()
+            scope.launch {
+                val profile = runCatching { root.child("users").child(from).get().await() }.getOrNull()
+                val peer = ChatUser(
+                    uid = from,
+                    name = profile?.child("name")?.getValue(String::class.java) ?: "?",
+                    username = profile?.child("username")?.getValue(String::class.java).orEmpty(),
+                    photo = profile?.child("photo")?.getValue(String::class.java),
+                )
+                CallHooks.onBusy?.invoke(peer, video)
+                logEntry(id, peer, video, CallDirection.IN, CallOutcome.MISSED, 0)
+            }
             return
         }
         scope.launch {
@@ -378,6 +412,13 @@ internal class FirebaseCallService(
                 val offerSnap = waitFor(s.callRef.child("offer"))
                 val pc = createPeer(s)
                 pc.awaitSetRemote(SessionDescription(SessionDescription.Type.OFFER, offerSnap.child("sdp").getValue(String::class.java)))
+                // A voice call: the caller's picture slot is taken both ways, so either camera can come on later.
+                if (!s.video) {
+                    pc.transceivers.firstOrNull { it.mediaType == org.webrtc.MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }?.let { t ->
+                        t.setDirection(RtpTransceiver.RtpTransceiverDirection.SEND_RECV)
+                        s.videoSender = t.sender
+                    }
+                }
                 s.remoteSet = true
                 drainIce(s)
                 val answer = pc.awaitCreate(offer = false)
@@ -440,7 +481,11 @@ internal class FirebaseCallService(
                 }
                 // The other camera on or off: their picture or their photo.
                 val theirCamera = snap.child("cam").child(s.peer.uid).getValue(Boolean::class.java)
-                if (theirCamera != null) _state.update { it?.copy(remoteVideo = theirCamera && remoteTrack.value != null) }
+                if (theirCamera != null) {
+                    // In a voice call their camera coming on makes it a video call here too.
+                    if (theirCamera && !s.video && !s.upgraded) s.upgraded = true
+                    _state.update { it?.copy(remoteVideo = theirCamera && remoteTrack.value != null, video = it.video || theirCamera) }
+                }
                 // After a network change the caller sends a new offer (ICE restart); the other side answers it.
                 val reoffer = snap.child("reoffer").child("sdp").getValue(String::class.java)
                 if (!s.caller && reoffer != null && reoffer != s.lastReoffer && s.remoteSet) {
@@ -578,10 +623,18 @@ internal class FirebaseCallService(
         s.audio = audio
         pc.addTrack(audio, listOf("qm"))
 
+        if (!s.video && s.caller) {
+            // A voice call keeps a picture slot open (sending nothing), so a camera can come on without a new offer.
+            s.videoSender = pc.addTransceiver(
+                org.webrtc.MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
+                RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_RECV),
+            ).sender
+        }
         if (s.video) {
             startCamera(s, front = true)
             s.videoTrack?.let { track ->
                 val sender = pc.addTrack(track, listOf("qm"))
+                s.videoSender = sender
                 // Up to 2.5 Mbit/s for a sharp picture; WebRTC lowers it by itself when the line is weaker.
                 runCatching {
                     val p = sender.parameters
@@ -651,7 +704,8 @@ internal class FirebaseCallService(
             if (track is VideoTrack) {
                 scope.launch {
                     remoteTrack.value = track
-                    _state.update { it?.copy(remoteVideo = true) }
+                    // A voice call's picture slot: shown only once their camera is on (they say so).
+                    if (s.video) _state.update { it?.copy(remoteVideo = true) }
                 }
             }
         }
@@ -693,15 +747,83 @@ internal class FirebaseCallService(
         val on = !(_state.value?.speaker ?: false)
         if (!telecom.setSpeaker(on)) routeAudio(on)
         _state.update { it?.copy(speaker = on) }
+        if (!telecom.active) publishDevices()
     }
 
     override fun toggleCamera() {
         val s = session ?: return
+        if (s.videoTrack == null) {
+            // A voice call: the camera comes on and its picture goes through the slot kept for it.
+            startCamera(s, front = true)
+            val track = s.videoTrack ?: return
+            s.videoSender?.let { sender ->
+                sender.setTrack(track, false)
+                runCatching {
+                    val p = sender.parameters
+                    p.encodings.forEach { it.maxBitrateBps = 2_500_000 }
+                    sender.parameters = p
+                }
+            }
+            s.upgraded = true
+            me()?.uid?.let { s.callRef.child("cam").child(it).setValue(true) }
+            _state.update { it?.copy(video = true, cameraOn = true) }
+            // A video call is held away from the ear.
+            if (_state.value?.speaker != true) toggleSpeaker()
+            return
+        }
         val on = !(_state.value?.cameraOn ?: true)
         s.videoTrack?.setEnabled(on)
         if (on) runCatching { s.capturer?.startCapture(1280, 720, 30) } else runCatching { s.capturer?.stopCapture() }
         me()?.uid?.let { s.callRef.child("cam").child(it).setValue(on) }
         _state.update { it?.copy(cameraOn = on) }
+    }
+
+    override fun setAudioRoute(id: String) {
+        if (telecom.select(id)) return
+        // Without the system's call: the app sends the sound to that device itself.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val device = audioManager.availableCommunicationDevices.firstOrNull { it.id.toString() == id } ?: return
+            audioManager.setCommunicationDevice(device)
+            pickedDevice = device.id
+            _state.update { it?.copy(route = id, speaker = device.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) }
+        } else {
+            val speaker = id == "speaker"
+            routeAudio(speaker)
+            _state.update { it?.copy(route = id, speaker = speaker) }
+        }
+    }
+
+    /** The app's own list of places for the sound (when the system does not have the call). */
+    private fun publishDevices() {
+        if (telecom.active) return
+        val routes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            audioManager.availableCommunicationDevices.mapNotNull { d ->
+                val kind = when (d.type) {
+                    AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> AudioRouteKind.EARPIECE
+                    AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> AudioRouteKind.SPEAKER
+                    AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_USB_HEADSET -> AudioRouteKind.WIRED
+                    AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET -> AudioRouteKind.BLUETOOTH
+                    else -> null
+                } ?: return@mapNotNull null
+                AudioRoute(d.id.toString(), kind, d.productName?.toString().orEmpty())
+            }.distinctBy { it.kind to it.name }
+        } else {
+            listOf(AudioRoute("earpiece", AudioRouteKind.EARPIECE), AudioRoute("speaker", AudioRouteKind.SPEAKER))
+        }
+        val current = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audioManager.communicationDevice?.id?.toString()
+        else if (_state.value?.speaker == true) "speaker" else "earpiece"
+        _state.update { it?.copy(routes = routes, route = current) }
+    }
+
+    private var pickedDevice: Int? = null
+    private val deviceCallback = object : android.media.AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) {
+            scope.launch { publishDevices() }
+        }
+
+        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) {
+            scope.launch { publishDevices() }
+        }
     }
 
     override fun switchCamera() {
@@ -750,6 +872,18 @@ internal class FirebaseCallService(
                     root.child("notify").push().setValue(notifyEntry(mine.uid, s.peer.uid, s.chatId, s.id, s.video, "cancel"))
                 }
             }
+        }
+        // The person's list of calls: in or out, how it went, how long.
+        run {
+            val startedAt = _state.value?.startedAt
+            val seconds = if (s.connectedOnce && startedAt != null) (System.currentTimeMillis() - startedAt) / 1000 else 0L
+            val outcome = when {
+                s.connectedOnce -> CallOutcome.ANSWERED
+                !s.caller && reason == CallEnd.DECLINED -> CallOutcome.DECLINED
+                !s.caller -> CallOutcome.MISSED
+                else -> CallOutcome.NOT_ANSWERED
+            }
+            logEntry(s.id, s.peer, s.video || s.upgraded, if (s.caller) CallDirection.OUT else CallDirection.IN, outcome, seconds)
         }
         // The caller writes the line in the conversation ("Voice call · 2:31", or a missed call).
         if (s.caller && mine != null) {
@@ -801,6 +935,12 @@ internal class FirebaseCallService(
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         // Where the phone's call system has the call it sends the sound (see CallTelecom); otherwise the app does.
         if (!telecom.available) routeAudio(video)
+        runCatching { audioManager.registerAudioDeviceCallback(deviceCallback, android.os.Handler(android.os.Looper.getMainLooper())) }
+        scope.launch {
+            // The system's list comes through CallTelecom; this is for when it does not have the call.
+            delay(600)
+            publishDevices()
+        }
         if (!video) {
             // A voice call held to the ear turns the screen off (no cheek on the buttons).
             val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -832,6 +972,8 @@ internal class FirebaseCallService(
     }
 
     private fun stopAudio() {
+        runCatching { audioManager.unregisterAudioDeviceCallback(deviceCallback) }
+        pickedDevice = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audioManager.clearCommunicationDevice()
         audioManager.mode = AudioManager.MODE_NORMAL
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) focus?.let { audioManager.abandonAudioFocusRequest(it) }
@@ -974,4 +1116,18 @@ actual fun rememberCallPermissions(): (video: Boolean, onResult: (Boolean) -> Un
             }
         }
     }
+}
+
+@Composable
+actual fun CallPictureInPicture(armed: Boolean): Boolean {
+    DisposableEffect(armed) {
+        com.qmusic.ui.videos.VideoPip.armed = armed
+        com.qmusic.ui.videos.VideoPip.portrait = armed
+        onDispose {
+            com.qmusic.ui.videos.VideoPip.armed = false
+            com.qmusic.ui.videos.VideoPip.portrait = false
+        }
+    }
+    val inside by com.qmusic.ui.videos.VideoPip.active.collectAsState()
+    return inside
 }

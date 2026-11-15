@@ -34,7 +34,7 @@ class UpdateMessagingService : FirebaseMessagingService() {
             ChatPush.onCall(applicationContext, message.data)
             return
         }
-        if (message.data["type"] == "chat") {
+        if (message.data["type"] == "chat" || message.data["type"] == "reaction") {
             ChatPush.notify(applicationContext, message.data)
             return
         }

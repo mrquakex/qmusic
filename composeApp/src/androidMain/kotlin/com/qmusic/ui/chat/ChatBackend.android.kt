@@ -107,6 +107,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             app = app,
             root = root,
             me = { (_account.value as? ChatAccount.Ready)?.me },
+            logEntry = { id, peer, video, direction, outcome, seconds -> logCall(id, peer, video, direction, outcome, seconds) },
             logCall = { peer, video, seconds ->
                 val tr = app.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
                 val text = when {
@@ -595,7 +596,9 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     // ------------------------------------------------------------------ group calls
 
     override val groupCalls: FirebaseGroupCallService by lazy {
-        FirebaseGroupCallService(app, root, { (_account.value as? ChatAccount.Ready)?.me }, calls)
+        FirebaseGroupCallService(app, root, { (_account.value as? ChatAccount.Ready)?.me }, calls) { id, group, video, seconds ->
+            logCall(id, group, video, CallDirection.GROUP, if (seconds > 0) CallOutcome.ANSWERED else CallOutcome.NOT_ANSWERED, seconds)
+        }
     }
 
     private fun DataSnapshot.toMessage(pending: Set<String>): ChatMessage? {
@@ -1490,10 +1493,79 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         awaitClose { job.cancel() }
     }
 
-    override suspend fun react(chatId: String, messageId: String, emoji: String?) {
+    override suspend fun react(chatId: String, messageId: String, emoji: String?, author: String?, preview: String) {
         val uid = auth.currentUser?.uid ?: return
         val ref = root.child("chats").child(chatId).child("reactions").child(messageId).child(uid)
-        if (emoji == null) ref.removeValue() else ref.setValue(emoji)
+        if (emoji == null) {
+            ref.removeValue()
+            return
+        }
+        val updates = hashMapOf<String, Any?>("chats/$chatId/reactions/$messageId/$uid" to emoji)
+        // The message's writer hears about it (not for our own messages, nor Claude's).
+        if (author != null && author != uid && author != CLAUDE_BOT_UID) {
+            updates["notify/${root.child("notify").push().key}"] = mapOf(
+                "from" to uid, "to" to author, "chatId" to chatId, "type" to "reaction",
+                "emoji" to emoji, "body" to preview.take(120), "at" to ServerValue.TIMESTAMP,
+            )
+        }
+        root.updateChildren(updates)
+    }
+
+    // ------------------------------------------------------------------ the list of calls
+    //
+    //   callLog/{uid}/{callId} = {peer, name, username, photo, video, dir: in|out|group, outcome, at, seconds}
+
+    override fun callLog(): Flow<List<CallLogEntry>> = callbackFlow {
+        val job = launch {
+            listen(root.child("callLog").child(me()).orderByChild("at").limitToLast(200)).collect { snap ->
+                trySend(
+                    snap.children.mapNotNull { c ->
+                        val peer = c.child("peer").getValue(String::class.java) ?: return@mapNotNull null
+                        CallLogEntry(
+                            id = c.key ?: return@mapNotNull null,
+                            peer = ChatUser(peer, c.child("name").getValue(String::class.java).orEmpty(), c.child("username").getValue(String::class.java).orEmpty(), c.child("photo").getValue(String::class.java)),
+                            video = c.child("video").getValue(Boolean::class.java) == true,
+                            direction = when (c.child("dir").getValue(String::class.java)) {
+                                "out" -> CallDirection.OUT
+                                "group" -> CallDirection.GROUP
+                                else -> CallDirection.IN
+                            },
+                            outcome = runCatching { CallOutcome.valueOf(c.child("outcome").getValue(String::class.java).orEmpty()) }.getOrDefault(CallOutcome.MISSED),
+                            at = c.child("at").getValue(Long::class.java) ?: 0L,
+                            seconds = c.child("seconds").getValue(Long::class.java) ?: 0L,
+                        )
+                    }.sortedByDescending { it.at },
+                )
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override suspend fun clearCallLog() {
+        root.child("callLog").child(me()).removeValue()
+    }
+
+    /** Writes one line of the person's call list (the same call twice only updates it). */
+    fun logCall(id: String, peer: ChatUser, video: Boolean, direction: CallDirection, outcome: CallOutcome, seconds: Long) {
+        val uid = auth.currentUser?.uid ?: return
+        if (id.isBlank()) return
+        root.child("callLog").child(uid).child(id.replace(Regex("[.#$\\[\\]/]"), "_")).setValue(
+            mapOf(
+                "peer" to peer.uid,
+                "name" to peer.name,
+                "username" to peer.username,
+                "photo" to peer.photo,
+                "video" to video,
+                "dir" to when (direction) {
+                    CallDirection.OUT -> "out"
+                    CallDirection.GROUP -> "group"
+                    CallDirection.IN -> "in"
+                },
+                "outcome" to outcome.name,
+                "at" to ServerValue.TIMESTAMP,
+                "seconds" to seconds,
+            ),
+        )
     }
 
     // ------------------------------------------------------------------ blocking

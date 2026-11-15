@@ -52,3 +52,6 @@ actual fun rememberAppLock(): AppLock? = null
 
 @androidx.compose.runtime.Composable
 actual fun rememberChatSounds(): ChatSounds? = null
+
+@androidx.compose.runtime.Composable
+actual fun CallPictureInPicture(armed: Boolean): Boolean = false

@@ -140,6 +140,7 @@ fun ChatApp(
                 is ChatRoute.AddMembers -> AddMembersPage(controller, s, top.group)
                 ChatRoute.Archived -> ArchivedPage(controller, s, a.me)
                 ChatRoute.Starred -> StarredPage(controller, s)
+                ChatRoute.Calls -> CallsPage(controller, s, onCall)
                 ChatRoute.Settings -> SettingsPage(controller, s, a.me)
                 ChatRoute.Friends -> FriendsPage(controller, s)
                 is ChatRoute.Profile -> ProfilePage(controller, s, a.me, top.user, onCall)
@@ -412,6 +413,7 @@ private fun ThreadListPage(controller: ChatController, s: ChatStrings, me: ChatU
                         }
                     }
                 }
+                IconButton(onClick = { controller.openCalls() }) { Icon(QMusicIcons.Phone, contentDescription = s.callsTitle, tint = Color.White) }
                 IconButton(onClick = { searching = !searching; if (!searching) search = "" }) { Icon(QMusicIcons.Search, contentDescription = s.search, tint = Color.White) }
                 IconButton(onClick = { controller.openNewChat() }) { Icon(QMusicIcons.Edit, contentDescription = s.newChat, tint = Color.White) }
                 Box {
@@ -550,8 +552,10 @@ private fun ReadinessCard(s: ChatStrings) {
                 Text(
                     when (issue) {
                         ReadinessIssue.NOTIFICATIONS -> s.readinessNotifications
+                        ReadinessIssue.CHANNELS -> s.readinessChannels
                         ReadinessIssue.FULL_SCREEN -> s.readinessFullScreen
                         ReadinessIssue.BATTERY -> s.readinessBattery
+                        ReadinessIssue.AUTOSTART -> s.readinessAutostart
                     },
                     color = Color.Black,
                     fontSize = 13.sp,

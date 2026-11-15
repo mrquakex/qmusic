@@ -20,7 +20,8 @@ class QMusicApplication : Application() {
     /** Calls: the ringing notification when the app is not on screen, and the service that keeps a call going. */
     private fun hookCalls() {
         val app = this
-        com.qmusic.ui.chat.CallHooks.onIncoming = { _, peer, video -> CallNotifications.showIncoming(app, peer, video) }
+        com.qmusic.ui.chat.CallHooks.onIncoming = { id, peer, video -> CallNotifications.showIncoming(app, peer, video, id) }
+        com.qmusic.ui.chat.CallHooks.onBusy = { peer, video -> CallNotifications.showMissed(app, peer, video, busy = true) }
         com.qmusic.ui.chat.CallHooks.onIncomingGone = { CallNotifications.cancelIncoming(app) }
         com.qmusic.ui.chat.CallHooks.onMissed = { peer, video -> CallNotifications.showMissed(app, peer, video) }
         com.qmusic.ui.chat.ChatPresence.onOpened = { chatId -> ChatPush.clear(app, chatId) }
