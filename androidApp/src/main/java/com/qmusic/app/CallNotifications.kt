@@ -84,6 +84,13 @@ object CallNotifications {
      * remembered, so that if the caller gives up before the app has taken the call over it can still say "missed".
      */
     fun showIncoming(context: Context, peer: ChatUser, video: Boolean, callId: String = "") {
+        // The photo not here yet: it rings with the initial now, and the notification gets the photo once it is in.
+        if (!NotificationAvatars.has(peer.photo)) {
+            NotificationAvatars.prefetch(peer.photo) {
+                val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                if (prefs.getString("ring_id", null) == callId) showIncoming(context, peer, video, callId)
+            }
+        }
         channels(context)
         val tr = tr(context)
         val icon = NotificationAvatars.icon(peer.uid, peer.name, peer.photo)
@@ -111,6 +118,8 @@ object CallNotifications {
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setOngoing(true)
+            // Putting the photo in later does not start the ringing over.
+            .setOnlyAlertOnce(true)
             .setFullScreenIntent(openApp(context, EXTRA_OPEN, 13), true)
             .setContentIntent(openApp(context, EXTRA_OPEN, 14))
             .setTimeoutAfter(50_000)

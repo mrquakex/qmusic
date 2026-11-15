@@ -22,6 +22,24 @@ import java.net.URL
  * Downloads the APK into the app's cache and opens Android's installer for it. Android never installs an app
  * silently: the person confirms once on the system sheet, and must have allowed installs from QMusic.
  */
+internal fun isXiaomi(): Boolean = (Build.MANUFACTURER + " " + Build.BRAND).lowercase().let { "xiaomi" in it || "redmi" in it || "poco" in it }
+
+/** The downloaded update, where [ApkUpdateInstaller] keeps it. */
+internal fun downloadedUpdate(context: Context): File = File(File(context.cacheDir, "updates"), "qmusic-update.apk")
+
+/** The system's own install screen for [file] ("Update"): on screen now, or a notification that opens it. */
+internal fun openSystemInstaller(context: Context, file: File) {
+    if (!file.exists()) return
+    val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".updates", file)
+    val open = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(uri, "application/vnd.android.package-archive")
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+    if (com.qmusic.ui.chat.CallHooks.appVisible) {
+        runCatching { context.startActivity(open) }.onSuccess { return }
+    }
+    InstallResultReceiver.showLater(context, open)
+}
+
 class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
     private val _progress = MutableStateFlow<Float?>(null)
     override val progress: StateFlow<Float?> = _progress.asStateFlow()
@@ -60,6 +78,12 @@ class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
      * (when the app is not on screen); otherwise the system confirmation sheet appears, via [InstallResultReceiver].
      */
     private fun commit(file: File) {
+        // Xiaomi's system blocks the install sessions of other apps (it fails without a word): its own installer is
+        // opened instead, which shows the usual Update button.
+        if (isXiaomi()) {
+            openSystemInstaller(context, file)
+            return
+        }
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

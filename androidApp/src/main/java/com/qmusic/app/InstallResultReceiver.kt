@@ -30,15 +30,26 @@ class InstallResultReceiver : BroadcastReceiver() {
 
             PackageInstaller.STATUS_SUCCESS -> Unit
 
-            else -> {
-                // A failed update is not tried again and again: the next release (or the update button) starts over.
+            PackageInstaller.STATUS_FAILURE_ABORTED -> {
+                // The person said no: asked again with the next release (or the update button).
                 AutoUpdate.forget(context)
+            }
+
+            else -> {
                 Log.w("QMUpdate", "Install ended with status $status: ${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)}")
+                // The quiet way failed (some makers' systems refuse it): the system's own install screen instead.
+                val file = downloadedUpdate(context)
+                if (file.exists()) openSystemInstaller(context, file) else AutoUpdate.forget(context)
             }
         }
     }
 
-    private fun confirmLater(context: Context, confirm: Intent) {
+    companion object {
+        /** The "update is ready, tap to install" notification, opening [confirm]. */
+        fun showLater(context: Context, confirm: Intent) = InstallResultReceiver().confirmLater(context, confirm)
+    }
+
+    internal fun confirmLater(context: Context, confirm: Intent) {
         val manager = context.getSystemService(android.app.NotificationManager::class.java) ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             manager.createNotificationChannel(
@@ -56,7 +67,13 @@ class InstallResultReceiver : BroadcastReceiver() {
                 androidx.core.app.NotificationCompat.Builder(context, "qmusic_updates")
                     .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
                     .setContentTitle(if (english) "Qeyf update is ready" else "Qeyf güncellemesi hazır")
-                    .setContentText(if (english) "Tap to install (next updates will install by themselves)" else "Kurmak için dokun (sonraki güncellemeler kendiliğinden kurulacak)")
+                    .setContentText(
+                        when {
+                            isXiaomi() -> if (english) "Tap to install" else "Kurmak için dokun"
+                            english -> "Tap to install (next updates will install by themselves)"
+                            else -> "Kurmak için dokun (sonraki güncellemeler kendiliğinden kurulacak)"
+                        },
+                    )
                     .setAutoCancel(true)
                     .setContentIntent(tap)
                     .build(),

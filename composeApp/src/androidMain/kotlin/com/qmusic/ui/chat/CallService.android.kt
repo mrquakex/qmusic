@@ -347,7 +347,9 @@ internal class FirebaseCallService(
                 uid = from,
                 name = profile?.child("name")?.getValue(String::class.java) ?: "?",
                 username = profile?.child("username")?.getValue(String::class.java).orEmpty(),
-                photo = profile?.child("photo")?.getValue(String::class.java),
+                // A photo shown to friends only is kept in privateProfile (the caller is a friend, so it can be read).
+                photo = profile?.child("photo")?.getValue(String::class.java)
+                    ?: runCatching { root.child("privateProfile").child(from).child("photo").get().await().getValue(String::class.java) }.getOrNull(),
             )
             if (session != null) return@launch
             val s = Session(id, chatId, peer, video, caller = false)

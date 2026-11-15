@@ -26,11 +26,37 @@ object NotificationAvatars {
     fun icon(key: String, name: String, photo: String?): IconCompat = IconCompat.createWithBitmap(bitmap(key, name, photo))
 
     fun bitmap(key: String, name: String, photo: String?): Bitmap {
-        val id = photo?.takeIf { it.isNotBlank() } ?: "letter:$key:$name"
-        cache.get(id)?.let { return it }
-        val made = photo?.takeIf { it.startsWith("http") }?.let { download(it) }?.let(::circle) ?: letter(key, name)
-        cache.put(id, made)
-        return made
+        val url = photo?.takeIf { it.startsWith("http") }
+        if (url != null) {
+            cache.get(url)?.let { return it }
+            // The main thread may not use the network: the initial now, the photo fetched beside it for next time.
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                prefetch(url) {}
+            } else {
+                download(url)?.let(::circle)?.let { got ->
+                    cache.put(url, got)
+                    return got
+                }
+            }
+        }
+        // The initial is kept under its own name, never in place of a photo that could not be had this time.
+        val id = "letter:$key:$name"
+        return cache.get(id) ?: letter(key, name).also { cache.put(id, it) }
+    }
+
+    /** Whether [photo] is ready to show without waiting. */
+    fun has(photo: String?): Boolean = photo?.takeIf { it.startsWith("http") }?.let { cache.get(it) != null } ?: true
+
+    /** Fetches [photo] off the main thread; [then] runs (on that thread) once it is in. */
+    fun prefetch(photo: String?, then: () -> Unit) {
+        val url = photo?.takeIf { it.startsWith("http") } ?: return
+        if (cache.get(url) != null) return then()
+        Thread {
+            download(url)?.let(::circle)?.let { got ->
+                cache.put(url, got)
+                then()
+            }
+        }.start()
     }
 
     private fun download(url: String): Bitmap? = runCatching {

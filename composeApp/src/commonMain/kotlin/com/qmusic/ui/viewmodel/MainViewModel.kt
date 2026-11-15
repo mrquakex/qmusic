@@ -600,11 +600,30 @@ class MainViewModel(
     /** Called once at start: a version not seen before brings its notes (empty notes still say it was updated). */
     fun checkWhatsNew() {
         if (whatsNewSeen.value == currentAppVersion) return
+        showWhatsNew()
+    }
+
+    /**
+     * The notes of the version running now: kept on the phone when the update came (so they show without a
+     * connection), else asked from GitHub, a second time if the first try fails. Shown even if seen before (the
+     * "updated" notification was tapped).
+     */
+    fun showWhatsNew() {
         scope.launch {
-            val notes = updateChecker.releaseNotes(currentAppVersion).getOrNull().orEmpty()
+            var notes = settings.string(notesKey(currentAppVersion), "").value
+            if (notes.isBlank()) {
+                notes = updateChecker.releaseNotes(currentAppVersion).getOrNull().orEmpty()
+                if (notes.isBlank()) {
+                    kotlinx.coroutines.delay(3_000)
+                    notes = updateChecker.releaseNotes(currentAppVersion).getOrNull().orEmpty()
+                }
+            }
             _whatsNew.value = WhatsNew(currentAppVersion, notes)
         }
     }
+
+    /** Where a version's notes are kept once its update is known. */
+    private fun notesKey(version: String) = "release_notes_" + version.removePrefix("v")
 
     fun dismissWhatsNew() {
         settings.setString(KEY_WHATS_NEW_SEEN, currentAppVersion)
@@ -2336,6 +2355,7 @@ class MainViewModel(
 
     fun installUpdate() {
         val info = _updateInfo.value ?: return
+        if (info.changelog.isNotBlank()) settings.setString(notesKey(info.versionName), info.changelog)
         _offerUpdate.value = false
         if (updateProgress.value != null) return
         _updateMessage.value = strings.downloadingUpdate(info.versionName)

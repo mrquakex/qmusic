@@ -79,6 +79,7 @@ class MainActivity : AppCompatActivity() {
         this.viewModel = viewModel
         hookRingtones()
         openUpdatesIfAsked(intent)
+        showWhatsNewIfAsked(intent)
         installNowIfAsked(intent)
         ChatPush.openIfAsked(intent)
         GroupCallNotifications.openIfAsked(this, intent)
@@ -212,6 +213,7 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         openUpdatesIfAsked(intent)
+        showWhatsNewIfAsked(intent)
         installNowIfAsked(intent)
         ChatPush.openIfAsked(intent)
         GroupCallNotifications.openIfAsked(this, intent)
@@ -289,6 +291,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Tapped the "new version" notification: show Settings with the check already done. */
+    /** Tapped "Qeyf was updated": what changed in this version. */
+    private fun showWhatsNewIfAsked(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_WHATS_NEW, false) != true) return
+        intent.removeExtra(EXTRA_WHATS_NEW)
+        viewModel?.showWhatsNew()
+    }
+
     private fun openUpdatesIfAsked(intent: Intent?) {
         if (intent?.getBooleanExtra(UpdatePush.EXTRA_OPEN_UPDATES, false) != true) return
         intent.removeExtra(UpdatePush.EXTRA_OPEN_UPDATES)

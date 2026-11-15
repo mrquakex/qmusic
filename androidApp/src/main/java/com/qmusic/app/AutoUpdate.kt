@@ -124,6 +124,11 @@ class AutoUpdateJob : JobService() {
                     if (info != null && installer != null && UpdatePush.isNewer(info.versionName, AutoUpdate.installedVersion(context))) {
                         val file = installer.downloadOnly(info)
                         AutoUpdate.remember(context, file, info.versionName)
+                        // The notes go with it: the new version shows them at once, even without a connection.
+                        if (info.changelog.isNotBlank()) {
+                            context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).edit()
+                                .putString("release_notes_" + info.versionName.removePrefix("v"), info.changelog).apply()
+                        }
                     }
                 }
                 AutoUpdate.tryInstall(context)
@@ -158,7 +163,8 @@ class UpdatedReceiver : BroadcastReceiver() {
             )
         }
         val open = PendingIntent.getActivity(
-            context, 0, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            context, 0,
+            Intent(context, MainActivity::class.java).putExtra(EXTRA_WHATS_NEW, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         runCatching {
@@ -175,3 +181,6 @@ class UpdatedReceiver : BroadcastReceiver() {
         }
     }
 }
+
+/** On the "Qeyf was updated" notification: open the app on what changed. */
+internal const val EXTRA_WHATS_NEW = "show_whats_new"
