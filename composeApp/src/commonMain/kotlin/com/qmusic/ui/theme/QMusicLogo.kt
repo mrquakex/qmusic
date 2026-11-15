@@ -58,13 +58,13 @@ fun QMusicLogo(
 ) {
     Icon(
         imageVector = QMusicLogoSymbol,
-        contentDescription = "QMusic",
+        contentDescription = "Qeyf",
         modifier = modifier.size(size),
         tint = tint,
     )
 }
 
-/** "q" + "music" wordmark: q weight 800, music weight 600 at 72% alpha. */
+/** "q" + "eyf" wordmark: q weight 800, the rest weight 600 at 72% alpha. */
 @Composable
 fun QMusicWordmark(
     modifier: Modifier = Modifier,
@@ -75,7 +75,7 @@ fun QMusicWordmark(
         text = buildAnnotatedString {
             withStyle(SpanStyle(fontWeight = FontWeight.ExtraBold, color = color)) { append("q") }
             withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = color.copy(alpha = 0.72f))) {
-                append("music")
+                append("eyf")
             }
         },
         fontSize = fontSize.sp,

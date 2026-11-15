@@ -35,7 +35,7 @@ class SimpleMediaService : MediaLibraryService() {
 
     companion object {
         const val NOTIFICATION_CHANNEL_ID = "qmusic_playback_channel"
-        const val NOTIFICATION_CHANNEL_NAME = "QMusic Audio Playback"
+        const val NOTIFICATION_CHANNEL_NAME = "Qeyf Audio Playback"
         const val NOTIFICATION_ID = 1001
 
         @Volatile
@@ -173,7 +173,7 @@ class SimpleMediaService : MediaLibraryService() {
                 NOTIFICATION_CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "QMusic foreground playback controls and track metadata"
+                description = "Qeyf foreground playback controls and track metadata"
                 setShowBadge(false)
             }
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

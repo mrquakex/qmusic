@@ -175,6 +175,16 @@ class GithubReleaseUpdateChecker(
         )
     }
 
+    override suspend fun releaseNotes(version: String): Result<String> = runCatching {
+        val url = config.endpointUrl.substringBeforeLast("/releases") + "/releases/tags/v" + version.removePrefix("v")
+        val response: HttpResponse = httpClient.get(url) {
+            header(HttpHeaders.Accept, "application/vnd.github+json")
+            header(HttpHeaders.UserAgent, "QMusic-App")
+        }
+        if (response.status.value !in 200..299) throw IllegalStateException("HTTP ${response.status.value}")
+        json.decodeFromString<GithubReleaseDto>(response.bodyAsText()).body.orEmpty().trim()
+    }
+
     companion object {
         fun isNewerVersion(candidate: String, current: String): Boolean {
             val candSemVer = SemVer.parse(candidate) ?: return false

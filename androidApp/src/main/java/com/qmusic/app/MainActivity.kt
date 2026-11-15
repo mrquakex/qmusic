@@ -258,6 +258,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         com.qmusic.ui.chat.CallHooks.setVisible(false)
+        AutoUpdate.onAppHidden(this)
         super.onStop()
     }
 

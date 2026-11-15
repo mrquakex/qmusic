@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -113,10 +116,6 @@ fun QMusicApp(
     androidx.compose.runtime.SideEffect { com.qmusic.ui.theme.amoledTheme = amoled }
     QMusicTheme {
         var showSplash by remember { mutableStateOf(!com.qmusic.ui.components.SplashState.shown) }
-        if (showSplash) {
-            QMusicSplash(onFinished = { showSplash = false }, modifier = modifier)
-            return@QMusicTheme
-        }
 
         val language by viewModel.language.collectAsState()
         val accountMode by viewModel.accountMode.collectAsState()
@@ -1330,6 +1329,12 @@ fun QMusicApp(
                 )
             }
 
+            // The first opening after an update: what changed, once.
+            val whatsNew by viewModel.whatsNew.collectAsState()
+            whatsNew?.let { news ->
+                WhatsNewDialog(news, english = language == "en", onDismiss = { viewModel.dismissWhatsNew() })
+            }
+
             if (showSpotifyImportDialog) {
                 SpotifyImportDialog(
                     isImporting = isImportingSpotify,
@@ -1356,5 +1361,33 @@ fun QMusicApp(
             }
         }
         }
+        // The opening animation plays over the app while it loads underneath, then fades away.
+        if (showSplash) QMusicSplash(onFinished = { showSplash = false }, modifier = modifier)
     }
+}
+
+/** "Updated to X": the release notes of the version just installed, as Markdown, shown once after an update. */
+@Composable
+private fun WhatsNewDialog(news: com.qmusic.ui.viewmodel.MainViewModel.WhatsNew, english: Boolean, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { com.qmusic.ui.theme.QMusicLogo(size = 40.dp, tint = MaterialTheme.colorScheme.primary) },
+        title = { Text(if (english) "Updated to Qeyf ${news.version}" else "Qeyf ${news.version} sürümüne güncellendi") },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                Text(
+                    if (english) "What's new" else "Neler değişti",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                if (news.notes.isNotBlank()) {
+                    com.mikepenz.markdown.m3.Markdown(content = news.notes)
+                } else {
+                    Text(if (english) "Fixes and improvements." else "Düzeltmeler ve iyileştirmeler.")
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(if (english) "Got it" else "Tamam") } },
+    )
 }

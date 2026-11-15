@@ -582,6 +582,27 @@ class MainViewModel(
 
     /** The installed version, generated from gradle.properties (the same number the APK carries). */
     val currentAppVersion: String = com.qmusic.ui.AppVersion.NAME
+
+    /** The version that was just installed and what changed in it: shown once, on the first opening after an update. */
+    data class WhatsNew(val version: String, val notes: String)
+
+    private val _whatsNew = MutableStateFlow<WhatsNew?>(null)
+    val whatsNew: StateFlow<WhatsNew?> = _whatsNew.asStateFlow()
+    private val whatsNewSeen = settings.string(KEY_WHATS_NEW_SEEN, "")
+
+    /** Called once at start: a version not seen before brings its notes (empty notes still say it was updated). */
+    fun checkWhatsNew() {
+        if (whatsNewSeen.value == currentAppVersion) return
+        scope.launch {
+            val notes = updateChecker.releaseNotes(currentAppVersion).getOrNull().orEmpty()
+            _whatsNew.value = WhatsNew(currentAppVersion, notes)
+        }
+    }
+
+    fun dismissWhatsNew() {
+        settings.setString(KEY_WHATS_NEW_SEEN, currentAppVersion)
+        _whatsNew.value = null
+    }
     private val _isCheckingUpdate = MutableStateFlow(false)
     val isCheckingUpdate: StateFlow<Boolean> = _isCheckingUpdate.asStateFlow()
 
@@ -610,7 +631,8 @@ class MainViewModel(
                 loadLikedSongs()
                 loadYouTubeLibrary()
             }
-            if (settings.autoCheckUpdates.value) checkForUpdates(silent = true)
+            checkForUpdates(silent = true)
+            checkWhatsNew()
         }
         // Auto-download: every liked song (device favorites + YouTube Music likes) that is not saved yet
         scope.launch {
@@ -2326,7 +2348,8 @@ class MainViewModel(
                     _updateMessage.value = strings.updateAvailable(info.versionName)
                     // Found when the app opened: install it straight away, or offer it, as the person chose.
                     if (silent) {
-                        if (settings.autoUpdate.value) installUpdate() else _offerUpdate.value = true
+                        // Updating is mandatory: a version found at launch goes in.
+                        installUpdate()
                     }
                 } else if (!silent) {
                     _updateMessage.value = strings.latestVersion
@@ -2339,6 +2362,7 @@ class MainViewModel(
     }
 
     private companion object {
+        const val KEY_WHATS_NEW_SEEN = "whats_new_seen"
         const val RADIO_REFILL_THRESHOLD = 3
         const val CACHE_REFRESH_MS = 600L
         const val SAMPLE_SEEDS = 5

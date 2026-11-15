@@ -37,7 +37,10 @@ class UpdateMessagingService : FirebaseMessagingService() {
         if (message.data["type"] != "update") return
         val version = message.data["version"] ?: return
         val summary = message.data["body"] ?: message.notification?.body
-        UpdatePush.notify(applicationContext, version, summary)
+        // Where the update can go in by itself it is fetched now and installed while the app is not in use;
+        // elsewhere the notification leads to the update button.
+        if (AutoUpdate.canBeSilent(applicationContext)) AutoUpdate.schedule(applicationContext)
+        else UpdatePush.notify(applicationContext, version, summary)
     }
 
     /** The phone's push address changed: the messages account keeps the new one. */

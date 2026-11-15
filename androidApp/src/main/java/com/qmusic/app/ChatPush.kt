@@ -42,7 +42,7 @@ object ChatPush {
                 NotificationChannel(FRIEND_CHANNEL, if (tr) "Arkadaşlık" else "Friends", NotificationManager.IMPORTANCE_DEFAULT),
             )
         }
-        val name = data["name"].orEmpty().ifBlank { "QMusic" }
+        val name = data["name"].orEmpty().ifBlank { "Qeyf" }
         val accepted = data["action"] == "accepted"
         val text = when {
             accepted && tr -> "$name arkadaşlık isteğini kabul etti"
@@ -85,7 +85,7 @@ object ChatPush {
         if (from != null && !com.qmusic.ui.chat.CallHooks.appVisible) {
             CallNotifications.showIncoming(
                 context,
-                ChatUser(from, data["name"].orEmpty().ifBlank { "QMusic" }, data["username"].orEmpty(), data["photo"]?.ifBlank { null }),
+                ChatUser(from, data["name"].orEmpty().ifBlank { "Qeyf" }, data["username"].orEmpty(), data["photo"]?.ifBlank { null }),
                 data["video"] == "1",
             )
         }
@@ -107,7 +107,7 @@ object ChatPush {
                 NotificationChannel(CHANNEL_ID, if (tr) "Mesajlar" else "Messages", NotificationManager.IMPORTANCE_HIGH),
             )
         }
-        val name = data["name"].orEmpty().ifBlank { "QMusic" }
+        val name = data["name"].orEmpty().ifBlank { "Qeyf" }
         val body = data["body"].orEmpty()
         val open = PendingIntent.getActivity(
             context,

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.QMusic" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/qmusic_root</item>
+        <item name="android:colorBackground">@color/qmusic_root</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <!-- The system launch screen: the same dark as the app, no icon (the animated splash follows at once). -->
+        <item name="android:windowSplashScreenBackground">#FF050507</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#FF050507</item>
+    </style>
+</resources>

@@ -414,22 +414,7 @@ fun SettingsScreen(
                 }
             }
             RowDivider()
-            SwitchRow(
-                icon = null,
-                title = s.checkOnLaunchTitle,
-                subtitle = s.checkOnLaunchSubtitle,
-                checked = autoCheckUpdates,
-                onChange = onAutoCheckUpdatesChange,
-            )
-            RowDivider()
-            SwitchRow(
-                icon = null,
-                title = s.autoUpdateTitle,
-                subtitle = s.autoUpdateSubtitle,
-                checked = autoUpdate,
-                onChange = onAutoUpdateChange,
-            )
-            RowDivider()
+            // Updates are not optional: every phone is checked at launch and updated by itself (see AutoUpdate).
             SwitchRow(
                 icon = null,
                 title = s.updateNotificationsTitle,
@@ -486,7 +471,7 @@ fun SettingsScreen(
         Section(s.sectionAbout) {
             ActionRow(
                 icon = QMusicIcons.Headphones,
-                title = "QMusic",
+                title = "Qeyf",
                 subtitle = s.madeBy,
             )
             RowDivider()

@@ -18,12 +18,49 @@ class InstallResultReceiver : BroadcastReceiver() {
                     @Suppress("DEPRECATION")
                     intent.getParcelableExtra(Intent.EXTRA_INTENT)
                 }
-                confirm?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)?.let(context::startActivity)
+                confirm ?: return
+                confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (com.qmusic.ui.chat.CallHooks.appVisible) {
+                    context.startActivity(confirm)
+                } else {
+                    // Out of sight Android does not let the sheet open by itself: a notification brings it.
+                    confirmLater(context, confirm)
+                }
             }
 
             PackageInstaller.STATUS_SUCCESS -> Unit
 
-            else -> Log.w("QMUpdate", "Install ended with status $status: ${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)}")
+            else -> {
+                // A failed update is not tried again and again: the next release (or the update button) starts over.
+                AutoUpdate.forget(context)
+                Log.w("QMUpdate", "Install ended with status $status: ${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)}")
+            }
+        }
+    }
+
+    private fun confirmLater(context: Context, confirm: Intent) {
+        val manager = context.getSystemService(android.app.NotificationManager::class.java) ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                android.app.NotificationChannel("qmusic_updates", context.getString(R.string.update_channel_name), android.app.NotificationManager.IMPORTANCE_DEFAULT),
+            )
+        }
+        val english = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") == "en"
+        val tap = android.app.PendingIntent.getActivity(
+            context, 7, confirm,
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        runCatching {
+            manager.notify(
+                1003,
+                androidx.core.app.NotificationCompat.Builder(context, "qmusic_updates")
+                    .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
+                    .setContentTitle(if (english) "Qeyf update is ready" else "Qeyf güncellemesi hazır")
+                    .setContentText(if (english) "Tap to install (next updates will install by themselves)" else "Kurmak için dokun (sonraki güncellemeler kendiliğinden kurulacak)")
+                    .setAutoCancel(true)
+                    .setContentIntent(tap)
+                    .build(),
+            )
         }
     }
 }

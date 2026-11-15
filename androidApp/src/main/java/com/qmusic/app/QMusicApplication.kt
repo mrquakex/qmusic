@@ -12,6 +12,8 @@ class QMusicApplication : Application() {
         container = AppContainer(this)
         container.crashReports.install(this)
         UpdatePush.subscribe(this)
+        // A release the push did not bring (the phone was off) is picked up in the background too.
+        AutoUpdate.schedule(this, delayMs = 60_000)
         HeadsetResume.start(this, container.settings)
     }
 

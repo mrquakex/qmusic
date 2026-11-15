@@ -41,6 +41,19 @@ class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
         commit(download(info))
     }.also { _progress.value = null }
 
+    /** Downloads [info]'s APK without installing it (the background update, see [AutoUpdate]). */
+    internal suspend fun downloadOnly(info: UpdateInfo): File {
+        if (info.downloadUrl.isBlank() || !info.downloadUrl.endsWith(".apk", ignoreCase = true)) error("no apk")
+        return try {
+            download(info)
+        } finally {
+            _progress.value = null
+        }
+    }
+
+    /** Installs an APK already downloaded. */
+    internal fun commitFile(file: File) = commit(file)
+
     /**
      * Hands the APK to Android through an install session. On Android 12+ the session asks for no confirmation
      * when QMusic itself installed the version being replaced, so from the second update on it installs by itself

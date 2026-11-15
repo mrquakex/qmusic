@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">QMusic</string>
+    <string name="app_name" translatable="false">Qeyf</string>
     <string name="update_no_apk">This release has no APK to download</string>
-    <string name="update_allow_permission">Allow installs from QMusic in the settings that just opened, then tap Update again</string>
+    <string name="update_allow_permission">Allow installs from Qeyf in the settings that just opened, then tap Update again</string>
     <string name="update_download_failed">Download failed (HTTP %1$d)</string>
     <string name="update_channel_name">App updates</string>
-    <string name="update_ready_title">QMusic %1$s is ready</string>
+    <string name="update_ready_title">Qeyf %1$s is ready</string>
     <string name="update_ready_text">Tap to update</string>
     <string name="widget_description">What is playing, with play, pause and skip</string>
     <string name="widget_previous">Previous</string>
     <string name="widget_play_pause">Play or pause</string>
     <string name="widget_next">Next</string>
     <string name="widget_nothing_playing">Nothing is playing</string>
-    <string name="widget_tap_to_open">Tap to open QMusic</string>
+    <string name="widget_tap_to_open">Tap to open Qeyf</string>
     <string name="shortcut_shuffle_liked">Shuffle liked songs</string>
     <string name="shortcut_downloads">Downloads</string>
     <string name="shortcut_search">Search</string>
-    <string name="tile_label">QMusic</string>
+    <string name="tile_label">Qeyf</string>
 </resources>

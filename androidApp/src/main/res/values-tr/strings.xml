@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">QMusic</string>
+    <string name="app_name" translatable="false">Qeyf</string>
     <string name="update_no_apk">Bu sürümde indirilecek APK dosyası bulunamadı</string>
-    <string name="update_allow_permission">Açılan ayarlardan QMusic için yüklemeye izin verin, ardından Güncelle\'ye tekrar dokunun</string>
+    <string name="update_allow_permission">Açılan ayarlardan Qeyf için yüklemeye izin verin, ardından Güncelle\'ye tekrar dokunun</string>
     <string name="update_download_failed">İndirme başarısız oldu (HTTP %1$d)</string>
     <string name="update_channel_name">Uygulama güncellemeleri</string>
-    <string name="update_ready_title">QMusic %1$s hazır</string>
+    <string name="update_ready_title">Qeyf %1$s hazır</string>
     <string name="update_ready_text">Güncellemek için dokun</string>
     <string name="widget_description">Çalan şarkı; oynat, duraklat ve geç</string>
     <string name="widget_previous">Önceki</string>
     <string name="widget_play_pause">Oynat veya duraklat</string>
     <string name="widget_next">Sonraki</string>
     <string name="widget_nothing_playing">Bir şey çalmıyor</string>
-    <string name="widget_tap_to_open">QMusic\'i açmak için dokun</string>
+    <string name="widget_tap_to_open">Qeyf\'i açmak için dokun</string>
     <string name="shortcut_shuffle_liked">Beğenilenleri karıştır</string>
     <string name="shortcut_downloads">İndirilenler</string>
     <string name="shortcut_search">Ara</string>

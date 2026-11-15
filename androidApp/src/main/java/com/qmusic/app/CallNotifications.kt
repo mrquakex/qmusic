@@ -104,11 +104,11 @@ object CallNotifications {
         val tr = tr(context)
         return NotificationCompat.Builder(context, ONGOING_CHANNEL)
             .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
-            .setContentTitle(peer?.name ?: "QMusic")
+            .setContentTitle(peer?.name ?: "Qeyf")
             .setContentText(if (tr) "Arama sürüyor" else "Call in progress")
             .setStyle(
                 NotificationCompat.CallStyle.forOngoingCall(
-                    Person.Builder().setName(peer?.name ?: "QMusic").build(),
+                    Person.Builder().setName(peer?.name ?: "Qeyf").build(),
                     action(context, CallActionReceiver.HANG_UP, 15),
                 ).setIsVideo(video),
             )
