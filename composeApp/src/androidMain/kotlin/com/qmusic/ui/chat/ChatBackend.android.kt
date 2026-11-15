@@ -1691,29 +1691,42 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
      * Online while the app is connected: the database itself marks the person offline (with the time) when the
      * connection drops, even if the phone dies or the app is killed.
      */
+    @Volatile
+    private var presenceConnected = false
+    private var presenceVisibility: kotlinx.coroutines.Job? = null
+
     private fun trackPresence(uid: String?) {
         val connected = db.getReference(".info/connected")
         presenceListener?.let { connected.removeEventListener(it) }
         presenceListener = null
+        presenceVisibility?.cancel()
+        presenceVisibility = null
         if (uid == null) return
         val ref = root.child("presence").child(uid)
+        // "Online" only while the app is on screen: in the background (music playing, a call service) the connection
+        // stays, but the person is not there, so it says "last seen" from the moment they left.
+        fun write() {
+            if (!presenceConnected) return
+            if (_privacy.value.hideLastSeen) {
+                // Hidden: others see neither "online" nor a time.
+                ref.onDisconnect().setValue(mapOf("hidden" to true))
+                ref.setValue(mapOf("hidden" to true))
+                return
+            }
+            ref.onDisconnect().setValue(mapOf("online" to false, "lastSeen" to ServerValue.TIMESTAMP))
+            ref.setValue(mapOf("online" to CallHooks.appVisible, "lastSeen" to ServerValue.TIMESTAMP))
+        }
         val listener = object : ValueEventListener {
             override fun onDataChange(snap: DataSnapshot) {
-                if (snap.getValue(Boolean::class.java) != true) return
-                if (_privacy.value.hideLastSeen) {
-                    // Hidden: others see neither "online" nor a time.
-                    ref.onDisconnect().setValue(mapOf("hidden" to true))
-                    ref.setValue(mapOf("hidden" to true))
-                    return
-                }
-                ref.onDisconnect().setValue(mapOf("online" to false, "lastSeen" to ServerValue.TIMESTAMP))
-                ref.setValue(mapOf("online" to true, "lastSeen" to ServerValue.TIMESTAMP))
+                presenceConnected = snap.getValue(Boolean::class.java) == true
+                write()
             }
 
             override fun onCancelled(error: DatabaseError) {}
         }
         connected.addValueEventListener(listener)
         presenceListener = listener
+        presenceVisibility = scope.launch { CallHooks.onScreen.collect { write() } }
         // Privacy changed while connected: written again at once.
         if (_privacy.value.hideLastSeen) ref.setValue(mapOf("hidden" to true))
     }

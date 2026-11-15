@@ -98,7 +98,12 @@ actual fun YouTubeLoginView(
                             }
                         }
 
-                        loadUrl("https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F")
+                        // The Google account already signed in to Qeyf's messages is filled in, so only its password
+                        // is asked (and the phone's saved passwords can fill that in with one tap).
+                        val known = runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email }.getOrNull()
+                        val hint = known?.takeIf { it.isNotBlank() }?.let { "&Email=" + java.net.URLEncoder.encode(it, "UTF-8") }.orEmpty()
+                        importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_YES
+                        loadUrl("https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F$hint")
                     }
                 },
             )

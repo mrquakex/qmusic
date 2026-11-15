@@ -94,6 +94,9 @@ object CallHooks {
     var state: StateFlow<CallState?>? = null
         internal set
 
+    /** The same, to follow (the "online" mark goes with it). */
+    val onScreen = kotlinx.coroutines.flow.MutableStateFlow(false)
+
     /** Whether the app is on screen: a call rings in the app then, and in a notification otherwise. */
     @Volatile
     var appVisible: Boolean = false
@@ -102,6 +105,7 @@ object CallHooks {
 
     fun setVisible(visible: Boolean) {
         appVisible = visible
+        onScreen.value = visible
         onVisibility?.invoke(visible)
         trace?.invoke(if (visible) "app on screen" else "app hidden")
     }
