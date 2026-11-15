@@ -93,6 +93,8 @@ kotlin {
                 implementation(libs.media3.database)
                 implementation(libs.okhttp)
                 implementation("androidx.appcompat:appcompat:1.7.0")
+                // Calls as the phone's own calls: Bluetooth / car / watch control, audio routes, the phoneCall service.
+                implementation("androidx.core:core-telecom:1.0.0")
                 implementation(project.dependencies.platform(libs.firebase.bom))
                 implementation(libs.firebase.auth)
                 implementation(libs.firebase.database)

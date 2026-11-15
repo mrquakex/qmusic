@@ -1,5 +1,7 @@
 package com.qmusic.ui.chat
 
+import com.google.firebase.database.ChildEventListener
+import kotlinx.coroutines.flow.first
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -122,6 +124,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         profileListener = null
         runCatching { calls.listenFor(user?.uid) }
         trackPresence(user?.uid)
+        runCatching { watchDeliveries(user?.uid) }
         if (user == null) {
             _account.value = if (webClientId == null) ChatAccount.Unavailable(SETUP_NEEDED) else ChatAccount.SignedOut
             return
@@ -326,6 +329,59 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             share = share,
             pending = id in pending,
         )
+    }
+
+    override fun otherDeliveredAt(chatId: String, otherUid: String): Flow<Long> = callbackFlow {
+        val job = launch {
+            listen(root.child("chats").child(chatId).child("delivered").child(otherUid)).collect { trySend(it.getValue(Long::class.java) ?: 0L) }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    /** This phone has the conversation's messages up to now: the sender sees two ticks. */
+    fun markDelivered(chatId: String) {
+        val uid = auth.currentUser?.uid ?: return
+        root.child("chats").child(chatId).child("delivered").child(uid).setValue(ServerValue.TIMESTAMP)
+    }
+
+    /**
+     * While signed in, every new message to this person (the list's entries changing) is marked delivered at once, the
+     * app open or not, as long as it runs: a push wakes it, and that is enough.
+     */
+    private var deliveryRef: DatabaseReference? = null
+    private var deliveryListener: ChildEventListener? = null
+    private val deliveredUpTo = HashMap<String, Long>()
+
+    private fun watchDeliveries(uid: String?) {
+        deliveryListener?.let { deliveryRef?.removeEventListener(it) }
+        deliveryListener = null
+        deliveredUpTo.clear()
+        if (uid == null) return
+        val ref = root.child("userChats").child(uid)
+        val listener = object : ChildEventListener {
+            fun seen(snap: DataSnapshot) {
+                val chatId = snap.key ?: return
+                val from = snap.child("lastFrom").getValue(String::class.java) ?: return
+                val at = snap.child("lastAt").getValue(Long::class.java) ?: return
+                if (from == uid || at <= (deliveredUpTo[chatId] ?: 0L)) return
+                deliveredUpTo[chatId] = at
+                markDelivered(chatId)
+            }
+
+            override fun onChildAdded(snap: DataSnapshot, previous: String?) = seen(snap)
+            override fun onChildChanged(snap: DataSnapshot, previous: String?) = seen(snap)
+            override fun onChildRemoved(snap: DataSnapshot) {}
+            override fun onChildMoved(snap: DataSnapshot, previous: String?) {}
+            override fun onCancelled(error: DatabaseError) {}
+        }
+        ref.addChildEventListener(listener)
+        deliveryRef = ref
+        deliveryListener = listener
+    }
+
+    /** The signed-in person, waited for (a notification's action can wake the app before sign-in is restored). */
+    suspend fun awaitMe(timeoutMs: Long = 15_000): ChatUser? = kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+        (account.first { it is ChatAccount.Ready || it is ChatAccount.SignedOut || it is ChatAccount.Unavailable } as? ChatAccount.Ready)?.me
     }
 
     override fun otherReadAt(chatId: String, otherUid: String): Flow<Long> = callbackFlow {

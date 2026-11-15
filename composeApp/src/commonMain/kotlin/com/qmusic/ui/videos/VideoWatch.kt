@@ -176,12 +176,13 @@ fun WatchPage(
 
 @Composable
 private fun PlayerBox(w: WatchState, playback: VideoPlayback?, s: VideoStrings, controller: VideosController, fullscreen: Boolean, modifier: Modifier) {
+    val fill by controller.fill.collectAsState()
     Box(modifier = modifier.background(Color.Black)) {
         val isPlaying = playback?.isPlaying?.collectAsState()?.value ?: false
         val buffering = playback?.buffering?.collectAsState()?.value ?: false
         val playError = playback?.error?.collectAsState()?.value
         if (playback != null && w.quality != null) {
-            VideoPlaybackSurface(playback, Modifier.fillMaxSize())
+            VideoPlaybackSurface(playback, Modifier.fillMaxSize(), fill = fullscreen && fill)
         } else if (w.video.thumbnail != null) {
             AsyncImage(model = w.video.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }

@@ -57,6 +57,35 @@ async function publishTurn() {
 
 const isMember = (chatId, uid) => chatId.startsWith(uid + "_") || chatId.endsWith("_" + uid);
 
+/** Errors worth another try a moment later (Google's side, the network); the others will not change. */
+const TRANSIENT = new Set(["messaging/internal-error", "messaging/server-unavailable", "messaging/unknown-error", "app/network-error"]);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Sends to every address, and tries the ones that failed for a passing reason twice more. */
+async function sendWithRetry(message) {
+  const result = await admin.messaging().sendEachForMulticast(message);
+  for (const wait of [500, 1500]) {
+    const again = [];
+    result.responses.forEach((r, i) => {
+      if (!r.success && r.error && TRANSIENT.has(r.error.code)) again.push(i);
+    });
+    if (again.length === 0) break;
+    await sleep(wait);
+    const retry = await admin.messaging().sendEachForMulticast({ ...message, tokens: again.map((i) => message.tokens[i]) });
+    retry.responses.forEach((r, j) => {
+      result.responses[again[j]] = r;
+    });
+  }
+  result.successCount = result.responses.filter((r) => r.success).length;
+  return result;
+}
+
+/** For a call: how many of the other person's phones were told, so the caller can say "Unavailable" at once. */
+async function reportCallPush(n, ok) {
+  if (n.type !== "call" || n.action === "cancel") return;
+  await db.ref(`calls/${n.chatId}/push`).set({ id: String(n.callId || ""), ok, at: admin.database.ServerValue.TIMESTAMP }).catch(() => {});
+}
+
 async function handle(n) {
   if (!n || typeof n.from !== "string" || typeof n.to !== "string" || typeof n.chatId !== "string") return;
   if (n.from === n.to || !isMember(n.chatId, n.to)) return;
@@ -70,7 +99,11 @@ async function handle(n) {
 
   const tokensByKey = (await db.ref(`pushTokens/${n.to}`).get()).val() || {};
   const keys = Object.keys(tokensByKey);
-  if (keys.length === 0) return;
+  if (keys.length === 0) {
+    await reportCallPush(n, 0);
+    log(`${n.type} ${n.chatId.length} -> no push address`);
+    return;
+  }
   // Claude speaking in someone's conversation: the notification is about that conversation (the other member),
   // so tapping it opens it; the text says it was Claude.
   const [m1, m2] = n.chatId.split("_");
@@ -95,7 +128,7 @@ async function handle(n) {
     data.video = n.video ? "1" : "0";
     data.action = n.action === "cancel" ? "cancel" : "ring";
   }
-  const result = await admin.messaging().sendEachForMulticast({
+  const result = await sendWithRetry({
     tokens: keys.map((k) => tokensByKey[k]),
     data,
     android: { priority: "high", ttl: call ? 30 * 1000 : 24 * 3600 * 1000 },
@@ -107,7 +140,9 @@ async function handle(n) {
     if (!r.success && r.error && DEAD_TOKEN.has(r.error.code)) removals[keys[i]] = null;
   });
   if (Object.keys(removals).length > 0) await db.ref(`pushTokens/${n.to}`).update(removals);
-  log(`${data.type} ${n.chatId.length} -> ${result.successCount}/${keys.length}`);
+  await reportCallPush(n, result.successCount);
+  const errors = result.responses.filter((r) => !r.success).map((r) => (r.error && r.error.code) || "unknown");
+  log(`${data.type} ${n.chatId.length} -> ${result.successCount}/${keys.length}` + (errors.length ? ` errors: ${errors.join(", ")}` : ""));
 }
 
 db.ref("notify").on("child_added", async (snap) => {

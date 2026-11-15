@@ -67,6 +67,13 @@ object VideoColors {
     val TextSecondary = Color(0xFFAAAAAA)
     val Divider = Color(0xFF303030)
     val Link = Color(0xFF3EA6FF)
+
+    /** Qeyf's own warm colours (the opening's glow): the seek bar runs from one to the other. */
+    val QeyfOrange = Color(0xFFFF8A3D)
+    val QeyfPink = Color(0xFFFF3D7F)
+
+    /** The parts SponsorBlock skips, marked on the seek bar. */
+    val Sponsor = Color(0xFFFFD54F)
 }
 
 @Composable

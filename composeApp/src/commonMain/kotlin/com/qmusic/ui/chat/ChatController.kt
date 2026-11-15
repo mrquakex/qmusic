@@ -207,6 +207,8 @@ class ChatController(
 
     fun otherReadAt(other: ChatUser) = chatIdWith(other)?.let { id -> backend.otherReadAt(id, other.uid).catch { emit(0L) } } ?: flowOf(0L)
 
+    fun otherDeliveredAt(other: ChatUser) = chatIdWith(other)?.let { id -> backend.otherDeliveredAt(id, other.uid).catch { emit(0L) } } ?: flowOf(0L)
+
     fun markRead(other: ChatUser) {
         val id = chatIdWith(other) ?: return
         scope.launch { runCatching { backend.markRead(id) } }

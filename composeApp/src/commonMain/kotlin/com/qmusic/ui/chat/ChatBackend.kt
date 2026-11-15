@@ -136,6 +136,9 @@ interface ChatBackend {
     /** Until when [chatId]'s other member has read (updated live). */
     fun otherReadAt(chatId: String, otherUid: String): Flow<Long>
 
+    /** Until when the other person's phone has the messages ("delivered", two grey ticks). */
+    fun otherDeliveredAt(chatId: String, otherUid: String): Flow<Long> = kotlinx.coroutines.flow.flowOf(0L)
+
     suspend fun send(other: ChatUser, text: String, share: SharedItem?, replyTo: ChatReply?): Result<Unit>
     suspend fun markRead(chatId: String)
     suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit>

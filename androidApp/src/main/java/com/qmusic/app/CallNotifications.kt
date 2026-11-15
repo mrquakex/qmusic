@@ -26,6 +26,7 @@ import com.qmusic.ui.chat.ChatUser
 object CallNotifications {
     private const val RING_CHANNEL = "qmusic_calls_ring"
     private const val ONGOING_CHANNEL = "qmusic_calls_ongoing"
+    private const val MISSED_CHANNEL = "qmusic_calls_missed"
     const val RING_ID = 2001
     const val ONGOING_ID = 2002
     const val EXTRA_ACCEPT = "call_accept"
@@ -95,6 +96,31 @@ object CallNotifications {
         runCatching { context.getSystemService(NotificationManager::class.java).notify(RING_ID, notification) }
     }
 
+    /** "Missed call from X": tapping it opens the conversation, with the call button there. */
+    fun showMissed(context: Context, peer: ChatUser, video: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(MISSED_CHANNEL, if (tr(context)) "Cevapsız aramalar" else "Missed calls", NotificationManager.IMPORTANCE_DEFAULT),
+            )
+        }
+        val tr = tr(context)
+        runCatching {
+            context.getSystemService(NotificationManager::class.java).notify(
+                ("missed" + peer.uid).hashCode(),
+                NotificationCompat.Builder(context, MISSED_CHANNEL)
+                    .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
+                    .setContentTitle(if (tr) "Cevapsız arama" else "Missed call")
+                    .setContentText(
+                        peer.name + " · " + if (video) (if (tr) "Görüntülü arama" else "Video call") else (if (tr) "Sesli arama" else "Voice call"),
+                    )
+                    .setCategory(NotificationCompat.CATEGORY_MISSED_CALL)
+                    .setAutoCancel(true)
+                    .setContentIntent(ChatPush.openChat(context, peer))
+                    .build(),
+            )
+        }
+    }
+
     fun cancelIncoming(context: Context) {
         context.getSystemService(NotificationManager::class.java).cancel(RING_ID)
     }
@@ -144,14 +170,21 @@ class CallKeepAliveService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val video = intent?.getBooleanExtra(EXTRA_VIDEO, false) == true
         val peer = intent?.getStringExtra(EXTRA_NAME)?.let { ChatUser(uid = "", name = it, username = "") }
-        val types = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        val media = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or (if (video) ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else 0)
         } else {
             0
         }
-        runCatching {
-            ServiceCompat.startForeground(this, CallNotifications.ONGOING_ID, CallNotifications.ongoing(this, peer, video), types)
-        }.onFailure { stopSelf() }
+        // First as a phone call (allowed to start and keep the microphone in the background, the call being the phone's
+        // own through Core-Telecom), then as microphone / camera only, then as a plain service: whatever this phone takes.
+        val tries = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) add(ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL or media)
+            add(media)
+            add(0)
+        }.distinct()
+        val notification = CallNotifications.ongoing(this, peer, video)
+        val started = tries.any { type -> runCatching { ServiceCompat.startForeground(this, CallNotifications.ONGOING_ID, notification, type) }.isSuccess }
+        if (!started) stopSelf()
         return START_NOT_STICKY
     }
 

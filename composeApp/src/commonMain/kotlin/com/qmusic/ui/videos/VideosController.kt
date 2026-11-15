@@ -509,6 +509,7 @@ class VideosController(
             launch { loadStream(id) }
             launch { loadCaptions(id) }
             launch { loadSegments(id) }
+            launch { loadPreview(id) }
             service.watch(id).fold(
                 onSuccess = { d ->
                     _watch.update { w ->
@@ -1024,7 +1025,42 @@ class VideosController(
             _sleep.value = SleepTimer()
             return
         }
-        if (autoplay.value != "0") playNext()
+        if (autoplay.value != "0" && _autoplayCancelled.value != _watch.value?.video?.id) playNext()
+    }
+
+    /** What plays when this video ends: the next of the list it was opened from, else YouTube's first suggestion. */
+    fun nextUp(): VideoItem? {
+        val w = _watch.value ?: return null
+        return w.queue.getOrNull(w.queueIndex + 1) ?: w.related.firstNotNullOfOrNull { (it as? VideoEntry.Video)?.item }
+    }
+
+    private val _autoplayCancelled = MutableStateFlow<String?>(null)
+
+    /** The video whose "up next" the person dismissed: it ends without going on. */
+    val autoplayCancelled: StateFlow<String?> = _autoplayCancelled.asStateFlow()
+
+    fun cancelAutoplay() {
+        _autoplayCancelled.value = _watch.value?.video?.id
+    }
+
+    private val _fill = MutableStateFlow(false)
+
+    /** Full screen: the picture fills the whole screen (cropped) instead of fitting inside it. */
+    val fill: StateFlow<Boolean> = _fill.asStateFlow()
+
+    fun setFill(on: Boolean) {
+        _fill.value = on
+    }
+
+    private val _preview = MutableStateFlow<com.qmusic.engine.models.PreviewFrames?>(null)
+
+    /** The small pictures of the open video, shown over the seek bar while seeking. */
+    val preview: StateFlow<com.qmusic.engine.models.PreviewFrames?> = _preview.asStateFlow()
+
+    private suspend fun loadPreview(id: String) {
+        _preview.value = null
+        val frames = service.previewFrames(id).getOrNull()
+        if (_watch.value?.video?.id == id) _preview.value = frames
     }
 
     private val _sleep = MutableStateFlow(SleepTimer())

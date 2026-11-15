@@ -68,6 +68,14 @@ data class VideoExtraStrings(
     val removeDownload: String,
     val cancelDownload: String,
     val downloadLive: String,
+    val upNext: String,
+    val playNow: String,
+    val seconds: String,
+    val lock: String,
+    val unlock: String,
+    val zoomFill: String,
+    val zoomFit: String,
+    val playerSettings: String,
 ) {
     companion object {
         val Turkish = VideoExtraStrings(
@@ -89,6 +97,14 @@ data class VideoExtraStrings(
             removeDownload = "Sil",
             cancelDownload = "İptal",
             downloadLive = "Canlı yayın indirilemez",
+            upNext = "Sıradaki",
+            playNow = "Şimdi oynat",
+            seconds = "sn",
+            lock = "Ekranı kilitle",
+            unlock = "Kilidi açmak için dokun",
+            zoomFill = "Ekranı doldur",
+            zoomFit = "Ekrana sığdır",
+            playerSettings = "Oynatıcı ayarları",
         )
         val English = VideoExtraStrings(
             autoplay = "Autoplay",
@@ -109,6 +125,14 @@ data class VideoExtraStrings(
             removeDownload = "Delete",
             cancelDownload = "Cancel",
             downloadLive = "A live stream cannot be downloaded",
+            upNext = "Up next",
+            playNow = "Play now",
+            seconds = "s",
+            lock = "Lock screen",
+            unlock = "Tap to unlock",
+            zoomFill = "Fill screen",
+            zoomFit = "Fit to screen",
+            playerSettings = "Player settings",
         )
     }
 }

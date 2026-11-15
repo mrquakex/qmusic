@@ -36,6 +36,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -89,6 +90,9 @@ import kotlinx.datetime.toLocalDateTime
 /** The conversation open on screen right now (no notification is shown for it). */
 object ChatPresence {
     var openChatId: String? = null
+
+    /** A conversation was opened: its notification goes (set by the app). */
+    var onOpened: ((chatId: String) -> Unit)? = null
 }
 
 /**
@@ -372,6 +376,7 @@ private fun ThreadListPage(controller: ChatController, s: ChatStrings, me: ChatU
                 }
             },
         )
+        ReadinessCard(s)
         val list = threads
         when {
             list == null -> Centered { CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp) }
@@ -400,6 +405,46 @@ private fun ThreadListPage(controller: ChatController, s: ChatStrings, me: ChatU
             confirmButton = { TextButton(onClick = { confirmDelete = false; controller.deleteAccount() }) { Text(s.delete, color = Color.White) } },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(s.cancel, color = TextSecondary) } },
         )
+    }
+}
+
+/** What on this phone keeps calls and messages from arriving, each a tap away from its settings page. */
+@Composable
+private fun ReadinessCard(s: ChatStrings) {
+    val readiness = rememberReadiness()
+    if (readiness.issues.isEmpty()) return
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(DarkSurfaceVariant)
+            .padding(14.dp),
+    ) {
+        Text(s.readinessTitle, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(10.dp))
+        Row(
+            Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            readiness.issues.forEach { issue ->
+                Text(
+                    when (issue) {
+                        ReadinessIssue.NOTIFICATIONS -> s.readinessNotifications
+                        ReadinessIssue.FULL_SCREEN -> s.readinessFullScreen
+                        ReadinessIssue.BATTERY -> s.readinessBattery
+                    },
+                    color = Color.Black,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.White)
+                        .clickable { readiness.fix(issue) }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
+        }
     }
 }
 
@@ -482,6 +527,7 @@ private fun ConversationPage(
 ) {
     val messages by remember(other.uid) { controller.messages(other) }.collectAsState(initial = null)
     val readAt by remember(other.uid) { controller.otherReadAt(other) }.collectAsState(initial = 0L)
+    val deliveredAt by remember(other.uid) { controller.otherDeliveredAt(other) }.collectAsState(initial = 0L)
     val blocked by controller.blocked.collectAsState()
     val isBlocked = other.uid in blocked
     var text by remember(other.uid) { mutableStateOf("") }
@@ -520,6 +566,7 @@ private fun ConversationPage(
     val chatId = controller.chatIdWith(other)
     DisposableEffect(chatId) {
         ChatPresence.openChatId = chatId
+        chatId?.let { ChatPresence.onOpened?.invoke(it) }
         onDispose { if (ChatPresence.openChatId == chatId) ChatPresence.openChatId = null }
     }
     // What arrives while the conversation is open counts as read.
@@ -635,6 +682,7 @@ private fun ConversationPage(
                                 m = row.m,
                                 mine = row.m.from == me.uid,
                                 read = row.m.at <= readAt,
+                                delivered = row.m.at <= maxOf(deliveredAt, readAt),
                                 s = s,
                                 otherName = other.name,
                                 reactions = reactions[row.m.id].orEmpty(),
@@ -1216,6 +1264,7 @@ private fun Bubble(
     m: ChatMessage,
     mine: Boolean,
     read: Boolean,
+    delivered: Boolean = false,
     s: ChatStrings,
     otherName: String,
     reactions: Map<String, String>,
@@ -1346,7 +1395,7 @@ private fun Bubble(
                     Text(
                         text = when {
                             m.pending -> "◷"
-                            read -> "✓✓"
+                            read || delivered -> "✓✓"
                             else -> "✓"
                         },
                         color = if (read && !m.pending) Color.Black else fgSoft,

@@ -19,7 +19,8 @@ enum class CallPhase {
     ENDED,
 }
 
-enum class CallEnd { HUNG_UP, DECLINED, NO_ANSWER, BUSY, FAILED, CANCELLED }
+/** [UNREACHABLE]: the other phone could not be told (no push address, switched off, no connection for long). */
+enum class CallEnd { HUNG_UP, DECLINED, NO_ANSWER, BUSY, FAILED, CANCELLED, UNREACHABLE }
 
 data class CallState(
     val id: String,
@@ -37,6 +38,8 @@ data class CallState(
     val endReason: CallEnd? = null,
     /** The connection got weak (the picture or sound may stutter for a moment). */
     val weak: Boolean = false,
+    /** We are calling and the other phone rings now ("Ringing…" instead of "Calling…"). */
+    val reached: Boolean = false,
 )
 
 /** One-to-one voice and video calls. On Android: WebRTC, with signalling through the messages database. */

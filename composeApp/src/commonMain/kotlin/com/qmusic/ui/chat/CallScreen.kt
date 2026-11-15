@@ -141,7 +141,7 @@ fun CallScreen(
 
 @Composable
 private fun statusText(call: CallState, s: ChatStrings): String = when (call.phase) {
-    CallPhase.CALLING -> s.callCalling
+    CallPhase.CALLING -> if (call.reached) s.callRinging else s.callCalling
     CallPhase.INCOMING -> if (call.video) s.callIncomingVideo else s.callIncomingVoice
     CallPhase.CONNECTING -> s.callConnecting
     CallPhase.ACTIVE -> {
@@ -159,6 +159,7 @@ private fun statusText(call: CallState, s: ChatStrings): String = when (call.pha
         CallEnd.NO_ANSWER -> s.callNoAnswer
         CallEnd.BUSY -> s.callBusy
         CallEnd.FAILED -> s.callFailed
+        CallEnd.UNREACHABLE -> s.callUnreachable
         else -> s.callEnded
     }
 }

@@ -22,6 +22,8 @@ class QMusicApplication : Application() {
         val app = this
         com.qmusic.ui.chat.CallHooks.onIncoming = { _, peer, video -> CallNotifications.showIncoming(app, peer, video) }
         com.qmusic.ui.chat.CallHooks.onIncomingGone = { CallNotifications.cancelIncoming(app) }
+        com.qmusic.ui.chat.CallHooks.onMissed = { peer, video -> CallNotifications.showMissed(app, peer, video) }
+        com.qmusic.ui.chat.ChatPresence.onOpened = { chatId -> ChatPush.clear(app, chatId) }
         com.qmusic.ui.chat.CallHooks.onActive = { active, peer, video ->
             val service = android.content.Intent(app, CallKeepAliveService::class.java)
             if (active) {

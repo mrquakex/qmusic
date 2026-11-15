@@ -53,6 +53,11 @@
               ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 8)"
             }
           }
+        },
+        "delivered": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid))"
+          }
         }
       }
     },

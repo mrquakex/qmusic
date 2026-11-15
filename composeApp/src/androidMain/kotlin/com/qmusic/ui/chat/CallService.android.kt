@@ -78,6 +78,9 @@ object CallHooks {
     /** The ringing stopped (answered, declined, cancelled): take the notification away. */
     var onIncomingGone: (() -> Unit)? = null
 
+    /** A call rang out unanswered while the app was out of sight: the "missed call" notification. */
+    var onMissed: ((peer: ChatUser, video: Boolean) -> Unit)? = null
+
     /** A call is going on (keep the app alive with a foreground service), or it is over. */
     var onActive: ((active: Boolean, peer: ChatUser?, video: Boolean) -> Unit)? = null
 
@@ -185,12 +188,42 @@ internal class FirebaseCallService(
         var ended = false
         var lastReoffer: String? = null
         var lastReanswer: String? = null
+        var unreachableJob: Job? = null
         val callRef: DatabaseReference get() = root.child("calls").child(chatId)
     }
 
     private var session: Session? = null
 
+    /** The phone's own call system (Core-Telecom), where the phone has one: see [CallTelecom]. */
+    private val telecom = CallTelecom(app, scope).also { t ->
+        t.onRemoteHangUp = { scope.launch { hangUp() } }
+        t.onMuteChanged = { muted ->
+            scope.launch {
+                if (session != null && _state.value?.muted != muted) {
+                    session?.audio?.setEnabled(!muted)
+                    _state.update { it?.copy(muted = muted) }
+                }
+            }
+        }
+        t.onUnavailable = { scope.launch { if (session != null) routeAudio(_state.value?.speaker == true) } }
+    }
+
+    /** How far the phone's clock is from the server's: "is this call still ringing" is asked in the server's time. */
+    @Volatile
+    private var serverOffset = 0L
+
+    private fun serverNow() = System.currentTimeMillis() + serverOffset
+
     init {
+        runCatching {
+            root.database.getReference(".info/serverTimeOffset").addValueEventListener(object : ValueEventListener {
+                override fun onDataChange(snap: DataSnapshot) {
+                    serverOffset = snap.getValue(Long::class.java) ?: 0L
+                }
+
+                override fun onCancelled(error: DatabaseError) {}
+            })
+        }
         CallHooks.state = _state
         CallHooks.onVisibility = { visible ->
             scope.launch {
@@ -225,7 +258,13 @@ internal class FirebaseCallService(
     }
 
     private fun onInbox(snap: DataSnapshot) {
-        val current = session
+        var current = session
+        // A call that is over (still on screen for a moment) does not make this phone "busy" for the next one.
+        if (current != null && current.ended) {
+            session = null
+            _state.value = null
+            current = null
+        }
         if (!snap.exists()) {
             // The caller gave up before it was answered.
             if (current != null && !current.caller && _state.value?.phase == CallPhase.INCOMING) finish(CallEnd.CANCELLED, write = false)
@@ -237,7 +276,7 @@ internal class FirebaseCallService(
         val at = snap.child("at").getValue(Long::class.java) ?: 0L
         val video = snap.child("video").getValue(Boolean::class.java) == true
         if (current?.id == id) return
-        if (System.currentTimeMillis() - at > RING_MS + 15_000) {
+        if (serverNow() - at > RING_MS + 15_000) {
             snap.ref.removeValue()
             return
         }
@@ -259,6 +298,8 @@ internal class FirebaseCallService(
             val s = Session(id, chatId, peer, video, caller = false)
             session = s
             _state.value = CallState(id = id, peer = peer, video = video, phase = CallPhase.INCOMING, speaker = video)
+            // The caller sees "Ringing…" from here on: this phone has the call.
+            s.callRef.child("ringing").setValue(id)
             watchCall(s)
             if (CallHooks.appVisible) startRinging() else CallHooks.onIncoming?.invoke(id, peer, video)
             s.timeout = scope.launch {
@@ -278,6 +319,7 @@ internal class FirebaseCallService(
         _state.value = CallState(id = id, peer = peer, video = video, phase = CallPhase.CALLING, speaker = video)
         CallHooks.onActive?.invoke(true, peer, video)
         startAudio(video)
+        telecom.start(peer, video, incoming = false)
         scope.launch {
             try {
                 // A new call replaces what was left of the last one in this conversation.
@@ -326,6 +368,7 @@ internal class FirebaseCallService(
         s.timeout?.cancel()
         _state.update { it?.copy(phase = CallPhase.CONNECTING) }
         startAudio(s.video)
+        telecom.start(s.peer, s.video, incoming = true)
         scope.launch {
             try {
                 root.child("incomingCall").child(me()?.uid ?: return@launch).removeValue()
@@ -417,6 +460,22 @@ internal class FirebaseCallService(
                             val pc = s.pc ?: return@runCatching
                             if (pc.signalingState() == PeerConnection.SignalingState.HAVE_LOCAL_OFFER) {
                                 pc.awaitSetRemote(SessionDescription(SessionDescription.Type.ANSWER, reanswer))
+                            }
+                        }
+                    }
+                }
+                // Calling: their phone rings ("Ringing…"), or the server could not reach it at all ("Unavailable" after a
+                // short wait, unless it shows up meanwhile through the open app).
+                if (s.caller && !s.connectedOnce) {
+                    val reached = snap.child("ringing").getValue(String::class.java) == s.id
+                    if (reached && _state.value?.reached != true) _state.update { it?.copy(reached = true) }
+                    val push = snap.child("push")
+                    val pushFailed = push.child("id").getValue(String::class.java) == s.id && (push.child("ok").getValue(Long::class.java) ?: 1L) == 0L
+                    if (!reached && pushFailed && s.unreachableJob == null) {
+                        s.unreachableJob = scope.launch {
+                            delay(UNREACHABLE_GRACE_MS)
+                            if (session === s && _state.value?.phase == CallPhase.CALLING && _state.value?.reached != true) {
+                                finish(CallEnd.UNREACHABLE, write = true)
                             }
                         }
                     }
@@ -563,6 +622,7 @@ internal class FirebaseCallService(
                         s.disconnectJob?.cancel()
                         _state.update { it?.copy(phase = CallPhase.ACTIVE, startedAt = it.startedAt ?: System.currentTimeMillis(), weak = false) }
                         s.connectedOnce = true
+                        telecom.setActive()
                     }
                     PeerConnection.PeerConnectionState.DISCONNECTED -> {
                         _state.update { it?.copy(weak = true) }
@@ -626,7 +686,7 @@ internal class FirebaseCallService(
 
     override fun toggleSpeaker() {
         val on = !(_state.value?.speaker ?: false)
-        routeAudio(on)
+        if (!telecom.setSpeaker(on)) routeAudio(on)
         _state.update { it?.copy(speaker = on) }
     }
 
@@ -661,6 +721,21 @@ internal class FirebaseCallService(
         CallHooks.onIncomingGone?.invoke()
         s.timeout?.cancel()
         s.disconnectJob?.cancel()
+        s.unreachableJob?.cancel()
+        telecom.end(
+            when (reason) {
+                CallEnd.DECLINED -> android.telecom.DisconnectCause.REJECTED
+                CallEnd.NO_ANSWER -> android.telecom.DisconnectCause.MISSED
+                CallEnd.BUSY -> android.telecom.DisconnectCause.BUSY
+                CallEnd.FAILED, CallEnd.UNREACHABLE -> android.telecom.DisconnectCause.ERROR
+                CallEnd.CANCELLED -> android.telecom.DisconnectCause.CANCELED
+                CallEnd.HUNG_UP -> if (write) android.telecom.DisconnectCause.LOCAL else android.telecom.DisconnectCause.REMOTE
+            },
+        )
+        // Rang here and nobody answered (or they gave up) while the app was out of sight: a missed call to call back.
+        if (!s.caller && !s.connectedOnce && (reason == CallEnd.NO_ANSWER || reason == CallEnd.CANCELLED) && !CallHooks.appVisible) {
+            CallHooks.onMissed?.invoke(s.peer, s.video)
+        }
         val mine = me()
         if (write) {
             s.callRef.child("state").setValue("ended")
@@ -717,7 +792,8 @@ internal class FirebaseCallService(
                 .also { audioManager.requestAudioFocus(it) }
         }
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        routeAudio(video)
+        // Where the phone's call system has the call it sends the sound (see CallTelecom); otherwise the app does.
+        if (!telecom.available) routeAudio(video)
         if (!video) {
             // A voice call held to the ear turns the screen off (no cheek on the buttons).
             val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -792,6 +868,9 @@ internal class FirebaseCallService(
     companion object {
         /** How long a call rings before it counts as not answered. */
         const val RING_MS = 45_000L
+
+        /** The server could not reach the other phone: this long for it to show up anyway, then "Unavailable". */
+        private const val UNREACHABLE_GRACE_MS = 8_000L
         private const val END_SHOWN_MS = 1_800L
     }
 }

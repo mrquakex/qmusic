@@ -57,6 +57,9 @@ interface VideoService {
     /** Every way to play [videoId], best first (empty when it cannot be played). */
     suspend fun qualities(videoId: String): Result<List<VideoQuality>>
 
+    /** The small pictures shown over the seek bar while seeking (null when YouTube has none for the video). */
+    suspend fun previewFrames(videoId: String): Result<com.qmusic.engine.models.PreviewFrames?> = Result.success(null)
+
     /** A channel's page; [params] opens one of its tabs, none opens its videos. */
     suspend fun channel(channelId: String, params: String? = null): Result<VideoChannelPage>
 

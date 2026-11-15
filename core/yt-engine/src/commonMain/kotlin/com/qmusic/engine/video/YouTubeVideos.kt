@@ -111,6 +111,9 @@ class YouTubeVideos(
     override suspend fun qualities(videoId: String): Result<List<VideoQuality>> =
         runCatching { extractor?.videoQualities(videoId).orEmpty() }
 
+    override suspend fun previewFrames(videoId: String): Result<com.qmusic.engine.models.PreviewFrames?> =
+        runCatching { extractor?.previewFrames(videoId) }
+
     // ------------------------------------------------------------------ channels
 
     /** A channel's page; [params] opens one of its tabs (see [VideoChannelTab]), none opens its videos. */
