@@ -202,6 +202,19 @@ private class AndroidVoicePlayer(context: Context) : VoicePlayer {
         _progress.value = fraction
     }
 
+    private val _speed = MutableStateFlow(1f)
+    override val speed: StateFlow<Float> = _speed.asStateFlow()
+
+    override fun cycleSpeed() {
+        val next = when (_speed.value) {
+            1f -> 1.5f
+            1.5f -> 2f
+            else -> 1f
+        }
+        _speed.value = next
+        player.setPlaybackSpeed(next)
+    }
+
     override fun stop() {
         player.stop()
         loaded = null

@@ -289,6 +289,19 @@ fun QMusicApp(
                 )
                 return@CompositionLocalProvider
             }
+            // A group call takes the whole screen too.
+            val groupCallService = chatController?.groupCalls
+            val groupCall by (groupCallService?.state ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
+            if (groupCallService != null && groupCall != null) {
+                val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
+                com.qmusic.ui.chat.GroupCallScreen(
+                    service = groupCallService,
+                    s = chatStrings,
+                    me = (chatController.account.value as? com.qmusic.ui.chat.ChatAccount.Ready)?.me,
+                    modifier = modifier,
+                )
+                return@CompositionLocalProvider
+            }
             if (chatOpen && chatController != null) {
                 val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
                 com.qmusic.ui.chat.ChatApp(

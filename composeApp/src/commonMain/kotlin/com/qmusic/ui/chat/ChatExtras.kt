@@ -1,0 +1,564 @@
+package com.qmusic.ui.chat
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
+import com.qmusic.ui.PlatformBackHandler
+import com.qmusic.ui.theme.DarkSurface
+import com.qmusic.ui.theme.DarkSurfaceVariant
+import com.qmusic.ui.theme.QMusicIcons
+import com.qmusic.ui.theme.TextMuted
+import com.qmusic.ui.theme.TextPrimary
+import com.qmusic.ui.theme.TextSecondary
+import kotlinx.datetime.Clock
+
+/** Read: two green ticks (like the apps people know); delivered: two grey; sent: one grey. */
+internal val TickRead = Color(0xFF1DAA61)
+
+// ------------------------------------------------------------------ emoji
+
+private val EmojiCategories: List<Pair<String, List<String>>> = listOf(
+    "😀" to "😀 😃 😄 😁 😆 😅 🤣 😂 🙂 🙃 😉 😊 😇 🥰 😍 🤩 😘 😗 😚 😙 😋 😛 😜 🤪 😝 🤑 🤗 🤭 🤫 🤔 🤐 🤨 😐 😑 😶 😏 😒 🙄 😬 😮‍💨 🤥 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🥵 🥶 🥴 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 😟 🙁 😮 😯 😲 😳 🥺 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 👿 💀 💩 🤡 👻 👽 🤖 😺 😸 😹 😻 😼 😽 🙀 😿 😾".split(" "),
+    "👍" to "👍 👎 👌 🤌 🤏 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 ☝️ ✋ 🤚 🖐️ 🖖 👋 🤝 🙏 👏 🙌 👐 🤲 💪 🦾 ✍️ 💅 🤳 👀 👁️ 👅 👄 🧠 🫶 🫡 🫠 🫢 🫣 🫤 🥹".split(" "),
+    "❤️" to "❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❣️ 💕 💞 💓 💗 💖 💘 💝 💟 ♥️ 💋 💯 💢 💥 💫 💦 💨 🔥 ✨ ⭐ 🌟 💤".split(" "),
+    "🐶" to "🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐸 🐵 🙈 🙉 🙊 🐔 🐧 🐦 🐤 🦆 🦅 🦉 🐺 🐴 🦄 🐝 🦋 🐌 🐞 🐢 🐍 🦖 🐙 🦑 🦀 🐠 🐟 🐬 🐳 🦈 🐊 🐘 🦒 🐪 🐕 🐈 🌵 🌲 🌳 🌴 🌱 🌿 🍀 🍁 🍂 🌷 🌹 🌺 🌸 🌼 🌻 🌞 🌝 🌚 🌙 ⭐ ☀️ ⛅ ☁️ 🌧️ ⛈️ ❄️ ☃️ 🌈 🌊".split(" "),
+    "🍔" to "🍏 🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍒 🍑 🥭 🍍 🥥 🥝 🍅 🥑 🍆 🥔 🥕 🌽 🌶️ 🥒 🥦 🧄 🧅 🍄 🥜 🍞 🥐 🥖 🧀 🥚 🍳 🥞 🥓 🥩 🍗 🍖 🌭 🍔 🍟 🍕 🥪 🌮 🌯 🥗 🍝 🍜 🍲 🍛 🍣 🍱 🥟 🍤 🍙 🍚 🍰 🎂 🧁 🍮 🍭 🍬 🍫 🍿 🍩 🍪 ☕ 🍵 🧃 🥤 🧋 🍺 🍻 🥂 🍷 🍸 🍹".split(" "),
+    "⚽" to "⚽ 🏀 🏈 ⚾ 🎾 🏐 🏉 🎱 🏓 🏸 🥊 🥋 ⛳ 🎣 🎽 🛹 ⛸️ 🎿 🏂 🏋️ 🤸 🚴 🏆 🥇 🥈 🥉 🎖️ 🎪 🎭 🎨 🎬 🎤 🎧 🎼 🎹 🥁 🎷 🎺 🎸 🎻 🎲 🎯 🎳 🎮 🕹️ 🧩".split(" "),
+    "🚗" to "🚗 🚕 🚙 🚌 🏎️ 🚓 🚑 🚒 🚚 🚜 🏍️ 🛵 🚲 🛴 🚨 🚆 🚇 ✈️ 🛫 🚀 🛸 🚁 ⛵ 🚤 🛳️ ⚓ 🗺️ 🏔️ 🏕️ 🏖️ 🏝️ 🏠 🏡 🏢 🏥 🏦 🏨 🏫 🕌 ⛪ 🗽 🗼 🏰 🎡 🎢 🌃 🌆 🌉".split(" "),
+    "💡" to "⌚ 📱 💻 ⌨️ 🖥️ 🖨️ 🖱️ 💾 💿 📷 📸 📹 🎥 📞 ☎️ 📺 📻 🎙️ ⏰ ⏳ 🔋 🔌 💡 🔦 🕯️ 💸 💵 💰 💳 💎 ⚖️ 🔧 🔨 ⚙️ 🔫 💣 🔪 🛡️ 🔮 💊 💉 🧬 🔬 🔭 🧹 🧺 🧻 🚽 🛁 🔑 🗝️ 🚪 🛋️ 🛏️ 🎁 🎈 🎉 🎊 ✉️ 📦 📝 📚 📖 🔖 📌 📎 ✂️ 🔒 🔓".split(" "),
+    "🔣" to "✅ ☑️ ✔️ ❌ ❎ ➕ ➖ ➗ ✖️ ♾️ ‼️ ⁉️ ❓ ❔ ❕ ❗ 〰️ ⚠️ 🚫 ⛔ 🔞 📵 ♻️ 🔰 🆗 🆕 🆒 🆓 🆙 🆘 ▶️ ⏸️ ⏹️ ⏺️ ⏭️ ⏮️ 🔀 🔁 🔂 🎵 🎶 💲 ©️ ®️ ™️ 🔴 🟠 🟡 🟢 🔵 🟣 ⚫ ⚪ 🟥 🟧 🟨 🟩 🟦 🟪 ⬛ ⬜ 🇹🇷 🏳️ 🏴 🏁 🚩 🏳️‍🌈".split(" "),
+)
+
+/** The emoji keyboard: categories along the top, the emoji in a grid; a tap types it. */
+@Composable
+internal fun EmojiPanel(onEmoji: (String) -> Unit, modifier: Modifier = Modifier) {
+    var category by remember { mutableStateOf(0) }
+    Column(modifier.fillMaxWidth().height(290.dp).background(DarkSurface)) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp)) {
+            EmojiCategories.forEachIndexed { i, (icon, _) ->
+                Box(
+                    Modifier.size(42.dp).clip(RoundedCornerShape(10.dp)).background(if (i == category) DarkSurfaceVariant else Color.Transparent).clickable { category = i },
+                    contentAlignment = Alignment.Center,
+                ) { Text(icon, fontSize = 22.sp) }
+            }
+        }
+        LazyVerticalGrid(columns = GridCells.Adaptive(44.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(6.dp)) {
+            items(EmojiCategories[category].second.filter { it.isNotBlank() }) { e ->
+                Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).clickable { onEmoji(e) }, contentAlignment = Alignment.Center) {
+                    Text(e, fontSize = 26.sp)
+                }
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ link cards
+
+/** The card of the first link in a message: picture, site, title and a line; a tap opens it. */
+@Composable
+internal fun LinkPreviewCard(url: String, mine: Boolean, load: suspend (String) -> LinkPreview?) {
+    var card by remember(url) { mutableStateOf<LinkPreview?>(null) }
+    LaunchedEffect(url) { card = load(url) }
+    val c = card ?: return
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    Column(
+        Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp).width(260.dp).clip(RoundedCornerShape(12.dp))
+            .background(if (mine) Color.Black.copy(alpha = 0.06f) else Color.White.copy(alpha = 0.06f))
+            .clickable { runCatching { uriHandler.openUri(c.url) } },
+    ) {
+        if (c.image != null) {
+            AsyncImage(model = c.image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().aspectRatio(1.91f))
+        }
+        Column(Modifier.padding(10.dp)) {
+            val soft = if (mine) Color.Black.copy(alpha = 0.5f) else TextSecondary
+            if (c.site.isNotBlank()) Text(c.site, color = soft, fontSize = 11.sp, maxLines = 1)
+            Text(c.title, color = if (mine) Color.Black else TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (c.description.isNotBlank()) Text(c.description, color = soft, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+// ------------------------------------------------------------------ starred messages
+
+@Composable
+internal fun StarredPage(controller: ChatController, s: ChatStrings) {
+    val items by controller.starred.collectAsState()
+    Column(Modifier.fillMaxSize()) {
+        TopBar(s.starredTitle, { controller.pop() })
+        if (items.isEmpty()) {
+            Centered { Text(s.noStarred, color = TextSecondary, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(32.dp)) }
+        } else {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                items(items, key = { it.chatId + it.messageId }) { m ->
+                    Column(Modifier.fillMaxWidth().clickable { controller.openStarredChat(m) }.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(m.fromName.ifBlank { "?" }, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text("  ›  " + m.chatName, color = TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Text(listTime(m.at, s), color = TextMuted, fontSize = 12.sp)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("★ ", color = Color(0xFFFFCC00), fontSize = 13.sp)
+                            Text(m.text, color = TextSecondary, fontSize = 14.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ profile and privacy
+
+@Composable
+internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUser) {
+    val privacy by controller.privacy.collectAsState()
+    var name by remember(me.uid) { mutableStateOf(me.name) }
+    var about by remember(me.uid) { mutableStateOf(me.about) }
+    val pickPhoto = rememberImagePicker { photos -> photos.firstOrNull()?.let { controller.setProfilePhoto(it) } }
+    val changed = name.trim() != me.name || about.trim() != me.about
+    LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(bottom = 32.dp)) {
+        item { TopBar(s.settings, { controller.pop() }) }
+        item {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.clip(CircleShape).clickable { pickPhoto() }) { ChatAvatar(me, 112.dp) }
+                Text(s.changePhoto, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { pickPhoto() }.padding(10.dp))
+            }
+        }
+        item {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                Text(s.nameLabel, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
+                Field(name, { name = it.take(40) }, s.nameLabel)
+                Spacer(Modifier.height(14.dp))
+                Text(s.about, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
+                Field(about, { about = it.take(140) }, s.aboutHint, capitalize = false)
+                Text("@" + me.username, color = TextMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
+                if (changed) {
+                    Spacer(Modifier.height(12.dp))
+                    WhiteButton(s.save, enabled = name.isNotBlank()) { controller.updateProfile(name, about) }
+                }
+            }
+        }
+        item { SectionTitle(s.privacyTitle) }
+        item {
+            SettingSwitch(s.hideLastSeen, s.hideLastSeenNote, privacy.hideLastSeen) { controller.setPrivacy(privacy.copy(hideLastSeen = it)) }
+            SettingSwitch(s.hideReadReceipts, s.hideReadReceiptsNote, privacy.hideReadReceipts) { controller.setPrivacy(privacy.copy(hideReadReceipts = it)) }
+            Text(s.e2eNote, color = TextMuted, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun SettingSwitch(title: String, note: String, on: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onChange(!on) }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = TextPrimary, fontSize = 15.sp)
+            Text(note, color = TextSecondary, fontSize = 12.sp)
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(
+            checked = on,
+            onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = Color.White, uncheckedThumbColor = TextSecondary, uncheckedTrackColor = DarkSurfaceVariant),
+        )
+    }
+}
+
+// ------------------------------------------------------------------ dialogs
+
+/** A list of choices in a dialog; the one picked runs. */
+@Composable
+internal fun ChoiceDialog(title: String, choices: List<Pair<String, () -> Unit>>, s: ChatStrings, note: String? = null, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurfaceVariant,
+        title = { Text(title, color = TextPrimary) },
+        text = {
+            Column {
+                if (note != null) Text(note, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+                choices.forEach { (label, run) ->
+                    Text(label, color = TextPrimary, fontSize = 16.sp, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { onDismiss(); run() }.padding(vertical = 12.dp, horizontal = 4.dp))
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(s.cancel, color = TextSecondary) } },
+    )
+}
+
+/** Picking where to forward: the conversations, ticked; Send forwards to all of them. */
+@Composable
+internal fun ForwardDialog(controller: ChatController, s: ChatStrings, onSend: (List<ChatUser>) -> Unit, onDismiss: () -> Unit) {
+    val targets by controller.forwardTargets.collectAsState()
+    var picked by remember { mutableStateOf(setOf<String>()) }
+    var query by remember { mutableStateOf("") }
+    val shown = targets.filter { query.isBlank() || it.name.contains(query, ignoreCase = true) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurfaceVariant,
+        title = { Text(s.forwardTo, color = TextPrimary) },
+        text = {
+            Column {
+                Field(query, { query = it }, s.search, capitalize = false)
+                Spacer(Modifier.height(8.dp))
+                LazyColumn(Modifier.heightIn(max = 380.dp)) {
+                    items(shown, key = { it.uid }) { user ->
+                        val on = user.uid in picked
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { picked = if (on) picked - user.uid else picked + user.uid }.padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            ChatAvatar(user, 38.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(user.name, color = TextPrimary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Box(Modifier.size(22.dp).clip(CircleShape).background(if (on) Color.White else DarkSurface), contentAlignment = Alignment.Center) {
+                                if (on) Icon(QMusicIcons.Check, null, tint = Color.Black, modifier = Modifier.size(14.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = picked.isNotEmpty(), onClick = { onDismiss(); onSend(targets.filter { it.uid in picked }) }) {
+                Text(s.send + if (picked.isNotEmpty()) " (${picked.size})" else "", color = if (picked.isNotEmpty()) Color.White else TextMuted)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel, color = TextSecondary) } },
+    )
+}
+
+/** Who read a message of ours, who has it, who not yet (in a group, everyone; with one person, them). */
+@Composable
+internal fun MessageInfoDialog(
+    m: ChatMessage,
+    people: List<ChatUser>,
+    read: Map<String, Long>,
+    delivered: Map<String, Long>,
+    s: ChatStrings,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurfaceVariant,
+        title = { Text(s.messageInfo, color = TextPrimary) },
+        text = {
+            LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                items(people, key = { it.uid }) { user ->
+                    val r = (read[user.uid] ?: 0L) >= m.at
+                    val d = r || (delivered[user.uid] ?: 0L) >= m.at
+                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        ChatAvatar(user, 36.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text(user.name, color = TextPrimary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Text(
+                            when {
+                                r -> "✓✓ " + s.readBy
+                                d -> "✓✓ " + s.deliveredTo
+                                else -> "✓ " + s.sentOnly
+                            },
+                            color = if (r) TickRead else TextSecondary,
+                            fontSize = 13.sp,
+                            fontWeight = if (r) FontWeight.SemiBold else FontWeight.Normal,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("OK", color = Color.White) } },
+    )
+}
+
+// ------------------------------------------------------------------ media of a conversation
+
+/** Photos, videos, files and links of a conversation, in tabs (a profile, a group's page). */
+@Composable
+internal fun MediaTabs(
+    messages: List<ChatMessage>,
+    s: ChatStrings,
+    loadImage: suspend (ChatImage) -> ByteArray?,
+    onOpenPhotos: (List<ChatImage>, Int) -> Unit,
+    onOpenVideo: (String) -> Unit,
+    onOpenFile: (ChatAttachment) -> Unit,
+) {
+    val photos = remember(messages) { messages.filter { !it.deleted }.flatMap { it.images }.asReversed() }
+    val videos = remember(messages) { messages.mapNotNull { it.attachment?.takeIf { a -> a.kind == AttachmentKind.VIDEO } }.asReversed() }
+    val files = remember(messages) { messages.mapNotNull { it.attachment?.takeIf { a -> a.kind == AttachmentKind.FILE } }.asReversed() }
+    val linkList = remember(messages) { messages.flatMap { links(it.text) }.distinct().asReversed() }
+    var tab by remember { mutableStateOf(0) }
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(s.photos to photos.size, s.videos to videos.size, s.files to files.size, s.linksTab to linkList.size).forEachIndexed { i, (label, n) ->
+                Text(
+                    "$label${if (n > 0) " $n" else ""}",
+                    color = if (i == tab) Color.Black else TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (i == tab) Color.White else DarkSurfaceVariant).clickable { tab = i }.padding(horizontal = 12.dp, vertical = 7.dp),
+                )
+            }
+        }
+        val empty = when (tab) {
+            0 -> photos.isEmpty()
+            1 -> videos.isEmpty()
+            2 -> files.isEmpty()
+            else -> linkList.isEmpty()
+        }
+        if (empty) {
+            Text(s.nothingHere, color = TextMuted, fontSize = 14.sp, modifier = Modifier.padding(16.dp))
+            return@Column
+        }
+        when (tab) {
+            0 -> photos.chunked(3).forEachIndexed { row, three ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 1.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    three.forEachIndexed { col, image ->
+                        Box(Modifier.weight(1f).aspectRatio(1f)) { PhotoCell(image, loadImage, { onOpenPhotos(photos, row * 3 + col) }, false, Modifier.fillMaxSize()) }
+                    }
+                    repeat(3 - three.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+            1 -> videos.chunked(2).forEach { two ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    two.forEach { v -> Box(Modifier.weight(1f)) { VideoTile(v) { onOpenVideo(v.url) } } }
+                    if (two.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+            2 -> files.forEach { f ->
+                Box(Modifier.padding(horizontal = 16.dp, vertical = 3.dp)) { FileBubble(f, false, null, s) { onOpenFile(f) } }
+            }
+            else -> linkList.forEach { link ->
+                Text(
+                    link,
+                    color = Color(0xFF8AB4F8),
+                    fontSize = 14.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().clickable { runCatching { uriHandler.openUri(link) } }.padding(horizontal = 16.dp, vertical = 10.dp),
+                )
+            }
+        }
+    }
+}
+
+@OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
+@Composable
+private fun VideoTile(a: ChatAttachment, onOpen: () -> Unit) {
+    val thumb = remember(a.thumb) { runCatching { kotlin.io.encoding.Base64.decode(a.thumb) }.getOrNull() }
+    Box(Modifier.fillMaxWidth().aspectRatio(16f / 10f).clip(RoundedCornerShape(10.dp)).background(Color.Black).clickable(onClick = onOpen), contentAlignment = Alignment.Center) {
+        if (thumb != null) AsyncImage(model = thumb, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        Icon(QMusicIcons.Play, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
+        if (a.durationMs > 0) Text(mmss(a.durationMs), color = Color.White, fontSize = 11.sp, modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp))
+    }
+}
+
+// ------------------------------------------------------------------ sending photos: a look first, a caption, edits
+
+/** The photos picked, before they go: swipe between them, edit one (crop, turn, draw), write a caption, send. */
+@Composable
+internal fun SendPhotosPage(photos: List<PickedImage>, s: ChatStrings, caption: String, onSend: (List<PickedImage>, String) -> Unit, onCancel: () -> Unit) {
+    PlatformBackHandler(enabled = true) { onCancel() }
+    var list by remember(photos) { mutableStateOf(photos) }
+    var text by remember { mutableStateOf(caption) }
+    var editing by remember { mutableStateOf<Int?>(null) }
+    val pager = androidx.compose.foundation.pager.rememberPagerState { list.size }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        Column(Modifier.fillMaxSize().imePadding()) {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onCancel) { Icon(QMusicIcons.Close, null, tint = Color.White) }
+                Spacer(Modifier.weight(1f))
+                if (list.size > 1) Text("${pager.currentPage + 1} / ${list.size}", color = Color.White, fontSize = 14.sp)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    s.editPhoto,
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(14.dp)).clickable { editing = pager.currentPage }.padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
+            androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.weight(1f).fillMaxWidth()) { page ->
+                AsyncImage(model = list[page].jpeg, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+            }
+            Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(8.dp), verticalAlignment = Alignment.Bottom) {
+                Box(Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(22.dp)).background(DarkSurfaceVariant).padding(horizontal = 16.dp, vertical = 11.dp)) {
+                    if (text.isEmpty()) Text(s.addCaption, color = TextMuted, fontSize = 16.sp)
+                    BasicTextField(
+                        value = text,
+                        onValueChange = { text = it.take(ChatController.MAX_LENGTH) },
+                        textStyle = TextStyle(color = TextPrimary, fontSize = 16.sp),
+                        cursorBrush = SolidColor(Color.White),
+                        maxLines = 4,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
+                Box(Modifier.size(44.dp).clip(CircleShape).background(Color.White).clickable { onSend(list, text) }, contentAlignment = Alignment.Center) {
+                    Icon(QMusicIcons.Send, null, tint = Color.Black, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+        editing?.let { index ->
+            PhotoEditor(
+                image = list[index],
+                onDone = { edited ->
+                    list = list.toMutableList().also { it[index] = edited }
+                    editing = null
+                },
+                onCancel = { editing = null },
+            )
+        }
+    }
+}
+
+// ------------------------------------------------------------------ group calls
+
+/** The group's call going on, when we are not in it: who is in it, and Join. */
+@Composable
+internal fun GroupCallBanner(people: List<ChatUser>, s: ChatStrings, onJoin: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp).clip(RoundedCornerShape(14.dp)).background(TickRead.copy(alpha = 0.18f)).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(QMusicIcons.Phone, null, tint = TickRead, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(s.groupCallOngoing, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(people.joinToString(", ") { it.name.substringBefore(' ') } + " · ${people.size} ${s.people}", color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(
+            s.groupCallJoin,
+            color = Color.White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(TickRead).clickable(onClick = onJoin).padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+    }
+}
+
+/** A group call on screen: everyone's picture (or face) in a grid, ours too, and the buttons. */
+@Composable
+fun GroupCallScreen(service: GroupCallService, s: ChatStrings, me: ChatUser?, modifier: Modifier = Modifier) {
+    val state by service.state.collectAsState()
+    val call = state ?: return
+    var now by remember { mutableStateOf(Clock.System.now().toEpochMilliseconds()) }
+    LaunchedEffect(call.startedAt) {
+        while (true) {
+            now = Clock.System.now().toEpochMilliseconds()
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+    Column(modifier.fillMaxSize().background(Color(0xFF0B0B0B))) {
+        Column(Modifier.fillMaxWidth().statusBarsPadding().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(call.group.name, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                call.startedAt?.let { mmss(now - it) } ?: s.groupCallWaiting,
+                color = TextSecondary,
+                fontSize = 14.sp,
+            )
+        }
+        // The tiles: two to a row (one big tile when alone with one other).
+        val tiles = buildList {
+            add(null as GroupCallMember?)
+            addAll(call.members)
+        }
+        val columns = if (tiles.size <= 2) 1 else 2
+        Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            tiles.chunked(columns).forEach { row ->
+                Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { member ->
+                        Box(Modifier.weight(1f).fillMaxSize().clip(RoundedCornerShape(16.dp)).background(DarkSurfaceVariant), contentAlignment = Alignment.Center) {
+                            val user = member?.user ?: me
+                            val showVideo = if (member == null) call.video && call.cameraOn else member.hasVideo && member.cameraOn && member.connected
+                            if (showVideo) {
+                                GroupCallVideo(service, member?.user?.uid, Modifier.fillMaxSize())
+                            } else if (user != null) {
+                                ChatAvatar(user, 72.dp)
+                            }
+                            Text(
+                                (if (member == null) s.you else user?.name?.substringBefore(' ').orEmpty()) +
+                                    if (member != null && !member.connected) " · …" else "",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                modifier = Modifier.align(Alignment.BottomStart).padding(8.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.5f)).padding(horizontal = 8.dp, vertical = 3.dp),
+                            )
+                        }
+                    }
+                    if (row.size < columns) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(vertical = 20.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+            CallRoundButton(if (call.muted) QMusicIcons.MicOff else QMusicIcons.Mic, call.muted) { service.toggleMute() }
+            if (call.video) {
+                CallRoundButton(if (call.cameraOn) QMusicIcons.Camera else QMusicIcons.CameraOff, !call.cameraOn) { service.toggleCamera() }
+                CallRoundButton(QMusicIcons.SwitchCamera, false) { service.switchCamera() }
+            }
+            CallRoundButton(QMusicIcons.Volume, call.speaker) { service.toggleSpeaker() }
+            Box(Modifier.size(64.dp).clip(CircleShape).background(Color(0xFFFF3B30)).clickable { service.leave() }, contentAlignment = Alignment.Center) {
+                Icon(QMusicIcons.PhoneEnd, null, tint = Color.White, modifier = Modifier.size(28.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun CallRoundButton(icon: androidx.compose.ui.graphics.vector.ImageVector, on: Boolean, onClick: () -> Unit) {
+    Box(Modifier.size(54.dp).clip(CircleShape).background(if (on) Color.White else Color.White.copy(alpha = 0.14f)).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(icon, null, tint = if (on) Color.Black else Color.White, modifier = Modifier.size(24.dp))
+    }
+}

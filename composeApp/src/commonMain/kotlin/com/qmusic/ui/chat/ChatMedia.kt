@@ -33,6 +33,12 @@ interface VoicePlayer {
     /** Jumps to [fraction] of [url] (when it is the one playing). */
     fun seek(url: String, fraction: Float)
     fun stop()
+
+    /** How fast voice messages play: 1, 1.5 or 2. */
+    val speed: StateFlow<Float>
+
+    /** 1× → 1.5× → 2× → 1×. */
+    fun cycleSpeed()
 }
 
 @Composable
@@ -52,3 +58,7 @@ expect fun rememberAttachmentOpener(): (ChatAttachment) -> Unit
 /** A video message, full size, with the player's controls. */
 @Composable
 expect fun VideoMessagePlayer(url: String, modifier: Modifier)
+
+/** Crop, turn and draw on a photo before it is sent; [onDone] gets the edited one. */
+@Composable
+expect fun PhotoEditor(image: PickedImage, onDone: (PickedImage) -> Unit, onCancel: () -> Unit)

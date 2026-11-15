@@ -34,11 +34,12 @@
         "messages": {
           ".indexOn": [
             "at",
-            "from"
+            "from",
+            "expireAt"
           ],
           "$messageId": {
-            ".write": "(auth != null && $chatId.matches(/^[A-Za-z0-9]+_[A-Za-z0-9]+$/) && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) && ((!data.exists() && newData.child('from').val() === auth.uid && root.child('blocked').child($chatId.replace(auth.uid, '').replace('_', '')).child(auth.uid).val() !== true) || (data.exists() && !newData.exists() && data.child('from').val() === auth.uid))) || (auth != null && $chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists() && ((!data.exists() && newData.child('from').val() === auth.uid) || (data.exists() && !newData.exists() && data.child('from').val() === auth.uid)))",
-            ".validate": "!newData.exists() || (newData.child('text').isString() && newData.child('text').val().length <= 4000 && newData.child('at').val() === now)"
+            ".write": "((auth != null && $chatId.matches(/^[A-Za-z0-9]+_[A-Za-z0-9]+$/) && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) && ((!data.exists() && newData.child('from').val() === auth.uid && root.child('blocked').child($chatId.replace(auth.uid, '').replace('_', '')).child(auth.uid).val() !== true) || (data.exists() && !newData.exists() && data.child('from').val() === auth.uid))) || (auth != null && $chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists() && ((!data.exists() && newData.child('from').val() === auth.uid) || (data.exists() && !newData.exists() && data.child('from').val() === auth.uid)))) || (auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists())) && data.exists() && newData.exists() && data.child('from').val() === auth.uid && newData.child('from').val() === auth.uid)",
+            ".validate": "!newData.exists() || (newData.child('text').isString() && newData.child('text').val().length <= 4000 && (data.exists() ? newData.child('at').val() === data.child('at').val() : newData.child('at').val() === now))"
           }
         },
         "read": {
@@ -58,6 +59,12 @@
           "$uid": {
             ".write": "auth != null && auth.uid === $uid && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))"
           }
+        },
+        "settings": {
+          ".write": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))",
+          "ttl": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 7776000000"
+          }
         }
       }
     },
@@ -76,7 +83,7 @@
     "notify": {
       "$id": {
         ".write": "auth != null && !data.exists() && newData.child('from').val() === auth.uid",
-        ".validate": "newData.hasChildren(['from', 'to', 'chatId', 'type', 'at']) && newData.child('at').val() === now && newData.child('to').isString() && newData.child('chatId').isString() && (newData.child('type').val() === 'chat' || newData.child('type').val() === 'call' || newData.child('type').val() === 'friend')"
+        ".validate": "newData.hasChildren(['from', 'to', 'chatId', 'type', 'at']) && newData.child('at').val() === now && newData.child('to').isString() && newData.child('chatId').isString() && (newData.child('type').val() === 'chat' || newData.child('type').val() === 'call' || newData.child('type').val() === 'friend' || newData.child('type').val() === 'groupcall')"
       }
     },
     "turn": {
@@ -176,9 +183,13 @@
         "createdAt": {},
         "members": {
           "$uid": {
-            ".write": "auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).exists() && (newData.exists() ? (!data.exists() || auth.uid === $uid || root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin') : (auth.uid === $uid || root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin'))",
+            ".write": "auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).exists() && (newData.exists() ? ((!data.exists() && (newData.child('role').val() === 'member' || root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin')) || (data.exists() && root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin') || (auth.uid === $uid && newData.child('role').val() === data.child('role').val())) : (auth.uid === $uid || root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin'))",
             ".validate": "newData.hasChildren(['name', 'role']) && newData.child('name').isString() && (newData.child('role').val() === 'admin' || newData.child('role').val() === 'member')"
           }
+        },
+        "description": {
+          ".write": "auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).exists()",
+          ".validate": "newData.isString() && newData.val().length <= 500"
         }
       }
     },
@@ -187,6 +198,29 @@
         ".read": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))",
         ".write": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))",
         ".validate": "!newData.exists() || (newData.hasChildren(['kind', 'id', 'by', 'at']) && newData.child('by').val() === auth.uid)"
+      }
+    },
+    "ttlChats": {
+      "$chatId": {
+        ".write": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))"
+      }
+    },
+    "hidden": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "starred": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "groupCalls": {
+      "$chatId": {
+        ".read": "auth != null && $chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()",
+        ".write": "auth != null && $chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()"
       }
     }
   }

@@ -90,7 +90,7 @@ const GROUP = /^grp[A-Za-z0-9]{20}$/;
 
 /** A message in a group: every member but the sender gets it, titled with the group, "Name: text" as the body. */
 async function handleGroup(n) {
-  if (n.type !== "chat" || n.to !== n.chatId) return;
+  if ((n.type !== "chat" && n.type !== "groupcall") || n.to !== n.chatId) return;
   if (Date.now() - (Number(n.at) || 0) > MESSAGE_MAX_AGE_MS) return;
   const group = (await db.ref(`groups/${n.chatId}`).get()).val();
   if (!group || !group.members) return;
@@ -106,8 +106,21 @@ async function handleGroup(n) {
     body: (senderName ? senderName + ": " : "") + String(n.body || "").replace(/^Claude: /, "").slice(0, 280),
     group: "1",
   };
+  const call = n.type === "groupcall";
+  if (call) data.body = `📞 ${senderName || "Biri"} grup araması başlattı`;
   const targets = Object.keys(group.members).filter((uid) => uid !== n.from);
-  await Promise.all(targets.map((uid) => deliver(uid, data, 24 * 3600 * 1000).catch((e) => log("group push failed:", e.message))));
+  await Promise.all(
+    targets.map(async (uid) => {
+      if (!call && (await isMuted(uid, n.chatId))) return;
+      await deliver(uid, data, call ? 60 * 1000 : 24 * 3600 * 1000);
+    }).map((p) => p.catch((e) => log("group push failed:", e.message))),
+  );
+}
+
+/** The person muted the conversation (until a time, or for good: -1). */
+async function isMuted(uid, chatId) {
+  const until = (await db.ref(`userChats/${uid}/${chatId}/mutedUntil`).get()).val();
+  return until === -1 || (typeof until === "number" && until > Date.now());
 }
 
 /** Sends [data] to every phone of [uid]; drops the addresses of phones that are gone. Resolves how many got it. */
@@ -136,6 +149,7 @@ async function handle(n) {
   const age = Date.now() - (Number(n.at) || 0);
   if (age > (call ? CALL_MAX_AGE_MS : MESSAGE_MAX_AGE_MS)) return;
   if ((await db.ref(`blocked/${n.to}/${n.from}`).get()).val() === true) return;
+  if (n.type === "chat" && (await isMuted(n.to, n.chatId))) return;
 
   const tokensByKey = (await db.ref(`pushTokens/${n.to}`).get()).val() || {};
   const keys = Object.keys(tokensByKey);
@@ -195,6 +209,33 @@ db.ref("notify").on("child_added", async (snap) => {
   }
 });
 
+// ------------------------------------------------------------------ disappearing messages
+
+/** Removes the messages whose time is up, in the conversations that have disappearing messages on. */
+async function sweepExpired() {
+  try {
+    const chats = Object.keys((await db.ref("ttlChats").get()).val() || {});
+    let removed = 0;
+    for (const chatId of chats) {
+      const due = (await db.ref(`chats/${chatId}/messages`).orderByChild("expireAt").startAt(1).endAt(Date.now()).get()).val() || {};
+      const updates = {};
+      for (const id of Object.keys(due)) {
+        updates[`chats/${chatId}/messages/${id}`] = null;
+        updates[`chats/${chatId}/reactions/${id}`] = null;
+      }
+      if (Object.keys(updates).length > 0) {
+        await db.ref().update(updates);
+        removed += Object.keys(due).length;
+      }
+    }
+    if (removed > 0) log(`expired messages removed: ${removed}`);
+  } catch (e) {
+    log("sweep failed:", e.message);
+  }
+}
+
 publishTurn();
 setInterval(publishTurn, TURN_EVERY_MS);
+sweepExpired();
+setInterval(sweepExpired, 5 * 60 * 1000);
 log("qmusic-push started");

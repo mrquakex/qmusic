@@ -157,16 +157,30 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
     var memberMenu by remember { mutableStateOf<ChatUser?>(null) }
     val g = info
     val iAmAdmin = g?.members?.any { it.user.uid == me.uid && it.admin } == true
+    val pickPhoto = rememberImagePicker { photos -> photos.firstOrNull()?.let { controller.setGroupPhoto(group, it) } }
+    var describing by remember { mutableStateOf(false) }
+    val messages by remember(group.uid) { controller.messages(group) }.collectAsState(initial = null)
+    var viewingPhotos by remember { mutableStateOf<Pair<List<ChatImage>, Int>?>(null) }
+    var videoOpen by remember { mutableStateOf<String?>(null) }
+    val openFile = rememberAttachmentOpener()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item { TopBar("", { controller.pop() }) }
         item {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(112.dp).clip(CircleShape).background(DarkSurfaceVariant), contentAlignment = Alignment.Center) {
-                    Icon(QMusicIcons.Group, contentDescription = null, tint = Color.White, modifier = Modifier.size(52.dp))
+                Box(Modifier.clip(CircleShape).clickable { pickPhoto() }) {
+                    ChatAvatar(ChatUser(group.uid, g?.name ?: group.name, "", g?.photo), 112.dp)
                 }
-                Spacer(Modifier.height(14.dp))
+                Text(s.changePhoto, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { pickPhoto() }.padding(8.dp))
                 Text(g?.name ?: group.name, color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 Text("${g?.members?.size ?: 0} ${s.membersCount}", color = TextSecondary, fontSize = 14.sp)
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    g?.description?.ifBlank { null } ?: s.descriptionHint,
+                    color = if (g?.description.isNullOrBlank()) TextMuted else TextPrimary,
+                    fontSize = 14.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 24.dp).clip(RoundedCornerShape(10.dp)).clickable { describing = true }.padding(8.dp),
+                )
                 Spacer(Modifier.height(18.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Pill(s.addMembers, primary = true) { controller.openAddMembers(group) }
@@ -178,6 +192,19 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
         items(g?.members.orEmpty(), key = { it.user.uid }) { m ->
             PersonRow(m.user, onClick = { if (m.user.uid != me.uid) memberMenu = m.user }) {
                 if (m.admin) Text(s.admin, color = ClaudeCoral, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        if (!messages.isNullOrEmpty()) {
+            item { SectionTitle(s.media) }
+            item {
+                MediaTabs(
+                    messages.orEmpty(),
+                    s,
+                    loadImage = { i -> controller.imageBytes(group, i) },
+                    onOpenPhotos = { list, index -> viewingPhotos = list to index },
+                    onOpenVideo = { videoOpen = it },
+                    onOpenFile = openFile,
+                )
             }
         }
         item {
@@ -201,6 +228,13 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
                     Text(s.message, color = TextPrimary, fontSize = 16.sp, modifier = Modifier.fillMaxWidth().clickable { memberMenu = null; controller.openConversation(user) }.padding(vertical = 12.dp))
                     Text("@" + user.username, color = TextPrimary, fontSize = 16.sp, modifier = Modifier.fillMaxWidth().clickable { memberMenu = null; controller.openProfile(user) }.padding(vertical = 12.dp))
                     if (iAmAdmin) {
+                        val isAdmin = g?.members?.any { it.user.uid == user.uid && it.admin } == true
+                        Text(
+                            if (isAdmin) s.removeAdmin else s.makeAdmin,
+                            color = TextPrimary,
+                            fontSize = 16.sp,
+                            modifier = Modifier.fillMaxWidth().clickable { memberMenu = null; controller.setAdmin(group, user, !isAdmin) }.padding(vertical = 12.dp),
+                        )
                         Text(s.removeFromGroup, color = Color(0xFFFF6B6B), fontSize = 16.sp, modifier = Modifier.fillMaxWidth().clickable { memberMenu = null; controller.removeMember(group, user) }.padding(vertical = 12.dp))
                     }
                 }
@@ -221,6 +255,19 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
             dismissButton = { TextButton(onClick = { renaming = false }) { Text(s.cancel, color = TextSecondary) } },
         )
     }
+    if (describing) {
+        var text by remember { mutableStateOf(g?.description.orEmpty()) }
+        AlertDialog(
+            onDismissRequest = { describing = false },
+            containerColor = DarkSurfaceVariant,
+            title = { Text(s.groupDescription, color = TextPrimary) },
+            text = { Field(text, { text = it.take(500) }, s.descriptionHint, capitalize = false) },
+            confirmButton = { TextButton(onClick = { describing = false; controller.setGroupDescription(group, text) }) { Text(s.save, color = Color.White) } },
+            dismissButton = { TextButton(onClick = { describing = false }) { Text(s.cancel, color = TextSecondary) } },
+        )
+    }
+    viewingPhotos?.let { (list, index) -> PhotoViewer(list, index, load = { i -> controller.imageBytes(group, i) }) { viewingPhotos = null } }
+    videoOpen?.let { url -> VideoViewer(url) { videoOpen = null } }
     if (confirmLeave) {
         AlertDialog(
             onDismissRequest = { confirmLeave = false },
@@ -318,11 +365,25 @@ internal fun VoiceBubble(a: ChatAttachment, mine: Boolean, player: VoicePlayer?,
                     )
                 }
             }
-            Text(
-                if (isThis) mmss((a.durationMs * played).toLong()) else mmss(a.durationMs),
-                color = if (mine) Color.Black.copy(alpha = 0.55f) else TextSecondary,
-                fontSize = 11.sp,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (isThis) mmss((a.durationMs * played).toLong()) else mmss(a.durationMs),
+                    color = if (mine) Color.Black.copy(alpha = 0.55f) else TextSecondary,
+                    fontSize = 11.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                if (isThis && player != null) {
+                    // 1× → 1.5× → 2×, like the apps people know.
+                    val speed by player.speed.collectAsState()
+                    Text(
+                        (if (speed == 1f) "1" else if (speed == 1.5f) "1.5" else "2") + "×",
+                        color = if (mine) Color.White else Color.Black,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (mine) Color.Black else Color.White).clickable { player.cycleSpeed() }.padding(horizontal = 6.dp, vertical = 1.dp),
+                    )
+                }
+            }
         }
     }
 }

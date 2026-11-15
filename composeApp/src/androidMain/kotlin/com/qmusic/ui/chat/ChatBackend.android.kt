@@ -137,7 +137,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 val name = snap.child("name").getValue(String::class.java)
                 val username = snap.child("username").getValue(String::class.java)
                 _account.value = if (name != null && username != null) {
-                    ChatAccount.Ready(ChatUser(user.uid, name, username, snap.child("photo").getValue(String::class.java)))
+                    ChatAccount.Ready(ChatUser(user.uid, name, username, snap.child("photo").getValue(String::class.java), snap.child("about").getValue(String::class.java).orEmpty()))
                 } else {
                     ChatAccount.NeedsProfile(user.uid, user.displayName.orEmpty(), user.photoUrl?.toString())
                 }
@@ -150,10 +150,53 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         ref.addValueEventListener(listener)
         profileRef = ref
         profileListener = listener
+        privacyListener?.let { privacyRef?.removeEventListener(it) }
+        val pRef = root.child("users").child(user.uid).child("privacy")
+        val pListener = object : ValueEventListener {
+            override fun onDataChange(snap: DataSnapshot) {
+                val next = Privacy(
+                    hideLastSeen = snap.child("hideLastSeen").getValue(Boolean::class.java) == true,
+                    hideReadReceipts = snap.child("hideReadReceipts").getValue(Boolean::class.java) == true,
+                )
+                val changed = next.hideLastSeen != _privacy.value.hideLastSeen
+                _privacy.value = next
+                if (changed) trackPresence(user.uid)
+            }
+
+            override fun onCancelled(error: DatabaseError) {}
+        }
+        pRef.addValueEventListener(pListener)
+        privacyRef = pRef
+        privacyListener = pListener
         scope.launch { runCatching { savePushToken(user.uid) } }
     }
 
     private fun me(): String = auth.currentUser?.uid ?: error("not signed in")
+
+    private val _privacy = MutableStateFlow(Privacy())
+    override val privacy: StateFlow<Privacy> = _privacy.asStateFlow()
+    private var privacyRef: DatabaseReference? = null
+    private var privacyListener: ValueEventListener? = null
+
+    override suspend fun setPrivacy(privacy: Privacy) {
+        root.child("users").child(me()).child("privacy").setValue(mapOf("hideLastSeen" to privacy.hideLastSeen, "hideReadReceipts" to privacy.hideReadReceipts))
+    }
+
+    override suspend fun updateProfile(name: String, about: String): Result<Unit> = runCatching {
+        val clean = name.trim().take(40)
+        require(clean.isNotEmpty()) { "name" }
+        root.child("users").child(me()).updateChildren(mapOf("name" to clean, "about" to about.trim().take(140))).await()
+    }
+
+    override suspend fun setProfilePhoto(image: PickedImage): Result<Unit> = runCatching {
+        val uid = me()
+        // "u_<uid>": a place on the media server only this person can put files in.
+        val url = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            MediaUpload.upload(token(), "u_$uid", "jpg", "image/jpeg", image.jpeg.size.toLong(), { image.jpeg.inputStream() }) {}
+        }
+        imageCache.put(url, image.jpeg)
+        root.child("users").child(uid).child("photo").setValue(url).await()
+    }
 
     // ------------------------------------------------------------------ account
 
@@ -274,18 +317,228 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             pinned = child("pinned").getValue(Long::class.java) ?: 0L,
             archived = child("archived").getValue(Boolean::class.java) == true,
             lastFromName = child("lastFromName").getValue(String::class.java).orEmpty(),
+            unreadCount = (child("unread").getValue(Long::class.java) ?: 0L).toInt(),
+            readAt = read,
+            mutedUntil = child("mutedUntil").getValue(Long::class.java) ?: 0L,
+            typingAt = child("typingAt").getValue(Long::class.java) ?: 0L,
+            typingName = child("typingName").getValue(String::class.java).orEmpty(),
         )
     }
 
-    override fun messages(chatId: String): Flow<List<ChatMessage>> {
+    override fun messages(chatId: String): Flow<List<ChatMessage>> = messages(chatId, MESSAGES_SHOWN)
+
+    override fun messages(chatId: String, limit: Int): Flow<List<ChatMessage>> {
         val ref = root.child("chats").child(chatId).child("messages")
         ref.keepSynced(true)
-        val query = ref.orderByChild("at").limitToLast(MESSAGES_SHOWN)
-        return combine(listen(query), pendingIds, outbox, _uploads) { snap, pending, out, progress ->
-            val sent = snap.children.mapNotNull { it.toMessage(pending) }
+        val query = ref.orderByChild("at").limitToLast(limit)
+        return combine(listen(query), pendingIds, outbox, _uploads, hidden(chatId)) { snap, pending, out, progress, hidden ->
+            val now = System.currentTimeMillis() + _serverOffset.value
+            val sent = snap.children.mapNotNull { it.toMessage(pending) }.filter { it.id !in hidden && (it.expireAt == 0L || it.expireAt > now) }
             val ids = sent.mapTo(HashSet()) { it.id }
             sent + out[chatId].orEmpty().filter { it.id !in ids }.map { it.copy(progress = progress[it.id] ?: 0f) }
         }
+    }
+
+    override fun hidden(chatId: String): Flow<Set<String>> = callbackFlow {
+        val uid = auth.currentUser?.uid
+        if (uid == null) {
+            trySend(emptySet())
+            awaitClose {}
+            return@callbackFlow
+        }
+        val job = launch {
+            listen(root.child("hidden").child(uid).child(chatId)).collect { snap -> trySend(snap.children.mapNotNull { it.key }.toSet()) }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override suspend fun deleteForMe(chatId: String, messageId: String) {
+        root.child("hidden").child(me()).child(chatId).child(messageId).setValue(true)
+    }
+
+    override suspend fun editMessage(chatId: String, messageId: String, text: String): Result<Unit> = runCatching {
+        val body = text.trim()
+        require(body.isNotEmpty() && body.length <= 4000) { "text" }
+        root.child("chats").child(chatId).child("messages").child(messageId).updateChildren(mapOf("text" to body, "edited" to true)).await()
+    }
+
+    override suspend fun deleteForEveryone(chatId: String, messageId: String): Result<Unit> = runCatching {
+        root.child("chats").child(chatId).child("messages").child(messageId).updateChildren(
+            mapOf(
+                "text" to "",
+                "deleted" to true,
+                "images" to null,
+                "image" to null,
+                "attachment" to null,
+                "share" to null,
+                "replyTo" to null,
+                "together" to null,
+                "edited" to null,
+            ),
+        ).await()
+    }
+
+    override suspend fun forward(fromChatId: String, message: ChatMessage, targets: List<ChatUser>): Result<Unit> = runCatching {
+        val images = message.images.map { img ->
+            mapOf(
+                "id" to img.id,
+                // Older photos (kept by id) live on the media server under their id.
+                "url" to (img.url ?: "${MediaUpload.BASE}/m/$fromChatId/${img.id}.jpg"),
+                "w" to img.width,
+                "h" to img.height,
+                "thumb" to img.thumb,
+            )
+        }.ifEmpty { null }
+        val extra = HashMap<String, Any?>()
+        extra["forwarded"] = true
+        message.attachment?.let { a ->
+            extra["attachment"] = buildMap<String, Any?> {
+                put("kind", a.kind.name.lowercase())
+                put("url", a.url)
+                put("name", a.name)
+                put("size", a.size)
+                put("mime", a.mime)
+                if (a.durationMs > 0) put("duration", a.durationMs)
+                if (a.width > 0) put("w", a.width)
+                if (a.height > 0) put("h", a.height)
+                if (a.thumb.isNotEmpty()) put("thumb", a.thumb)
+                if (a.wave.isNotEmpty()) put("wave", a.wave.joinToString("") { ('A' + (it / 4).coerceIn(0, 25)).toString() })
+            }
+        }
+        val label = when {
+            message.attachment?.kind == AttachmentKind.VOICE -> "🎤"
+            message.attachment?.kind == AttachmentKind.VIDEO -> "🎬"
+            message.attachment?.kind == AttachmentKind.FILE -> "📄 " + message.attachment.name
+            images != null -> "📷"
+            else -> null
+        }
+        val preview = listOfNotNull(label, message.text.ifBlank { null }).joinToString(" ").ifBlank { null }
+        for (target in targets) sendMessage(target, message.text, message.share, null, images, preview, extra = extra)
+    }
+
+    override fun starred(): Flow<List<StarredMessage>> = callbackFlow {
+        val job = launch {
+            listen(root.child("starred").child(me())).collect { snap ->
+                trySend(
+                    snap.children.mapNotNull { m ->
+                        StarredMessage(
+                            chatId = m.child("chatId").getValue(String::class.java) ?: return@mapNotNull null,
+                            messageId = m.child("messageId").getValue(String::class.java) ?: return@mapNotNull null,
+                            text = m.child("text").getValue(String::class.java).orEmpty(),
+                            from = m.child("from").getValue(String::class.java).orEmpty(),
+                            fromName = m.child("fromName").getValue(String::class.java).orEmpty(),
+                            chatName = m.child("chatName").getValue(String::class.java).orEmpty(),
+                            at = m.child("at").getValue(Long::class.java) ?: 0L,
+                        )
+                    }.sortedByDescending { it.at },
+                )
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override suspend fun setStarred(chatId: String, message: ChatMessage, fromName: String, chatName: String, starred: Boolean) {
+        val ref = root.child("starred").child(me()).child("$chatId|${message.id}")
+        if (!starred) {
+            ref.removeValue()
+            return
+        }
+        val text = message.text.ifBlank {
+            when {
+                message.attachment?.kind == AttachmentKind.VOICE -> "🎤"
+                message.attachment?.kind == AttachmentKind.VIDEO -> "🎬"
+                message.attachment != null -> "📄 " + message.attachment.name
+                message.images.isNotEmpty() -> "📷"
+                message.share != null -> "🎵 " + message.share.title
+                else -> ""
+            }
+        }
+        ref.setValue(mapOf("chatId" to chatId, "messageId" to message.id, "text" to text.take(300), "from" to message.from, "fromName" to fromName, "chatName" to chatName, "at" to message.at))
+    }
+
+    // ------------------------------------------------------------------ disappearing messages, muting
+
+    private val ttls = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    override fun ttl(chatId: String): Flow<Long> = callbackFlow {
+        val job = launch {
+            listen(root.child("chats").child(chatId).child("settings").child("ttl")).collect { snap ->
+                val ttl = snap.getValue(Long::class.java) ?: 0L
+                ttls[chatId] = ttl
+                trySend(ttl)
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    private suspend fun ttlOf(chatId: String): Long =
+        ttls[chatId] ?: (runCatching { root.child("chats").child(chatId).child("settings").child("ttl").get().await().getValue(Long::class.java) }.getOrNull() ?: 0L)
+            .also { ttls[chatId] = it }
+
+    override suspend fun setTtl(other: ChatUser, ttlMs: Long): Result<Unit> = runCatching {
+        val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
+        val chatId = conversationId(me.uid, other)
+        root.updateChildren(
+            mapOf(
+                "chats/$chatId/settings/ttl" to ttlMs,
+                "ttlChats/$chatId" to if (ttlMs > 0) true else null,
+            ),
+        ).await()
+        ttls[chatId] = ttlMs
+        val tr = app.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+        val who = me.name.substringBefore(' ')
+        val span = when (ttlMs) {
+            24 * 3600_000L -> if (tr) "24 saat" else "24 hours"
+            7 * 24 * 3600_000L -> if (tr) "7 gün" else "7 days"
+            90 * 24 * 3600_000L -> if (tr) "90 gün" else "90 days"
+            else -> "${ttlMs / 3600_000L}h"
+        }
+        val line = when {
+            ttlMs <= 0 -> if (tr) "$who süreli mesajları kapattı" else "$who turned off disappearing messages"
+            tr -> "$who süreli mesajları açtı: yeni mesajlar $span sonra silinecek"
+            else -> "$who turned on disappearing messages: new messages go after $span"
+        }
+        sendMessage(other, line, null, null, null, "⏱ $line", extra = mapOf("system" to "ttl", "who" to who, "whom" to span), noExpiry = true)
+    }
+
+    override suspend fun setMuted(chatId: String, until: Long) {
+        root.child("userChats").child(me()).child(chatId).child("mutedUntil").setValue(if (until == 0L) null else until)
+    }
+
+    // ------------------------------------------------------------------ read marks
+
+    override fun readMarks(chatId: String): Flow<Map<String, Long>> = marks(chatId, "read", hideWhenPrivate = true)
+    override fun deliveredMarks(chatId: String): Flow<Map<String, Long>> = marks(chatId, "delivered", hideWhenPrivate = false)
+
+    /** Until when each member read / has the messages; who hides their own read marks does not see the others' either. */
+    private fun marks(chatId: String, what: String, hideWhenPrivate: Boolean): Flow<Map<String, Long>> =
+        combine(
+            callbackFlow {
+                val job = launch {
+                    listen(root.child("chats").child(chatId).child(what)).collect { snap ->
+                        trySend(snap.children.mapNotNull { m -> m.key?.let { k -> k to (m.getValue(Long::class.java) ?: 0L) } }.toMap())
+                    }
+                }
+                awaitClose { job.cancel() }
+            },
+            _privacy,
+        ) { map, p -> if (hideWhenPrivate && p.hideReadReceipts) emptyMap() else map }
+
+    // ------------------------------------------------------------------ link cards
+
+    private val previews = android.util.LruCache<String, LinkPreview>(64)
+
+    override suspend fun linkPreview(url: String): LinkPreview? {
+        previews.get(url)?.let { return it }
+        val card = kotlinx.coroutines.withContext(Dispatchers.IO) { LinkPreviews.fetch(url) } ?: return null
+        previews.put(url, card)
+        return card
+    }
+
+    // ------------------------------------------------------------------ group calls
+
+    override val groupCalls: FirebaseGroupCallService by lazy {
+        FirebaseGroupCallService(app, root, { (_account.value as? ChatAccount.Ready)?.me }, calls)
     }
 
     private fun DataSnapshot.toMessage(pending: Set<String>): ChatMessage? {
@@ -355,6 +608,10 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             attachment = attachment,
             system = child("system").exists(),
             together = child("together").getValue(Boolean::class.java) == true,
+            edited = child("edited").getValue(Boolean::class.java) == true,
+            deleted = child("deleted").getValue(Boolean::class.java) == true,
+            forwarded = child("forwarded").getValue(Boolean::class.java) == true,
+            expireAt = child("expireAt").getValue(Long::class.java) ?: 0L,
         )
     }
 
@@ -411,12 +668,15 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         (account.first { it is ChatAccount.Ready || it is ChatAccount.SignedOut || it is ChatAccount.Unavailable } as? ChatAccount.Ready)?.me
     }
 
-    override fun otherReadAt(chatId: String, otherUid: String): Flow<Long> = callbackFlow {
-        val job = launch {
-            listen(root.child("chats").child(chatId).child("read").child(otherUid)).collect { trySend(it.getValue(Long::class.java) ?: 0L) }
-        }
-        awaitClose { job.cancel() }
-    }
+    override fun otherReadAt(chatId: String, otherUid: String): Flow<Long> = combine(
+        callbackFlow {
+            val job = launch {
+                listen(root.child("chats").child(chatId).child("read").child(otherUid)).collect { trySend(it.getValue(Long::class.java) ?: 0L) }
+            }
+            awaitClose { job.cancel() }
+        },
+        _privacy,
+    ) { at, p -> if (p.hideReadReceipts) 0L else at }
 
     override suspend fun send(other: ChatUser, text: String, share: SharedItem?, replyTo: ChatReply?): Result<Unit> = runCatching {
         sendMessage(other, text, share, replyTo, images = null, preview = null)
@@ -431,12 +691,15 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         preview: String?,
         extra: Map<String, Any?> = emptyMap(),
         fixedId: String? = null,
+        noExpiry: Boolean = false,
     ) {
         val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
         val chatId = conversationId(me.uid, other)
         val messageId = fixedId ?: root.child("chats").child(chatId).child("messages").push().key ?: error("no id")
+        val ttl = if (noExpiry || other.uid == CLAUDE_BOT_UID) 0L else ttlOf(chatId)
         val message = buildMap<String, Any?> {
             putAll(extra)
+            if (ttl > 0) put("expireAt", System.currentTimeMillis() + _serverOffset.value + ttl)
             put("from", me.uid)
             put("text", text)
             put("at", ServerValue.TIMESTAMP)
@@ -483,6 +746,9 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             "$theirs/lastText" to preview,
             "$theirs/lastAt" to ServerValue.TIMESTAMP,
             "$theirs/lastFrom" to me.uid,
+            "$theirs/unread" to ServerValue.increment(1),
+            "$theirs/typingAt" to null,
+            "$mine/unread" to 0,
             // The push to the other person's phones (sent by QMusic's server, see server/qmusic-push).
             "notify/${root.child("notify").push().key}" to mapOf(
                 "from" to me.uid,
@@ -515,7 +781,10 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             updates["$base/lastAt"] = ServerValue.TIMESTAMP
             updates["$base/lastFrom"] = me.uid
             updates["$base/lastFromName"] = me.name.substringBefore(' ')
+            updates["$base/typingAt"] = null
+            if (member.user.uid != me.uid) updates["$base/unread"] = ServerValue.increment(1)
         }
+        updates["userChats/${me.uid}/$groupId/unread"] = 0
         updates["userChats/${me.uid}/$groupId/read"] = ServerValue.TIMESTAMP
         updates["notify/${root.child("notify").push().key}"] = mapOf(
             "from" to me.uid, "to" to groupId, "chatId" to groupId, "type" to "chat", "body" to preview, "at" to ServerValue.TIMESTAMP,
@@ -594,19 +863,33 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val localAttachment = ChatAttachment(file.kind, file.location, file.name, file.size, file.mime, file.durationMs, file.width, file.height, file.thumb, file.wave)
         addOutbox(chatId, ChatMessage(id = messageId, from = me.uid, text = caption, attachment = localAttachment, at = System.currentTimeMillis(), pending = true))
         try {
-            require(file.size <= MediaUpload.MAX_BYTES) { "max 100 MB" }
+            // A video goes as 720p H.264 (a phone's 4K clip of 200 MB becomes ~20 MB); the first 40 % of the ring is that.
+            var source = file.location
+            var size = file.size
+            var share = 0f
+            if (file.kind == AttachmentKind.VIDEO) {
+                VideoCompressor.compress(app, file.location) { p -> _uploads.update { it + (messageId to p * 0.4f) } }?.let { small ->
+                    if (small.length() in 1 until size) {
+                        source = small.absolutePath
+                        size = small.length()
+                    }
+                }
+                share = 0.4f
+            }
+            require(size <= MediaUpload.MAX_BYTES) { "max 100 MB" }
             val url = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                MediaUpload.upload(token(), chatId, ext, file.mime.ifBlank { "application/octet-stream" }, file.size, { openLocation(file.location) }) { done ->
-                    _uploads.update { it + (messageId to done.toFloat() / file.size.coerceAtLeast(1)) }
+                MediaUpload.upload(token(), chatId, ext, file.mime.ifBlank { "application/octet-stream" }, size, { openLocation(source) }) { done ->
+                    _uploads.update { it + (messageId to share + (1 - share) * done.toFloat() / size.coerceAtLeast(1)) }
                 }
             }
+            if (source != file.location) runCatching { java.io.File(source).delete() }
             // Our own voice message plays from the phone's copy, without fetching it back.
             if (file.kind == AttachmentKind.VOICE) localCopies[url] = file.location
             val attachment = buildMap<String, Any?> {
                 put("kind", file.kind.name.lowercase())
                 put("url", url)
                 put("name", file.name.take(120))
-                put("size", file.size)
+                put("size", size)
                 put("mime", file.mime)
                 if (file.durationMs > 0) put("duration", file.durationMs)
                 if (file.width > 0) put("w", file.width)
@@ -672,7 +955,29 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 admin = m.child("role").getValue(String::class.java) == "admin",
             )
         }.sortedWith(compareByDescending<GroupMember> { it.admin }.thenBy { it.user.name.lowercase() })
-        return GroupInfo(id, name, child("photo").getValue(String::class.java), members, child("createdBy").getValue(String::class.java))
+        return GroupInfo(
+            id, name, child("photo").getValue(String::class.java), members, child("createdBy").getValue(String::class.java),
+            description = child("description").getValue(String::class.java).orEmpty(),
+        )
+    }
+
+    override suspend fun setGroupPhoto(groupId: String, image: PickedImage): Result<Unit> = runCatching {
+        val url = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            MediaUpload.upload(token(), groupId, "jpg", "image/jpeg", image.jpeg.size.toLong(), { image.jpeg.inputStream() }) {}
+        }
+        imageCache.put(url, image.jpeg)
+        root.child("groups").child(groupId).child("photo").setValue(url).await()
+        // Every member's list shows the new picture at once.
+        val info = groupInfo(groupId, fresh = true) ?: return@runCatching
+        root.updateChildren(info.members.associate { "userChats/${it.user.uid}/$groupId/photo" to url })
+    }
+
+    override suspend fun setGroupDescription(groupId: String, text: String): Result<Unit> = runCatching {
+        root.child("groups").child(groupId).child("description").setValue(text.trim().take(500)).await()
+    }
+
+    override suspend fun setAdmin(groupId: String, member: ChatUser, admin: Boolean): Result<Unit> = runCatching {
+        root.child("groups").child(groupId).child("members").child(member.uid).child("role").setValue(if (admin) "admin" else "member").await()
     }
 
     /** The group as last seen (kept fresh by [group]); read from the server the first time. */
@@ -921,6 +1226,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             name = snap.child("name").getValue(String::class.java) ?: return null,
             username = snap.child("username").getValue(String::class.java).orEmpty(),
             photo = snap.child("photo").getValue(String::class.java),
+            about = snap.child("about").getValue(String::class.java).orEmpty(),
         )
     }
 
@@ -982,12 +1288,13 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
 
     override suspend fun markRead(chatId: String) {
         val uid = auth.currentUser?.uid ?: return
-        root.updateChildren(
-            mapOf(
-                "userChats/$uid/$chatId/read" to ServerValue.TIMESTAMP,
-                "chats/$chatId/read/$uid" to ServerValue.TIMESTAMP,
-            ),
+        val updates = hashMapOf<String, Any?>(
+            "userChats/$uid/$chatId/read" to ServerValue.TIMESTAMP,
+            "userChats/$uid/$chatId/unread" to 0,
         )
+        // Who hides their read marks only marks it for themselves.
+        if (!_privacy.value.hideReadReceipts) updates["chats/$chatId/read/$uid"] = ServerValue.TIMESTAMP
+        root.updateChildren(updates)
     }
 
     override suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit> = runCatching {
@@ -1012,6 +1319,12 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val listener = object : ValueEventListener {
             override fun onDataChange(snap: DataSnapshot) {
                 if (snap.getValue(Boolean::class.java) != true) return
+                if (_privacy.value.hideLastSeen) {
+                    // Hidden: others see neither "online" nor a time.
+                    ref.onDisconnect().setValue(mapOf("hidden" to true))
+                    ref.setValue(mapOf("hidden" to true))
+                    return
+                }
                 ref.onDisconnect().setValue(mapOf("online" to false, "lastSeen" to ServerValue.TIMESTAMP))
                 ref.setValue(mapOf("online" to true, "lastSeen" to ServerValue.TIMESTAMP))
             }
@@ -1020,13 +1333,17 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         }
         connected.addValueEventListener(listener)
         presenceListener = listener
+        // Privacy changed while connected: written again at once.
+        if (_privacy.value.hideLastSeen) ref.setValue(mapOf("hidden" to true))
     }
 
-    override fun presence(uid: String): Flow<Presence?> = callbackFlow {
+    override fun presence(uid: String): Flow<Presence?> = combine(presenceOf(uid), _privacy) { p, mine -> if (mine.hideLastSeen) null else p }
+
+    private fun presenceOf(uid: String): Flow<Presence?> = callbackFlow {
         val job = launch {
             listen(root.child("presence").child(uid)).collect { snap ->
                 trySend(
-                    if (!snap.exists()) null else Presence(
+                    if (!snap.exists() || snap.child("hidden").getValue(Boolean::class.java) == true) null else Presence(
                         online = snap.child("online").getValue(Boolean::class.java) == true,
                         lastSeen = snap.child("lastSeen").getValue(Long::class.java) ?: 0L,
                     ),
@@ -1072,6 +1389,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
 
     override suspend fun setTyping(chatId: String, typing: Boolean) {
         val uid = auth.currentUser?.uid ?: return
+        val name = (_account.value as? ChatAccount.Ready)?.me?.name?.substringBefore(' ').orEmpty()
         val ref = root.child("typing").child(chatId).child(uid)
         if (typing) {
             ref.onDisconnect().removeValue()
@@ -1079,6 +1397,14 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         } else {
             ref.removeValue()
         }
+        // The others' conversation lists say "typing…" too.
+        val others = if (isGroupId(chatId)) groups[chatId]?.members?.map { it.user.uid }.orEmpty() else chatId.split("_")
+        val updates = HashMap<String, Any?>()
+        others.filter { it != uid && it != CLAUDE_BOT_UID }.forEach { other ->
+            updates["userChats/$other/$chatId/typingAt"] = if (typing) ServerValue.TIMESTAMP else null
+            updates["userChats/$other/$chatId/typingName"] = if (typing) name else null
+        }
+        if (updates.isNotEmpty()) root.updateChildren(updates)
     }
 
     override fun reactions(chatId: String): Flow<Map<String, Map<String, String>>> = callbackFlow {

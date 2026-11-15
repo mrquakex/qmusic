@@ -150,7 +150,7 @@ internal class FirebaseCallService(
 
     val egl: EglBase by lazy { EglBase.create() }
 
-    private val factory: PeerConnectionFactory by lazy {
+    internal val factory: PeerConnectionFactory by lazy {
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(app).createInitializationOptions())
         PeerConnectionFactory.builder()
             .setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext, true, true))
@@ -536,7 +536,7 @@ internal class FirebaseCallService(
 
     // ------------------------------------------------------------------ WebRTC
 
-    private suspend fun iceServers(): List<PeerConnection.IceServer> {
+    internal suspend fun iceServers(): List<PeerConnection.IceServer> {
         val servers = ArrayList<PeerConnection.IceServer>()
         runCatching {
             val turn = root.child("turn").get().await()
@@ -877,7 +877,7 @@ internal class FirebaseCallService(
 
 // ------------------------------------------------------------------ WebRTC's callbacks as suspend functions
 
-private suspend fun PeerConnection.awaitCreate(offer: Boolean): SessionDescription = suspendCancellableCoroutine { cont ->
+internal suspend fun PeerConnection.awaitCreate(offer: Boolean): SessionDescription = suspendCancellableCoroutine { cont ->
     val observer = object : SdpObserver {
         override fun onCreateSuccess(sdp: SessionDescription) {
             if (cont.isActive) cont.resume(sdp)
@@ -909,8 +909,8 @@ private suspend fun PeerConnection.awaitSet(sdp: SessionDescription, local: Bool
     if (local) setLocalDescription(observer, sdp) else setRemoteDescription(observer, sdp)
 }
 
-private suspend fun PeerConnection.awaitSetLocal(sdp: SessionDescription) = awaitSet(sdp, local = true)
-private suspend fun PeerConnection.awaitSetRemote(sdp: SessionDescription) = awaitSet(sdp, local = false)
+internal suspend fun PeerConnection.awaitSetLocal(sdp: SessionDescription) = awaitSet(sdp, local = true)
+internal suspend fun PeerConnection.awaitSetRemote(sdp: SessionDescription) = awaitSet(sdp, local = false)
 
 // ------------------------------------------------------------------ the screen
 

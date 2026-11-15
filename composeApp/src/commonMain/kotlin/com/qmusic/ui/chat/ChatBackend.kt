@@ -10,7 +10,60 @@ data class ChatUser(
     val name: String,
     val username: String,
     val photo: String? = null,
+    /** A line about themselves ("Hakkımda"). */
+    val about: String = "",
 )
+
+/** What the person shares: their last seen (and being online), and whether they tell others they read. */
+data class Privacy(val hideLastSeen: Boolean = false, val hideReadReceipts: Boolean = false)
+
+/** The card of a link in a message: the page's title, a line about it and its picture. */
+data class LinkPreview(val url: String, val title: String, val description: String, val image: String?, val site: String)
+
+/** A message the person starred, to find it again. */
+data class StarredMessage(val chatId: String, val messageId: String, val text: String, val from: String, val fromName: String, val chatName: String, val at: Long)
+
+/** The first link in a text, or null. */
+fun firstLink(text: String): String? = Regex("""https?://[^\s<>"]+[^\s<>".,;:!?)\]]""").find(text)?.value
+
+/** The links in a text. */
+fun links(text: String): List<String> = Regex("""https?://[^\s<>"]+[^\s<>".,;:!?)\]]""").findAll(text).map { it.value }.toList()
+
+/** A text made only of one to three emoji: shown large, without a bubble. */
+fun isBigEmoji(text: String): Boolean {
+    val t = text.trim()
+    if (t.isEmpty() || t.length > 24) return false
+    if (t.any { it.isLetterOrDigit() }) return false
+    var count = 0
+    var i = 0
+    while (i < t.length) {
+        val cp = t.codePointAtCompat(i)
+        val size = if (cp > 0xFFFF) 2 else 1
+        // Joiners, variation selectors and skin tones belong to the emoji before them.
+        if (cp != 0x200D && cp !in 0xFE00..0xFE0F && cp !in 0x1F3FB..0x1F3FF && cp != 0x20E3 && !t[i].isWhitespace()) {
+            if (i == 0 || t.codePointBeforeCompat(i) != 0x200D) count++
+        }
+        if (cp < 0x2000 && !t[i].isWhitespace()) return false
+        i += size
+    }
+    return count in 1..3
+}
+
+private fun String.codePointAtCompat(i: Int): Int {
+    val c = this[i]
+    if (c.isHighSurrogate() && i + 1 < length && this[i + 1].isLowSurrogate()) {
+        return ((c.code - 0xD800) shl 10) + (this[i + 1].code - 0xDC00) + 0x10000
+    }
+    return c.code
+}
+
+private fun String.codePointBeforeCompat(i: Int): Int {
+    val c = this[i - 1]
+    if (c.isLowSurrogate() && i - 2 >= 0 && this[i - 2].isHighSurrogate()) {
+        return ((this[i - 2].code - 0xD800) shl 10) + (c.code - 0xDC00) + 0x10000
+    }
+    return c.code
+}
 
 enum class ShareKind { SONG, VIDEO }
 
@@ -66,7 +119,7 @@ class PickedFile(
 )
 
 /** A group: its name and picture, and who is in it. */
-data class GroupInfo(val id: String, val name: String, val photo: String?, val members: List<GroupMember>, val createdBy: String?)
+data class GroupInfo(val id: String, val name: String, val photo: String?, val members: List<GroupMember>, val createdBy: String?, val description: String = "")
 
 data class GroupMember(val user: ChatUser, val admin: Boolean)
 
@@ -152,6 +205,14 @@ data class ChatMessage(
     val together: Boolean = false,
     /** Going up: how much of the attachment has been sent (0-1), on the sender's phone only. */
     val progress: Float? = null,
+    /** The sender changed the text after sending. */
+    val edited: Boolean = false,
+    /** The sender deleted it for everyone ("This message was deleted"). */
+    val deleted: Boolean = false,
+    /** Passed on from another conversation. */
+    val forwarded: Boolean = false,
+    /** A disappearing message: when it goes (server time), 0 when it stays. */
+    val expireAt: Long = 0,
 )
 
 /** A conversation as the list shows it. */
@@ -171,7 +232,18 @@ data class ChatThread(
     val archived: Boolean = false,
     /** Who wrote the last message, for groups ("Ali: …"). */
     val lastFromName: String = "",
+    /** How many messages came since the person last looked. */
+    val unreadCount: Int = 0,
+    /** Until when the person read this conversation. */
+    val readAt: Long = 0,
+    /** No notifications until then (-1: for good; 0: not muted). */
+    val mutedUntil: Long = 0,
+    /** Someone is typing in it (when they last typed, and who, for groups). */
+    val typingAt: Long = 0,
+    val typingName: String = "",
 ) {
+    fun muted(now: Long): Boolean = mutedUntil == -1L || mutedUntil > now
+
     val isGroup: Boolean get() = other.isGroup
 }
 
@@ -325,6 +397,56 @@ interface ChatBackend {
 
     /** The server's clock minus the phone's (ms), to know where a song is now from where it was at a time. */
     val serverOffset: StateFlow<Long> get() = kotlinx.coroutines.flow.MutableStateFlow(0L)
+
+    // ------------------------------------------------------------------ more of a conversation
+
+    /** The last [limit] messages of a conversation (scrolling up asks for more). */
+    fun messages(chatId: String, limit: Int): Flow<List<ChatMessage>> = messages(chatId)
+
+    /** Until when each member read [chatId], and until when their phone has its messages. */
+    fun readMarks(chatId: String): Flow<Map<String, Long>> = kotlinx.coroutines.flow.flowOf(emptyMap())
+    fun deliveredMarks(chatId: String): Flow<Map<String, Long>> = kotlinx.coroutines.flow.flowOf(emptyMap())
+
+    suspend fun editMessage(chatId: String, messageId: String, text: String): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    /** Blanks a message of ours for everyone ("This message was deleted"). */
+    suspend fun deleteForEveryone(chatId: String, messageId: String): Result<Unit> = deleteMessage(chatId, messageId)
+
+    /** Hides a message on the person's own phones only. */
+    suspend fun deleteForMe(chatId: String, messageId: String) {}
+    fun hidden(chatId: String): Flow<Set<String>> = kotlinx.coroutines.flow.flowOf(emptySet())
+
+    /** Sends a copy of [message] (its text, photos, file, song) to each of [targets]. */
+    suspend fun forward(fromChatId: String, message: ChatMessage, targets: List<ChatUser>): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    fun starred(): Flow<List<StarredMessage>> = kotlinx.coroutines.flow.flowOf(emptyList())
+    suspend fun setStarred(chatId: String, message: ChatMessage, fromName: String, chatName: String, starred: Boolean) {}
+
+    /** Disappearing messages of [chatId]: how long they stay (ms), 0 for off. */
+    fun ttl(chatId: String): Flow<Long> = kotlinx.coroutines.flow.flowOf(0L)
+    suspend fun setTtl(other: ChatUser, ttlMs: Long): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    /** No notifications from [chatId] until [until] (-1: for good, 0: on again). */
+    suspend fun setMuted(chatId: String, until: Long) {}
+
+    // ------------------------------------------------------------------ the person
+
+    suspend fun updateProfile(name: String, about: String): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun setProfilePhoto(image: PickedImage): Result<Unit> = Result.failure(UnsupportedOperationException())
+    val privacy: StateFlow<Privacy> get() = kotlinx.coroutines.flow.MutableStateFlow(Privacy())
+    suspend fun setPrivacy(privacy: Privacy) {}
+
+    // ------------------------------------------------------------------ more of a group
+
+    suspend fun setGroupPhoto(groupId: String, image: PickedImage): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun setGroupDescription(groupId: String, text: String): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun setAdmin(groupId: String, member: ChatUser, admin: Boolean): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    /** Group voice and video calls, where this platform has them. */
+    val groupCalls: GroupCallService? get() = null
+
+    /** The card of a link (fetched once, then kept). */
+    suspend fun linkPreview(url: String): LinkPreview? = null
 }
 
 /** A conversation's id: both people's ids in order, so each pair has exactly one. */

@@ -31,3 +31,9 @@ actual fun rememberAttachmentOpener(): (ChatAttachment) -> Unit = {}
 
 @androidx.compose.runtime.Composable
 actual fun VideoMessagePlayer(url: String, modifier: androidx.compose.ui.Modifier) = Unit
+
+@androidx.compose.runtime.Composable
+actual fun PhotoEditor(image: PickedImage, onDone: (PickedImage) -> Unit, onCancel: () -> Unit) = onCancel()
+
+@androidx.compose.runtime.Composable
+actual fun GroupCallVideo(service: GroupCallService, uid: String?, modifier: androidx.compose.ui.Modifier) = Unit

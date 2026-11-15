@@ -29,6 +29,8 @@ sealed interface ChatRoute {
     data class GroupInfo(val group: ChatUser) : ChatRoute
     data class AddMembers(val group: ChatUser) : ChatRoute
     data object Archived : ChatRoute
+    data object Starred : ChatRoute
+    data object Settings : ChatRoute
 }
 
 /**
@@ -48,6 +50,13 @@ class ChatController(
     fun reportError(message: String) {
         _error.value = message
     }
+
+    private val _info = MutableStateFlow<String?>(null)
+
+    /** A short note for the person ("Copied"), cleared once shown. */
+    val info: StateFlow<String?> = _info.asStateFlow()
+    fun reportInfo(message: String) { _info.value = message }
+    fun clearInfo() { _info.value = null }
 
     private val ready = account.map { it as? ChatAccount.Ready }
 
@@ -88,6 +97,117 @@ class ChatController(
     }
 
     fun openArchived() = _routes.update { list -> list.filter { it !is ChatRoute.Archived } + ChatRoute.Archived }
+
+    fun openStarred() = _routes.update { list -> list.filter { it !is ChatRoute.Starred } + ChatRoute.Starred }
+
+    fun openSettings() = _routes.update { list -> list.filter { it !is ChatRoute.Settings } + ChatRoute.Settings }
+
+    /** The list entry of the conversation with [other] (its counts and marks), when there is one. */
+    fun threadOf(other: ChatUser): ChatThread? {
+        val id = chatIdWith(other) ?: return null
+        return allThreads.value?.firstOrNull { it.id == id }
+    }
+
+    fun setMuted(other: ChatUser, until: Long) {
+        val id = chatIdWith(other) ?: return
+        scope.launch { runCatching { backend.setMuted(id, until) } }
+    }
+
+    // ------------------------------------------------------------------ more of messages
+
+    /** The last [limit] messages (scrolling up raises it). */
+    fun messages(other: ChatUser, limit: kotlinx.coroutines.flow.Flow<Int>) =
+        chatIdWith(other)?.let { id -> limit.flatMapLatest { n -> backend.messages(id, n).catch { emit(emptyList()) } } } ?: emptyFlow()
+
+    fun readMarks(other: ChatUser) = chatIdWith(other)?.let { id -> backend.readMarks(id).catch { emit(emptyMap()) } } ?: flowOf(emptyMap())
+
+    fun deliveredMarks(other: ChatUser) = chatIdWith(other)?.let { id -> backend.deliveredMarks(id).catch { emit(emptyMap()) } } ?: flowOf(emptyMap())
+
+    fun edit(other: ChatUser, message: ChatMessage, text: String) {
+        val id = chatIdWith(other) ?: return
+        scope.launch { backend.editMessage(id, message.id, text).onFailure { _error.value = it.message } }
+    }
+
+    fun deleteForEveryone(other: ChatUser, message: ChatMessage) {
+        val id = chatIdWith(other) ?: return
+        scope.launch { backend.deleteForEveryone(id, message.id).onFailure { _error.value = it.message } }
+    }
+
+    fun deleteForMe(other: ChatUser, message: ChatMessage) {
+        val id = chatIdWith(other) ?: return
+        scope.launch { runCatching { backend.deleteForMe(id, message.id) } }
+    }
+
+    fun forward(from: ChatUser, messages: List<ChatMessage>, targets: List<ChatUser>) {
+        val id = chatIdWith(from) ?: return
+        if (targets.isEmpty()) return
+        scope.launch {
+            for (m in messages.sortedBy { it.at }) backend.forward(id, m, targets).onFailure { _error.value = it.message }
+        }
+    }
+
+    /** Conversations a message can be forwarded to (the list, archived ones too). */
+    val forwardTargets: StateFlow<List<ChatUser>> = allThreads
+        .map { list -> list.orEmpty().map { it.other } }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    val starred: StateFlow<List<StarredMessage>> = ready
+        .flatMapLatest { if (it == null) flowOf(emptyList()) else backend.starred().catch { emit(emptyList()) } }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    fun setStarred(other: ChatUser, message: ChatMessage, fromName: String, chatName: String, starred: Boolean) {
+        val id = chatIdWith(other) ?: return
+        scope.launch { runCatching { backend.setStarred(id, message, fromName, chatName, starred) } }
+    }
+
+    /** Opens the conversation a starred message is in. */
+    fun openStarredChat(item: StarredMessage) {
+        val thread = allThreads.value?.firstOrNull { it.id == item.chatId } ?: return
+        openConversation(thread.other)
+    }
+
+    fun ttl(other: ChatUser) = chatIdWith(other)?.let { id -> backend.ttl(id).catch { emit(0L) } } ?: flowOf(0L)
+
+    fun setTtl(other: ChatUser, ttlMs: Long) {
+        scope.launch { backend.setTtl(other, ttlMs).onFailure { _error.value = it.message } }
+    }
+
+    suspend fun linkPreview(url: String): LinkPreview? = runCatching { backend.linkPreview(url) }.getOrNull()
+
+    // ------------------------------------------------------------------ the person
+
+    val privacy: StateFlow<Privacy> = backend.privacy
+
+    fun setPrivacy(privacy: Privacy) {
+        scope.launch { runCatching { backend.setPrivacy(privacy) } }
+    }
+
+    fun updateProfile(name: String, about: String) {
+        scope.launch { backend.updateProfile(name, about).onFailure { _error.value = it.message } }
+    }
+
+    fun setProfilePhoto(image: PickedImage) {
+        scope.launch { backend.setProfilePhoto(image).onFailure { _error.value = it.message } }
+    }
+
+    // ------------------------------------------------------------------ more of groups
+
+    fun setGroupPhoto(group: ChatUser, image: PickedImage) {
+        scope.launch { backend.setGroupPhoto(group.uid, image).onFailure { _error.value = it.message } }
+    }
+
+    fun setGroupDescription(group: ChatUser, text: String) {
+        scope.launch { backend.setGroupDescription(group.uid, text).onFailure { _error.value = it.message } }
+    }
+
+    fun setAdmin(group: ChatUser, member: ChatUser, admin: Boolean) {
+        scope.launch { backend.setAdmin(group.uid, member, admin).onFailure { _error.value = it.message } }
+    }
+
+    /** Group calls (null where the platform has none). */
+    val groupCalls: GroupCallService? = backend.groupCalls
+
+    fun groupCallParticipants(group: ChatUser) = groupCalls?.participants(group.uid)?.catch { emit(emptyList()) } ?: flowOf(emptyList())
 
     // ------------------------------------------------------------------ groups
 
@@ -245,6 +365,9 @@ class ChatController(
     fun unfriend(user: ChatUser) {
         scope.launch { backend.unfriend(user).onFailure { _error.value = it.message } }
     }
+
+    /** Someone's profile read fresh (their about line, a new picture). */
+    suspend fun userFresh(uid: String): ChatUser? = runCatching { backend.user(uid) }.getOrNull()
 
     /** Opens someone's profile by id (a tapped friend notification). */
     fun openProfileOf(uid: String, fallback: ChatUser) {
