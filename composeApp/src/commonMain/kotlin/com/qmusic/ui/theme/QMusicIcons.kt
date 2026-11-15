@@ -294,4 +294,22 @@ object QMusicIcons {
     val File: ImageVector = stroked("File", "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6")
 
     val Attach: ImageVector = stroked("Attach", "M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9")
+
+    /** Three bars: a poll. */
+    val Poll: ImageVector = stroked("Poll", "M4 20h16M7 20V12M12 20V5M17 20v-5")
+
+    /** A map pin. */
+    val Location: ImageVector = stroked("Location", "M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z", "M12 12.2a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z")
+
+    /** A person on a card: a contact. */
+    val Contact: ImageVector = stroked("Contact", "M4 4h16v16H4z", "M12 12.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM7.5 18a4.5 4.5 0 0 1 9 0")
+
+    /** A stopwatch: disappearing messages. */
+    val Timer: ImageVector = stroked("Timer", "M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 9v4l2.5 2.5M9.5 2.5h5")
+
+    /** A star outline: starred messages. */
+    val Star: ImageVector = stroked("Star", "M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z")
+
+    /** A circle with a bar: deleted. */
+    val Blocked: ImageVector = stroked("Blocked", "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM5.6 5.6l12.8 12.8")
 }

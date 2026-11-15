@@ -412,6 +412,8 @@ data class ChatStrings(
     val gifsFailed: String get() = if (english) "Could not load. Check the connection." else "Yüklenemedi. Bağlantını kontrol et."
     val poweredByKlipy: String get() = if (english) "Powered by KLIPY" else "KLIPY ile"
 
+    val micSilent: String get() = if (english) "The microphone recorded no sound. Check the microphone permission and that no other app is using it." else "Mikrofon hiç ses almadı. Mikrofon iznini ve başka bir uygulamanın mikrofonu kullanmadığını kontrol et."
+
     companion object {
         val Turkish = ChatStrings(
             title = "Mesajlar",

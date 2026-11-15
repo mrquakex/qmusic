@@ -69,7 +69,14 @@ interface CallService {
 
 /** The answer button of the ringing notification was tapped: the call screen answers as soon as it is up. */
 object CallLaunch {
-    val acceptRequested = kotlinx.coroutines.flow.MutableStateFlow(false)
+    /**
+     * When Answer was tapped (0 when it was not). It counts only for a call ringing within a few seconds of the tap: a
+     * tap that found no call (it had ended) must not answer the next one by itself.
+     */
+    val acceptRequestedAt = kotlinx.coroutines.flow.MutableStateFlow(0L)
+
+    /** How long a tap on Answer waits for its call to show up. */
+    const val ACCEPT_WINDOW_MS = 15_000L
 
     /** "Call back" was tapped on a missed call: the app dials this person (voice or video). */
     val callBack = kotlinx.coroutines.flow.MutableStateFlow<Pair<ChatUser, Boolean>?>(null)

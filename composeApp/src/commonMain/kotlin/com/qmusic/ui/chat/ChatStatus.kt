@@ -288,7 +288,7 @@ internal fun TextStatusPage(controller: ChatController, s: ChatStrings) {
             IconButton(onClick = {
                 emoji = !emoji
                 if (emoji) keyboard?.hide() else runCatching { focus.requestFocus() }.also { keyboard?.show() }
-            }) { Text("☺", color = Color.White, fontSize = 22.sp) }
+            }) { Icon(QMusicIcons.Mood, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp)) }
             Text(
                 "Aa",
                 color = Color.White,

@@ -58,7 +58,8 @@ private class AndroidVoiceRecorder(private val context: Context) : VoiceRecorder
         val target = File(dir, "voice_${System.currentTimeMillis()}.m4a")
         val r = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(context) else @Suppress("DEPRECATION") MediaRecorder()
         return try {
-            r.setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+            // The plain microphone: some tablets give only silence from the voice recognition source.
+            r.setAudioSource(MediaRecorder.AudioSource.MIC)
             r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             r.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
             r.setAudioChannels(1)
@@ -89,7 +90,11 @@ private class AndroidVoiceRecorder(private val context: Context) : VoiceRecorder
         }
     }
 
+    override var lastSilent: Boolean = false
+        private set
+
     override fun stop(): PickedFile? {
+        lastSilent = false
         sampling?.cancel()
         _level.value = 0f
         val r = recorder ?: return null
@@ -101,6 +106,13 @@ private class AndroidVoiceRecorder(private val context: Context) : VoiceRecorder
         val duration = System.currentTimeMillis() - startedAt
         if (!ok || f == null || !f.exists() || duration < MIN_MS) {
             f?.delete()
+            return null
+        }
+        // Not a sound the whole time: the microphone gave nothing (blocked, or another app has it). Sending it would
+        // be a silent message, so it is not sent and the person is told.
+        if (samples.size >= 5 && samples.all { it == 0 }) {
+            f.delete()
+            lastSilent = true
             return null
         }
         return PickedFile(

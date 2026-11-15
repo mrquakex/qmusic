@@ -17,6 +17,9 @@ interface VoiceRecorder {
 
     /** Stops and throws the recording away. */
     fun cancel()
+
+    /** The last recording heard nothing at all (the microphone was blocked or taken): it was not kept. */
+    val lastSilent: Boolean get() = false
 }
 
 /** Plays voice messages, one at a time; the music pauses meanwhile. */

@@ -572,6 +572,15 @@ private fun ConversationPage(
     val ttl by remember(other.uid) { controller.ttl(other) }.collectAsState(initial = 0L)
     // Where the person had read up to when they opened it: the "unread" line goes there and stays.
     val openedReadAt = remember(other.uid) { controller.threadOf(other)?.takeIf { it.unreadCount > 0 }?.readAt ?: Long.MAX_VALUE }
+    // The "unread" line marks what came before the chat was opened; it goes after a few seconds, or when the person writes.
+    val openedAt = remember(other.uid) { Clock.System.now().toEpochMilliseconds() + 5_000 }
+    var unreadLineOn by remember(other.uid) { mutableStateOf(openedReadAt != Long.MAX_VALUE) }
+    LaunchedEffect(other.uid, unreadLineOn) {
+        if (unreadLineOn) {
+            kotlinx.coroutines.delay(8_000)
+            unreadLineOn = false
+        }
+    }
     val threadsNow by controller.threads.collectAsState()
     val archivedNow by controller.archived.collectAsState()
     val thread = remember(threadsNow, archivedNow, other.uid) {
@@ -710,7 +719,7 @@ private fun ConversationPage(
     }
 
     // The rows newest first (the list is drawn from the bottom), and the messages the search finds, newest first.
-    val rows = remember(messages) { messages?.let { withDays(it, openedReadAt, me.uid).asReversed() } }
+    val rows = remember(messages, unreadLineOn) { messages?.let { withDays(it, if (unreadLineOn) openedReadAt else Long.MAX_VALUE, me.uid, openedAt).asReversed() } }
     val selectedMessages = remember(messages, selected) { messages.orEmpty().filter { it.id in selected } }
     val starredIds = remember(starredList, chatId) { starredList.filter { it.chatId == chatId }.map { it.messageId }.toSet() }
     // In a group a message is read when every other member read it (delivered likewise).
@@ -773,7 +782,7 @@ private fun ConversationPage(
                     val allStarred = selectedMessages.all { it.id in starredIds }
                     selectedMessages.forEach { m -> controller.setStarred(other, m, if (m.from == me.uid) me.name else memberNames[m.from] ?: other.name, chatName, !allStarred) }
                     selected = emptySet()
-                }) { Text("★", color = Color(0xFFFFB800), fontSize = 20.sp) }
+                }) { Icon(QMusicIcons.Star, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(22.dp)) }
                 TextButton(onClick = { forwarding = selectedMessages.filter { !it.deleted } }) { Text(s.forward, color = Ink) }
                 IconButton(onClick = { deleting = selectedMessages }) { Icon(QMusicIcons.Trash, null, tint = Ink) }
             }
@@ -875,7 +884,7 @@ private fun ConversationPage(
                         )
                         if (!isClaude) {
                             DropdownMenuItem(
-                                leadingIcon = { Text("⏱", fontSize = 18.sp) },
+                                leadingIcon = { Icon(QMusicIcons.Timer, null, tint = Ink) },
                                 text = { Text(s.disappearing + if (ttl > 0) " · " + ttlLabel(ttl, s) else "", color = TextPrimary) },
                                 onClick = { menu = false; ttlDialog = true },
                             )
@@ -1247,13 +1256,13 @@ private fun ConversationPage(
                             )
                             if (!isClaude) {
                                 DropdownMenuItem(
-                                    leadingIcon = { Text("📊", fontSize = 18.sp) },
+                                    leadingIcon = { Icon(QMusicIcons.Poll, null, tint = Ink) },
                                     text = { Text(s.poll, color = TextPrimary, fontSize = 14.sp) },
                                     onClick = { attach = false; pollDialog = true },
                                 )
                             }
                             DropdownMenuItem(
-                                leadingIcon = { Text("📍", fontSize = 18.sp) },
+                                leadingIcon = { Icon(QMusicIcons.Location, null, tint = Ink) },
                                 text = { Text(s.location, color = TextPrimary, fontSize = 14.sp) },
                                 onClick = {
                                     attach = false
@@ -1262,7 +1271,7 @@ private fun ConversationPage(
                                 },
                             )
                             DropdownMenuItem(
-                                leadingIcon = { Text("👤", fontSize = 18.sp) },
+                                leadingIcon = { Icon(QMusicIcons.Contact, null, tint = Ink) },
                                 text = { Text(s.contact, color = TextPrimary, fontSize = 14.sp) },
                                 onClick = { attach = false; pickContact() },
                             )
@@ -1298,7 +1307,7 @@ private fun ConversationPage(
                                 if (emojiOpen) keyboard?.hide() else { runCatching { inputFocus.requestFocus() }; keyboard?.show() }
                             },
                             contentAlignment = Alignment.Center,
-                        ) { Text(if (emojiOpen) "⌨" else "😊", fontSize = 20.sp, color = TextSecondary) }
+                        ) { Icon(if (emojiOpen) QMusicIcons.ChevronDown else QMusicIcons.Mood, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(24.dp)) }
                     Box(Modifier.weight(1f).padding(vertical = 11.dp)) {
                         if (text.isEmpty()) Text(s.messageHint, color = TextMuted, fontSize = 16.sp)
                         BasicTextField(
@@ -1373,10 +1382,13 @@ private fun ConversationPage(
                                     if (thrownAway) {
                                         recorder.cancel()
                                     } else {
-                                        recorder.stop()?.let { voice ->
+                                        val voice = recorder.stop()
+                                        if (voice != null) {
                                             sounds?.playSmall(SmallSound.REC_SENT)
                                             controller.sendFile(other, voice, "", quoted())
                                             replyTo = null
+                                        } else if (recorder.lastSilent) {
+                                            controller.reportError(s.micSilent)
                                         }
                                     }
                                 }
@@ -1399,6 +1411,7 @@ private fun ConversationPage(
                                     text = ""
                                 } else if (controller.send(other, text, replyTo = quoted(), mentions = mentionNames.filter { (_, name) -> text.contains("@$name") }.keys)) {
                                     text = ""
+                                    unreadLineOn = false
                                     mentionNames = emptyMap()
                                     replyTo = null
                                     controller.stopTyping(other)
@@ -1958,7 +1971,7 @@ private sealed interface ListRow {
 }
 
 /** The messages with a date line wherever the day changes. */
-private fun withDays(list: List<ChatMessage>, unreadAfter: Long = Long.MAX_VALUE, myUid: String = ""): List<ListRow> {
+private fun withDays(list: List<ChatMessage>, unreadAfter: Long = Long.MAX_VALUE, myUid: String = "", openedAt: Long = Long.MAX_VALUE): List<ListRow> {
     val out = ArrayList<ListRow>(list.size + 5)
     var day: kotlinx.datetime.LocalDate? = null
     val firstUnread = list.indexOfFirst { it.at > unreadAfter && it.from != myUid && !it.system }
@@ -1968,7 +1981,8 @@ private fun withDays(list: List<ChatMessage>, unreadAfter: Long = Long.MAX_VALUE
             out += ListRow.Day(m.at)
             day = d
         }
-        if (i == firstUnread) out += ListRow.Unread(list.size - i)
+        // Only what others wrote before the chat was opened counts (not one's own, not what came while reading).
+        if (i == firstUnread) out += ListRow.Unread(list.drop(i).count { it.from != myUid && !it.system && it.at <= openedAt })
         out += ListRow.Message(m)
     }
     return out
@@ -2146,7 +2160,7 @@ private fun Bubble(
             }
             if (m.deleted) {
                 Text(
-                    "🚫 " + s.deletedMessage,
+                    s.deletedMessage,
                     color = TextSecondary,
                     fontSize = 15.sp,
                     fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,

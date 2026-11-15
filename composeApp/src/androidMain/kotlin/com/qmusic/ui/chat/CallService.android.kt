@@ -103,7 +103,13 @@ object CallHooks {
     fun setVisible(visible: Boolean) {
         appVisible = visible
         onVisibility?.invoke(visible)
+        trace?.invoke(if (visible) "app on screen" else "app hidden")
     }
+
+    /** Notes something the app did into the call going on (its trail shows why a call ended). */
+    @Volatile
+    var trace: ((String) -> Unit)? = null
+        internal set
 }
 
 /** What a tapped call notification asks for, from outside the app's screens. */
@@ -206,11 +212,22 @@ internal class FirebaseCallService(
         var lastReoffer: String? = null
         var lastReanswer: String? = null
         var unreachableJob: Job? = null
+        var lastState: String? = "-"
+        /** When this call started (server time): a record of an older call, still in the cache, is not a new one. */
+        var at = 0L
         /** Where our picture goes: there from the start, in voice calls too, so the camera can come on mid-call. */
         var videoSender: org.webrtc.RtpSender? = null
         /** A voice call where a camera came on. */
         var upgraded = false
         val callRef: DatabaseReference get() = root.child("calls").child(chatId)
+
+        /** What happened in this call, in order (sent to callDebug when it ends, to find why a call failed). */
+        val trail = java.util.concurrent.ConcurrentLinkedQueue<String>()
+        val startedAt = System.currentTimeMillis()
+        fun note(what: String) {
+            if (trail.size < 80) trail.add("+${System.currentTimeMillis() - startedAt}ms $what")
+            android.util.Log.i("QeyfCall", "${id.take(8)} ${if (caller) "out" else "in"}: $what")
+        }
     }
 
     private var session: Session? = null
@@ -241,6 +258,7 @@ internal class FirebaseCallService(
     private fun serverNow() = System.currentTimeMillis() + serverOffset
 
     init {
+        CallHooks.trace = { what -> session?.note(what) }
         runCatching {
             root.database.getReference(".info/serverTimeOffset").addValueEventListener(object : ValueEventListener {
                 override fun onDataChange(snap: DataSnapshot) {
@@ -333,7 +351,9 @@ internal class FirebaseCallService(
             )
             if (session != null) return@launch
             val s = Session(id, chatId, peer, video, caller = false)
+            s.at = at
             session = s
+            s.note("incoming from ${peer.name}, app visible: ${CallHooks.appVisible}")
             _state.value = CallState(id = id, peer = peer, video = video, phase = CallPhase.INCOMING, speaker = video)
             // The caller sees "Ringing…" from here on: this phone has the call.
             s.callRef.child("ringing").setValue(id)
@@ -352,7 +372,9 @@ internal class FirebaseCallService(
         val chatId = chatIdOf(mine.uid, peer.uid)
         val id = UUID.randomUUID().toString()
         val s = Session(id, chatId, peer, video, caller = true)
+        s.at = serverNow()
         session = s
+        s.note("calling ${peer.name}, video: $video")
         _state.value = CallState(id = id, peer = peer, video = video, phase = CallPhase.CALLING, speaker = video)
         CallHooks.onActive?.invoke(true, peer, video)
         startAudio(video)
@@ -380,6 +402,7 @@ internal class FirebaseCallService(
                     if (_state.value?.phase == CallPhase.CALLING) finish(CallEnd.NO_ANSWER, write = true)
                 }
             } catch (e: Exception) {
+                s.note("call setup failed: ${e.javaClass.simpleName}: ${e.message}")
                 finish(CallEnd.FAILED, write = true)
             }
         }
@@ -398,6 +421,7 @@ internal class FirebaseCallService(
 
     override fun accept() {
         val s = session ?: return
+        s.note("accept, phase ${_state.value?.phase}")
         if (s.caller || _state.value?.phase != CallPhase.INCOMING) return
         stopRinging()
         CallHooks.onIncomingGone?.invoke()
@@ -409,7 +433,17 @@ internal class FirebaseCallService(
         scope.launch {
             try {
                 root.child("incomingCall").child(me()?.uid ?: return@launch).removeValue()
+                // The call may have ended a moment before the answer: then there is nothing to answer.
+                val now = s.callRef.get().await()
+                val nowId = now.child("id").getValue(String::class.java)
+                val nowState = now.child("state").getValue(String::class.java)
+                if (nowId != s.id || nowState == "ended" || nowState == "declined" || nowState == "busy") {
+                    s.note("answer too late: call $nowId is $nowState")
+                    finish(CallEnd.CANCELLED, write = false)
+                    return@launch
+                }
                 val offerSnap = waitFor(s.callRef.child("offer"))
+                s.note("offer received")
                 val pc = createPeer(s)
                 pc.awaitSetRemote(SessionDescription(SessionDescription.Type.OFFER, offerSnap.child("sdp").getValue(String::class.java)))
                 // A voice call: the caller's picture slot is taken both ways, so either camera can come on later.
@@ -426,7 +460,9 @@ internal class FirebaseCallService(
                 s.callRef.updateChildren(
                     mapOf("answer" to mapOf("type" to answer.type.canonicalForm(), "sdp" to answer.description), "state" to "accepted"),
                 )
+                s.note("answer sent")
             } catch (e: Exception) {
+                s.note("answer failed: ${e.javaClass.simpleName}: ${e.message}")
                 finish(CallEnd.FAILED, write = true)
             }
         }
@@ -435,6 +471,7 @@ internal class FirebaseCallService(
     override fun decline() {
         val s = session ?: return
         if (s.caller) return
+        s.note("decline")
         s.callRef.child("state").setValue("declined")
         me()?.uid?.let { root.child("incomingCall").child(it).removeValue() }
         finish(CallEnd.DECLINED, write = false)
@@ -443,6 +480,7 @@ internal class FirebaseCallService(
     override fun hangUp() {
         val s = session ?: return
         val phase = _state.value?.phase
+        s.note("hangUp in $phase")
         if (!s.caller && phase == CallPhase.INCOMING) {
             decline()
             return
@@ -475,6 +513,14 @@ internal class FirebaseCallService(
                 if (session !== s) return
                 val id = snap.child("id").getValue(String::class.java)
                 if (id != null && id != s.id) {
+                    // The cache can show the conversation's last call for a moment before this one arrives: an older
+                    // call is not a new one taking over, so it is waited out.
+                    val otherAt = snap.child("at").getValue(Long::class.java) ?: 0L
+                    if (s.at > 0 && otherAt < s.at - 2_000) {
+                        s.note("older call $id still shown, waiting")
+                        return
+                    }
+                    s.note("another call took the conversation: $id")
                     // Someone started a new call in this conversation: this one is over.
                     finish(CallEnd.HUNG_UP, write = false)
                     return
@@ -528,7 +574,12 @@ internal class FirebaseCallService(
                         }
                     }
                 }
-                when (snap.child("state").getValue(String::class.java)) {
+                val st = snap.child("state").getValue(String::class.java)
+                if (st != s.lastState) {
+                    s.note("state ${s.lastState} -> $st")
+                    s.lastState = st
+                }
+                when (st) {
                     "declined" -> if (s.caller) finish(CallEnd.DECLINED, write = false)
                     "busy" -> if (s.caller) finish(CallEnd.BUSY, write = false)
                     "ended" -> finish(CallEnd.HUNG_UP, write = false)
@@ -673,6 +724,7 @@ internal class FirebaseCallService(
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
             scope.launch {
                 if (session !== s) return@launch
+                s.note("connection $newState")
                 when (newState) {
                     PeerConnection.PeerConnectionState.CONNECTED -> {
                         s.disconnectJob?.cancel()
@@ -843,6 +895,31 @@ internal class FirebaseCallService(
         val s = session ?: return
         if (s.ended) return
         s.ended = true
+        s.note("finish $reason write=$write from " + Throwable().stackTrace.drop(1).take(3).joinToString(" < ") { "${it.methodName}:${it.lineNumber}" })
+        // Who ended it, and how it got there: kept on the server for a while (callDebug/{uid}/{call}).
+        runCatching {
+            val uid = me()?.uid
+            if (uid != null) {
+                val where = Throwable().stackTrace.drop(1).take(6).joinToString(" < ") { "${it.methodName}:${it.lineNumber}" }
+                root.child("callDebug").child(uid).child(s.id.replace(Regex("[.#$\\[\\]/]"), "_")).setValue(
+                    mapOf(
+                        "at" to ServerValue.TIMESTAMP,
+                        "peer" to s.peer.name,
+                        "caller" to s.caller,
+                        "video" to s.video,
+                        "reason" to reason.name,
+                        "write" to write,
+                        "phase" to _state.value?.phase?.name,
+                        "connectedOnce" to s.connectedOnce,
+                        "where" to where,
+                        "trail" to s.trail.toList(),
+                        "app" to CallHooks.appVisible,
+                        "android" to android.os.Build.VERSION.SDK_INT,
+                        "model" to android.os.Build.MODEL,
+                    ),
+                )
+            }
+        }
         stopRinging()
         stopRingback()
         CallHooks.onIncomingGone?.invoke()

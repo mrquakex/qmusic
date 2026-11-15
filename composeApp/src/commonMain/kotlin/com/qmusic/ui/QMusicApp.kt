@@ -334,13 +334,14 @@ fun QMusicApp(
             if (callService != null && call != null) {
                 val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
                 val askPermissions = com.qmusic.ui.chat.rememberCallPermissions()
-                val acceptAsked by com.qmusic.ui.chat.CallLaunch.acceptRequested.collectAsState()
-                LaunchedEffect(acceptAsked, call?.phase) {
+                val acceptAskedAt by com.qmusic.ui.chat.CallLaunch.acceptRequestedAt.collectAsState()
+                LaunchedEffect(acceptAskedAt, call?.phase, call?.id) {
                     val c = call ?: return@LaunchedEffect
-                    if (acceptAsked && c.phase == com.qmusic.ui.chat.CallPhase.INCOMING) {
-                        com.qmusic.ui.chat.CallLaunch.acceptRequested.value = false
-                        askPermissions(c.video) { granted -> if (granted) callService.accept() else callService.decline() }
-                    }
+                    if (acceptAskedAt == 0L || c.phase != com.qmusic.ui.chat.CallPhase.INCOMING) return@LaunchedEffect
+                    com.qmusic.ui.chat.CallLaunch.acceptRequestedAt.value = 0L
+                    // Only a fresh tap answers: an old one (its call long gone) is dropped, never applied to a new call.
+                    val fresh = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - acceptAskedAt < com.qmusic.ui.chat.CallLaunch.ACCEPT_WINDOW_MS
+                    if (fresh) askPermissions(c.video) { granted -> if (granted) callService.accept() else callService.decline() }
                 }
                 com.qmusic.ui.chat.CallScreen(
                     service = callService,

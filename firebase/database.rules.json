@@ -343,6 +343,14 @@
         ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null && auth.uid === $uid"
       }
+    },
+    "callDebug": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        "$call": {
+          ".write": "auth != null && auth.uid === $uid"
+        }
+      }
     }
   }
 }

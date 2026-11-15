@@ -285,7 +285,7 @@ class MainActivity : AppCompatActivity() {
         if (intent?.getBooleanExtra(CallNotifications.EXTRA_ACCEPT, false) != true) return
         intent.removeExtra(CallNotifications.EXTRA_ACCEPT)
         CallNotifications.cancelIncoming(this)
-        com.qmusic.ui.chat.CallLaunch.acceptRequested.value = true
+        com.qmusic.ui.chat.CallLaunch.acceptRequestedAt.value = System.currentTimeMillis()
     }
 
     /** Tapped the "new version" notification: show Settings with the check already done. */

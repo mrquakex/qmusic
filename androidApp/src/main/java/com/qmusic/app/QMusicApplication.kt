@@ -24,7 +24,10 @@ class QMusicApplication : Application() {
         com.qmusic.ui.chat.CallHooks.onBusy = { peer, video -> CallNotifications.showMissed(app, peer, video, busy = true) }
         com.qmusic.ui.chat.CallHooks.onIncomingGone = { CallNotifications.cancelIncoming(app) }
         com.qmusic.ui.chat.CallHooks.onMissed = { peer, video -> CallNotifications.showMissed(app, peer, video) }
-        com.qmusic.ui.chat.ChatPresence.onOpened = { chatId -> ChatPush.clear(app, chatId) }
+        com.qmusic.ui.chat.ChatPresence.onOpened = { chatId ->
+            ChatPush.clear(app, chatId)
+            com.qmusic.ui.chat.CallHooks.trace?.invoke("chat opened")
+        }
         // The locked conversations' ids, kept for notifications that come with the app closed.
         val lockPrefs = getSharedPreferences("qeyf_locked_chats", MODE_PRIVATE)
         com.qmusic.ui.chat.LockedChats.restore(lockPrefs.getStringSet("ids", emptySet()).orEmpty().toSet())
