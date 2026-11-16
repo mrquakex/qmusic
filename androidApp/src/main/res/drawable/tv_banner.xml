@@ -7,5 +7,5 @@
             <size android:width="320dp" android:height="180dp" />
         </shape>
     </item>
-    <item android:drawable="@mipmap/ic_launcher" android:gravity="center" android:width="112dp" android:height="112dp" />
+    <item android:drawable="@drawable/ic_launcher_foreground" android:gravity="center" android:width="180dp" android:height="180dp" />
 </layer-list>
