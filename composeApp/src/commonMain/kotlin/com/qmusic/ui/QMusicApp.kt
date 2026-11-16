@@ -514,7 +514,15 @@ fun QMusicApp(
             val call by (callService?.state ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
             // A downloaded update while the app is open: a tap restarts it in the new version (never during a call).
             if (call == null) UpdateReadyBanner(english = language == "en")
-            if (callService != null && call != null) {
+            // Shrunk into its bubble (Back or the chevron), the call leaves the app usable; a new call starts full.
+            val callMinimized by com.qmusic.ui.chat.CallUi.minimized.collectAsState()
+            LaunchedEffect(call?.id) { com.qmusic.ui.chat.CallUi.minimized.value = false }
+            androidx.compose.runtime.SideEffect {
+                com.qmusic.ui.chat.CallUi.service = callService
+                com.qmusic.ui.chat.CallUi.strings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
+            }
+            val callShrunk = callMinimized && call?.phase != com.qmusic.ui.chat.CallPhase.INCOMING && call?.phase != com.qmusic.ui.chat.CallPhase.ENDED
+            if (callService != null && call != null && !callShrunk) {
                 val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
                 val askPermissions = com.qmusic.ui.chat.rememberCallPermissions()
                 val acceptAskedAt by com.qmusic.ui.chat.CallLaunch.acceptRequestedAt.collectAsState()

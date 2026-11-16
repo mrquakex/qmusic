@@ -197,3 +197,17 @@ actual fun StatusAudio(url: String, playing: Boolean, startMs: Long, loopMs: Lon
 }
 
 private const val STATUS_CHUNK_BYTES = 1L * 1024 * 1024
+
+@Composable
+actual fun DialogEdgeToEdge() {
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.SideEffect {
+        val window = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window ?: return@SideEffect
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+        @Suppress("DEPRECATION")
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        @Suppress("DEPRECATION")
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+    }
+}

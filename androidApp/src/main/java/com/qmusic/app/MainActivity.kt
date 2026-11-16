@@ -158,6 +158,8 @@ class MainActivity : AppCompatActivity() {
                 QMusicApp(viewModel = viewModel)
                 val language by container.settings.language.collectAsState()
                 com.qmusic.ui.tv.TvOverlay(english = language == "en")
+                // A call shrunk into its bubble floats over everything.
+                com.qmusic.ui.chat.CallBubbleOverlay()
             }
         }
     }

@@ -109,29 +109,46 @@ internal fun ChatHome(
         // slides there.
         val tabs = ChatTab.entries
         val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = tabs.indexOf(tab)) { tabs.size }
+        val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+        // A tap on the bar slides there; a far tab is not reached through every tab between (one step, then the
+        // slide), as WhatsApp does.
         LaunchedEffect(tab) {
             val target = tabs.indexOf(tab)
-            if (pager.targetPage != target) pager.animateScrollToPage(target)
+            if (pager.targetPage == target && !pager.isScrollInProgress) return@LaunchedEffect
+            if (kotlin.math.abs(pager.currentPage - target) > 1) pager.scrollToPage(if (target > pager.currentPage) target - 1 else target + 1)
+            pager.animateScrollToPage(target, animationSpec = androidx.compose.animation.core.tween(280, easing = androidx.compose.animation.core.FastOutSlowInEasing))
         }
+        // A swipe that lands on a tab makes it the tab (its badge clears, Back comes home from it).
         LaunchedEffect(pager) {
             androidx.compose.runtime.snapshotFlow { pager.settledPage }.collect { page -> if (controller.tab.value != tabs[page]) controller.selectTab(tabs[page]) }
+        }
+        // Leaving a tab puts its keyboard away (a search typed on it).
+        LaunchedEffect(pager) {
+            androidx.compose.runtime.snapshotFlow { pager.currentPage }.collect { focusManager.clearFocus() }
         }
         androidx.compose.foundation.pager.HorizontalPager(
             state = pager,
             modifier = Modifier.weight(1f),
+            // The tabs beside are ready, so a swipe shows them at once (their effects wait for them to be shown).
             beyondViewportPageCount = 1,
             key = { tabs[it].name },
+            // A firm, quick settle: a short swipe goes to the next tab, without bouncing.
+            flingBehavior = androidx.compose.foundation.pager.PagerDefaults.flingBehavior(
+                state = pager,
+                pagerSnapDistance = androidx.compose.foundation.pager.PagerSnapDistance.atMost(1),
+                snapAnimationSpec = androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 500f),
+            ),
         ) { page ->
             Box(Modifier.fillMaxSize()) {
                 when (tabs[page]) {
                     ChatTab.CHATS -> ChatsTab(controller, s, me, onExit)
                     ChatTab.STATUS -> StatusTab(controller, s, me, onExit)
                     ChatTab.GROUPS -> GroupsTab(controller, s, me, onExit)
-                    ChatTab.CALLS -> CallsTab(controller, s, me, onExit, onCall, onGroupCall)
+                    ChatTab.CALLS -> CallsTab(controller, s, me, onExit, onCall, onGroupCall, shown = pager.settledPage == page)
                 }
             }
         }
-        HomeBar(controller, s, tab)
+        HomeBar(controller, s, if (pager.isScrollInProgress) tabs[pager.currentPage] else tab)
     }
 }
 
@@ -661,6 +678,8 @@ private fun CallsTab(
     onExit: () -> Unit,
     onCall: ((ChatUser, Boolean) -> Unit)?,
     onGroupCall: ((ChatUser, Boolean) -> Unit)?,
+    /** On screen (not only ready beside the one shown). */
+    shown: Boolean = true,
 ) {
     val calls by controller.callLog.collectAsState()
     val threads by controller.threads.collectAsState()
@@ -674,8 +693,9 @@ private fun CallsTab(
         runsOf(if (q.isEmpty()) calls else calls.filter { it.peer.name.contains(q, ignoreCase = true) || it.peer.username.contains(q, ignoreCase = true) })
     }
     val favorites = remember(threads) { threads.orEmpty().filter { it.favorite && !it.isGroup } }
-    // Looking at the tab clears its badge; new missed calls while on it too.
-    LaunchedEffect(calls.firstOrNull()?.id) { controller.selectTab(ChatTab.CALLS) }
+    // Looking at the tab clears its badge; new missed calls while on it too. (Ready beside another tab, it did
+    // this too and made itself the tab: the chats jumped to the calls.)
+    LaunchedEffect(shown, calls.firstOrNull()?.id) { if (shown) controller.markCallsSeen() }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
             stickyHeader(key = "title") {

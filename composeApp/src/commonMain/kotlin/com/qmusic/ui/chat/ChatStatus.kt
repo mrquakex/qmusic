@@ -563,6 +563,14 @@ internal fun StatusMediaComposer(
     val topBar = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
     val bottomBar = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
     Dialog(onDismissRequest = onCancel, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        // The dialog's own window goes under the bars too (its size then is the screen's), and its bars are measured
+        // in it: measured outside alone, the box with the caption and the send button sat under the navigation bar
+        // on some phones (the window was laid out differently from the screen).
+        DialogEdgeToEdge()
+        @Suppress("NAME_SHADOWING")
+        val topBar = maxOf(topBar, with(density) { WindowInsets.statusBars.getTop(this).toDp() })
+        @Suppress("NAME_SHADOWING")
+        val bottomBar = maxOf(bottomBar, with(density) { WindowInsets.navigationBars.getBottom(this).toDp() })
         val shown = photo
         if (editing && shown != null) {
             Box(Modifier.fillMaxSize().background(Color.Black).padding(top = topBar, bottom = bottomBar)) {

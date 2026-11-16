@@ -108,6 +108,10 @@ const val STATUS_SONG_LENGTH = 15_000L
 /** Where [song] starts in a status: the part its poster chose (1 ms stands for the very start), else the default. */
 fun statusSongStart(song: SharedItem): Long = if (song.startMs > 0) song.startMs else STATUS_SONG_DEFAULT_START
 
+/** Inside a full-screen dialog: its window drawn under the system bars, with their sizes known inside it. */
+@Composable
+expect fun DialogEdgeToEdge()
+
 /** A status video: no controls, paused when asked; [onReady] says how long it is (ms). */
 @Composable
 expect fun StatusVideo(url: String, paused: Boolean, modifier: Modifier, onReady: (Long) -> Unit)

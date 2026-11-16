@@ -1,5 +1,12 @@
 package com.qmusic.ui.chat
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.draw.shadow
+import kotlin.math.roundToInt
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material3.IconButton
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -64,8 +71,9 @@ fun CallScreen(
 ) {
     val state by service.state.collectAsState()
     val call = state ?: return
-    // Back does not end a call by accident.
-    PlatformBackHandler(enabled = true) {}
+    // Back does not end a call: it shrinks it into the small bubble (as on WhatsApp), the app usable meanwhile.
+    val canShrink = call.phase == CallPhase.CALLING || call.phase == CallPhase.CONNECTING || call.phase == CallPhase.ACTIVE
+    PlatformBackHandler(enabled = true) { if (canShrink) CallUi.minimized.value = true }
     val showVideo = call.video && call.phase != CallPhase.ENDED
     val askCamera = rememberCallPermissions()
     var routesOpen by remember { mutableStateOf(false) }
@@ -94,6 +102,12 @@ fun CallScreen(
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)))
         }
 
+        if (canShrink) {
+            IconButton(
+                onClick = { CallUi.minimized.value = true },
+                modifier = Modifier.statusBarsPadding().padding(start = 8.dp, top = 8.dp).size(44.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.25f)),
+            ) { Icon(QMusicIcons.ChevronDown, contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp)) }
+        }
         Column(
             modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -220,7 +234,7 @@ fun CallScreen(
 }
 
 @Composable
-private fun statusText(call: CallState, s: ChatStrings): String = when (call.phase) {
+internal fun statusText(call: CallState, s: ChatStrings): String = when (call.phase) {
     CallPhase.CALLING -> if (call.reached) s.callRinging else s.callCalling
     CallPhase.INCOMING -> if (call.video) s.callIncomingVideo else s.callIncomingVoice
     CallPhase.CONNECTING -> s.callConnecting
@@ -349,5 +363,74 @@ private fun CallBackdrop(photo: String?) {
         )
         // Phones without blur (before Android 12) see the photo sharp: a darker veil keeps it a background.
         if (photo != null) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (callBlurWorks) 0.15f else 0.5f)))
+    }
+}
+
+/** The call shrunk into a bubble (the app usable under it), and the call service it shows. */
+object CallUi {
+    val minimized = kotlinx.coroutines.flow.MutableStateFlow(false)
+    var service by androidx.compose.runtime.mutableStateOf<CallService?>(null)
+    var strings by androidx.compose.runtime.mutableStateOf<ChatStrings?>(null)
+}
+
+/**
+ * Over the whole app while a call is shrunk: a small bubble (their picture and the time, or their video), dragged
+ * anywhere and settling on the nearer side; a tap brings the call back to full screen.
+ */
+@Composable
+fun CallBubbleOverlay() {
+    val service = CallUi.service ?: return
+    val s = CallUi.strings ?: return
+    val state by service.state.collectAsState()
+    val call = state ?: return
+    val minimized by CallUi.minimized.collectAsState()
+    if (!minimized || call.phase == CallPhase.INCOMING || call.phase == CallPhase.ENDED) return
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val video = call.video && call.remoteVideo && call.phase == CallPhase.ACTIVE
+    val margin = with(density) { 12.dp.toPx() }
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+        val areaW = with(density) { maxWidth.toPx() }
+        val areaH = with(density) { maxHeight.toPx() }
+        val w = with(density) { (if (video) 112.dp else 84.dp).toPx() }
+        val h = with(density) { (if (video) 160.dp else 104.dp).toPx() }
+        var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset(areaW - w - margin, with(density) { 80.dp.toPx() })) }
+        val shape = RoundedCornerShape(if (video) 16.dp else 26.dp)
+        Box(
+            Modifier
+                .offset { androidx.compose.ui.unit.IntOffset(offset.x.roundToInt(), offset.y.roundToInt()) }
+                .size(with(density) { w.toDp() }, with(density) { h.toDp() })
+                .shadow(14.dp, shape)
+                .clip(shape)
+                .background(Color(0xFF15151B))
+                .pointerInput(areaW, areaH) {
+                    detectDragGestures(
+                        onDragEnd = {
+                            // To the nearer side, like the system's own bubbles.
+                            val x = if (offset.x + w / 2 < areaW / 2) margin else areaW - w - margin
+                            offset = androidx.compose.ui.geometry.Offset(x, offset.y.coerceIn(margin, areaH - h - margin))
+                        },
+                    ) { change, drag ->
+                        change.consume()
+                        offset = androidx.compose.ui.geometry.Offset(
+                            (offset.x + drag.x).coerceIn(0f, areaW - w),
+                            (offset.y + drag.y).coerceIn(0f, areaH - h),
+                        )
+                    }
+                }
+                .clickable { CallUi.minimized.value = false },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (video) {
+                CallVideo(service, remote = true, modifier = Modifier.fillMaxSize())
+            } else {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.size(56.dp).clip(CircleShape).border(2.dp, Color(0xFF1DAA61), CircleShape).padding(3.dp), contentAlignment = Alignment.Center) {
+                        ChatAvatar(call.peer, 50.dp)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(statusText(call, s), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                }
+            }
+        }
     }
 }

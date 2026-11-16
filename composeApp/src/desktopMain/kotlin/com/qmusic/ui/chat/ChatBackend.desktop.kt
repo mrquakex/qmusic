@@ -75,3 +75,6 @@ actual val callBlurWorks: Boolean = true
 
 @androidx.compose.runtime.Composable
 actual fun StatusAudio(url: String, playing: Boolean, startMs: Long, loopMs: Long, onReady: (Long) -> Unit, onFailed: () -> Unit) = Unit
+
+@androidx.compose.runtime.Composable
+actual fun DialogEdgeToEdge() = Unit

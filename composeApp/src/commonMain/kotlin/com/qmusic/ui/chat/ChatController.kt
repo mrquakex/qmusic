@@ -141,7 +141,12 @@ class ChatController(
 
     fun selectTab(tab: ChatTab) {
         _tab.value = tab
-        if (tab == ChatTab.CALLS) scope.launch { runCatching { backend.setCallsSeen() } }
+        if (tab == ChatTab.CALLS) markCallsSeen()
+    }
+
+    /** The calls' badge clears (the calls tab is looked at). */
+    fun markCallsSeen() {
+        scope.launch { runCatching { backend.setCallsSeen() } }
     }
 
     private val _filter = MutableStateFlow(ChatFilter.ALL)
