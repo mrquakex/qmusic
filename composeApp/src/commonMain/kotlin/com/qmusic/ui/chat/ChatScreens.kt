@@ -2064,6 +2064,8 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
                     }
                 }
             }
+            // Their own ringtone for Qeyf calls (a song, or one of Qeyf's sounds).
+            if (!isClaude && user.uid != me.uid) item { PersonRingRow(s, user) }
             if (!messages.isNullOrEmpty()) {
                 item { SectionTitle(s.media) }
                 item {

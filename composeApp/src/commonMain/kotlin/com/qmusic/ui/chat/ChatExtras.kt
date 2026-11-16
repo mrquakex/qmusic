@@ -751,6 +751,8 @@ private fun SoundSettings(s: ChatStrings) {
     val small by sounds.small.collectAsState()
     val english = s.you == "You"
     var picking by remember { mutableStateOf<SoundKind?>(null) }
+    val ring by CallTones.ring.collectAsState()
+    CallTones.made.collectAsState().value
     val rows = listOf(
         SoundKind.SEND to s.soundSend,
         SoundKind.RECEIVE to s.soundReceive,
@@ -763,13 +765,20 @@ private fun SoundSettings(s: ChatStrings) {
             Row(Modifier.fillMaxWidth().clickable { picking = kind }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(label, color = TextPrimary, fontSize = 15.sp, modifier = Modifier.weight(1f))
                 Text(
-                    ChatSoundCatalog.option(kind, choices[kind] ?: ChatSoundCatalog.defaults.getValue(kind)).name(english),
+                    if (kind == SoundKind.RING && ring.isNotEmpty()) CallTones.name(ring)
+                    else ChatSoundCatalog.option(kind, choices[kind] ?: ChatSoundCatalog.defaults.getValue(kind)).name(english),
                     color = TickRead,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.padding(start = 12.dp).weight(1f, fill = false),
                 )
             }
         }
+        // Songs as Qeyf's sounds: what people calling here hear, and hearing what the called person chose.
+        CallerToneSettings(s)
         SettingSwitch(s.soundInChat, s.soundInChatNote, inChat) { sounds.setInChat(it) }
         SettingSwitch(s.soundSmall, s.soundSmallNote, small) { sounds.setSmall(it) }
         val typing by sounds.typing.collectAsState()
@@ -777,6 +786,10 @@ private fun SoundSettings(s: ChatStrings) {
             sounds.setTyping(on)
             if (on) sounds.playKey()
         }
+    }
+    if (picking == SoundKind.RING) {
+        RingTonePicker(s, s.soundRing, ring.ifEmpty { choices[SoundKind.RING] }, allowDefault = false, onPick = { id -> id?.let { CallTones.setRing?.invoke(it) } }) { picking = null }
+        return
     }
     picking?.let { kind ->
         val current = choices[kind]

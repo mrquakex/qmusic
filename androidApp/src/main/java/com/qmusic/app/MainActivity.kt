@@ -108,6 +108,8 @@ class MainActivity : AppCompatActivity() {
         CastBridge.init(this)
         // A TV linked by code: on a TV, Qeyf waits for a phone; on a phone, it plays on linked TVs.
         com.qmusic.ui.tv.TvAndroid.init(this)
+        // Songs as Qeyf's call sounds (ringing, per person, and what callers hear).
+        com.qmusic.ui.chat.CallTonesAndroid.init(this)
 
         // The heart in the playback notification: shows and toggles the like of the playing song.
         MediaActions.onToggleLike = { viewModel.currentTrack.value?.let(viewModel::toggleFavorite) }

@@ -353,6 +353,10 @@ private fun Saved(d: RingtoneDraft, studio: RingtoneStudio, onOpenList: () -> Un
         TargetRow(QMusicIcons.Account, s.ringtoneSetContact, d.contactName != null, detail = d.contactName?.takeIf { it != "·" }) {
             studio.applyToContact()
         }
+        // Qeyf's own calls: ringing here, and what people calling here hear.
+        val w = com.qmusic.ui.chat.CallTones.words()
+        TargetRow(QMusicIcons.Phone, w.qeyfCalls, d.qeyfApplied) { studio.applyToQeyf() }
+        TargetRow(QMusicIcons.Chat, w.callers, d.callersApplied, detail = if (d.callersApplied) null else w.callersNote, showDetail = true) { studio.applyToCallers() }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
         OutlinedButton(onClick = studio::editAgain, shape = RoundedCornerShape(24.dp), modifier = Modifier.weight(1f)) {
@@ -365,7 +369,7 @@ private fun Saved(d: RingtoneDraft, studio: RingtoneStudio, onOpenList: () -> Un
 }
 
 @Composable
-private fun TargetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, done: Boolean, detail: String? = null, onClick: () -> Unit) {
+private fun TargetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, done: Boolean, detail: String? = null, showDetail: Boolean = false, onClick: () -> Unit) {
     val s = LocalStrings.current
     Row(
         modifier = Modifier
@@ -378,9 +382,9 @@ private fun TargetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, lab
         Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
-            if (done) {
+            if (done || (showDetail && detail != null)) {
                 Text(
-                    text = listOfNotNull(s.ringtoneIsSet, detail).joinToString(" · "),
+                    text = if (done) listOfNotNull(s.ringtoneIsSet, detail).joinToString(" · ") else detail.orEmpty(),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

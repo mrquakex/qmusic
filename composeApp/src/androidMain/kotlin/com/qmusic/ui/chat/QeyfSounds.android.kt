@@ -34,8 +34,27 @@ object QeyfSounds {
     private fun tr(context: Context) = prefs(context).getString("language", "tr") != "en"
 
     fun choice(context: Context, kind: SoundKind): String =
-        prefs(context).getString(key(kind), null)?.takeIf { id -> ChatSoundCatalog.options.getValue(kind).any { it.id == id } }
-            ?: ChatSoundCatalog.defaults.getValue(kind)
+        prefs(context).getString(key(kind), null)?.takeIf { id ->
+            // The ringtone may also be a song's (made in the music side).
+            (kind == SoundKind.RING && CallTones.isSong(id)) || ChatSoundCatalog.options.getValue(kind).any { it.id == id }
+        } ?: ChatSoundCatalog.defaults.getValue(kind)
+
+    /** Whether the phone still has the song ringtone [id] (it can be deleted in the music side or elsewhere). */
+    private fun songExists(context: Context, id: String): Boolean = runCatching {
+        context.contentResolver.openAssetFileDescriptor(Uri.parse(CallTones.uriOf(id)), "r")?.use { true } ?: false
+    }.getOrDefault(false)
+
+    /**
+     * What rings for a call from [uid]: their own ringtone if they have one, else the one for everyone; a song that is
+     * gone is replaced by Qeyf's ringtone.
+     */
+    fun ringFor(context: Context, uid: String?): String {
+        val id = CallTonesAndroid.ringFor(context, uid) ?: choice(context, SoundKind.RING)
+        return if (CallTones.isSong(id) && !songExists(context, id)) ChatSoundCatalog.defaults.getValue(SoundKind.RING) else id
+    }
+
+    /** A channel's name part for ringtone [id] (a song's address is long: it is hashed). */
+    private fun ringKey(id: String) = if (CallTones.isSong(id)) "s" + Integer.toHexString(CallTones.uriOf(id).hashCode()) else id
 
     fun setChoice(context: Context, kind: SoundKind, id: String) = prefs(context).edit().putString(key(kind), id).apply()
     fun inChat(context: Context) = prefs(context).getBoolean(KEY_IN_CHAT, true)
@@ -50,7 +69,11 @@ object QeyfSounds {
 
     /** The file of [kind] as an address a notification channel or a player takes. */
     fun uri(context: Context, kind: SoundKind, id: String = choice(context, kind)): Uri? =
-        resId(context, fileOf(kind, id)).takeIf { it != 0 }?.let { Uri.parse("android.resource://${context.packageName}/$it") }
+        if (CallTones.isSong(id)) {
+            Uri.parse(CallTones.uriOf(id))
+        } else {
+            resId(context, fileOf(kind, id)).takeIf { it != 0 }?.let { Uri.parse("android.resource://${context.packageName}/$it") }
+        }
 
     // ------------------------------------------------------------------ the notification channels
 
@@ -74,23 +97,28 @@ object QeyfSounds {
         return id
     }
 
-    /** The ringing channel (one-to-one and group calls), with the chosen ringtone. */
-    fun ringChannelId(context: Context): String {
-        val id = RING_PREFIX + choice(context, SoundKind.RING)
+    /**
+     * The ringing channel for a call from [uid] (null: a group call), with its ringtone: the person's own, or the one for
+     * everyone. Each ringtone has its own channel (a channel's sound is fixed); the ones no longer used are removed.
+     */
+    fun ringChannelId(context: Context, uid: String? = null): String {
+        val sound = ringFor(context, uid)
+        val id = RING_PREFIX + ringKey(sound)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return id
         val manager = context.getSystemService(NotificationManager::class.java)
         if (manager.getNotificationChannel(id) == null) {
             val tr = tr(context)
             manager.createNotificationChannel(
                 NotificationChannel(id, if (tr) "Gelen aramalar" else "Incoming calls", NotificationManager.IMPORTANCE_HIGH).apply {
-                    setSound(uri(context, SoundKind.RING), AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+                    setSound(uri(context, SoundKind.RING, sound), AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
                     enableVibration(true)
                     vibrationPattern = longArrayOf(0, 800, 800)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 },
             )
         }
-        manager.notificationChannels.filter { (it.id.startsWith(RING_PREFIX) && it.id != id) || it.id == "qmusic_calls_ring" }
+        val used = (CallTonesAndroid.allPersonal(context) + choice(context, SoundKind.RING)).map { RING_PREFIX + ringKey(it) }.toSet() + id
+        manager.notificationChannels.filter { (it.id.startsWith(RING_PREFIX) && it.id !in used) || it.id == "qmusic_calls_ring" }
             .forEach { runCatching { manager.deleteNotificationChannel(it.id) } }
         return id
     }
@@ -168,23 +196,43 @@ object QeyfSounds {
 
     private fun player(context: Context, kind: SoundKind, id: String, usage: Int, loop: Boolean): MediaPlayer? {
         val uri = uri(context, kind, id) ?: return null
+        val type = if (CallTones.isSong(id)) AudioAttributes.CONTENT_TYPE_MUSIC else AudioAttributes.CONTENT_TYPE_SONIFICATION
+        return playerOf(context, uri, usage, type, loop)
+    }
+
+    private fun playerOf(context: Context, uri: Uri, usage: Int, type: Int, loop: Boolean): MediaPlayer? {
+        val player = MediaPlayer()
         return runCatching {
-            MediaPlayer().apply {
-                setAudioAttributes(AudioAttributes.Builder().setUsage(usage).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+            player.apply {
+                setAudioAttributes(AudioAttributes.Builder().setUsage(usage).setContentType(type).build())
                 setDataSource(context.applicationContext, uri)
                 isLooping = loop
                 setOnPreparedListener { it.start() }
                 prepareAsync()
             }
-        }.getOrNull()
+        }.onFailure { runCatching { player.release() } }.getOrNull()
     }
 
-    /** The ringtone, again and again, at the ring volume (silent when the phone is on silent). */
-    fun startRingtone(context: Context): MediaPlayer? = player(context, SoundKind.RING, choice(context, SoundKind.RING), AudioAttributes.USAGE_NOTIFICATION_RINGTONE, loop = true)
+    /** The ringtone for a call from [uid], again and again, at the ring volume (silent when the phone is on silent). */
+    fun startRingtone(context: Context, uid: String? = null): MediaPlayer? =
+        player(context, SoundKind.RING, ringFor(context, uid), AudioAttributes.USAGE_NOTIFICATION_RINGTONE, loop = true)
+            ?: player(context, SoundKind.RING, ChatSoundCatalog.defaults.getValue(SoundKind.RING), AudioAttributes.USAGE_NOTIFICATION_RINGTONE, loop = true)
 
-    /** What the caller hears while it rings at the other end, in the call's sound route. */
-    fun startRingback(context: Context): MediaPlayer? =
-        player(context, SoundKind.RINGBACK, choice(context, SoundKind.RINGBACK), AudioAttributes.USAGE_VOICE_COMMUNICATION_SIGNALLING, loop = true)
+    /**
+     * What the caller hears while it rings at the other end, in the call's sound route: [song] (what the called person
+     * chose for their callers) when there is one, else the chosen ringback.
+     */
+    fun startRingback(context: Context, song: java.io.File? = null): MediaPlayer? {
+        if (song != null) {
+            playerOf(context, Uri.fromFile(song), AudioAttributes.USAGE_VOICE_COMMUNICATION_SIGNALLING, AudioAttributes.CONTENT_TYPE_MUSIC, loop = true)?.let { return it }
+        }
+        return player(context, SoundKind.RINGBACK, choice(context, SoundKind.RINGBACK), AudioAttributes.USAGE_VOICE_COMMUNICATION_SIGNALLING, loop = true)
+    }
+
+    fun stopPreview() {
+        stop(preview)
+        preview = null
+    }
 
     fun stop(player: MediaPlayer?) {
         runCatching { player?.stop() }

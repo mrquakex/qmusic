@@ -386,6 +386,7 @@ internal class FirebaseCallService(
         CallHooks.onActive?.invoke(true, peer, video)
         startAudio(video)
         telecom.start(peer, video, incoming = false)
+        fetchPeerTone(id, peer)
         scope.launch {
             try {
                 // A new call replaces what was left of the last one in this conversation.
@@ -1141,7 +1142,7 @@ internal class FirebaseCallService(
     private fun startRinging() {
         // Qeyf's own ringtone (the one chosen in Profile and privacy → Sounds).
         QeyfSounds.stop(ringtone)
-        ringtone = QeyfSounds.startRingtone(app)
+        ringtone = QeyfSounds.startRingtone(app, session?.peer?.uid)
         val vibrator = app.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             runCatching { vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 800, 800), 0)) }
@@ -1156,7 +1157,23 @@ internal class FirebaseCallService(
 
     private fun startRingback() {
         QeyfSounds.stop(ringback)
-        ringback = QeyfSounds.startRingback(app)
+        ringback = QeyfSounds.startRingback(app, peerTone?.takeIf { it.first == session?.id }?.second)
+    }
+
+    /** The song the person being called chose for their callers (the call's id with it), once it is here. */
+    private var peerTone: Pair<String, java.io.File?>? = null
+    private var peerToneJob: Job? = null
+
+    /** Fetches the song [peer] chose for their callers; it takes over from the beeps as soon as it is here. */
+    private fun fetchPeerTone(callId: String, peer: ChatUser) {
+        peerToneJob?.cancel()
+        peerTone = null
+        peerToneJob = scope.launch {
+            val file = CallTonesAndroid.peerTone(app, peer.uid)
+            if (session?.id != callId) return@launch
+            peerTone = callId to file
+            if (file != null && ringback != null && _state.value?.phase == CallPhase.CALLING) startRingback()
+        }
     }
 
     private fun stopRingback() {

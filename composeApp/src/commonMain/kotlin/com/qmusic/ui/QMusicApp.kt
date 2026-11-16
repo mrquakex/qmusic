@@ -280,7 +280,32 @@ fun QMusicApp(
                 }
             }
             val tvScope = rememberCoroutineScope()
+            // Songs as the sounds of Qeyf's calls: the music side's ringtones, its search, and its ringtone maker.
+            LaunchedEffect(Unit) {
+                val tones = com.qmusic.ui.chat.CallTones
+                tones.searchSongs = { query ->
+                    viewModel.youTube.search(query, com.qmusic.engine.models.SearchFilter.SONGS).getOrNull()?.items.orEmpty().take(25).map { song ->
+                        com.qmusic.ui.chat.SharedItem(com.qmusic.ui.chat.ShareKind.SONG, song.id, song.title, song.artists.joinToString(", ") { it.name }, song.thumbnail)
+                    }
+                }
+                tones.makeFromSong = { item ->
+                    chatOpen = false
+                    videosOpen = false
+                    tones.openedFromChat = true
+                    viewModel.openRingtoneEditor(
+                        com.qmusic.engine.models.SongItem(
+                            id = item.id,
+                            title = item.title,
+                            artists = item.subtitle.takeIf { it.isNotBlank() }?.let { listOf(com.qmusic.engine.models.Artist(it)) }.orEmpty(),
+                            thumbnail = item.thumbnail,
+                        ),
+                    )
+                }
+                tones.backToChat = { chatOpen = true }
+                viewModel.ringtones.saved.collect { list -> tones.made.value = list.map { com.qmusic.ui.chat.MadeTone(it.uri, it.title, it.artist, it.thumbnail) } }
+            }
             androidx.compose.runtime.SideEffect {
+                com.qmusic.ui.chat.CallTones.english = language == "en"
                 com.qmusic.ui.tv.TvLink.english = language == "en"
                 val tv = com.qmusic.ui.tv.TvScreen
                 tv.music = togetherMusic

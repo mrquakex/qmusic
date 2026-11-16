@@ -64,6 +64,8 @@ fun RingtonesScreen(
     val saved by studio.saved.collectAsState()
     val inUse by studio.inUse.collectAsState()
     val playing by studio.playingSaved.collectAsState()
+    val qeyfRing by com.qmusic.ui.chat.CallTones.ring.collectAsState()
+    val callerTone by com.qmusic.ui.chat.CallTones.callerTone.collectAsState()
     var actions by remember { mutableStateOf<MadeRingtone?>(null) }
     var confirmDelete by remember { mutableStateOf<MadeRingtone?>(null) }
 
@@ -106,6 +108,10 @@ fun RingtonesScreen(
                     RingtoneRow(
                         made = made,
                         targets = inUse[made.uri].orEmpty(),
+                        qeyf = listOfNotNull(
+                            com.qmusic.ui.chat.CallTones.words().inUseQeyf.takeIf { qeyfRing == com.qmusic.ui.chat.CallTones.songTone(made.uri) },
+                            com.qmusic.ui.chat.CallTones.words().inUseCallers.takeIf { callerTone?.uri == made.uri },
+                        ),
                         playing = playing == made.uri,
                         onPlay = { studio.togglePlay(made) },
                         onMore = { actions = made },
@@ -138,6 +144,15 @@ fun RingtonesScreen(
                         actions = null
                         studio.applySavedToContact(made)
                     }
+                    val w = com.qmusic.ui.chat.CallTones.words()
+                    ActionLine(QMusicIcons.Phone, w.qeyfCalls) {
+                        actions = null
+                        studio.applySavedToQeyf(made)
+                    }
+                    ActionLine(QMusicIcons.Chat, w.callers) {
+                        actions = null
+                        studio.applySavedToCallers(made)
+                    }
                     ActionLine(QMusicIcons.Trash, s.ringtoneDelete) {
                         actions = null
                         confirmDelete = made
@@ -166,7 +181,7 @@ fun RingtonesScreen(
 }
 
 @Composable
-private fun RingtoneRow(made: MadeRingtone, targets: Set<RingtoneTarget>, playing: Boolean, onPlay: () -> Unit, onMore: () -> Unit) {
+private fun RingtoneRow(made: MadeRingtone, targets: Set<RingtoneTarget>, qeyf: List<String>, playing: Boolean, onPlay: () -> Unit, onMore: () -> Unit) {
     val s = LocalStrings.current
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
@@ -208,16 +223,19 @@ private fun RingtoneRow(made: MadeRingtone, targets: Set<RingtoneTarget>, playin
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (targets.isNotEmpty()) {
+            if (targets.isNotEmpty() || qeyf.isNotEmpty()) {
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    RingtoneTarget.entries.filter { it in targets }.forEach { target ->
+                    val labels = RingtoneTarget.entries.filter { it in targets }.map { target ->
+                        when (target) {
+                            RingtoneTarget.PHONE -> s.ringtoneInUsePhone
+                            RingtoneTarget.NOTIFICATION -> s.ringtoneInUseNotification
+                            RingtoneTarget.ALARM -> s.ringtoneInUseAlarm
+                        }
+                    } + qeyf
+                    labels.forEach { label ->
                         Text(
-                            text = when (target) {
-                                RingtoneTarget.PHONE -> s.ringtoneInUsePhone
-                                RingtoneTarget.NOTIFICATION -> s.ringtoneInUseNotification
-                                RingtoneTarget.ALARM -> s.ringtoneInUseAlarm
-                            },
+                            text = label,
                             style = MaterialTheme.typography.labelSmall,
                             color = InkInverse,
                             modifier = Modifier

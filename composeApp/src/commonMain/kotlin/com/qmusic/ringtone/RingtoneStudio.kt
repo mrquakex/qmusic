@@ -5,6 +5,8 @@ import com.qmusic.player.PlayerController
 import com.qmusic.player.ringtone.ClipRange
 import com.qmusic.player.ringtone.RingtoneMath
 import com.qmusic.settings.AppSettings
+import com.qmusic.ui.chat.CallTones
+import com.qmusic.ui.chat.MadeTone
 import com.qmusic.settings.SettingKeys
 import com.qmusic.ui.strings.AppStrings
 import kotlinx.coroutines.CancellationException
@@ -44,6 +46,9 @@ data class RingtoneDraft(
     val made: MadeRingtone? = null,
     val applied: Set<RingtoneTarget> = emptySet(),
     val contactName: String? = null,
+    /** Set for Qeyf's calls, and as what callers hear. */
+    val qeyfApplied: Boolean = false,
+    val callersApplied: Boolean = false,
     val error: String? = null,
 )
 
@@ -118,6 +123,9 @@ class RingtoneStudio(
 
     /** The editor was left: preview stopped, the song's file dropped, the music that was playing carries on. */
     fun close() {
+        // Left without choosing a Qeyf use: nothing goes back to the messages later.
+        CallTones.openedFromChat = false
+        CallTones.makingFor = null
         val songId = _draft.value?.song?.id
         job?.cancel()
         job = null
@@ -216,7 +224,7 @@ class RingtoneStudio(
             maker.save(d.song, request) { p -> _draft.update { it?.copy(progress = p) } }
                 .onSuccess { made ->
                     remember(made)
-                    _draft.update { it?.copy(phase = RingtonePhase.SAVED, made = made, applied = emptySet(), contactName = null) }
+                    _draft.update { it?.copy(phase = RingtonePhase.SAVED, made = made, applied = emptySet(), contactName = null, qeyfApplied = false, callersApplied = false) }
                     refreshInUse()
                 }
                 .onFailure { error ->
@@ -229,7 +237,7 @@ class RingtoneStudio(
 
     /** From the finished screen back to the editor, to make another one (another part, other fades) from the song. */
     fun editAgain() {
-        _draft.update { it?.copy(phase = RingtonePhase.READY, made = null, applied = emptySet(), contactName = null) }
+        _draft.update { it?.copy(phase = RingtonePhase.READY, made = null, applied = emptySet(), contactName = null, qeyfApplied = false, callersApplied = false) }
     }
 
     fun apply(target: RingtoneTarget) {
@@ -239,6 +247,38 @@ class RingtoneStudio(
                 _draft.update { it?.copy(applied = it.applied + target) }
             }
         }
+    }
+
+    /** Qeyf's calls ring with the new ringtone (for everyone, or for the person it was made for in the messages). */
+    fun applyToQeyf() {
+        val made = _draft.value?.made ?: return
+        CallTones.ringWith(made.tone())
+        _draft.update { it?.copy(qeyfApplied = true) }
+        message(CallTones.words().qeyfCallsSet)
+    }
+
+    /** People calling this account hear the new ringtone while it rings. */
+    fun applyToCallers() {
+        val made = _draft.value?.made ?: return
+        scope.launch {
+            if (setCallers(made)) _draft.update { it?.copy(callersApplied = true) }
+        }
+    }
+
+    private suspend fun setCallers(made: MadeRingtone): Boolean {
+        val ok = CallTones.setCallerTone?.invoke(made.tone()) == true
+        message(if (ok) CallTones.words().callersSet else CallTones.words().callersFailed)
+        if (ok) CallTones.returnToChat()
+        return ok
+    }
+
+    fun applySavedToQeyf(made: MadeRingtone) {
+        CallTones.ringWith(made.tone())
+        message(CallTones.words().qeyfCallsSet)
+    }
+
+    fun applySavedToCallers(made: MadeRingtone) {
+        scope.launch { setCallers(made) }
     }
 
     fun applyToContact() {
@@ -386,3 +426,6 @@ class RingtoneStudio(
         const val MAX_SONG_SECONDS = 20 * 60
     }
 }
+
+/** The ringtone as one of Qeyf's call sounds. */
+fun MadeRingtone.tone() = MadeTone(uri, title, artist, thumbnail)

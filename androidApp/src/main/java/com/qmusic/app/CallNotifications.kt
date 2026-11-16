@@ -110,7 +110,9 @@ object CallNotifications {
             .apply()
         val manager = context.getSystemService(NotificationManager::class.java)
         val text = if (video) (if (tr) "Görüntülü arama" else "Video call") else (if (tr) "Sesli arama" else "Voice call")
-        fun base() = NotificationCompat.Builder(context, ringChannelId(context))
+        // The person's own ringtone, if they have one (each ringtone has its own channel).
+        val channel = com.qmusic.ui.chat.QeyfSounds.ringChannelId(context, peer.uid)
+        fun base() = NotificationCompat.Builder(context, channel)
             .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
             .setLargeIcon(NotificationAvatars.bitmap(peer.uid, peer.name, peer.photo))
             .setContentTitle(peer.name)
