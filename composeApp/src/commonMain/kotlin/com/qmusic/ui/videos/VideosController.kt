@@ -450,11 +450,14 @@ class VideosController(
     private val _searching = MutableStateFlow(false)
     val searching: StateFlow<Boolean> = _searching.asStateFlow()
 
-    fun openSearchBox() {
-        // Opens empty, so the recent searches show; the page behind keeps its own query.
-        _query.value = ""
+    /**
+     * Opens the search box: empty, so the recent searches show; or with [text] in it (the results page's words
+     * tapped), to change them and search again.
+     */
+    fun openSearchBox(text: String = "") {
         _suggestions.value = emptyList()
         _searching.value = true
+        if (text.isBlank()) _query.value = "" else typeQuery(text)
     }
 
     fun closeSearchBox() {

@@ -1653,6 +1653,13 @@ class MainViewModel(
         }
     }
 
+    /** The words of the results tapped: back to typing them (with their suggestions), the words kept. */
+    fun editSearch() {
+        if (!_showSearchResults.value) return
+        lastSubmittedQuery = null
+        setSearchQuery(_searchQuery.value)
+    }
+
     /** The back arrow of the search box: leaves the results and the typed words. */
     fun clearSearch() {
         suggestionJob?.cancel()

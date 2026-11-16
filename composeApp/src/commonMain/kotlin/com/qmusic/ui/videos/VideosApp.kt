@@ -1,5 +1,6 @@
 package com.qmusic.ui.videos
 
+import com.qmusic.ui.components.QeyfBarItem
 import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
@@ -95,6 +96,9 @@ fun VideosApp(
     onPauseMusic: () -> Unit,
     onShare: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** Goes to the messages (their bar's button), and how many are unread there. */
+    onChat: (() -> Unit)? = null,
+    chatUnread: Int = 0,
 ) {
     val tab by controller.tab.collectAsState()
     val routes by controller.routes.collectAsState()
@@ -264,7 +268,7 @@ fun VideosApp(
             // While the video floats small the bottom bar is away; closing the video brings it back.
             if (top !is VideoRoute.Watch && !pip && !miniShown) {
                 AnimatedVisibility(visible = bars.value || !feedPage, enter = expandVertically(expandFrom = Alignment.Top), exit = shrinkVertically(shrinkTowards = Alignment.Top)) {
-                    VideoBottomBar(tab = tab.takeIf { routes.isEmpty() }, s = s, onTab = { t -> if (t == tab && routes.isEmpty()) controller.refreshCurrent() else controller.selectTab(t) }, onMusic = exit)
+                    VideoBottomBar(tab = tab.takeIf { routes.isEmpty() }, s = s, onTab = { t -> if (t == tab && routes.isEmpty()) controller.refreshCurrent() else controller.selectTab(t) }, onMusic = exit, onChat = onChat, chatUnread = chatUnread)
                 }
             }
         }
@@ -368,15 +372,15 @@ private fun TopBar(s: VideoStrings, onSearch: () -> Unit, onAccount: () -> Unit)
 }
 
 @Composable
-private fun VideoBottomBar(tab: VideoTab?, s: VideoStrings, onTab: (VideoTab) -> Unit, onMusic: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().background(VideoColors.Background).navigationBarsPadding().padding(top = 6.dp, bottom = 4.dp),
-    ) {
-        BarItem(QMusicIcons.Home, s.tabHome, tab == VideoTab.HOME, Modifier.weight(1f)) { onTab(VideoTab.HOME) }
-        BarItem(VideoIcons.Shorts, s.shorts, tab == VideoTab.SHORTS, Modifier.weight(1f)) { onTab(VideoTab.SHORTS) }
-        BarItem(QMusicIcons.VideoPlay, s.tabSubscriptions, tab == VideoTab.SUBSCRIPTIONS, Modifier.weight(1f)) { onTab(VideoTab.SUBSCRIPTIONS) }
-        BarItem(QMusicIcons.Library, s.tabLibrary, tab == VideoTab.LIBRARY, Modifier.weight(1f)) { onTab(VideoTab.LIBRARY) }
-        BarItem(QMusicIcons.Headphones, s.backToMusic, false, Modifier.weight(1f), onMusic)
+private fun VideoBottomBar(tab: VideoTab?, s: VideoStrings, onTab: (VideoTab) -> Unit, onMusic: () -> Unit, onChat: (() -> Unit)?, chatUnread: Int) {
+    // The same bar as the messages and the music, with both on it.
+    com.qmusic.ui.components.QeyfBar(VideoColors.Background) {
+        QeyfBarItem(s.tabHome, QMusicIcons.Home, tab == VideoTab.HOME) { onTab(VideoTab.HOME) }
+        QeyfBarItem(s.shorts, VideoIcons.Shorts, tab == VideoTab.SHORTS) { onTab(VideoTab.SHORTS) }
+        QeyfBarItem(s.tabSubscriptions, QMusicIcons.VideoPlay, tab == VideoTab.SUBSCRIPTIONS) { onTab(VideoTab.SUBSCRIPTIONS) }
+        QeyfBarItem(s.tabLibrary, QMusicIcons.Library, tab == VideoTab.LIBRARY) { onTab(VideoTab.LIBRARY) }
+        QeyfBarItem(s.backToMusic, QMusicIcons.Headphones, false, onClick = onMusic)
+        if (onChat != null) QeyfBarItem(com.qmusic.ui.chat.ChatMusic.words().messages, QMusicIcons.Chat, false, count = chatUnread, onClick = onChat)
     }
 }
 
@@ -392,13 +396,18 @@ private fun BarItem(icon: ImageVector, label: String, selected: Boolean, modifie
 }
 
 @Composable
-private fun PageBar(title: String, onBack: () -> Unit, trailing: (@Composable () -> Unit)? = null) {
+private fun PageBar(title: String, onBack: () -> Unit, onTitleClick: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
     Row(
         modifier = Modifier.fillMaxWidth().background(VideoColors.Background).statusBarsPadding().height(52.dp).padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack) { Icon(QMusicIcons.Back, null, tint = VideoColors.Text) }
-        Text(title, color = VideoColors.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 4.dp))
+        Text(
+            title, color = VideoColors.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+                .then(if (onTitleClick != null) Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onTitleClick) else Modifier)
+                .padding(horizontal = 4.dp, vertical = 8.dp),
+        )
         trailing?.invoke()
     }
 }
@@ -605,9 +614,15 @@ private fun SearchBox(controller: VideosController, s: VideoStrings) {
                 contentAlignment = Alignment.CenterStart,
             ) {
                 if (query.isEmpty()) Text(s.searchHint, color = VideoColors.TextSecondary, fontSize = 16.sp)
+                // Opened with words in it, the cursor stands at their end, ready to change them.
+                var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(query, androidx.compose.ui.text.TextRange(query.length))) }
+                if (field.text != query) field = androidx.compose.ui.text.input.TextFieldValue(query, androidx.compose.ui.text.TextRange(query.length))
                 BasicTextField(
-                    value = query,
-                    onValueChange = { controller.typeQuery(it) },
+                    value = field,
+                    onValueChange = {
+                        field = it
+                        if (it.text != query) controller.typeQuery(it.text)
+                    },
                     singleLine = true,
                     textStyle = TextStyle(color = VideoColors.Text, fontSize = 16.sp),
                     cursorBrush = SolidColor(VideoColors.Text),
@@ -648,16 +663,16 @@ private fun SearchBox(controller: VideosController, s: VideoStrings) {
             }
             items(if (query.isBlank()) emptyList() else suggestions) { text ->
                 Row(
-                    modifier = Modifier.fillMaxWidth().clickable { controller.submitSearch(text) }.padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier = Modifier.fillMaxWidth().clickable { controller.submitSearch(text) }.padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(QMusicIcons.Search, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(16.dp))
                     Text(text, color = VideoColors.Text, fontSize = 16.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Icon(
-                        QMusicIcons.FillQuery, null, tint = VideoColors.TextSecondary,
-                        modifier = Modifier.size(20.dp).clickable { controller.typeQuery(text) },
-                    )
+                    // A roomy target for putting the words in the box (a small one was missed and searched instead).
+                    IconButton(onClick = { controller.typeQuery(text) }, modifier = Modifier.size(40.dp)) {
+                        Icon(QMusicIcons.FillQuery, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp))
+                    }
                 }
             }
         }
@@ -671,8 +686,9 @@ private fun SearchResultsPage(controller: VideosController, s: VideoStrings, onS
     val filter by controller.filter.collectAsState()
     val loader by controller.searchResults.collectAsState()
     Column(modifier = Modifier.fillMaxSize()) {
-        PageBar(title = query, onBack = { controller.pop() }, trailing = {
-            IconButton(onClick = { controller.openSearchBox() }) { Icon(QMusicIcons.Search, s.searchHint, tint = VideoColors.Text) }
+        // The words searched for: a tap opens the search with them in it, to change them (as on YouTube).
+        PageBar(title = query, onBack = { controller.pop() }, onTitleClick = { controller.openSearchBox(query) }, trailing = {
+            IconButton(onClick = { controller.openSearchBox(query) }) { Icon(QMusicIcons.Search, s.searchHint, tint = VideoColors.Text) }
         })
         LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(VideosController.FILTERS) { (params, key) ->

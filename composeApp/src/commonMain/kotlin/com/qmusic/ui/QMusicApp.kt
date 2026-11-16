@@ -4,6 +4,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.first
+import com.qmusic.ui.components.QeyfBarItem
 import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.systemBarsPadding
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -640,6 +641,12 @@ fun QMusicApp(
                     com.qmusic.ui.videos.VideosApp(
                         controller = videosController,
                         s = videoStrings,
+                        onChat = if (chatAvailable) ({
+                            videosOpen = false
+                            videoFromChat = false
+                            chatOpen = true
+                        }) else null,
+                        chatUnread = chatUnread,
                         onExit = {
                             videosOpen = false
                             if (videoFromChat) {
@@ -899,6 +906,7 @@ fun QMusicApp(
                         onSearchClick = { viewModel.selectTab(ScreenTab.SEARCH) },
                         onChatClick = if (chatAvailable) ({ chatOpen = true }) else null,
                         chatUnread = chatUnread,
+                        onSettingsClick = if (wide) null else ({ viewModel.selectTab(ScreenTab.SETTINGS) }),
                         onSignIn = {
                             when (accountMode) {
                                 com.qmusic.settings.AccountMode.SPOTIFY -> viewModel.setShowSpotifyLoginDialog(true)
@@ -949,6 +957,7 @@ fun QMusicApp(
                         onFilterChange = { viewModel.setSearchFilter(it) },
                         onSearch = { viewModel.performSearch() },
                         onSuggestionClick = { viewModel.selectSuggestion(it) },
+                        onEditSearch = { viewModel.editSearch() },
                         onHistoryClick = { viewModel.performSearch(it) },
                         onHistoryDelete = { viewModel.deleteSearchHistoryEntry(it) },
                         onClearHistory = { viewModel.clearSearchHistory() },
@@ -1428,12 +1437,17 @@ fun QMusicApp(
                                     )
                                 }
 
-                                QMusicNavigationBar(
-                                    items = navTabs.map { NavBarItem(it.title, it.icon) } +
-                                        NavBarItem("QVideo", QMusicIcons.VideoPlay),
-                                    selectedIndex = navTabs.indexOfFirst { it.tab == currentTab },
-                                    onSelect = { index -> if (index >= navTabs.size) videosOpen = true else selectTab(index) },
-                                )
+                                // The same bar as the messages', with the videos and the messages on it.
+                                com.qmusic.ui.components.QeyfBar(com.qmusic.ui.theme.BgSurface) {
+                                    // Settings are not on the bar (the gear at the top of the home page opens them).
+                                    navTabs.forEachIndexed { index, item ->
+                                        if (item.tab != ScreenTab.SETTINGS) QeyfBarItem(item.title, item.icon, item.tab == currentTab) { selectTab(index) }
+                                    }
+                                    QeyfBarItem("QVideo", QMusicIcons.VideoPlay, false) { videosOpen = true }
+                                    if (chatAvailable) {
+                                        QeyfBarItem(com.qmusic.ui.chat.ChatMusic.words().messages, QMusicIcons.Chat, false, count = chatUnread) { chatOpen = true }
+                                    }
+                                }
                             }
                         },
                     ) { innerPadding ->

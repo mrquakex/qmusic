@@ -1,5 +1,6 @@
 package com.qmusic.ui.screens
 
+import androidx.compose.ui.draw.shadow
 import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
@@ -114,6 +115,8 @@ fun HomeScreen(
     /** Opens the messages; null where there are none. */
     onChatClick: (() -> Unit)? = null,
     chatUnread: Int = 0,
+    /** The settings (no longer a tab of the bottom bar: the gear at the top of the home page). */
+    onSettingsClick: (() -> Unit)? = null,
     onSignIn: () -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
@@ -178,7 +181,12 @@ fun HomeScreen(
                         QMusicHeaderLogo(modifier = Modifier.weight(1f))
                         // As on YouTube Music: cast and search sit at the right of the logo
                         com.qmusic.ui.tv.TvButton(tint = Ink, modifier = Modifier.size(48.dp))
-                        if (onChatClick != null) {
+                        // The messages are on the bottom bar now; the settings sit here.
+                        if (onSettingsClick != null) {
+                            IconButton(onClick = onSettingsClick) {
+                                Icon(QMusicIcons.Settings, contentDescription = LocalStrings.current.tabSettings, tint = Ink)
+                            }
+                        } else if (onChatClick != null) {
                             IconButton(onClick = onChatClick) {
                                 Box {
                                     Icon(QMusicIcons.Chat, contentDescription = null, tint = Ink)
@@ -515,10 +523,10 @@ private fun SpeedDial(
                 modifier = Modifier
                     .fillParentMaxWidth()
                     .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 pages[index].chunked(3).forEachIndexed { rowIndex, row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         row.forEachIndexed { column, song ->
                             Box(modifier = Modifier.weight(1f).aspectRatio(1f)) {
                                 if (song == null) {
@@ -555,14 +563,20 @@ private fun SpeedDial(
     }
 }
 
+/**
+ * A speed dial tile: the cover, softly rounded with a hairline edge and a little depth, the title and the artist on a
+ * dark fade at the bottom. The song heard last wears a small "now" badge instead of a heavy frame.
+ */
 @Composable
 private fun SpeedDialTile(song: SongItem, framed: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(14.dp)
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .clip(RoundedCornerShape(12.dp))
+            .shadow(3.dp, shape, clip = false)
+            .clip(shape)
             .background(DarkSurfaceVariant)
-            .then(if (framed) Modifier.border(3.dp, Ink, RoundedCornerShape(12.dp)) else Modifier)
+            .border(0.5.dp, Ink.copy(alpha = 0.08f), shape)
             .clickable(onClick = onClick),
     ) {
         AsyncImage(
@@ -571,41 +585,79 @@ private fun SpeedDialTile(song: SongItem, framed: Boolean, onClick: () -> Unit) 
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
         )
-        Box(
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                // White words on a dark fade in both themes: over a cover that is what reads (a light fade with black
-                // words looked muddy on dark covers).
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f))))
-                .padding(start = 10.dp, end = 10.dp, top = 22.dp, bottom = 8.dp),
+                // White words on a dark fade in both themes: over a cover that is what reads.
+                .background(Brush.verticalGradient(0f to Color.Transparent, 0.35f to Color.Black.copy(alpha = 0.35f), 1f to Color.Black.copy(alpha = 0.82f)))
+                .padding(start = 10.dp, end = 10.dp, top = 26.dp, bottom = 9.dp),
         ) {
             Text(
                 text = song.title,
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
                 color = Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            val artist = song.artists.joinToString(", ") { it.name }
+            if (artist.isNotBlank()) {
+                Text(
+                    text = artist,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.72f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (framed) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(7.dp)
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.55f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(QMusicIcons.History, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+            }
         }
     }
 }
 
+/** The ninth tile: plays something at random. A soft colour, the dice and its word. */
 @Composable
 private fun DiceTile(description: String, onClick: () -> Unit) {
-    Box(
+    val shape = RoundedCornerShape(14.dp)
+    val light = com.qmusic.ui.theme.lightTheme
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Brush.linearGradient(if (com.qmusic.ui.theme.lightTheme) listOf(Color(0xFFF1EEF7), Color(0xFFDFDAEA)) else listOf(Color(0xFF2B2140), Color(0xFF14101F))))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
+            .shadow(3.dp, shape, clip = false)
+            .clip(shape)
+            .background(Brush.linearGradient(if (light) listOf(Color(0xFFF3F0FA), Color(0xFFE2DCF0)) else listOf(Color(0xFF2E2446), Color(0xFF17121F))))
+            .border(0.5.dp, Ink.copy(alpha = 0.08f), shape)
+            .clickable(onClick = onClick)
+            .padding(10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
-        Icon(
-            imageVector = QMusicIcons.Dice,
-            contentDescription = description,
-            tint = Ink.copy(alpha = 0.85f),
-            modifier = Modifier.size(44.dp),
+        Box(
+            Modifier.size(52.dp).clip(CircleShape).background(Ink.copy(alpha = 0.08f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(imageVector = QMusicIcons.Dice, contentDescription = null, tint = Ink, modifier = Modifier.size(28.dp))
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = description,
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+            color = Ink.copy(alpha = 0.85f),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

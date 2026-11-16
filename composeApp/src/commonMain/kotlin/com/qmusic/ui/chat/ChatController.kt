@@ -724,6 +724,8 @@ class ChatController(
             _found.value = null
             return
         }
+        // Searching again: no old results meanwhile (the page shows that it looks).
+        _found.value = null
         searchJob = scope.launch {
             delay(SEARCH_DELAY_MS)
             val me = (account.value as? ChatAccount.Ready)?.me?.uid

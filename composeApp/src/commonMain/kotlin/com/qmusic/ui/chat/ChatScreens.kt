@@ -652,24 +652,144 @@ internal fun ThreadRow(
 
 @Composable
 private fun NewChatPage(controller: ChatController, s: ChatStrings) {
+    val w = ChatMusic.words()
     val query by controller.query.collectAsState()
     val found by controller.found.collectAsState()
+    val friends by controller.friends.collectAsState()
+    val incoming by controller.friendRequests.collectAsState()
     val focus = remember { FocusRequester() }
+    val scan = rememberQrScanner { text -> controller.openQeyfCode(text, s) }
+    val q = query.trim().removePrefix("@")
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    // Friends whose name or @username has the words, found here at once; people on Qeyf come from the search.
+    val friendHits = remember(friends, q) {
+        if (q.isEmpty()) friends else friends.filter { it.name.contains(q, ignoreCase = true) || it.username.contains(q, ignoreCase = true) }
+    }
+    val others = found.orEmpty().filter { f -> friendHits.none { it.uid == f.uid } }
     Column(Modifier.fillMaxSize().imePadding()) {
         TopBar(s.newChat, { controller.pop() })
-        Field(query, controller::setQuery, s.searchPeople, prefix = "@", capitalize = false, modifier = Modifier.padding(horizontal = 16.dp).focusRequester(focus))
-        Spacer(Modifier.height(8.dp))
-        val list = found
-        when {
-            list == null -> Unit
-            list.isEmpty() -> Text(s.noPeople, color = TextSecondary, fontSize = 15.sp, modifier = Modifier.padding(24.dp))
-            else -> LazyColumn(Modifier.fillMaxSize()) {
-                items(list, key = { it.uid }) { user ->
-                    PersonRow(user, onClick = { controller.openProfile(user) }) { FriendButton(controller, user, s) }
+        // The search, always there at the top.
+        Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().height(50.dp).clip(RoundedCornerShape(25.dp)).background(DarkSurfaceVariant).padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(QMusicIcons.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(12.dp))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                if (query.isEmpty()) Text(w.findPeople, color = TextMuted, fontSize = 16.sp, maxLines = 1)
+                androidx.compose.foundation.text.BasicTextField(
+                    value = query,
+                    onValueChange = controller::setQuery,
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(color = TextPrimary, fontSize = 16.sp),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(Ink),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.None, imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                )
+            }
+            if (query.isNotEmpty()) {
+                Box(Modifier.size(28.dp).clip(CircleShape).clickable { controller.setQuery("") }, contentAlignment = Alignment.Center) {
+                    Icon(QMusicIcons.Close, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
                 }
             }
         }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 6.dp, bottom = 32.dp)) {
+            if (q.isEmpty()) {
+                // What one starts a conversation with, besides a name.
+                item(key = "group") { QuickRow(QMusicIcons.Group, s.newGroup, w.newGroupNote) { controller.openNewGroup() } }
+                if (scan != null) item(key = "scan") { QuickRow(QMusicIcons.Camera, w.scanCode, w.scanCodeNote) { scan() } }
+                item(key = "mine") { QuickRow(QMusicIcons.Share, w.myCode, w.myCodeNote) { controller.push(ChatRoute.MyQr) } }
+                if (incoming.isNotEmpty()) {
+                    item(key = "reqHead") { SectionTitle(s.requests + " · " + incoming.size) }
+                    items(incoming, key = { "r" + it.uid }) { user ->
+                        PeopleRow(user, onClick = { controller.openProfile(user) }) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Pill(s.decline, primary = false) { controller.unfriend(user) }
+                                Pill(s.accept, primary = true) { controller.acceptFriend(user) }
+                            }
+                        }
+                    }
+                }
+                item(key = "friendsHead") { SectionTitle(if (friends.isEmpty()) w.yourFriends else w.yourFriends + " · " + friends.size) }
+                if (friends.isEmpty()) {
+                    item(key = "noFriends") {
+                        EmptyPeople(QMusicIcons.Account, w.noFriendsYet, w.noFriendsNote)
+                    }
+                }
+                items(friendHits, key = { "f" + it.uid }) { user -> PeopleRow(user, onClick = { controller.openConversation(user) }) }
+            } else {
+                if (friendHits.isNotEmpty()) {
+                    item(key = "fHead") { SectionTitle(w.yourFriends) }
+                    items(friendHits, key = { "f" + it.uid }) { user -> PeopleRow(user, onClick = { controller.openConversation(user) }) }
+                }
+                item(key = "oHead") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.weight(1f)) { SectionTitle(w.onQeyf) }
+                        if (found == null && q.length >= 2) {
+                            CircularProgressIndicator(color = Ink, strokeWidth = 2.dp, modifier = Modifier.padding(end = 20.dp).size(16.dp))
+                        }
+                    }
+                }
+                when {
+                    q.length < 2 -> item(key = "short") { Text(w.typeMore, color = TextSecondary, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+                    found != null && others.isEmpty() && friendHits.isEmpty() -> item(key = "none") {
+                        EmptyPeople(QMusicIcons.Search, w.noOne(q), w.noOneNote)
+                    }
+                    else -> items(others, key = { "o" + it.uid }) { user ->
+                        PeopleRow(user, onClick = { controller.openProfile(user) }) { FriendButton(controller, user, s) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A way to start something (a group, scanning a code): a round icon, a title and a line about it. */
+@Composable
+private fun QuickRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, note: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(48.dp).clip(CircleShape).background(TickRead), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(note, color = TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** A person in the lists of the new conversation: their picture, name, and their about line (or @username). */
+@Composable
+private fun PeopleRow(user: ChatUser, onClick: () -> Unit, trailing: @Composable () -> Unit = {}) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+        ChatAvatar(user, 48.dp)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(user.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                user.about.takeIf { it.isNotBlank() } ?: ("@" + user.username),
+                color = TextSecondary,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        trailing()
+    }
+}
+
+/** Nothing to show yet: an icon in a soft circle, what is the matter, and what to do. */
+@Composable
+private fun EmptyPeople(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, note: String) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(64.dp).clip(CircleShape).background(DarkSurfaceVariant), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(28.dp))
+        }
+        Spacer(Modifier.height(14.dp))
+        Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Spacer(Modifier.height(4.dp))
+        Text(note, color = TextSecondary, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
 

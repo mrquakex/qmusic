@@ -1,5 +1,9 @@
 package com.qmusic.ui.screens
 
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.focus.focusRequester
 import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
@@ -98,6 +102,8 @@ fun SearchScreen(
     onFilterChange: (SearchFilter?) -> Unit,
     onSearch: () -> Unit,
     onSuggestionClick: (SearchSuggestion) -> Unit,
+    /** The box tapped while the results show: back to typing the words (with suggestions). */
+    onEditSearch: () -> Unit = {},
     onHistoryClick: (String) -> Unit,
     onHistoryDelete: (String) -> Unit,
     onClearHistory: () -> Unit,
@@ -111,6 +117,17 @@ fun SearchScreen(
 ) {
     val s = LocalStrings.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    // Opening the search brings the keyboard up at once (nothing typed yet, no results shown).
+    val fieldFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) {
+        if (query.isEmpty() && !showResults) runCatching { fieldFocus.requestFocus() }
+    }
+    // A picked suggestion or past search: the keyboard goes down so the results show.
+    val done: () -> Unit = {
+        keyboardController?.hide()
+        focusManager.clearFocus()
+    }
 
     Column(
         modifier = modifier
@@ -129,7 +146,9 @@ fun SearchScreen(
             onValueChange = onQueryChange,
             modifier = Modifier
                 .weight(1f)
-                .height(56.dp),
+                .height(56.dp)
+                .focusRequester(fieldFocus)
+                .onFocusChanged { if (it.isFocused && showResults) onEditSearch() },
             shape = RoundedCornerShape(50),
             placeholder = { Text(s.searchFieldPlaceholder) },
             leadingIcon = {
@@ -169,7 +188,7 @@ fun SearchScreen(
             },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = {
-                keyboardController?.hide()
+                done()
                 onSearch()
             }),
             singleLine = true,
@@ -227,7 +246,7 @@ fun SearchScreen(
                 showExplore = showExplore,
                 onSongClick = onSongClick,
                 onFill = onQueryChange,
-                onHistoryClick = onHistoryClick,
+                onHistoryClick = { done(); onHistoryClick(it) },
                 onHistoryDelete = onHistoryDelete,
                 onClearHistory = onClearHistory,
             )
@@ -235,7 +254,7 @@ fun SearchScreen(
             SuggestionList(
                 query = query,
                 suggestions = suggestions,
-                onSuggestionClick = onSuggestionClick,
+                onSuggestionClick = { done(); onSuggestionClick(it) },
                 onFill = { onQueryChange(it.text) },
                 onSongMore = onSongMore,
             )

@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.qmusic.ui.chat
 
 import androidx.compose.runtime.rememberCoroutineScope
@@ -147,7 +149,7 @@ internal fun StatusTab(controller: ChatController, s: ChatStrings, me: ChatUser,
     val quiet = friends.filter { it.owner.uid in muted }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 160.dp)) {
-            item(key = "title") {
+            stickyHeader(key = "title") {
                 HomeTitle(s.tabStatus, onExit) {
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Ink) }

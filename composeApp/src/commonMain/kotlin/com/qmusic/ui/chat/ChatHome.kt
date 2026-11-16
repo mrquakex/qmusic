@@ -1,5 +1,8 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.qmusic.ui.chat
 
+import com.qmusic.ui.components.QeyfBarItem
 import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
@@ -102,12 +105,30 @@ internal fun ChatHome(
     // Back from another tab goes to Chats first, then out.
     PlatformBackHandler(enabled = tab != ChatTab.CHATS) { controller.selectTab(ChatTab.CHATS) }
     Column(Modifier.fillMaxSize().background(BgRoot)) {
-        Box(Modifier.weight(1f)) {
-            when (tab) {
-                ChatTab.CHATS -> ChatsTab(controller, s, me, onExit)
-                ChatTab.STATUS -> StatusTab(controller, s, me, onExit)
-                ChatTab.GROUPS -> GroupsTab(controller, s, me, onExit)
-                ChatTab.CALLS -> CallsTab(controller, s, me, onExit, onCall, onGroupCall)
+        // The tabs side by side: a swipe goes to the next or the previous one (as on WhatsApp), a tap on the bar
+        // slides there.
+        val tabs = ChatTab.entries
+        val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = tabs.indexOf(tab)) { tabs.size }
+        LaunchedEffect(tab) {
+            val target = tabs.indexOf(tab)
+            if (pager.targetPage != target) pager.animateScrollToPage(target)
+        }
+        LaunchedEffect(pager) {
+            androidx.compose.runtime.snapshotFlow { pager.settledPage }.collect { page -> if (controller.tab.value != tabs[page]) controller.selectTab(tabs[page]) }
+        }
+        androidx.compose.foundation.pager.HorizontalPager(
+            state = pager,
+            modifier = Modifier.weight(1f),
+            beyondViewportPageCount = 1,
+            key = { tabs[it].name },
+        ) { page ->
+            Box(Modifier.fillMaxSize()) {
+                when (tabs[page]) {
+                    ChatTab.CHATS -> ChatsTab(controller, s, me, onExit)
+                    ChatTab.STATUS -> StatusTab(controller, s, me, onExit)
+                    ChatTab.GROUPS -> GroupsTab(controller, s, me, onExit)
+                    ChatTab.CALLS -> CallsTab(controller, s, me, onExit, onCall, onGroupCall)
+                }
             }
         }
         HomeBar(controller, s, tab)
@@ -124,37 +145,20 @@ private fun HomeBar(controller: ChatController, s: ChatStrings, tab: ChatTab) {
     val missed by controller.missedCalls.collectAsState()
     val groupsUnread = threads.orEmpty().count { it.isGroup && it.unread }
     val chatsUnread = threads.orEmpty().count { !it.isGroup && it.unread }.takeIf { threads != null } ?: unread
-    Column(Modifier.fillMaxWidth().background(BgRoot)) {
-        Box(Modifier.fillMaxWidth().height(0.5.dp).background(BorderSubtle))
-        Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(vertical = 6.dp)) {
-            BarItem(s.tabChats, tab == ChatTab.CHATS, chatsUnread, false, Modifier.weight(1f), icon = { tint -> Icon(QMusicIcons.Chat, null, tint = tint, modifier = Modifier.size(24.dp)) }) {
-                controller.selectTab(ChatTab.CHATS)
-            }
-            BarItem(s.tabStatus, tab == ChatTab.STATUS, 0, unseen.isNotEmpty(), Modifier.weight(1f), icon = { tint -> StatusGlyph(tint, 22.dp) }) {
-                controller.selectTab(ChatTab.STATUS)
-            }
-            BarItem(s.tabGroups, tab == ChatTab.GROUPS, groupsUnread, false, Modifier.weight(1f), icon = { tint -> Icon(QMusicIcons.Group, null, tint = tint, modifier = Modifier.size(24.dp)) }) {
-                controller.selectTab(ChatTab.GROUPS)
-            }
-            BarItem(s.tabCalls, tab == ChatTab.CALLS, missed, false, Modifier.weight(1f), badgeColor = CallRed, icon = { tint -> Icon(QMusicIcons.Phone, null, tint = tint, modifier = Modifier.size(24.dp)) }) {
-                controller.selectTab(ChatTab.CALLS)
-            }
-            // Messages are home: the music and the videos are one tap away.
-            val home by AppHome.messagesFirst.collectAsState()
-            if (home) {
-                val w = ChatMusic.words()
-                AppHome.openMusic?.let { open ->
-                    BarItem(w.music, false, 0, false, Modifier.weight(1f), icon = { tint -> Icon(QMusicIcons.Headphones, null, tint = tint, modifier = Modifier.size(24.dp)) }, onClick = open)
-                }
-                AppHome.openVideos?.let { open ->
-                    BarItem(w.video, false, 0, false, Modifier.weight(1f), icon = { tint -> Icon(QMusicIcons.VideoPlay, null, tint = tint, modifier = Modifier.size(24.dp)) }, onClick = open)
-                }
-            }
-        }
+    com.qmusic.ui.components.QeyfBar(BgRoot) {
+        QeyfBarItem(s.tabChats, QMusicIcons.Chat, tab == ChatTab.CHATS, count = chatsUnread) { controller.selectTab(ChatTab.CHATS) }
+        QeyfBarItem(s.tabStatus, tab == ChatTab.STATUS, dot = unseen.isNotEmpty(), icon = { tint -> StatusGlyph(tint, 22.dp) }) { controller.selectTab(ChatTab.STATUS) }
+        QeyfBarItem(s.tabGroups, QMusicIcons.Group, tab == ChatTab.GROUPS, count = groupsUnread) { controller.selectTab(ChatTab.GROUPS) }
+        QeyfBarItem(s.tabCalls, QMusicIcons.Phone, tab == ChatTab.CALLS, count = missed, badgeColor = CallRed) { controller.selectTab(ChatTab.CALLS) }
+        // The music and the videos are one tap away (the same bar is in them, with the messages).
+        val w = ChatMusic.words()
+        AppHome.openMusic?.let { open -> QeyfBarItem(w.music, QMusicIcons.Headphones, false, onClick = open) }
+        AppHome.openVideos?.let { open -> QeyfBarItem(w.video, QMusicIcons.VideoPlay, false, onClick = open) }
     }
 }
 
 @Composable
+@Suppress("unused")
 private fun BarItem(
     label: String,
     selected: Boolean,
@@ -216,7 +220,8 @@ internal fun StatusGlyph(tint: Color, size: Dp) {
 @Composable
 internal fun HomeTitle(title: String, onExit: () -> Unit, actions: @Composable () -> Unit = {}) {
     Row(
-        Modifier.fillMaxWidth().statusBarsPadding().height(60.dp).padding(start = 4.dp, end = 4.dp),
+        // It stays at the top while the list scrolls under it (on the page's colour, so nothing shows through).
+        Modifier.fillMaxWidth().background(BgRoot).statusBarsPadding().height(60.dp).padding(start = 4.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // At home there is nowhere to go back to.
@@ -352,7 +357,7 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
     val lockedCount = controller.lockedThreads.collectAsState().value.size
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
-            item(key = "title") {
+            stickyHeader(key = "title") {
                 HomeTitle(s.title, onExit) {
                     val incoming by controller.friendRequests.collectAsState()
                     IconButton(onClick = { camera() }) { Icon(QMusicIcons.Camera, contentDescription = s.camera, tint = Ink) }
@@ -551,7 +556,7 @@ private fun GroupsTab(controller: ChatController, s: ChatStrings, me: ChatUser, 
     }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
-            item(key = "title") { HomeTitle(s.tabGroups, onExit) }
+            stickyHeader(key = "title") { HomeTitle(s.tabGroups, onExit) }
             item(key = "search") { SearchPill(search, { search = it }, s.search) }
             item(key = "create") {
                 Row(
@@ -663,7 +668,7 @@ private fun CallsTab(
     LaunchedEffect(calls.firstOrNull()?.id) { controller.selectTab(ChatTab.CALLS) }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
-            item(key = "title") {
+            stickyHeader(key = "title") {
                 HomeTitle(s.tabCalls, onExit) {
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Ink) }
