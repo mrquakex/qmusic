@@ -4,6 +4,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.first
+import androidx.compose.foundation.layout.displayCutoutPadding
+import androidx.compose.foundation.layout.systemBarsPadding
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -145,6 +149,11 @@ fun QMusicApp(
                 PlatformBackHandler(enabled = showSpotifyLoginDialog) { viewModel.setShowSpotifyLoginDialog(false) }
                 Box(modifier = modifier.fillMaxSize()) {
                     com.qmusic.ui.screens.WelcomeScreen(
+                        english = language == "en",
+                        onMessages = {
+                            com.qmusic.ui.screens.WelcomeChoice.signInToMessages = true
+                            viewModel.chooseAccount(com.qmusic.settings.AccountMode.NONE)
+                        },
                         onYouTube = { viewModel.chooseAccount(com.qmusic.settings.AccountMode.YOUTUBE) },
                         onSpotify = { viewModel.chooseAccount(com.qmusic.settings.AccountMode.SPOTIFY) },
                         onWithoutAccount = { viewModel.chooseAccount(com.qmusic.settings.AccountMode.NONE) },
@@ -206,10 +215,48 @@ fun QMusicApp(
                 )
             }
             // Messages: full screen like the videos, entered from the button on the home page (or a notification).
-            var chatOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+            // Messages are Qeyf's home (unless changed in the messages' settings): the app opens on them.
+            val messagesFirst by viewModel.settings.string(KEY_START_SCREEN, "chat").collectAsState()
+            val homeIsChat = messagesFirst == "chat" && !com.qmusic.ui.tv.TvScreen.isTv
+            var chatOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(homeIsChat) }
+            // A video opened from the messages' bar goes back to them.
+            var videoFromChat by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
             val chatBackend = com.qmusic.ui.chat.rememberChatBackend()
             val chatScope = rememberCoroutineScope()
             val chatController = remember(chatBackend) { chatBackend?.let { com.qmusic.ui.chat.ChatController(it, chatScope) } }
+            androidx.compose.runtime.SideEffect {
+                val home = com.qmusic.ui.chat.AppHome
+                home.messagesFirst.value = homeIsChat && chatController != null
+                home.setMessagesFirst = { on -> viewModel.settings.setString(KEY_START_SCREEN, if (on) "chat" else "music") }
+                home.openMusic = {
+                    chatOpen = false
+                    videosOpen = false
+                }
+                home.openVideos = {
+                    chatOpen = false
+                    videoFromChat = true
+                    videosOpen = true
+                }
+            }
+            // Without messages on this phone (no Firebase), the music is home after all.
+            LaunchedEffect(chatController) {
+                val controller = chatController
+                if (controller == null) {
+                    chatOpen = false
+                    return@LaunchedEffect
+                }
+                val account = controller.account.first { it !is com.qmusic.ui.chat.ChatAccount.Loading }
+                if (account is com.qmusic.ui.chat.ChatAccount.Unavailable) chatOpen = false
+            }
+            // The first launch's "start messaging": the Google sign-in comes up by itself.
+            LaunchedEffect(chatController) {
+                if (chatController != null && com.qmusic.ui.screens.WelcomeChoice.signInToMessages) {
+                    com.qmusic.ui.screens.WelcomeChoice.signInToMessages = false
+                    if (chatController.account.first { it !is com.qmusic.ui.chat.ChatAccount.Loading } is com.qmusic.ui.chat.ChatAccount.SignedOut) {
+                        chatController.signIn()
+                    }
+                }
+            }
             // The music side, for statuses: finding a song, and the address of its sound to play it in the status.
             LaunchedEffect(chatController) {
                 val controller = chatController ?: return@LaunchedEffect
@@ -218,9 +265,14 @@ fun QMusicApp(
                         com.qmusic.ui.chat.SharedItem(com.qmusic.ui.chat.ShareKind.SONG, song.id, song.title, song.artists.joinToString(", ") { it.name }, song.thumbnail)
                     }
                 }
-                controller.songAudio = { id ->
-                    viewModel.youTube.resolveStreamUrls(id).getOrNull()?.firstOrNull { !it.isDrm }?.url
+                // A status's song: an AAC stream near 128 kbit/s starts fastest and plays everywhere.
+                com.qmusic.ui.chat.ChatMusic.resolveSongUrl = { id, fresh ->
+                    if (fresh) viewModel.youTube.invalidateStreamCache(id)
+                    val streams = viewModel.youTube.resolveStreamUrls(id).getOrNull().orEmpty().filter { !it.isDrm && it.mimeType.startsWith("audio") }
+                    (streams.filter { it.mimeType.startsWith("audio/mp4") }.minByOrNull { kotlin.math.abs(it.bitrate - 128_000) }
+                        ?: streams.minByOrNull { kotlin.math.abs(it.bitrate - 128_000) })?.url
                 }
+                controller.songAudio = { id -> com.qmusic.ui.chat.ChatMusic.songUrl(id) }
             }
             // Listening / watching together: the music player and the video player as the session sees them.
             // (They are the TV's players too, when a phone plays on it: see TvScreen.)
@@ -304,7 +356,52 @@ fun QMusicApp(
                 tones.backToChat = { chatOpen = true }
                 viewModel.ringtones.saved.collect { list -> tones.made.value = list.map { com.qmusic.ui.chat.MadeTone(it.uri, it.title, it.artist, it.thumbnail) } }
             }
+            // Music in the messages: playing a shared playlist, sending what plays, telling friends what plays.
+            LaunchedEffect(Unit) {
+                val music = com.qmusic.ui.chat.ChatMusic
+                music.playList = { items, index ->
+                    chatOpen = false
+                    videosOpen = false
+                    viewModel.playerController.playQueue(
+                        items.map { item ->
+                            com.qmusic.engine.models.SongItem(
+                                id = item.id,
+                                title = item.title,
+                                artists = item.subtitle.takeIf { it.isNotBlank() }?.let { listOf(com.qmusic.engine.models.Artist(it)) }.orEmpty(),
+                                thumbnail = item.thumbnail,
+                            )
+                        },
+                        index.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
+                    )
+                    viewModel.setPlayerExpanded(true)
+                }
+                music.offerNowPlaying = {
+                    viewModel.currentTrack.value?.let { song ->
+                        music.offer(
+                            com.qmusic.ui.chat.SharedItem(
+                                com.qmusic.ui.chat.ShareKind.SONG, song.id, song.title, song.artists.joinToString(", ") { it.name }, song.thumbnail,
+                                startMs = viewModel.playbackPosition.value.takeIf { it > 5_000 } ?: 0L,
+                            ),
+                        )
+                    }
+                }
+            }
+            LaunchedEffect(chatController) {
+                if (chatController == null || com.qmusic.ui.tv.TvScreen.isTv) return@LaunchedEffect
+                kotlinx.coroutines.flow.combine(viewModel.currentTrack, viewModel.isPlaying, chatController.account) { song, playing, account ->
+                    if (account !is com.qmusic.ui.chat.ChatAccount.Ready || !playing || song == null) {
+                        null
+                    } else {
+                        com.qmusic.ui.chat.SharedItem(com.qmusic.ui.chat.ShareKind.SONG, song.id, song.title, song.artists.joinToString(", ") { it.name }, song.thumbnail)
+                    }
+                }.distinctUntilChanged().collectLatest { item ->
+                    // A pause of a moment, or skipping through songs, is not written each time.
+                    kotlinx.coroutines.delay(if (item == null) 20_000 else 3_000)
+                    com.qmusic.ui.chat.ChatMusic.publishListening(item)
+                }
+            }
             androidx.compose.runtime.SideEffect {
+                com.qmusic.ui.chat.ChatMusic.english = language == "en"
                 com.qmusic.ui.chat.CallTones.english = language == "en"
                 com.qmusic.ui.tv.TvLink.english = language == "en"
                 val tv = com.qmusic.ui.tv.TvScreen
@@ -351,6 +448,7 @@ fun QMusicApp(
                     myUid = { (controller.account.value as? com.qmusic.ui.chat.ChatAccount.Ready)?.me?.uid },
                     players = { kind -> if (kind == com.qmusic.ui.chat.ShareKind.SONG) music else video },
                 )
+                controller.together?.active?.collect { com.qmusic.ui.chat.ChatMusic.together.value = it }
             }
             val chatLaunch by com.qmusic.ui.chat.ChatLaunch.request.collectAsState()
             LaunchedEffect(chatLaunch, chatController) {
@@ -437,6 +535,22 @@ fun QMusicApp(
             }
             // A group call takes the whole screen too.
             val groupCallService = chatController?.groupCalls
+            // A song or a video sent to conversations from the music or video side.
+            val chatSending by com.qmusic.ui.chat.ChatMusic.sending.collectAsState()
+            chatSending?.let { item ->
+                if (chatController == null) {
+                    com.qmusic.ui.chat.ChatMusic.sending.value = null
+                } else {
+                    com.qmusic.ui.chat.ChatSendDialog(
+                        controller = chatController,
+                        s = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish,
+                        item = item,
+                    ) { done ->
+                        com.qmusic.ui.chat.ChatMusic.sending.value = null
+                        done?.let { viewModel.showMessage(it) }
+                    }
+                }
+            }
             val groupCall by (groupCallService?.state ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
             if (groupCallService != null && groupCall != null) {
                 val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
@@ -478,29 +592,29 @@ fun QMusicApp(
                     onOpenShare = { item ->
                         when (item.kind) {
                             com.qmusic.ui.chat.ShareKind.SONG -> {
-                                viewModel.play(
-                                    com.qmusic.engine.models.SongItem(
-                                        id = item.id,
-                                        title = item.title,
-                                        artists = item.subtitle.takeIf { it.isNotBlank() }
-                                            ?.let { listOf(com.qmusic.engine.models.Artist(it)) }.orEmpty(),
-                                        thumbnail = item.thumbnail,
-                                    ),
-                                    radio = true,
+                                val song = com.qmusic.engine.models.SongItem(
+                                    id = item.id,
+                                    title = item.title,
+                                    artists = item.subtitle.takeIf { it.isNotBlank() }
+                                        ?.let { listOf(com.qmusic.engine.models.Artist(it)) }.orEmpty(),
+                                    thumbnail = item.thumbnail,
                                 )
+                                // Sent at a second (or with a line of its lyrics): it starts there.
+                                if (item.startMs > 0) viewModel.playAt(song, item.startMs) else viewModel.play(song, radio = true)
                                 chatOpen = false
                                 viewModel.setPlayerExpanded(true)
                             }
                             com.qmusic.ui.chat.ShareKind.VIDEO -> {
                                 chatOpen = false
                                 videosOpen = true
-                                videosController.open(
+                                videosController.openAt(
                                     com.qmusic.engine.video.VideoItem(
                                         id = item.id,
                                         title = item.title,
                                         channelName = item.subtitle.ifBlank { null },
                                         thumbnail = item.thumbnail,
                                     ),
+                                    item.startMs,
                                 )
                             }
                         }
@@ -526,7 +640,13 @@ fun QMusicApp(
                     com.qmusic.ui.videos.VideosApp(
                         controller = videosController,
                         s = videoStrings,
-                        onExit = { videosOpen = false },
+                        onExit = {
+                            videosOpen = false
+                            if (videoFromChat) {
+                                videoFromChat = false
+                                chatOpen = true
+                            }
+                        },
                         onSignIn = { videoLogin = true },
                         onPauseMusic = { viewModel.playerController.pause() },
                         onShare = shareVideo,
@@ -682,6 +802,8 @@ fun QMusicApp(
         val favoriteIds = remember(favorites) { favorites.mapTo(HashSet()) { it.id } }
         val isCurrentTrackFavorite = currentTrack?.let { it.id in favoriteIds } ?: false
 
+        // Messages are home: Back on the music's first page goes to them (the handlers below come first).
+        PlatformBackHandler(enabled = homeIsChat && chatAvailable) { chatOpen = true }
         // System Back: close the player first, then the topmost page.
         PlatformBackHandler(enabled = isPlayerExpanded) { viewModel.setPlayerExpanded(false) }
         PlatformBackHandler(enabled = !isPlayerExpanded && topRoute != null) { viewModel.popRoute() }
@@ -1032,9 +1154,11 @@ fun QMusicApp(
                 var sidebarExpanded by remember { mutableStateOf(true) }
                 val desktopDominant = rememberDominantColor(
                     currentTrack?.let { it.thumbnail ?: it.thumbnails.lastOrNull()?.url }
-                )
+                )?.asBackdrop()
 
-                Column(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
+                // On a tablet the bars of the system (and a camera cut-out sideways) are kept clear: the player's
+                // buttons sat under the navigation bar.
+                Column(modifier = Modifier.fillMaxSize().background(DarkBackground).systemBarsPadding().displayCutoutPadding()) {
                     com.qmusic.ui.components.DesktopTopNavBar(
                         searchQuery = searchQuery,
                         onSearchQueryChange = { q ->
@@ -1409,6 +1533,16 @@ fun QMusicApp(
                                     onSearch = { viewModel.searchLyrics(it) },
                                     onUse = { viewModel.useLyrics(it) },
                                     onCloseSearch = { viewModel.closeLyricsSearch() },
+                                    onQuote = { text, at ->
+                                        viewModel.currentTrack.value?.let { song ->
+                                            com.qmusic.ui.chat.ChatMusic.offer(
+                                                com.qmusic.ui.chat.SharedItem(
+                                                    com.qmusic.ui.chat.ShareKind.SONG, song.id, song.title, song.artists.joinToString(", ") { it.name }, song.thumbnail,
+                                                    startMs = at, quote = text.take(300),
+                                                ),
+                                            )
+                                        }
+                                    },
                                 ),
                                 contentAlpha = { ((sheetProgress.value - 0.55f) / 0.45f).coerceIn(0f, 1f) },
                                 coverAlpha = { if (coverSettled()) 1f else 0f },
@@ -1721,3 +1855,6 @@ fun cleanReleaseNotes(markdown: String): String {
 
 /** The "Sana Özel" tab (song samples to swipe through); hidden for now, true brings it back. */
 const val FOR_YOU_SHOWN = false
+
+/** Where Qeyf opens: "chat" (the messages, the default) or "music". */
+private const val KEY_START_SCREEN = "start_screen"

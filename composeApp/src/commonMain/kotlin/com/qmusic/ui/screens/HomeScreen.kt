@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.getValue
 import com.qmusic.ui.rememberDominantColor
+import com.qmusic.ui.asBackdrop
 import com.qmusic.ui.theme.QMusicHeaderLogo
 import androidx.compose.foundation.border
 import androidx.compose.runtime.remember
@@ -126,7 +127,7 @@ fun HomeScreen(
     }
 
     val tintSong = currentTrack ?: speedDial.firstOrNull() ?: ordered.firstOrNull()?.songs?.firstOrNull()
-    val tint = rememberDominantColor(tintSong?.let { it.thumbnail ?: it.thumbnails.firstOrNull()?.url })
+    val tint = rememberDominantColor(tintSong?.let { it.thumbnail ?: it.thumbnails.firstOrNull()?.url })?.asBackdrop()
     // Heights of the rows seen so far: the logo row is short, so "how far the page has moved" has to add up the
     // rows above the first visible one, not only that row's own offset (which made the colour vanish at once).
     val itemSizes = remember { HashMap<Int, Int>() }
@@ -289,7 +290,8 @@ fun HomeScreen(
 
             if (isOnline && chips.isNotEmpty()) {
                 item {
-                    val hasTint = animatedTint.alpha > 0.01f
+                    // In the light theme the chips stay clean pills over the soft wash (tinted, they turned muddy).
+                    val hasTint = animatedTint.alpha > 0.01f && !com.qmusic.ui.theme.lightTheme
                     val chipContainer = if (hasTint) {
                         androidx.compose.ui.graphics.lerp(Ink, animatedTint.copy(alpha = 1f), 0.72f)
                             .copy(alpha = 0.28f)
@@ -573,13 +575,15 @@ private fun SpeedDialTile(song: SongItem, framed: Boolean, onClick: () -> Unit) 
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .background(Brush.verticalGradient(listOf(Color.Transparent, InkInverse.copy(alpha = 0.75f))))
-                .padding(start = 10.dp, end = 10.dp, top = 18.dp, bottom = 8.dp),
+                // White words on a dark fade in both themes: over a cover that is what reads (a light fade with black
+                // words looked muddy on dark covers).
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f))))
+                .padding(start = 10.dp, end = 10.dp, top = 22.dp, bottom = 8.dp),
         ) {
             Text(
                 text = song.title,
                 style = MaterialTheme.typography.labelLarge,
-                color = Ink,
+                color = Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -593,7 +597,7 @@ private fun DiceTile(description: String, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .clip(RoundedCornerShape(12.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF2B2140), Color(0xFF14101F))))
+            .background(Brush.linearGradient(if (com.qmusic.ui.theme.lightTheme) listOf(Color(0xFFF1EEF7), Color(0xFFDFDAEA)) else listOf(Color(0xFF2B2140), Color(0xFF14101F))))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

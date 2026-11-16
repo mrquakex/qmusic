@@ -97,14 +97,15 @@ fun VideoThumbnail(item: VideoItem, s: VideoStrings, modifier: Modifier = Modifi
         if (badge != null) {
             Text(
                 text = badge,
-                color = Ink,
+                // White on dark in both themes: it sits on a picture.
+                color = Color.White,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(6.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(if (item.isLive) VideoColors.Red else InkInverse.copy(alpha = 0.8f))
+                    .background(if (item.isLive) VideoColors.Red else Color.Black.copy(alpha = 0.78f))
                     .padding(horizontal = 5.dp, vertical = 2.dp),
             )
         }

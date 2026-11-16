@@ -224,7 +224,10 @@ fun SettingsScreen(
                     colors = SliderDefaults.colors(
                         thumbColor = Ink,
                         activeTrackColor = Ink,
-                        inactiveTrackColor = DarkSurfaceVariant,
+                        inactiveTrackColor = Ink.copy(alpha = 0.14f),
+                        // No dots for each second along the line: they looked busy.
+                        activeTickColor = Color.Transparent,
+                        inactiveTickColor = Color.Transparent,
                     ),
                 )
             }

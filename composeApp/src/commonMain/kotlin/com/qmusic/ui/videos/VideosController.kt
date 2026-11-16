@@ -421,6 +421,15 @@ class VideosController(
 
     fun open(item: VideoItem) = push(VideoRoute.Watch(item))
 
+    /** How far the open video is being pulled down into the small player (0-1): the page under it shows meanwhile. */
+    val watchDrag = MutableStateFlow(0f)
+
+    /** Opens [item] at [startMs] (a video sent at a second); 0 is as [open]. */
+    fun openAt(item: VideoItem, startMs: Long) {
+        if (startMs > 0) resume[item.id] = startMs
+        open(item)
+    }
+
     // ------------------------------------------------------------------ search
 
     private val _query = MutableStateFlow("")

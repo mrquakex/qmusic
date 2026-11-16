@@ -684,6 +684,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                     title = shareSnap.child("title").getValue(String::class.java).orEmpty(),
                     subtitle = shareSnap.child("subtitle").getValue(String::class.java).orEmpty(),
                     thumbnail = shareSnap.child("thumbnail").getValue(String::class.java),
+                    startMs = (shareSnap.child("start").getValue(Long::class.java) ?: 0L).coerceAtLeast(0L),
+                    quote = shareSnap.child("quote").getValue(String::class.java).orEmpty().take(300),
                 )
             }
         }
@@ -869,6 +871,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                         "title" to share.title,
                         "subtitle" to share.subtitle,
                         "thumbnail" to share.thumbnail,
+                        "start" to share.startMs.takeIf { it > 0 },
+                        "quote" to share.quote.takeIf { it.isNotEmpty() }?.take(300),
                     ),
                 )
             }
@@ -1962,6 +1966,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                     title = g.child("title").getValue(String::class.java).orEmpty(),
                     subtitle = g.child("sub").getValue(String::class.java).orEmpty(),
                     thumbnail = g.child("thumb").getValue(String::class.java),
+                    startMs = (g.child("start").getValue(Long::class.java) ?: 0L).coerceIn(0L, 3 * 3600_000L),
                 )
             },
         )
@@ -2014,7 +2019,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         overlay?.takeIf { it.text.isNotBlank() }?.let { o ->
             put("ov", mapOf("t" to o.text.take(200), "x" to o.x.toDouble().coerceIn(0.0, 1.0), "y" to o.y.toDouble().coerceIn(0.0, 1.0), "c" to o.color))
         }
-        song?.let { g -> put("song", mapOf("id" to g.id, "title" to g.title.take(120), "sub" to g.subtitle.take(120), "thumb" to g.thumbnail)) }
+        song?.let { g -> put("song", mapOf("id" to g.id, "title" to g.title.take(120), "sub" to g.subtitle.take(120), "thumb" to g.thumbnail, "start" to g.startMs.takeIf { it > 0 })) }
     }
 
     private suspend fun postStatus(fields: Map<String, Any?>) {

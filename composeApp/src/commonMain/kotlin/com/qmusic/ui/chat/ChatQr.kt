@@ -84,9 +84,29 @@ expect fun QrCode(text: String, modifier: Modifier)
 @Composable
 expect fun rememberQrScanner(onResult: (String) -> Unit): (() -> Unit)?
 
-/** A status's song, from a little into it (where it usually gets going), playing while [playing]. */
+/**
+ * A status's song from [startMs] (moved back when the song is shorter), fading in, playing while [playing]; with
+ * [loopMs] it goes back to [startMs] after that long. [onReady] says, once it can play, how long the whole song is;
+ * [onFailed] that it cannot be played (the address may have gone stale).
+ */
 @Composable
-expect fun StatusAudio(url: String, playing: Boolean)
+expect fun StatusAudio(
+    url: String,
+    playing: Boolean,
+    startMs: Long = STATUS_SONG_DEFAULT_START,
+    loopMs: Long = 0,
+    onReady: (Long) -> Unit = {},
+    onFailed: () -> Unit = {},
+)
+
+/** Where a status's song starts when its poster did not choose (where songs usually get going). */
+const val STATUS_SONG_DEFAULT_START = 30_000L
+
+/** How long of a status's song is heard (the status shows that long). */
+const val STATUS_SONG_LENGTH = 15_000L
+
+/** Where [song] starts in a status: the part its poster chose (1 ms stands for the very start), else the default. */
+fun statusSongStart(song: SharedItem): Long = if (song.startMs > 0) song.startMs else STATUS_SONG_DEFAULT_START
 
 /** A status video: no controls, paused when asked; [onReady] says how long it is (ms). */
 @Composable

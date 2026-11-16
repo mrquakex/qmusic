@@ -372,6 +372,37 @@
         ".read": "$tv.matches(/^[0-9a-f]{32}$/)",
         ".write": "$tv.matches(/^[0-9a-f]{32}$/)"
       }
+    },
+    "listening": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "!newData.exists() || (newData.child('id').isString() && newData.child('id').val().length > 0 && newData.child('id').val().length <= 64 && newData.child('title').isString() && newData.child('title').val().length <= 200)"
+      }
+    },
+    "chatLists": {
+      "$chatId": {
+        ".read": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))",
+        ".indexOn": [
+          "at"
+        ],
+        "$key": {
+          ".write": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists())) && ((!data.exists() && newData.child('by').val() === auth.uid) || (data.exists() && !newData.exists()))",
+          ".validate": "!newData.exists() || (newData.child('id').isString() && newData.child('id').val().length > 0 && newData.child('id').val().length <= 64 && newData.child('title').isString() && newData.child('title').val().length <= 200 && newData.child('at').isNumber())"
+        }
+      }
+    },
+    "reacts": {
+      "$chatId": {
+        ".read": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))",
+        ".indexOn": [
+          "at"
+        ],
+        "$key": {
+          ".write": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists())) && ((!data.exists() && newData.child('by').val() === auth.uid) || (data.exists() && !newData.exists() && data.child('by').val() === auth.uid))",
+          ".validate": "!newData.exists() || (newData.child('t').isString() && newData.child('t').val().length > 0 && newData.child('t').val().length <= 60 && newData.child('at').isNumber())"
+        }
+      }
     }
   }
 }

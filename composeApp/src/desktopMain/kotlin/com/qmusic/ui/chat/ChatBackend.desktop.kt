@@ -74,4 +74,4 @@ actual fun rememberAnimatedImageLoader(): coil3.ImageLoader = coil3.SingletonIma
 actual val callBlurWorks: Boolean = true
 
 @androidx.compose.runtime.Composable
-actual fun StatusAudio(url: String, playing: Boolean) = Unit
+actual fun StatusAudio(url: String, playing: Boolean, startMs: Long, loopMs: Long, onReady: (Long) -> Unit, onFailed: () -> Unit) = Unit

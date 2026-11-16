@@ -325,6 +325,8 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                             playback.setSpeed(speed)
                         }
                     },
+                    // A hold (for 2x) is not a tap: the controls do not come up when it is let go.
+                    onLongPress = {},
                     onTap = { at ->
                         // Right after a double tap, single taps keep seeking (as on YouTube).
                         if (seekSide != 0 && !live) chainSeek(if (at.x < size.width / 2f) -1 else 1)

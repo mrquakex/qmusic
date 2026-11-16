@@ -1,5 +1,7 @@
 package com.qmusic.ui.videos
 
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -106,12 +108,26 @@ fun WatchPage(
             }
         }
         else -> BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-            // Dragging the picture down shrinks the video into the small player, as on YouTube.
+            // Dragging the picture down shrinks the video into the small player, as on YouTube: it gets smaller and
+            // slides to the bottom corner, what is about it fades away and the page under it shows; let go far
+            // enough and it lands just where the small player is.
             val offset = remember { Animatable(0f) }
             val scope = rememberCoroutineScope()
             var height by remember { mutableStateOf(1f) }
             var total by remember { mutableStateOf(0f) }
             val wide = maxWidth >= WIDE_WATCH && maxHeight >= 600.dp
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val margin = with(density) { 12.dp.toPx() }
+            val width = with(density) { maxWidth.toPx() }
+            val statusTop = androidx.compose.foundation.layout.WindowInsets.statusBars.getTop(density).toFloat()
+            // The small player: half the width (300 dp at most), 12 dp from the bottom right corner.
+            val miniScale = (minOf(width * 0.5f, with(density) { 300.dp.toPx() }) / width).coerceIn(0.2f, 1f)
+            val travel = (height - margin - (statusTop + width * 9f / 16f) * miniScale).coerceAtLeast(1f)
+            val progress = { (offset.value / travel).coerceIn(0f, 1f) }
+            LaunchedEffect(Unit) {
+                androidx.compose.runtime.snapshotFlow { progress() }.collect { controller.watchDrag.value = it }
+            }
+            androidx.compose.runtime.DisposableEffect(Unit) { onDispose { controller.watchDrag.value = 0f } }
             // Ambient light: the video's colours glow softly around it, on the dark theme (as on YouTube).
             val ambient = !com.qmusic.ui.theme.lightTheme
             val player: @Composable () -> Unit = {
@@ -134,16 +150,18 @@ fun WatchPage(
                                         if (total < -SWIPE_PX) {
                                             offset.snapTo(0f)
                                             controller.setFullscreen(true)
-                                        } else if (offset.value > height * 0.18f) {
+                                        } else if (!wide && progress() > 0.16f) {
+                                            offset.animateTo(travel, tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+                                            controller.pop()
+                                        } else if (wide && offset.value > height * 0.18f) {
                                             offset.animateTo(height, tween(150))
                                             controller.pop()
-                                            offset.snapTo(0f)
                                         } else {
-                                            offset.animateTo(0f, tween(150))
+                                            offset.animateTo(0f, tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing))
                                         }
                                     }
                                 },
-                                onDragCancel = { scope.launch { offset.animateTo(0f, tween(150)) } },
+                                onDragCancel = { scope.launch { offset.animateTo(0f, tween(220)) } },
                             )
                         },
                 ) {
@@ -154,10 +172,24 @@ fun WatchPage(
                 .fillMaxSize()
                 .onSizeChanged { height = it.height.toFloat().coerceAtLeast(1f) }
                 .graphicsLayer {
-                    translationY = offset.value
-                    alpha = 1f - (offset.value / height).coerceIn(0f, 1f) * 0.6f
+                    if (wide) {
+                        translationY = offset.value
+                        alpha = 1f - (offset.value / height).coerceIn(0f, 1f) * 0.6f
+                    } else {
+                        // Smaller from the top right corner, down and a little in from the edge.
+                        val p = progress()
+                        val scale = 1f - (1f - miniScale) * p
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(1f, 0f)
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = -margin * p
+                        translationY = offset.value
+                    }
                 }
-                .background(VideoColors.Background)
+                // The page's background goes as the video is pulled, so the page under it shows through.
+                .drawBehind { drawRect(VideoColors.Background.copy(alpha = 1f - progress())) }
+            // What is about the video (and its glow) fades out early in the pull, the picture alone travels.
+            val fade = Modifier.graphicsLayer { alpha = (1f - progress() * 2.5f).coerceIn(0f, 1f) }
             if (wide) {
                 // A tablet: the video and what is about it on the left, what comes next down the right.
                 Row(modifier = layer) {
@@ -172,10 +204,10 @@ fun WatchPage(
                 }
             } else {
                 Box(modifier = layer) {
-                    if (ambient) AmbientGlow(w.video.thumbnail, Modifier.fillMaxWidth())
+                    if (ambient) AmbientGlow(w.video.thumbnail, Modifier.fillMaxWidth().then(fade))
                     Column {
-                        player()
-                        WatchDetails(controller, w, s, onShare, onSignIn, seek, showRelated = true)
+                        Box(Modifier.drawBehind { if (progress() > 0f) drawRect(Color.Black) }) { player() }
+                        Box(fade) { WatchDetails(controller, w, s, onShare, onSignIn, seek, showRelated = true) }
                     }
                 }
             }
@@ -244,6 +276,8 @@ private fun PlayerBox(w: WatchState, playback: VideoPlayback?, s: VideoStrings, 
         }
         if (playback != null && w.quality != null && !w.streamError) {
             PlayerControls(playback, w, s, controller, fullscreen)
+            // Watching together: everyone's reactions over the picture.
+            com.qmusic.ui.chat.TogetherReactionsLayer(w.video.id)
         }
     }
 }
@@ -388,6 +422,16 @@ private fun WatchDetails(
                     if (!controller.openSaveSheet(w.video.id)) onSignIn()
                 }
                 ActionPill(label = s.share, icon = QMusicIcons.Share, active = false) { onShare("https://youtu.be/${w.video.id}") }
+                // To a conversation, at the second it is at (they open it there).
+                ActionPill(label = com.qmusic.ui.chat.ChatMusic.words().sendToChat, icon = QMusicIcons.Chat, active = false) {
+                    val at = com.qmusic.ui.chat.TogetherVideo.playback?.positionMs?.value ?: 0L
+                    com.qmusic.ui.chat.ChatMusic.offer(
+                        com.qmusic.ui.chat.SharedItem(
+                            com.qmusic.ui.chat.ShareKind.VIDEO, w.video.id, w.video.title, w.video.channelName.orEmpty(), w.video.thumbnail,
+                            startMs = if (at > 5_000 && !w.isLive()) at else 0L,
+                        ),
+                    )
+                }
                 if (controller.canDownload && !w.isLive()) {
                     val x = s.extras()
                     val downloads by controller.downloads.collectAsState()

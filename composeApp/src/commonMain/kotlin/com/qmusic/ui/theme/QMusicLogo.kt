@@ -90,7 +90,7 @@ fun QMusicWordmark(
 @Composable
 fun QMusicHeaderLogo(
     modifier: Modifier = Modifier,
-    color: Color = Color.White,
+    color: Color = Ink,
 ) {
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
         QMusicLogo(size = 30.dp, tint = color)

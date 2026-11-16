@@ -9,3 +9,10 @@ import androidx.compose.ui.graphics.Color
  */
 @Composable
 expect fun rememberDominantColor(url: String?): Color?
+
+/**
+ * A cover's colour as the backdrop of a page: in the light theme a soft wash of it (the deep colour made for white
+ * text looked muddy behind dark text on a white page); in the dark theme the colour itself.
+ */
+fun Color.asBackdrop(): Color =
+    if (com.qmusic.ui.theme.lightTheme) androidx.compose.ui.graphics.lerp(this.copy(alpha = 1f), Color.White, 0.78f).copy(alpha = alpha) else this

@@ -17,6 +17,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.draggable
@@ -632,7 +633,7 @@ private fun LyricsPage(
                 TextButton(onClick = openSearch) { Text(s.lyricsSearch, color = Color.White) }
             }
 
-            is LyricsState.Available -> if (state.lyrics.isSynced) SyncedLyrics(state.lyrics, { positionMs() + tools.offsetMs }, { onSeekTo((it - tools.offsetMs).coerceAtLeast(0L)) }, translation) else Column(
+            is LyricsState.Available -> if (state.lyrics.isSynced) SyncedLyrics(state.lyrics, { positionMs() + tools.offsetMs }, { onSeekTo((it - tools.offsetMs).coerceAtLeast(0L)) }, translation, onQuote = { text, at -> tools.onQuote(text, (at - tools.offsetMs).coerceAtLeast(0L)) }) else Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState()),
@@ -706,7 +707,8 @@ private fun RelatedPage(
 
 /** Lines that follow the song: the one being sung is bright, the rest dim, and tapping a line jumps to it. */
 @Composable
-private fun SyncedLyrics(lyrics: Lyrics, positionMs: () -> Long, onSeekTo: (Long) -> Unit, translation: List<String>? = null) {
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun SyncedLyrics(lyrics: Lyrics, positionMs: () -> Long, onSeekTo: (Long) -> Unit, translation: List<String>? = null, onQuote: (String, Long) -> Unit = { _, _ -> }) {
     val lines = lyrics.lines
     val listState = rememberLazyListState()
     // Read inside derivedStateOf: the position ticks 4 times a second, but this only changes when a new line starts.
@@ -734,7 +736,8 @@ private fun SyncedLyrics(lyrics: Lyrics, positionMs: () -> Long, onSeekTo: (Long
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
-                    .clickable { onSeekTo(line.timeMs) }
+                    // A tap goes there; holding sends the line in a chat.
+                    .combinedClickable(onClick = { onSeekTo(line.timeMs) }, onLongClick = { if (line.text.isNotBlank()) onQuote(line.text.trim(), line.timeMs) })
                     .padding(vertical = 8.dp),
             ) {
                 Text(
@@ -769,6 +772,8 @@ class LyricsTools(
     val onSearch: (String) -> Unit = {},
     val onUse: (com.qmusic.engine.models.LyricsMatch) -> Unit = {},
     val onCloseSearch: () -> Unit = {},
+    /** A line held down: sent in a chat with the song, starting there. */
+    val onQuote: (String, Long) -> Unit = { _, _ -> },
 )
 
 private const val LYRIC_SHIFT_MS = 500L
@@ -1151,6 +1156,9 @@ private fun ChipsRow(
             onClick = onSpeed,
         )
         ActionChip(QMusicIcons.PlaylistAdd, s.save, active = false, onClick = onAddToPlaylist)
+        com.qmusic.ui.chat.ChatMusic.offerNowPlaying?.let { offer ->
+            ActionChip(QMusicIcons.Chat, com.qmusic.ui.chat.ChatMusic.words().sendToChat, active = false, onClick = offer)
+        }
         if (downloadProgress != null) {
             Row(
                 modifier = Modifier

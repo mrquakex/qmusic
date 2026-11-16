@@ -160,6 +160,10 @@ data class SharedItem(
     val title: String,
     val subtitle: String = "",
     val thumbnail: String? = null,
+    /** Where it starts when opened (a second of the song or the video); 0 from the start. */
+    val startMs: Long = 0,
+    /** A line of the song's lyrics sent with it (it starts where the line is sung). */
+    val quote: String = "",
 )
 
 /**

@@ -136,7 +136,9 @@ private fun ChatAppContent(
     val account by controller.account.collectAsState()
     val routes by controller.routes.collectAsState()
     val error by controller.error.collectAsState()
-    PlatformBackHandler(enabled = true) { if (!controller.pop()) onExit() }
+    // Messages as home: Back on the list leaves the app (as any home screen), instead of going to the music.
+    val home by AppHome.messagesFirst.collectAsState()
+    PlatformBackHandler(enabled = routes.isNotEmpty() || !home || account !is ChatAccount.Ready) { if (!controller.pop()) onExit() }
     val askPermissions = rememberCallPermissions()
     val voicePlayer = rememberVoicePlayer()
     val lock = rememberAppLock()
@@ -563,6 +565,8 @@ internal fun ThreadRow(
     actions: List<Pair<String, () -> Unit>> = emptyList(),
     now: Long = 0L,
     ring: Color? = null,
+    listening: SharedItem? = null,
+    onListening: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -638,6 +642,7 @@ internal fun ThreadRow(
                     ) { Text(if (n > 99) "99+" else n.toString(), color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                 }
             }
+            if (listening != null && !typingNow) ListeningLine(listening, Modifier.padding(top = 2.dp), onListening)
         }
     }
     }
@@ -717,6 +722,7 @@ private fun ConversationPage(
     var deleting by remember { mutableStateOf<List<ChatMessage>?>(null) }
     var muteDialog by remember { mutableStateOf(false) }
     var ttlDialog by remember { mutableStateOf(false) }
+    var sharedListOpen by remember { mutableStateOf(false) }
     var pendingPhotos by remember { mutableStateOf<List<PickedImage>?>(null) }
     var sendViewOnce by remember { mutableStateOf(false) }
     var locked by remember { mutableStateOf(false) }
@@ -968,6 +974,9 @@ private fun ConversationPage(
                         } else if (status.isNotEmpty()) {
                             Text(status, color = if (typing || seen?.online == true) TextPrimary else TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
+                        // What they play now; a tap plays it here.
+                        val playingNow = rememberListening("conversation", if (isGroup || isClaude) emptySet() else setOf(other.uid))[other.uid]
+                        if (playingNow != null && !typing && !recordingThem) ListeningLine(playingNow) { onOpenShare(playingNow) }
                     }
                 }
             },
@@ -1033,6 +1042,11 @@ private fun ConversationPage(
                                     },
                                 )
                             }
+                            DropdownMenuItem(
+                                leadingIcon = { Icon(QMusicIcons.Queue, null, tint = Ink) },
+                                text = { Text(ChatMusic.words().sharedList, color = TextPrimary) },
+                                onClick = { menu = false; sharedListOpen = true },
+                            )
                         }
                         thread?.let { t ->
                             DropdownMenuItem(
@@ -1674,6 +1688,9 @@ private fun ConversationPage(
             note = s.ttlNote,
         ) { ttlDialog = false }
     }
+    if (sharedListOpen && chatId != null) {
+        SharedListPage(controller, s, me, chatId, title) { sharedListOpen = false }
+    }
 }
 
 private const val PAGE = 150
@@ -2055,7 +2072,15 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
                         }
                     }
                     if (!isClaude && user.uid != me.uid) {
-                        Spacer(Modifier.height(18.dp))
+                        // What they play now, and their profile song.
+                        val playingNow = rememberListening("profile", setOf(user.uid))[user.uid]
+                        if (playingNow != null) {
+                            Spacer(Modifier.height(10.dp))
+                            ListeningLine(playingNow) { controller.openShare(playingNow) }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        ProfileSongCard(user.uid) { controller.openShare(it) }
+                        Spacer(Modifier.height(10.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             FriendButton(controller, user, s)
                             if (friendStatus == FriendStatus.FRIENDS) Pill(s.removeFriend, primary = false) { controller.unfriend(user) }
@@ -2501,6 +2526,44 @@ private fun seenLabel(ms: Long, s: ChatStrings): String = when (daysAgo(ms)) {
 @Composable
 internal fun ShareCard(item: SharedItem, mine: Boolean, s: ChatStrings) {
     val video = item.kind == ShareKind.VIDEO
+    if (item.quote.isNotEmpty()) {
+        // A line of the lyrics: the words big, the song under them.
+        Column(
+            Modifier.width(280.dp).clip(RoundedCornerShape(14.dp)).background(if (mine) Color(0xFFEDEDED) else DarkSurface).padding(12.dp),
+        ) {
+            val fg = if (mine) InkInverse else TextPrimary
+            val soft = if (mine) InkInverse.copy(alpha = 0.55f) else TextSecondary
+            Text(ChatMusic.words().lyricLine, color = soft, fontSize = 11.sp)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "“" + item.quote + "”",
+                color = fg,
+                fontSize = 18.sp,
+                lineHeight = 24.sp,
+                fontWeight = FontWeight.Bold,
+                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(36.dp).clip(RoundedCornerShape(6.dp)).background(InkInverse), contentAlignment = Alignment.Center) {
+                    if (item.thumbnail != null) AsyncImage(model = item.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    Icon(QMusicIcons.Play, contentDescription = null, tint = Ink, modifier = Modifier.size(12.dp))
+                }
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(item.title, color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        listOf(item.subtitle, if (item.startMs > 0) secondsLabel(item.startMs) else "").filter { it.isNotBlank() }.joinToString(" · "),
+                        color = soft,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        return
+    }
     Row(
         modifier = Modifier
             .width(280.dp)
@@ -2528,6 +2591,13 @@ internal fun ShareCard(item: SharedItem, mine: Boolean, s: ChatStrings) {
             Text(if (video) s.video else s.song, color = soft, fontSize = 11.sp)
             Text(item.title, color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (item.subtitle.isNotBlank()) Text(item.subtitle, color = soft, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (item.startMs > 0) {
+                Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(QMusicIcons.Timer, contentDescription = null, tint = soft, modifier = Modifier.size(12.dp))
+                    Spacer(Modifier.width(3.dp))
+                    Text(ChatMusic.words().startsAt(secondsLabel(item.startMs)), color = soft, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
         }
     }
 }

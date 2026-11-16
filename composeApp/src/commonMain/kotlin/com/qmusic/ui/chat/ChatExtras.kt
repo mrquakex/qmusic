@@ -210,6 +210,7 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
                 }
             }
         }
+        item { MyProfileSong(controller, s, me) }
         item { SectionTitle(s.accountSection) }
         item {
             MenuRow(s.myQrTitle, s.myQrNote) { controller.push(ChatRoute.MyQr) }
@@ -291,6 +292,11 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
         item {
             SettingSwitch(s.hideLastSeen, s.hideLastSeenNote, privacy.hideLastSeen) { controller.setPrivacy(privacy.copy(hideLastSeen = it)) }
             SettingSwitch(s.hideReadReceipts, s.hideReadReceiptsNote, privacy.hideReadReceipts) { controller.setPrivacy(privacy.copy(hideReadReceipts = it)) }
+            val shareListening by ChatMusic.shareListening.collectAsState()
+            val mw = ChatMusic.words()
+            SettingSwitch(mw.showListening, mw.showListeningNote, shareListening) { ChatMusic.setShareListening(it) }
+            val home by AppHome.messagesFirst.collectAsState()
+            SettingSwitch(mw.messagesFirst, mw.messagesFirstNote, home) { AppHome.setMessagesFirst(it) }
             val all = listOf(Visibility.EVERYONE, Visibility.FRIENDS, Visibility.NOBODY)
             VisibilityRow(s.privacyPhoto, null, privacy.photo, all, s) { controller.setPrivacy(privacy.copy(photo = it)) }
             VisibilityRow(s.privacyAbout, null, privacy.about, all, s) { controller.setPrivacy(privacy.copy(about = it)) }

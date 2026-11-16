@@ -117,19 +117,83 @@ actual fun rememberTextFileShare(): (fileName: String, text: String) -> Unit {
 }
 
 @Composable
-actual fun StatusAudio(url: String, playing: Boolean) {
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+actual fun StatusAudio(url: String, playing: Boolean, startMs: Long, loopMs: Long, onReady: (Long) -> Unit, onFailed: () -> Unit) {
     val context = LocalContext.current
+    val ready = rememberUpdatedState(onReady)
+    val failed = rememberUpdatedState(onFailed)
+    val start = rememberUpdatedState(startMs)
     val player = remember(url) {
+        // YouTube holds a request with no end to about real-time speed, so the song came slowly or not at all; asked
+        // for in bounded pieces (as the music player does) it comes at the line's full speed.
+        val http = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(10_000)
+            .setReadTimeoutMs(15_000)
+        val sources = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context)
+            .setDataSourceFactory(com.qmusic.player.source.ChunkedDataSource.Factory(http, STATUS_CHUNK_BYTES))
+        // It starts as soon as half a second is there (a status is short; waiting for 2.5 s felt broken).
+        val load = androidx.media3.exoplayer.DefaultLoadControl.Builder().setBufferDurationsMs(4_000, 20_000, 400, 1_000).build()
         ExoPlayer.Builder(context)
+            .setMediaSourceFactory(sources)
+            .setLoadControl(load)
             // It takes the sound: music playing in the app pauses while a status sings.
             .setAudioAttributes(androidx.media3.common.AudioAttributes.Builder().setUsage(androidx.media3.common.C.USAGE_MEDIA).setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             .build().apply {
                 setMediaItem(MediaItem.fromUri(Uri.parse(url)))
                 repeatMode = Player.REPEAT_MODE_ONE
+                volume = 0f
+                seekTo(startMs)
                 prepare()
-                seekTo(30_000L)
             }
     }
-    DisposableEffect(player) { onDispose { player.release() } }
-    LaunchedEffect(player, playing) { player.playWhenReady = playing }
+    /** [ms] moved back so that a whole part still fits in a shorter song. */
+    fun fit(ms: Long): Long {
+        val length = player.duration.takeIf { it != androidx.media3.common.C.TIME_UNSET && it > 0 } ?: return ms
+        return ms.coerceAtMost((length - STATUS_SONG_LENGTH).coerceAtLeast(0)).coerceAtLeast(0)
+    }
+    DisposableEffect(player) {
+        var announced = false
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state != Player.STATE_READY || announced) return
+                announced = true
+                val fitted = fit(start.value)
+                if (kotlin.math.abs(fitted - player.currentPosition) > 1_500) player.seekTo(fitted)
+                ready.value(player.duration.takeIf { it != androidx.media3.common.C.TIME_UNSET } ?: 0L)
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                failed.value()
+            }
+        }
+        player.addListener(listener)
+        onDispose {
+            player.removeListener(listener)
+            player.release()
+        }
+    }
+    // A part chosen again (while picking it): it plays from there.
+    LaunchedEffect(player, startMs) {
+        if (player.playbackState == Player.STATE_READY) player.seekTo(fit(startMs))
+    }
+    LaunchedEffect(player, playing) {
+        player.playWhenReady = playing
+        if (!playing) return@LaunchedEffect
+        // It fades in once it really plays, instead of starting with a jolt.
+        while (!player.isPlaying) kotlinx.coroutines.delay(40)
+        if (player.volume < 1f) {
+            for (step in 1..12) {
+                player.volume = step / 12f
+                kotlinx.coroutines.delay(45)
+            }
+        }
+        while (loopMs > 0) {
+            kotlinx.coroutines.delay(200)
+            val from = fit(start.value)
+            if (player.currentPosition >= from + loopMs || player.currentPosition < from - 1_000) player.seekTo(from)
+        }
+    }
 }
+
+private const val STATUS_CHUNK_BYTES = 1L * 1024 * 1024

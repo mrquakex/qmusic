@@ -236,14 +236,25 @@ fun VideosApp(
         val miniShown = watch != null && top !is VideoRoute.Watch && top !is VideoRoute.Shorts && !(top == null && tab == VideoTab.SHORTS) && !pip
         Column(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth().then(if (feedPage) Modifier.nestedScroll(hideOnScroll) else Modifier)) {
-                when (top) {
-                    null -> TabContent(controller, tab, s, signedIn, onSignIn, playback, onPauseMusic, onShare, onAccount = { accountDialog = true }, barsVisible = bars.value || !feedPage)
-                    is VideoRoute.Search -> SearchResultsPage(controller, s, onSignIn)
-                    is VideoRoute.Watch -> WatchPage(controller, playback, s, onShare, onSignIn)
-                    is VideoRoute.Channel -> ChannelPage(controller, s, onSignIn)
-                    is VideoRoute.Playlist -> PlaylistPage(controller, top.title, s, onSignIn)
-                    is VideoRoute.Shorts -> ShortsPage(controller, playback, s, true, onPauseMusic, onShare, onSignIn)
+                // The page under the video shows while the video is pulled down into the small player (as on YouTube),
+                // instead of black; it stays where it is once the video is small, so nothing reloads.
+                val drag by controller.watchDrag.collectAsState()
+                val watching = top is VideoRoute.Watch
+                val below = if (watching) routes.dropLast(1).lastOrNull() else top
+                if (!watching || drag > 0f) {
+                    when (below) {
+                        // (Shorts play in the same player: not drawn under a video.)
+                        null -> if (!watching || tab != VideoTab.SHORTS) {
+                            TabContent(controller, tab, s, signedIn, onSignIn, playback, onPauseMusic, onShare, onAccount = { accountDialog = true }, barsVisible = bars.value || !feedPage)
+                        }
+                        is VideoRoute.Search -> SearchResultsPage(controller, s, onSignIn)
+                        is VideoRoute.Watch -> Unit
+                        is VideoRoute.Channel -> ChannelPage(controller, s, onSignIn)
+                        is VideoRoute.Playlist -> PlaylistPage(controller, below.title, s, onSignIn)
+                        is VideoRoute.Shorts -> if (!watching) ShortsPage(controller, playback, s, true, onPauseMusic, onShare, onSignIn)
+                    }
                 }
+                if (watching) WatchPage(controller, playback, s, onShare, onSignIn)
                 // The video that was pulled down floats in a corner over the page, as on YouTube.
                 val w = watch
                 if (w != null && miniShown) {

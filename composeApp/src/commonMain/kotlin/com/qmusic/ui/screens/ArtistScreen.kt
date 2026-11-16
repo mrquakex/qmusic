@@ -207,7 +207,10 @@ fun ArtistScreen(
                 .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
+            // Over the photo, the buttons sit on a soft disc of the page's colour (gone once the bar shows), so they
+            // read on dark and light photos alike.
+            val disc = Modifier.drawBehind { drawCircle(BgRoot.copy(alpha = 0.6f * (1f - barAlpha())), radius = size.minDimension * 0.42f) }
+            IconButton(onClick = onBack, modifier = disc) {
                 Icon(imageVector = QMusicIcons.Back, contentDescription = s.back, tint = Ink)
             }
             Text(
@@ -221,7 +224,7 @@ fun ArtistScreen(
                     .graphicsLayer { alpha = barAlpha() },
             )
             if (page != null) {
-                IconButton(onClick = { onShare(page) }) {
+                IconButton(onClick = { onShare(page) }, modifier = disc) {
                     Icon(imageVector = QMusicIcons.Share, contentDescription = s.share, tint = Ink)
                 }
             }

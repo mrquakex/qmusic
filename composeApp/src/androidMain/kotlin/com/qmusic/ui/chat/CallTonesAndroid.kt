@@ -89,7 +89,7 @@ object CallTonesAndroid {
             val db = database(context) ?: return@withContext false
             val ref = db.getReference("users").child(user.uid).child("tone")
             if (tone == null) {
-                withTimeoutOrNull(15_000) { ref.removeValue().await() } ?: return@withContext false
+                withTimeoutOrNull(15_000) { ref.removeValue().await(); true } ?: return@withContext false
                 prefs(context).edit().remove(KEY_CALLER_URI).remove(KEY_CALLER_TITLE).apply()
                 CallTones.callerTone.value = null
                 return@withContext true
@@ -100,6 +100,7 @@ object CallTonesAndroid {
             val url = MediaUpload.upload(token, "u_${user.uid}", "m4a", "audio/mp4", bytes.size.toLong(), { bytes.inputStream() }) {}
             withTimeoutOrNull(15_000) {
                 ref.setValue(mapOf("url" to url, "title" to tone.title.take(80), "at" to ServerValue.TIMESTAMP)).await()
+                true
             } ?: return@withContext false
             prefs(context).edit().putString(KEY_CALLER_URI, tone.uri).putString(KEY_CALLER_TITLE, tone.title).apply()
             CallTones.callerTone.value = CallerTone(tone.uri, tone.title)

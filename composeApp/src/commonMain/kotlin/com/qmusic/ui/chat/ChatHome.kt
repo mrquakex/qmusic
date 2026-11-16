@@ -139,6 +139,17 @@ private fun HomeBar(controller: ChatController, s: ChatStrings, tab: ChatTab) {
             BarItem(s.tabCalls, tab == ChatTab.CALLS, missed, false, Modifier.weight(1f), badgeColor = CallRed, icon = { tint -> Icon(QMusicIcons.Phone, null, tint = tint, modifier = Modifier.size(24.dp)) }) {
                 controller.selectTab(ChatTab.CALLS)
             }
+            // Messages are home: the music and the videos are one tap away.
+            val home by AppHome.messagesFirst.collectAsState()
+            if (home) {
+                val w = ChatMusic.words()
+                AppHome.openMusic?.let { open ->
+                    BarItem(w.music, false, 0, false, Modifier.weight(1f), icon = { tint -> Icon(QMusicIcons.Headphones, null, tint = tint, modifier = Modifier.size(24.dp)) }, onClick = open)
+                }
+                AppHome.openVideos?.let { open ->
+                    BarItem(w.video, false, 0, false, Modifier.weight(1f), icon = { tint -> Icon(QMusicIcons.VideoPlay, null, tint = tint, modifier = Modifier.size(24.dp)) }, onClick = open)
+                }
+            }
         }
     }
 }
@@ -161,7 +172,7 @@ private fun BarItem(
         Box(contentAlignment = Alignment.Center) {
             // The selected tab sits on a pill, like the system's own bars.
             Box(
-                Modifier.width(60.dp).height(32.dp).clip(RoundedCornerShape(16.dp)).background(if (selected) Ink.copy(alpha = 0.14f) else Color.Transparent),
+                Modifier.widthIn(max = 60.dp).fillMaxWidth(0.86f).height(32.dp).clip(RoundedCornerShape(16.dp)).background(if (selected) Ink.copy(alpha = 0.14f) else Color.Transparent),
                 contentAlignment = Alignment.Center,
             ) { icon(if (selected) Ink else TextSecondary) }
             if (count > 0) {
@@ -208,7 +219,13 @@ internal fun HomeTitle(title: String, onExit: () -> Unit, actions: @Composable (
         Modifier.fillMaxWidth().statusBarsPadding().height(60.dp).padding(start = 4.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onExit) { Icon(QMusicIcons.Back, contentDescription = null, tint = Ink) }
+        // At home there is nowhere to go back to.
+        val home by AppHome.messagesFirst.collectAsState()
+        if (home) {
+            Spacer(Modifier.width(12.dp))
+        } else {
+            IconButton(onClick = onExit) { Icon(QMusicIcons.Back, contentDescription = null, tint = Ink) }
+        }
         Text(title, color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         actions()
     }
@@ -316,6 +333,9 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
         }
     }
     val unreadTotal = all.orEmpty().count { it.unread }
+    // What the people of the newest conversations play now.
+    val listeningUids = remember(all) { all.orEmpty().filter { !it.isGroup && it.other.uid != CLAUDE_BOT_UID }.take(40).map { it.other.uid }.toSet() }
+    val listeningNow = rememberListening("home", listeningUids)
     var found by remember { mutableStateOf<List<ChatController.FoundMessage>>(emptyList()) }
     var foundBusy by remember { mutableStateOf(false) }
     LaunchedEffect(search) {
@@ -436,6 +456,8 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
                         actions = threadActions(controller, s, t, now) { muteFor = t },
                         now = now,
                         ring = if (hasStatus) (if (t.other.uid in unseen) RingUnseen else RingSeen) else null,
+                        listening = if (t.isGroup) null else listeningNow[t.other.uid],
+                        onListening = { listeningNow[t.other.uid]?.let { controller.openShare(it) } },
                     ) { controller.openConversation(t.other) }
                 }
             }

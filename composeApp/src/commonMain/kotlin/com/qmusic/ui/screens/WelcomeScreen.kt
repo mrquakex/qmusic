@@ -41,19 +41,35 @@ import androidx.compose.ui.unit.sp
 import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.BgRoot
 import com.qmusic.ui.theme.QMusicLogo
+import com.qmusic.ui.theme.QMusicIcons
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+
+/** What the first launch asked for, read once the messages are up. */
+object WelcomeChoice {
+    /** "Start messaging" was tapped: the Google sign-in of the messages comes up by itself. */
+    var signInToMessages = false
+}
 
 /**
- * First launch: which account brings the music. Only the chosen one is used from then on (Settings can change it);
- * going on without an account is offered too.
+ * First launch: Qeyf is messages first (with calls, statuses, listening and watching together); the music can be
+ * brought by a YouTube or Spotify account, now or later from the settings.
  */
 @Composable
 fun WelcomeScreen(
+    english: Boolean,
+    onMessages: () -> Unit,
     onYouTube: () -> Unit,
     onSpotify: () -> Unit,
     onWithoutAccount: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val s = LocalStrings.current
+    var musicAccounts by remember { mutableStateOf(false) }
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -64,51 +80,90 @@ fun WelcomeScreen(
         contentAlignment = Alignment.Center,
     ) {
         Column(
-            modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth(),
+            modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             QMusicLogo(size = 72.dp, tint = Ink)
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(24.dp))
             Text(
-                text = s.welcomeTitle,
+                text = if (english) "Welcome to Qeyf" else "Qeyf'e hoş geldin",
                 style = MaterialTheme.typography.headlineLarge.copy(fontSize = 30.sp, lineHeight = 36.sp),
                 color = Ink,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                text = s.welcomeSubtitle,
+                text = if (english) "Talk with your friends, and listen and watch together." else "Arkadaşlarınla konuş, birlikte dinle, birlikte izle.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = Ink.copy(alpha = 0.65f),
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(28.dp))
+            Feature(QMusicIcons.Chat, if (english) "Messages and calls" else "Mesajlar ve aramalar", if (english) "Chats, groups, statuses, voice and video calls" else "Sohbetler, gruplar, durumlar, sesli ve görüntülü arama")
+            Feature(QMusicIcons.Headphones, if (english) "Music" else "Müzik", if (english) "Every song, lyrics, and listening together" else "Her şarkı, sözler, birlikte dinleme")
+            Feature(QMusicIcons.VideoPlay, if (english) "Videos" else "Videolar", if (english) "Watch, and watch together in a chat" else "İzle, sohbette birlikte izle")
+            Spacer(Modifier.height(28.dp))
             ServiceButton(
-                label = s.continueWithYouTube,
+                label = if (english) "Start messaging" else "Mesajlaşmaya başla",
                 container = Ink,
                 content = InkInverse,
-                mark = { YouTubeMusicMark() },
-                onClick = onYouTube,
+                mark = { androidx.compose.material3.Icon(QMusicIcons.Chat, contentDescription = null, tint = InkInverse, modifier = Modifier.size(22.dp)) },
+                onClick = onMessages,
             )
-            Spacer(Modifier.height(12.dp))
-            ServiceButton(
-                label = s.continueWithSpotify,
-                container = SPOTIFY_GREEN,
-                content = Color(0xFF0B0B0F),
-                mark = { SpotifyMark() },
-                onClick = onSpotify,
-            )
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(8.dp))
             Text(
-                text = s.welcomeNote,
+                text = if (english) "You sign in with your Google account." else "Google hesabınla giriş yaparsın.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Ink.copy(alpha = 0.45f),
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(18.dp))
-            TextButton(onClick = onWithoutAccount) {
-                Text(s.continueWithoutAccount, color = Ink.copy(alpha = 0.8f))
+            Spacer(Modifier.height(22.dp))
+            if (!musicAccounts) {
+                TextButton(onClick = { musicAccounts = true }) {
+                    Text(if (english) "Bring my music from an account" else "Müziğimi bir hesaptan getir", color = Ink.copy(alpha = 0.8f))
+                }
+            } else {
+                Text(
+                    text = s.welcomeNote,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Ink.copy(alpha = 0.55f),
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(12.dp))
+                ServiceButton(
+                    label = s.continueWithYouTube,
+                    container = Ink.copy(alpha = 0.1f),
+                    content = Ink,
+                    mark = { YouTubeMusicMark() },
+                    onClick = onYouTube,
+                )
+                Spacer(Modifier.height(10.dp))
+                ServiceButton(
+                    label = s.continueWithSpotify,
+                    container = SPOTIFY_GREEN,
+                    content = Color(0xFF0B0B0F),
+                    mark = { SpotifyMark() },
+                    onClick = onSpotify,
+                )
             }
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = onWithoutAccount) {
+                Text(if (english) "Not now" else "Şimdilik geç", color = Ink.copy(alpha = 0.55f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun Feature(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, note: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(Ink.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+            androidx.compose.material3.Icon(icon, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Ink, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold))
+            Text(note, color = Ink.copy(alpha = 0.6f), style = MaterialTheme.typography.bodySmall)
         }
     }
 }

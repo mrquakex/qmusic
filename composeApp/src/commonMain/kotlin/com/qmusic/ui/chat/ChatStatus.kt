@@ -1,5 +1,7 @@
 package com.qmusic.ui.chat
 
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
@@ -105,7 +107,10 @@ internal val StatusFonts = listOf(FontFamily.Default, FontFamily.Serif, FontFami
 internal val StatusFontWeights = listOf(FontWeight.SemiBold, FontWeight.Normal, FontWeight.Medium, FontWeight.Normal, FontWeight.Black)
 
 /** How long a photo or a text with a song stays on screen. */
-private const val SONG_MS = 15_000L
+private const val SONG_MS = STATUS_SONG_LENGTH
+
+/** How long a status waits for its song before going on in silence. */
+private const val SONG_WAIT_MS = 6_000L
 
 /** How long a photo or a text stays on screen. */
 private const val STILL_MS = 5_000L
@@ -334,12 +339,9 @@ internal fun TextStatusPage(controller: ChatController, s: ChatStrings) {
             )
         }
         song?.let { g ->
-            StatusSongChip(g, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 64.dp), trailing = {
-                Spacer(Modifier.width(8.dp))
-                Icon(QMusicIcons.Close, contentDescription = s.statusSongRemove, tint = Color.White, modifier = Modifier.size(16.dp))
-            }) { song = null }
+            ComposerSongChip(g, s, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 64.dp), onPart = { song = g.copy(startMs = it) }) { song = null }
         }
-        if (picking) StatusSongPicker(s, controller.shareables().filter { it.kind == ShareKind.SONG }, controller.searchSongs, onPick = { song = it }) { picking = false }
+        if (picking) StatusSongPicker(s, controller.shareables().filter { it.kind == ShareKind.SONG }, controller.searchSongs, onPick = { song = it.copy(startMs = 0, quote = "") }) { picking = false }
         if (emoji) {
             EmojiPanel(onEmoji = { e -> text = (text + e).take(700) }, modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 88.dp))
         }
@@ -401,6 +403,30 @@ internal fun StatusOverlayText(overlay: StatusOverlay, modifier: Modifier = Modi
                 ),
         )
     }
+}
+
+/**
+ * The song of a status being made: a tap picks which 15 seconds play (it shows them), the cross takes it off. The
+ * part picker opens by itself once, right after the song is picked.
+ */
+@Composable
+private fun ComposerSongChip(song: SharedItem, s: ChatStrings, modifier: Modifier, onPart: (Long) -> Unit, onRemove: () -> Unit) {
+    var choosing by remember(song.id) { mutableStateOf(song.startMs == 0L) }
+    StatusSongChip(song, modifier, trailing = {
+        Spacer(Modifier.width(8.dp))
+        Text(
+            secondsLabel(if (song.startMs == 1L) 0L else statusSongStart(song)),
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.18f)).padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Box(Modifier.size(24.dp).clip(CircleShape).clickable(onClick = onRemove), contentAlignment = Alignment.Center) {
+            Icon(QMusicIcons.Close, contentDescription = s.statusSongRemove, tint = Color.White, modifier = Modifier.size(16.dp))
+        }
+    }) { choosing = true }
+    if (choosing) StatusSongPart(song, onPick = onPart) { choosing = false }
 }
 
 /** A status's song: its cover and name; a tap plays it. */
@@ -572,10 +598,7 @@ internal fun StatusMediaComposer(
                     }
                 }
                 song?.let { g ->
-                    StatusSongChip(g, Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp), trailing = {
-                        Spacer(Modifier.width(8.dp))
-                        Icon(QMusicIcons.Close, contentDescription = s.statusSongRemove, tint = Color.White, modifier = Modifier.size(16.dp))
-                    }) { song = null }
+                    ComposerSongChip(g, s, Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp), onPart = { song = g.copy(startMs = it) }) { song = null }
                 }
             }
             if (video != null && video.durationMs > 60_000L) {
@@ -652,7 +675,7 @@ internal fun StatusMediaComposer(
             }
         }
     }
-    if (picking) StatusSongPicker(s, songs().filter { it.kind == ShareKind.SONG }, searchSongs, onPick = { song = it }) { picking = false }
+    if (picking) StatusSongPicker(s, songs().filter { it.kind == ShareKind.SONG }, searchSongs, onPick = { song = it.copy(startMs = 0, quote = "") }) { picking = false }
 }
 
 // ------------------------------------------------------------------ watching
@@ -707,15 +730,65 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
     // How far the current one has played (0..1); a video goes as long as it is.
     var progress by remember(item.id) { mutableFloatStateOf(0f) }
     var videoLength by remember(item.id) { mutableLongStateOf(if (item.kind == StatusKind.VIDEO) item.durationMs.coerceAtLeast(1_000L) else if (item.song != null) SONG_MS else STILL_MS) }
-    // Its song plays by itself (from a little into it), for as long as the status shows.
+    // Its song plays by itself (the part its poster chose), for as long as the status shows. The status waits for
+    // it (a few seconds at most), so the song is not half over when it is heard.
+    val soundOn by ChatMusic.statusSound.collectAsState()
     var songUrl by remember(item.id) { mutableStateOf<String?>(null) }
+    var songReady by remember(item.id) { mutableStateOf(item.song == null || item.kind == StatusKind.VIDEO) }
+    var songLoading by remember(item.id) { mutableStateOf(item.song != null && item.kind != StatusKind.VIDEO) }
+    var songRetried by remember(item.id) { mutableStateOf(false) }
+    val songScope = rememberCoroutineScope()
     LaunchedEffect(item.id) {
-        songUrl = item.song?.let { g -> runCatching { controller.songAudio(g.id) }.getOrNull() }
+        val g = item.song?.takeIf { item.kind != StatusKind.VIDEO } ?: return@LaunchedEffect
+        launch {
+            kotlinx.coroutines.delay(SONG_WAIT_MS)
+            songReady = true
+        }
+        songUrl = ChatMusic.songUrl(g.id)
+        if (songUrl == null) {
+            songReady = true
+            songLoading = false
+        }
     }
-    songUrl?.let { url -> StatusAudio(url, playing = !paused && !listening) }
+    // The songs of the next few statuses are looked up while this one shows.
+    LaunchedEffect(owner, at) {
+        items.drop(at + 1).take(3).mapNotNull { it.song?.id }.forEach { id -> launch { ChatMusic.songUrl(id) } }
+    }
+    if (!soundOn) songReady = true
+    songUrl?.let { url ->
+        androidx.compose.runtime.key(url) {
+            StatusAudio(
+                url = url,
+                playing = !paused && !listening && soundOn,
+                startMs = item.song?.let { statusSongStart(it) } ?: STATUS_SONG_DEFAULT_START,
+                onReady = {
+                    songReady = true
+                    songLoading = false
+                },
+                onFailed = {
+                    val g = item.song
+                    if (songRetried || g == null) {
+                        songReady = true
+                        songLoading = false
+                    } else {
+                        // An address that stopped working: a fresh one, once.
+                        songRetried = true
+                        songScope.launch {
+                            songUrl = null
+                            songUrl = ChatMusic.songUrl(g.id, fresh = true)
+                            if (songUrl == null) {
+                                songReady = true
+                                songLoading = false
+                            }
+                        }
+                    }
+                },
+            )
+        }
+    }
     var videoReady by remember(item.id) { mutableStateOf(item.kind != StatusKind.VIDEO) }
-    LaunchedEffect(item.id, paused, videoReady, videoLength) {
-        if (paused || !videoReady) return@LaunchedEffect
+    LaunchedEffect(item.id, paused, videoReady, videoLength, songReady) {
+        if (paused || !videoReady || !songReady) return@LaunchedEffect
         var last = Clock.System.now().toEpochMilliseconds()
         while (progress < 1f) {
             kotlinx.coroutines.delay(32)
@@ -786,12 +859,36 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
         item.overlay?.let { o -> StatusOverlayText(o) }
         // Its song: a tap plays it in Qeyf (the status waits meanwhile).
         item.song?.let { g ->
-            StatusSongChip(g, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 76.dp), trailing = {
-                Spacer(Modifier.width(8.dp))
-                Icon(QMusicIcons.Play, contentDescription = s.statusListen, tint = Color.White, modifier = Modifier.size(16.dp))
-            }) {
-                listening = true
-                controller.openShare(g)
+            Row(
+                Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 76.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StatusSongChip(g, trailing = {
+                    Spacer(Modifier.width(8.dp))
+                    if (songLoading && soundOn) {
+                        androidx.compose.material3.CircularProgressIndicator(color = Color.White, strokeWidth = 1.5.dp, modifier = Modifier.size(14.dp))
+                    } else {
+                        Icon(QMusicIcons.Play, contentDescription = s.statusListen, tint = Color.White, modifier = Modifier.size(16.dp))
+                    }
+                }) {
+                    listening = true
+                    controller.openShare(g)
+                }
+                if (item.kind != StatusKind.VIDEO) {
+                    Spacer(Modifier.width(8.dp))
+                    val mw = ChatMusic.words()
+                    Box(
+                        Modifier.size(36.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)).clickable { ChatMusic.statusSound.value = !soundOn },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            if (soundOn) QMusicIcons.Volume else QMusicIcons.VolumeMute,
+                            contentDescription = if (soundOn) mw.soundOff else mw.soundOn,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
             }
         }
 

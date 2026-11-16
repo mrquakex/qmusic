@@ -1,5 +1,6 @@
 package com.qmusic.ui.components
 
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -90,6 +91,7 @@ import com.qmusic.player.RepeatMode
 import com.qmusic.player.SleepTimerState
 import com.qmusic.ui.CastButton
 import com.qmusic.ui.rememberDominantColor
+import com.qmusic.ui.asBackdrop
 import com.qmusic.ui.screens.HomeShelf
 import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.BgRoot
@@ -164,7 +166,7 @@ fun DesktopTopNavBar(
                 .fillMaxWidth()
                 .height(DESKTOP_TOP_BAR_HEIGHT)
                 .background(barTint)
-                .border(width = 1.dp, color = Color.White.copy(alpha = 0.07f))
+                .border(width = 1.dp, color = com.qmusic.ui.theme.Ink.copy(alpha = 0.07f))
                 .padding(start = 16.dp, end = if (windowActions != null) 6.dp else 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -180,7 +182,7 @@ fun DesktopTopNavBar(
                     Icon(
                         imageVector = QMusicIcons.Menu,
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = com.qmusic.ui.theme.Ink,
                         modifier = Modifier.size(22.dp),
                     )
                 }
@@ -199,8 +201,8 @@ fun DesktopTopNavBar(
                 modifier = Modifier.weight(1f),
                 contentAlignment = Alignment.CenterStart,
             ) {
-                val boxBg = if (searchFocused) DarkSurface else Color.White.copy(alpha = 0.11f)
-                val boxBorder = if (searchFocused) Color.White.copy(alpha = 0.24f) else Color.White.copy(alpha = 0.08f)
+                val boxBg = if (searchFocused) DarkSurface else com.qmusic.ui.theme.Ink.copy(alpha = 0.11f)
+                val boxBorder = if (searchFocused) com.qmusic.ui.theme.Ink.copy(alpha = 0.24f) else com.qmusic.ui.theme.Ink.copy(alpha = 0.08f)
                 Row(
                     modifier = Modifier
                         .widthIn(max = 480.dp)
@@ -215,7 +217,7 @@ fun DesktopTopNavBar(
                     Icon(
                         imageVector = QMusicIcons.Search,
                         contentDescription = s.tabSearch,
-                        tint = Color.White.copy(alpha = 0.7f),
+                        tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.7f),
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.width(12.dp))
@@ -227,7 +229,7 @@ fun DesktopTopNavBar(
                             Text(
                                 text = s.searchFieldPlaceholder,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = Color.White.copy(alpha = 0.52f),
+                                color = com.qmusic.ui.theme.Ink.copy(alpha = 0.52f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -236,8 +238,8 @@ fun DesktopTopNavBar(
                             value = searchQuery,
                             onValueChange = onSearchQueryChange,
                             singleLine = true,
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White),
-                            cursorBrush = SolidColor(Color.White),
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = com.qmusic.ui.theme.Ink),
+                            cursorBrush = SolidColor(com.qmusic.ui.theme.Ink),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             keyboardActions = KeyboardActions(onSearch = { onSearchSubmit() }),
                             modifier = Modifier
@@ -253,7 +255,7 @@ fun DesktopTopNavBar(
                             Icon(
                                 imageVector = QMusicIcons.Close,
                                 contentDescription = s.clearSearch,
-                                tint = Color.White.copy(alpha = 0.7f),
+                                tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.7f),
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -269,13 +271,13 @@ fun DesktopTopNavBar(
                 CastButton(modifier = Modifier.size(40.dp))
                 if (onOpenVideos != null) {
                     IconButton(onClick = onOpenVideos, modifier = Modifier.size(40.dp)) {
-                        Icon(QMusicIcons.VideoPlay, contentDescription = "QVideo", tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(20.dp))
+                        Icon(QMusicIcons.VideoPlay, contentDescription = "QVideo", tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f), modifier = Modifier.size(20.dp))
                     }
                 }
                 if (onOpenChat != null) {
                     IconButton(onClick = onOpenChat, modifier = Modifier.size(40.dp)) {
                         Box {
-                            Icon(QMusicIcons.Chat, contentDescription = null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(20.dp))
+                            Icon(QMusicIcons.Chat, contentDescription = null, tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f), modifier = Modifier.size(20.dp))
                             if (chatUnread > 0) {
                                 Box(
                                     modifier = Modifier
@@ -283,10 +285,10 @@ fun DesktopTopNavBar(
                                         .offset(x = 6.dp, y = (-6).dp)
                                         .size(14.dp)
                                         .clip(androidx.compose.foundation.shape.CircleShape)
-                                        .background(Color.White),
+                                        .background(com.qmusic.ui.theme.Ink),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Text(if (chatUnread > 9) "9+" else chatUnread.toString(), color = Color.Black, fontSize = 9.sp)
+                                    Text(if (chatUnread > 9) "9+" else chatUnread.toString(), color = com.qmusic.ui.theme.InkInverse, fontSize = 9.sp)
                                 }
                             }
                         }
@@ -296,7 +298,7 @@ fun DesktopTopNavBar(
                     Icon(
                         imageVector = QMusicIcons.Stats,
                         contentDescription = s.statsTitle,
-                        tint = Color.White.copy(alpha = 0.85f),
+                        tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -304,7 +306,7 @@ fun DesktopTopNavBar(
                     Icon(
                         imageVector = QMusicIcons.Tune,
                         contentDescription = s.equalizerTitle,
-                        tint = Color.White.copy(alpha = 0.85f),
+                        tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -312,7 +314,7 @@ fun DesktopTopNavBar(
                     Icon(
                         imageVector = QMusicIcons.Settings,
                         contentDescription = s.tabSettings,
-                        tint = Color.White.copy(alpha = 0.85f),
+                        tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -321,14 +323,14 @@ fun DesktopTopNavBar(
                     modifier = Modifier
                         .size(34.dp)
                         .clip(CircleShape)
-                        .background(if (isLoggedIn) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.12f))
+                        .background(if (isLoggedIn) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f) else com.qmusic.ui.theme.Ink.copy(alpha = 0.12f))
                         .clickable(onClick = onAccountClick),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = QMusicIcons.Account,
                         contentDescription = s.sectionAccount,
-                        tint = Color.White,
+                        tint = com.qmusic.ui.theme.Ink,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -339,7 +341,7 @@ fun DesktopTopNavBar(
                         modifier = Modifier
                             .width(1.dp)
                             .height(22.dp)
-                            .background(Color.White.copy(alpha = 0.12f)),
+                            .background(com.qmusic.ui.theme.Ink.copy(alpha = 0.12f)),
                     )
                     Spacer(Modifier.width(4.dp))
                     DesktopWindowCaptionButtons(windowActions)
@@ -372,7 +374,7 @@ fun DesktopWindowCaptionButtons(
             modifier = Modifier
                 .size(width = 40.dp, height = 36.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(if (minHovered) Color.White.copy(alpha = 0.10f) else Color.Transparent)
+                .background(if (minHovered) com.qmusic.ui.theme.Ink.copy(alpha = 0.10f) else Color.Transparent)
                 .hoverable(minInteraction)
                 .clickable(
                     interactionSource = minInteraction,
@@ -383,7 +385,7 @@ fun DesktopWindowCaptionButtons(
         ) {
             Canvas(modifier = Modifier.size(12.dp)) {
                 drawLine(
-                    color = Color.White.copy(alpha = 0.88f),
+                    color = com.qmusic.ui.theme.Ink.copy(alpha = 0.88f),
                     start = Offset(1f, size.height / 2f),
                     end = Offset(size.width - 1f, size.height / 2f),
                     strokeWidth = 1.6.dp.toPx(),
@@ -399,7 +401,7 @@ fun DesktopWindowCaptionButtons(
             modifier = Modifier
                 .size(width = 40.dp, height = 36.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(if (maxHovered) Color.White.copy(alpha = 0.10f) else Color.Transparent)
+                .background(if (maxHovered) com.qmusic.ui.theme.Ink.copy(alpha = 0.10f) else Color.Transparent)
                 .hoverable(maxInteraction)
                 .clickable(
                     interactionSource = maxInteraction,
@@ -413,20 +415,20 @@ fun DesktopWindowCaptionButtons(
                 if (actions.isMaximized) {
                     val box = size.width * 0.78f
                     drawRect(
-                        color = Color.White.copy(alpha = 0.88f),
+                        color = com.qmusic.ui.theme.Ink.copy(alpha = 0.88f),
                         topLeft = Offset(size.width - box, 0f),
                         size = Size(box, box),
                         style = Stroke(width = stroke),
                     )
                     drawRect(
-                        color = Color.White.copy(alpha = 0.88f),
+                        color = com.qmusic.ui.theme.Ink.copy(alpha = 0.88f),
                         topLeft = Offset(0f, size.height - box),
                         size = Size(box, box),
                         style = Stroke(width = stroke),
                     )
                 } else {
                     drawRect(
-                        color = Color.White.copy(alpha = 0.88f),
+                        color = com.qmusic.ui.theme.Ink.copy(alpha = 0.88f),
                         topLeft = Offset(0.5f, 0.5f),
                         size = Size(size.width - 1f, size.height - 1f),
                         style = Stroke(width = stroke),
@@ -454,14 +456,14 @@ fun DesktopWindowCaptionButtons(
             Canvas(modifier = Modifier.size(11.dp)) {
                 val stroke = 1.6.dp.toPx()
                 drawLine(
-                    color = Color.White.copy(alpha = if (closeHovered) 1f else 0.88f),
+                    color = com.qmusic.ui.theme.Ink.copy(alpha = if (closeHovered) 1f else 0.88f),
                     start = Offset(1f, 1f),
                     end = Offset(size.width - 1f, size.height - 1f),
                     strokeWidth = stroke,
                     cap = StrokeCap.Round,
                 )
                 drawLine(
-                    color = Color.White.copy(alpha = if (closeHovered) 1f else 0.88f),
+                    color = com.qmusic.ui.theme.Ink.copy(alpha = if (closeHovered) 1f else 0.88f),
                     start = Offset(size.width - 1f, 1f),
                     end = Offset(1f, size.height - 1f),
                     strokeWidth = stroke,
@@ -499,9 +501,9 @@ fun DesktopLeftSidebar(
     var newPlaylistName by remember { mutableStateOf("") }
 
     val activePillColor = if (dominantTint != null) {
-        lerp(Color.White.copy(alpha = 0.14f), dominantTint.copy(alpha = 0.36f), 0.55f)
+        lerp(com.qmusic.ui.theme.Ink.copy(alpha = 0.14f), dominantTint.copy(alpha = 0.36f), 0.55f)
     } else {
-        Color.White.copy(alpha = 0.12f)
+        com.qmusic.ui.theme.Ink.copy(alpha = 0.12f)
     }
 
     val primaryItems = listOfNotNull(
@@ -534,7 +536,7 @@ fun DesktopLeftSidebar(
                     Icon(
                         imageVector = icon,
                         contentDescription = label,
-                        tint = if (selected) Color.White else Color.White.copy(alpha = 0.68f),
+                        tint = if (selected) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.68f),
                         modifier = Modifier.size(22.dp),
                     )
                     Spacer(Modifier.height(4.dp))
@@ -542,7 +544,7 @@ fun DesktopLeftSidebar(
                         text = label,
                         fontSize = 10.sp,
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (selected) Color.White else Color.White.copy(alpha = 0.68f),
+                        color = if (selected) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.68f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -572,7 +574,7 @@ fun DesktopLeftSidebar(
                     Icon(
                         imageVector = icon,
                         contentDescription = label,
-                        tint = if (selected) Color.White else Color.White.copy(alpha = 0.72f),
+                        tint = if (selected) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.72f),
                         modifier = Modifier.size(22.dp),
                     )
                     Spacer(Modifier.width(20.dp))
@@ -582,7 +584,7 @@ fun DesktopLeftSidebar(
                             fontSize = 15.sp,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                         ),
-                        color = if (selected) Color.White else Color.White.copy(alpha = 0.85f),
+                        color = if (selected) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.85f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -592,7 +594,7 @@ fun DesktopLeftSidebar(
             HorizontalDivider(
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp),
                 thickness = 1.dp,
-                color = Color.White.copy(alpha = 0.12f),
+                color = com.qmusic.ui.theme.Ink.copy(alpha = 0.12f),
             )
 
             // "+ Yeni oynatma listesi" (`+ New playlist`) pill button
@@ -602,7 +604,7 @@ fun DesktopLeftSidebar(
                     .padding(horizontal = 4.dp)
                     .height(36.dp)
                     .clip(RoundedCornerShape(18.dp))
-                    .background(Color.White.copy(alpha = 0.10f))
+                    .background(com.qmusic.ui.theme.Ink.copy(alpha = 0.10f))
                     .clickable { showNewPlaylistDialog = true }
                     .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -611,14 +613,14 @@ fun DesktopLeftSidebar(
                 Icon(
                     imageVector = QMusicIcons.Add,
                     contentDescription = s.newPlaylist,
-                    tint = Color.White,
+                    tint = com.qmusic.ui.theme.Ink,
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
                     text = s.newPlaylist,
                     style = MaterialTheme.typography.labelLarge,
-                    color = Color.White,
+                    color = com.qmusic.ui.theme.Ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -671,7 +673,7 @@ fun DesktopLeftSidebar(
         AlertDialog(
             onDismissRequest = { showNewPlaylistDialog = false },
             containerColor = DarkSurface,
-            title = { Text(s.newPlaylist, color = Color.White) },
+            title = { Text(s.newPlaylist, color = com.qmusic.ui.theme.Ink) },
             text = {
                 OutlinedTextField(
                     value = newPlaylistName,
@@ -723,7 +725,7 @@ private fun SidebarPlaylistRow(
             Icon(
                 imageVector = leadingIcon,
                 contentDescription = null,
-                tint = Color.White.copy(alpha = 0.75f),
+                tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.75f),
                 modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.width(12.dp))
@@ -732,14 +734,14 @@ private fun SidebarPlaylistRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                color = Color.White,
+                color = com.qmusic.ui.theme.Ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                color = Color.White.copy(alpha = 0.56f),
+                color = com.qmusic.ui.theme.Ink.copy(alpha = 0.56f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -824,7 +826,7 @@ fun DesktopBottomPlayerBar(
                     Icon(
                         imageVector = QMusicIcons.Previous,
                         contentDescription = s.previous,
-                        tint = Color.White,
+                        tint = com.qmusic.ui.theme.Ink,
                         modifier = Modifier.size(22.dp),
                     )
                 }
@@ -832,7 +834,7 @@ fun DesktopBottomPlayerBar(
                     Icon(
                         imageVector = if (isPlaying) QMusicIcons.Pause else QMusicIcons.Play,
                         contentDescription = if (isPlaying) s.pause else s.play,
-                        tint = Color.White,
+                        tint = com.qmusic.ui.theme.Ink,
                         modifier = Modifier.size(30.dp),
                     )
                 }
@@ -840,7 +842,7 @@ fun DesktopBottomPlayerBar(
                     Icon(
                         imageVector = QMusicIcons.Next,
                         contentDescription = s.next,
-                        tint = Color.White,
+                        tint = com.qmusic.ui.theme.Ink,
                         modifier = Modifier.size(22.dp),
                     )
                 }
@@ -848,7 +850,7 @@ fun DesktopBottomPlayerBar(
                 Text(
                     text = "${formatDurationMs(pos)} / ${formatDurationMs(effectiveDuration)}",
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                    color = Color.White.copy(alpha = 0.65f),
+                    color = com.qmusic.ui.theme.Ink.copy(alpha = 0.65f),
                     maxLines = 1,
                 )
             }
@@ -881,7 +883,7 @@ fun DesktopBottomPlayerBar(
                             contentScale = ContentScale.Crop,
                         )
                     } else {
-                        QMusicLogo(size = 24.dp, tint = Color.White.copy(alpha = 0.85f))
+                        QMusicLogo(size = 24.dp, tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f))
                     }
                 }
 
@@ -893,7 +895,7 @@ fun DesktopBottomPlayerBar(
                     Text(
                         text = currentTrack.title,
                         style = MaterialTheme.typography.titleMedium.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
-                        color = Color.White,
+                        color = com.qmusic.ui.theme.Ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -902,7 +904,7 @@ fun DesktopBottomPlayerBar(
                     Text(
                         text = subtitleText,
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
-                        color = Color.White.copy(alpha = 0.65f),
+                        color = com.qmusic.ui.theme.Ink.copy(alpha = 0.65f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = if (onArtistClick != null) {
@@ -919,7 +921,7 @@ fun DesktopBottomPlayerBar(
                     Icon(
                         imageVector = if (isFavorite) QMusicIcons.HeartFilled else QMusicIcons.Heart,
                         contentDescription = if (isFavorite) s.favorited else s.favorite,
-                        tint = if (isFavorite) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.72f),
+                        tint = if (isFavorite) MaterialTheme.colorScheme.primary else com.qmusic.ui.theme.Ink.copy(alpha = 0.72f),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -927,7 +929,7 @@ fun DesktopBottomPlayerBar(
                     Icon(
                         imageVector = QMusicIcons.PlaylistAdd,
                         contentDescription = s.addToPlaylist,
-                        tint = Color.White.copy(alpha = 0.72f),
+                        tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.72f),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -935,7 +937,7 @@ fun DesktopBottomPlayerBar(
                     Icon(
                         imageVector = QMusicIcons.More,
                         contentDescription = s.moreOptions,
-                        tint = Color.White.copy(alpha = 0.72f),
+                        tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.72f),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -961,21 +963,11 @@ fun DesktopBottomPlayerBar(
                     Icon(
                         imageVector = if (volume <= 0.01f) QMusicIcons.VolumeMute else QMusicIcons.Volume,
                         contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.8f),
+                        tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.8f),
                         modifier = Modifier.size(20.dp),
                     )
                 }
-                Slider(
-                    value = volume,
-                    onValueChange = onVolumeChange,
-                    valueRange = 0f..1f,
-                    modifier = Modifier.width(88.dp),
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color.White,
-                        activeTrackColor = Color.White,
-                        inactiveTrackColor = Color.White.copy(alpha = 0.24f),
-                    ),
-                )
+                ThinSlider(value = volume, onValueChange = onVolumeChange, modifier = Modifier.width(96.dp))
                 Spacer(Modifier.width(4.dp))
                 IconButton(onClick = onCycleRepeat, modifier = Modifier.size(36.dp)) {
                     Icon(
@@ -985,7 +977,7 @@ fun DesktopBottomPlayerBar(
                             RepeatMode.ALL -> s.repeatAll
                             RepeatMode.ONE -> s.repeatOne
                         },
-                        tint = if (repeatMode != RepeatMode.OFF) Color.White else Color.White.copy(alpha = 0.5f),
+                        tint = if (repeatMode != RepeatMode.OFF) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.5f),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -993,7 +985,7 @@ fun DesktopBottomPlayerBar(
                     Icon(
                         imageVector = QMusicIcons.Shuffle,
                         contentDescription = s.shuffle,
-                        tint = if (shuffle) Color.White else Color.White.copy(alpha = 0.5f),
+                        tint = if (shuffle) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.5f),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -1001,7 +993,7 @@ fun DesktopBottomPlayerBar(
                     Icon(
                         imageVector = QMusicIcons.Tune,
                         contentDescription = s.equalizerTitle,
-                        tint = Color.White.copy(alpha = 0.72f),
+                        tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.72f),
                         modifier = Modifier.size(19.dp),
                     )
                 }
@@ -1009,7 +1001,7 @@ fun DesktopBottomPlayerBar(
                     Icon(
                         imageVector = if (isExpanded) QMusicIcons.ChevronDown else QMusicIcons.ChevronUp,
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = com.qmusic.ui.theme.Ink,
                         modifier = Modifier.size(22.dp),
                     )
                 }
@@ -1055,14 +1047,14 @@ fun DesktopBottomPlayerBar(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(3.dp)
-                    .background(Color.White.copy(alpha = 0.16f)),
+                    .background(com.qmusic.ui.theme.Ink.copy(alpha = 0.16f)),
             )
             // Buffered track
             Box(
                 modifier = Modifier
                     .fillMaxWidth(bufferedProgress)
                     .height(3.dp)
-                    .background(Color.White.copy(alpha = 0.32f)),
+                    .background(com.qmusic.ui.theme.Ink.copy(alpha = 0.32f)),
             )
             // Active played track
             Box(
@@ -1124,7 +1116,7 @@ fun DesktopWatchPage(
     var queuePlaylistName by remember { mutableStateOf("") }
 
     val artwork = track.thumbnail ?: track.thumbnails.lastOrNull()?.url
-    val dominant = rememberDominantColor(artwork)
+    val dominant = rememberDominantColor(artwork)?.asBackdrop()
     val animatedTint by animateColorAsState(
         targetValue = dominant ?: Color(0xFF221C30),
         animationSpec = tween(700),
@@ -1185,7 +1177,7 @@ fun DesktopWatchPage(
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
-                            .background(Color.White.copy(alpha = 0.10f))
+                            .background(com.qmusic.ui.theme.Ink.copy(alpha = 0.10f))
                             .padding(3.dp),
                     ) {
                         listOf(false to s.song, true to s.video).forEach { (isVideo, label) ->
@@ -1193,14 +1185,14 @@ fun DesktopWatchPage(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(50))
-                                    .background(if (active) Color.White.copy(alpha = 0.22f) else Color.Transparent)
+                                    .background(if (active) com.qmusic.ui.theme.Ink.copy(alpha = 0.22f) else Color.Transparent)
                                     .clickable { onSetVideoPreferred(isVideo) }
                                     .padding(horizontal = 18.dp, vertical = 6.dp),
                             ) {
                                 Text(
                                     text = label,
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = if (active) Color.White else Color.White.copy(alpha = 0.65f),
+                                    color = if (active) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.65f),
                                 )
                             }
                         }
@@ -1227,7 +1219,7 @@ fun DesktopWatchPage(
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else {
-                        QMusicLogo(size = 72.dp, tint = Color.White.copy(alpha = 0.85f))
+                        QMusicLogo(size = 72.dp, tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f))
                     }
                 }
 
@@ -1298,14 +1290,14 @@ fun DesktopWatchPage(
                                     fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                                     letterSpacing = 0.6.sp,
                                 ),
-                                color = if (active) Color.White else Color.White.copy(alpha = 0.55f),
+                                color = if (active) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.55f),
                                 maxLines = 1,
                             )
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(2.dp)
-                                    .background(if (active) Color.White else Color.White.copy(alpha = 0.12f)),
+                                    .background(if (active) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.12f)),
                             )
                         }
                     }
@@ -1348,7 +1340,7 @@ fun DesktopWatchPage(
         AlertDialog(
             onDismissRequest = { showSleepDialog = false },
             containerColor = DarkSurface,
-            title = { Text(s.sleepTimer, color = Color.White) },
+            title = { Text(s.sleepTimer, color = com.qmusic.ui.theme.Ink) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(15, 30, 45, 60).forEach { mins ->
@@ -1359,7 +1351,7 @@ fun DesktopWatchPage(
                             },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("$mins dk", color = Color.White)
+                            Text("$mins dk", color = com.qmusic.ui.theme.Ink)
                         }
                     }
                     TextButton(
@@ -1369,7 +1361,7 @@ fun DesktopWatchPage(
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(s.endOfThisSong, color = Color.White)
+                        Text(s.endOfThisSong, color = com.qmusic.ui.theme.Ink)
                     }
                     if (sleepTimer.active) {
                         TextButton(
@@ -1394,7 +1386,7 @@ fun DesktopWatchPage(
         AlertDialog(
             onDismissRequest = { showSaveQueueDialog = false },
             containerColor = DarkSurface,
-            title = { Text(s.saveQueue, color = Color.White) },
+            title = { Text(s.saveQueue, color = com.qmusic.ui.theme.Ink) },
             text = {
                 OutlinedTextField(
                     value = queuePlaylistName,
@@ -1437,7 +1429,7 @@ private fun WatchQuickChip(
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(50))
-            .background(if (active) Color.White.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.10f))
+            .background(if (active) com.qmusic.ui.theme.Ink.copy(alpha = 0.22f) else com.qmusic.ui.theme.Ink.copy(alpha = 0.10f))
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1447,14 +1439,14 @@ private fun WatchQuickChip(
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = Color.White,
+                tint = com.qmusic.ui.theme.Ink,
                 modifier = Modifier.size(16.dp),
             )
         }
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
-            color = Color.White,
+            color = com.qmusic.ui.theme.Ink,
             maxLines = 1,
         )
     }
@@ -1491,7 +1483,7 @@ private fun DesktopQueueTab(
             Text(
                 text = s.songsCount(queue.size),
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.White.copy(alpha = 0.65f),
+                color = com.qmusic.ui.theme.Ink.copy(alpha = 0.65f),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
@@ -1531,7 +1523,7 @@ private fun DesktopQueueTab(
                         .fillMaxWidth()
                         .height(56.dp)
                         .clip(RoundedCornerShape(6.dp))
-                        .background(if (isCurrent) Color.White.copy(alpha = 0.12f) else Color.Transparent)
+                        .background(if (isCurrent) com.qmusic.ui.theme.Ink.copy(alpha = 0.12f) else Color.Transparent)
                         .clickable { onItemClick(index) }
                         .padding(horizontal = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1577,14 +1569,14 @@ private fun DesktopQueueTab(
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
                             ),
-                            color = Color.White,
+                            color = com.qmusic.ui.theme.Ink,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             text = song.artists.joinToString { it.name }.ifEmpty { s.unknownArtist },
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.65f),
+                            color = com.qmusic.ui.theme.Ink.copy(alpha = 0.65f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -1594,7 +1586,7 @@ private fun DesktopQueueTab(
                         Text(
                             text = formatDurationMs(sec * 1000L),
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.55f),
+                            color = com.qmusic.ui.theme.Ink.copy(alpha = 0.55f),
                             modifier = Modifier.padding(horizontal = 8.dp),
                         )
                     }
@@ -1607,7 +1599,7 @@ private fun DesktopQueueTab(
                             Icon(
                                 imageVector = QMusicIcons.Close,
                                 contentDescription = s.removeFromQueue,
-                                tint = Color.White.copy(alpha = 0.5f),
+                                tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.5f),
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -1634,13 +1626,13 @@ private fun DesktopLyricsTab(
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         when (state) {
             is LyricsState.Idle, is LyricsState.Loading -> {
-                CircularProgressIndicator(color = Color.White)
+                CircularProgressIndicator(color = com.qmusic.ui.theme.Ink)
             }
             is LyricsState.Unavailable -> {
                 Text(
                     text = s.lyricsUnavailable,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White.copy(alpha = 0.6f),
+                    color = com.qmusic.ui.theme.Ink.copy(alpha = 0.6f),
                     textAlign = TextAlign.Center,
                 )
             }
@@ -1659,7 +1651,7 @@ private fun DesktopLyricsTab(
                             TextButton(onClick = onToggleTranslation) {
                                 Text(
                                     text = if (translation != null) s.showOriginalLyrics else s.translateLyrics,
-                                    color = Color.White.copy(alpha = 0.8f),
+                                    color = com.qmusic.ui.theme.Ink.copy(alpha = 0.8f),
                                 )
                             }
                         }
@@ -1684,7 +1676,7 @@ private fun DesktopLyricsTab(
                                             fontSize = if (active) 22.sp else 18.sp,
                                             fontWeight = FontWeight.Bold,
                                         ),
-                                        color = if (active) Color.White else Color.White.copy(alpha = 0.36f),
+                                        color = if (active) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.36f),
                                     )
                                     val tr = translation?.getOrNull(idx)
                                     if (!tr.isNullOrBlank()) {
@@ -1692,7 +1684,7 @@ private fun DesktopLyricsTab(
                                         Text(
                                             text = tr,
                                             style = MaterialTheme.typography.bodyMedium,
-                                            color = if (active) Color.White.copy(alpha = 0.8f) else Color.White.copy(alpha = 0.28f),
+                                            color = if (active) com.qmusic.ui.theme.Ink.copy(alpha = 0.8f) else com.qmusic.ui.theme.Ink.copy(alpha = 0.28f),
                                         )
                                     }
                                 }
@@ -1708,7 +1700,7 @@ private fun DesktopLyricsTab(
                             Text(
                                 text = lyrics.text,
                                 style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp),
-                                color = Color.White.copy(alpha = 0.9f),
+                                color = com.qmusic.ui.theme.Ink.copy(alpha = 0.9f),
                             )
                         }
                     }
@@ -1728,7 +1720,7 @@ private fun DesktopRelatedTab(
 ) {
     if (related == null) {
         Box(modifier = modifier, contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = Color.White)
+            CircularProgressIndicator(color = com.qmusic.ui.theme.Ink)
         }
         return
     }
@@ -1754,4 +1746,35 @@ private fun formatDurationMs(ms: Long): String {
     val min = totalSec / 60L
     val sec = totalSec % 60L
     return "$min:${sec.toString().padStart(2, '0')}"
+}
+
+/**
+ * A slim slider (the volume): a 4 dp line with a small round knob, instead of the tall bar of the standard one that
+ * looked heavy in the player's bar. Tapped or dragged anywhere along it.
+ */
+@Composable
+private fun ThinSlider(value: Float, onValueChange: (Float) -> Unit, modifier: Modifier = Modifier) {
+    val ink = com.qmusic.ui.theme.Ink
+    var width by remember { mutableIntStateOf(1) }
+    Box(
+        modifier = modifier
+            .height(28.dp)
+            .onSizeChanged { width = it.width.coerceAtLeast(1) }
+            .pointerInput(Unit) {
+                detectTapGestures { o -> onValueChange((o.x / width).coerceIn(0f, 1f)) }
+            }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures { change, _ -> onValueChange((change.position.x / width).coerceIn(0f, 1f)) }
+            },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        val v = value.coerceIn(0f, 1f)
+        Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(ink.copy(alpha = 0.18f)))
+        Box(Modifier.fillMaxWidth(v).height(4.dp).clip(RoundedCornerShape(2.dp)).background(ink.copy(alpha = 0.85f)))
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            Box(
+                Modifier.offset(x = (maxWidth - 12.dp) * v).size(12.dp).clip(androidx.compose.foundation.shape.CircleShape).background(ink),
+            )
+        }
+    }
 }

@@ -110,6 +110,8 @@ class MainActivity : AppCompatActivity() {
         com.qmusic.ui.tv.TvAndroid.init(this)
         // Songs as Qeyf's call sounds (ringing, per person, and what callers hear).
         com.qmusic.ui.chat.CallTonesAndroid.init(this)
+        // Music in the messages: profile songs, what friends play, shared playlists, reactions.
+        com.qmusic.ui.chat.ChatMusicAndroid.init(this)
 
         // The heart in the playback notification: shows and toggles the like of the playing song.
         MediaActions.onToggleLike = { viewModel.currentTrack.value?.let(viewModel::toggleFavorite) }
