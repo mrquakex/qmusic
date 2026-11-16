@@ -64,6 +64,7 @@ import com.qmusic.ui.PlatformBackHandler
 import com.qmusic.ui.theme.BgRoot
 import com.qmusic.ui.theme.BorderSubtle
 import com.qmusic.ui.theme.DarkSurfaceVariant
+import com.qmusic.ui.theme.DarkSurface
 import com.qmusic.ui.theme.QMusicIcons
 import com.qmusic.ui.theme.TextMuted
 import com.qmusic.ui.theme.TextPrimary
@@ -141,9 +142,9 @@ internal fun ChatHome(
         ) { page ->
             Box(Modifier.fillMaxSize()) {
                 when (tabs[page]) {
-                    ChatTab.CHATS -> ChatsTab(controller, s, me, onExit)
+                    ChatTab.CHATS -> ChatsTab(controller, s, me, onExit, onCall, onGroupCall)
                     ChatTab.STATUS -> StatusTab(controller, s, me, onExit)
-                    ChatTab.GROUPS -> GroupsTab(controller, s, me, onExit)
+                    ChatTab.GROUPS -> GroupsTab(controller, s, me, onExit, onGroupCall)
                     ChatTab.CALLS -> CallsTab(controller, s, me, onExit, onCall, onGroupCall, shown = pager.settledPage == page)
                 }
             }
@@ -333,7 +334,27 @@ internal fun rememberNow(): Long {
 // ------------------------------------------------------------------ chats
 
 @Composable
-private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, onExit: () -> Unit) {
+private fun ChatsTab(
+    controller: ChatController,
+    s: ChatStrings,
+    me: ChatUser,
+    onExit: () -> Unit,
+    onCall: ((ChatUser, Boolean) -> Unit)? = null,
+    onGroupCall: ((ChatUser, Boolean) -> Unit)? = null,
+) {
+    // A picture tapped: the person (or group) in a small window, with message, call and info under it.
+    var peek by remember { mutableStateOf<ChatUser?>(null) }
+    peek?.let { who ->
+        AvatarPeek(
+            user = who,
+            s = s,
+            hasStatus = !who.isGroup && controller.friendStatuses.value.any { it.owner.uid == who.uid },
+            onMessage = { controller.openConversation(who) },
+            onCall = if (who.isGroup) onGroupCall?.let { f -> { video: Boolean -> f(who, video) } } else onCall?.let { f -> { video: Boolean -> f(who, video) } },
+            onInfo = { if (who.isGroup) controller.openGroupInfo(who) else controller.openProfile(who) },
+            onStatus = { controller.push(ChatRoute.StatusViewer(who.uid, mine = false)) },
+        ) { peek = null }
+    }
     val all by controller.threads.collectAsState()
     val archived by controller.archived.collectAsState()
     val filter by controller.filter.collectAsState()
@@ -476,13 +497,7 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
                     val hasStatus = !t.isGroup && t.other.uid in withStatus
                     ThreadRow(
                         t, me, s,
-                        onAvatar = {
-                            when {
-                                hasStatus -> controller.push(ChatRoute.StatusViewer(t.other.uid, mine = false))
-                                t.isGroup -> controller.openGroupInfo(t.other)
-                                else -> controller.openProfile(t.other)
-                            }
-                        },
+                        onAvatar = { if (t.other.uid == CLAUDE_BOT_UID) controller.openProfile(t.other) else peek = t.other },
                         actions = threadActions(controller, s, t, now) { muteFor = t },
                         now = now,
                         ring = if (hasStatus) (if (t.other.uid in unseen) RingUnseen else RingSeen) else null,
@@ -570,7 +585,19 @@ private fun MuteChoice(controller: ChatController, s: ChatStrings, t: ChatThread
 // ------------------------------------------------------------------ groups
 
 @Composable
-private fun GroupsTab(controller: ChatController, s: ChatStrings, me: ChatUser, onExit: () -> Unit) {
+private fun GroupsTab(controller: ChatController, s: ChatStrings, me: ChatUser, onExit: () -> Unit, onGroupCall: ((ChatUser, Boolean) -> Unit)? = null) {
+    var peek by remember { mutableStateOf<ChatUser?>(null) }
+    peek?.let { who ->
+        AvatarPeek(
+            user = who,
+            s = s,
+            hasStatus = false,
+            onMessage = { controller.openConversation(who) },
+            onCall = onGroupCall?.let { f -> { video: Boolean -> f(who, video) } },
+            onInfo = { controller.openGroupInfo(who) },
+            onStatus = {},
+        ) { peek = null }
+    }
     val all by controller.threads.collectAsState()
     val archived by controller.archived.collectAsState()
     var search by remember { mutableStateOf("") }
@@ -604,7 +631,7 @@ private fun GroupsTab(controller: ChatController, s: ChatStrings, me: ChatUser, 
             items(groups, key = { it.id }) { t ->
                 ThreadRow(
                     t, me, s,
-                    onAvatar = { controller.openGroupInfo(t.other) },
+                    onAvatar = { peek = t.other },
                     actions = threadActions(controller, s, t, now) { muteFor = t },
                     now = now,
                     tick = rememberListTick(controller, t, me),
@@ -919,4 +946,91 @@ private fun rememberListTick(controller: ChatController, t: ChatThread, me: Chat
         delivered >= t.lastAt -> TickState.DELIVERED
         else -> TickState.SENT
     }
+}
+
+/**
+ * A person's (or a group's) picture, opened from the list (as on WhatsApp): the picture large with the name over it,
+ * and under it message, voice and video call, and "i" for their profile. A tap on the picture opens their status
+ * when they have one.
+ */
+@Composable
+private fun AvatarPeek(
+    user: ChatUser,
+    s: ChatStrings,
+    hasStatus: Boolean,
+    onMessage: () -> Unit,
+    onCall: ((Boolean) -> Unit)?,
+    onInfo: () -> Unit,
+    onStatus: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    // The picture tapped: full screen, to zoom with two fingers.
+    var full by remember { mutableStateOf(false) }
+    if (full && user.photo != null) {
+        ZoomablePhoto(user.photo, user.name) { full = false }
+        return
+    }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(Modifier.width(280.dp).clip(RoundedCornerShape(18.dp)).background(DarkSurfaceVariant)) {
+            Box(
+                Modifier.size(280.dp).background(DarkSurface).clickable(enabled = user.photo != null || hasStatus) {
+                    if (user.photo != null) {
+                        full = true
+                    } else {
+                        onDismiss()
+                        onStatus()
+                    }
+                },
+            ) {
+                if (user.photo != null) {
+                    coil3.compose.AsyncImage(
+                        model = user.photo,
+                        contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { ChatAvatar(user, 160.dp) }
+                }
+                // The name, over a dark fade at the top of the picture.
+                Box(
+                    Modifier.fillMaxWidth().background(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent)),
+                    ).padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 22.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(user.name, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                        if (!user.isGroup) UserBadge(user.uid, compact = true, modifier = Modifier.padding(start = 6.dp))
+                    }
+                }
+                if (hasStatus) {
+                    // Their status, from the corner of the picture.
+                    Box(
+                        Modifier.align(Alignment.BottomEnd).padding(10.dp).size(38.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)).clickable {
+                            onDismiss()
+                            onStatus()
+                        },
+                        contentAlignment = Alignment.Center,
+                    ) { StatusGlyph(Color.White, 22.dp) }
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                PeekButton({ Icon(QMusicIcons.Chat, contentDescription = s.message, tint = TickRead, modifier = Modifier.size(24.dp)) }) { onDismiss(); onMessage() }
+                if (onCall != null) {
+                    PeekButton({ Icon(QMusicIcons.Phone, contentDescription = s.callVoice, tint = TickRead, modifier = Modifier.size(24.dp)) }) { onDismiss(); onCall(false) }
+                    PeekButton({ Icon(QMusicIcons.Camera, contentDescription = s.callVideo, tint = TickRead, modifier = Modifier.size(24.dp)) }) { onDismiss(); onCall(true) }
+                }
+                PeekButton({
+                    Box(Modifier.size(22.dp).border(2.dp, TickRead, CircleShape), contentAlignment = Alignment.Center) {
+                        Text("i", color = TickRead, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                    }
+                }) { onDismiss(); onInfo() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PeekButton(icon: @Composable () -> Unit, onClick: () -> Unit) {
+    Box(Modifier.size(56.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) { icon() }
 }

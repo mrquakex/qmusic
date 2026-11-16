@@ -92,7 +92,7 @@ private val EmojiCategories: List<Pair<String, List<String>>> = listOf(
 @Composable
 internal fun EmojiPanel(onEmoji: (String) -> Unit, modifier: Modifier = Modifier) {
     var category by remember { mutableStateOf(0) }
-    Column(modifier.fillMaxWidth().height(290.dp).background(DarkSurface)) {
+    Column(modifier.fillMaxWidth().heightIn(min = 240.dp).background(DarkSurface)) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp)) {
             EmojiCategories.forEachIndexed { i, (icon, _) ->
                 Box(

@@ -78,3 +78,6 @@ actual fun StatusAudio(url: String, playing: Boolean, startMs: Long, loopMs: Lon
 
 @androidx.compose.runtime.Composable
 actual fun DialogEdgeToEdge() = Unit
+
+@androidx.compose.runtime.Composable
+actual fun rememberRecentPhotos(enabled: Boolean): RecentPhotos = RecentPhotos(emptyList(), false, {}, { null })

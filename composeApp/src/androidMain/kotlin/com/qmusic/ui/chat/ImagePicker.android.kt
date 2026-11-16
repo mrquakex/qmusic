@@ -12,6 +12,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -76,7 +78,7 @@ private const val MAX_BYTES = 1_000_000
 private const val THUMB_SIDE = 24
 
 /** Decodes (upright, already scaled down while decoding), shrinks to [MAX_SIDE], compresses to under [MAX_BYTES]. */
-private fun prepare(context: Context, uri: Uri): PickedImage {
+internal fun prepare(context: Context, uri: Uri): PickedImage {
     val bitmap = decode(context, uri)
     val scale = MAX_SIDE.toFloat() / max(bitmap.width, bitmap.height)
     val sized = if (scale < 1f) Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).roundToInt(), (bitmap.height * scale).roundToInt(), true) else bitmap
@@ -125,3 +127,61 @@ private fun decode(context: Context, uri: Uri): Bitmap {
     return context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
         ?: error("cannot read the photo")
 }
+
+/**
+ * The phone's latest photos for the attach panel: asked for with the photos permission (on Android 14 and later the
+ * person may allow only some; those show then), read newest first.
+ */
+@Composable
+actual fun rememberRecentPhotos(enabled: Boolean): RecentPhotos {
+    val context = LocalContext.current
+    fun allowed(): Boolean {
+        fun has(p: String) = androidx.core.content.ContextCompat.checkSelfPermission(context, p) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        return when {
+            Build.VERSION.SDK_INT >= 34 -> has(android.Manifest.permission.READ_MEDIA_IMAGES) || has(android.Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+            Build.VERSION.SDK_INT >= 33 -> has(android.Manifest.permission.READ_MEDIA_IMAGES)
+            else -> has(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+    }
+    var granted by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(allowed()) }
+    var photos by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<List<String>>(emptyList()) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted = allowed() }
+    androidx.compose.runtime.LaunchedEffect(granted, enabled) {
+        if (!granted || !enabled) return@LaunchedEffect
+        photos = withContext(Dispatchers.IO) {
+            runCatching {
+                val uri = android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                context.contentResolver.query(
+                    uri,
+                    arrayOf(android.provider.MediaStore.Images.Media._ID),
+                    null,
+                    null,
+                    android.provider.MediaStore.Images.Media.DATE_ADDED + " DESC",
+                )?.use { c ->
+                    val id = c.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media._ID)
+                    val out = ArrayList<String>()
+                    while (c.moveToNext() && out.size < RECENT_PHOTOS) {
+                        out += android.content.ContentUris.withAppendedId(uri, c.getLong(id)).toString()
+                    }
+                    out
+                }.orEmpty()
+            }.getOrDefault(emptyList())
+        }
+    }
+    return RecentPhotos(
+        photos = photos,
+        allowed = granted,
+        ask = {
+            launcher.launch(
+                when {
+                    Build.VERSION.SDK_INT >= 34 -> arrayOf(android.Manifest.permission.READ_MEDIA_IMAGES, android.Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+                    Build.VERSION.SDK_INT >= 33 -> arrayOf(android.Manifest.permission.READ_MEDIA_IMAGES)
+                    else -> arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+                },
+            )
+        },
+        prepare = { u -> withContext(Dispatchers.Default) { runCatching { prepare(context, Uri.parse(u)) }.getOrNull() } },
+    )
+}
+
+private const val RECENT_PHOTOS = 40

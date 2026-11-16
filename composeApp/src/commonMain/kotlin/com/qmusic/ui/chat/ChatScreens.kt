@@ -1033,6 +1033,7 @@ private fun ConversationPage(
 
     if (selected.isNotEmpty()) PlatformBackHandler(enabled = true) { selected = emptySet() }
     if (emojiOpen) PlatformBackHandler(enabled = true) { emojiOpen = false }
+    if (attach) PlatformBackHandler(enabled = true) { attach = false }
     Column(Modifier.fillMaxSize().imePadding()) {
         if (selected.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().statusBarsPadding().height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1514,68 +1515,13 @@ private fun ConversationPage(
                     }
                     RecordingBar(elapsed, level, if (locked) s.voiceLocked else s.voiceSlideCancel + "   " + s.voiceSlideLock, cancelling, Modifier.weight(1f))
                 } else {
-                    Box {
-                        IconButton(onClick = { attach = true }) { Icon(QMusicIcons.Add, contentDescription = null, tint = Ink) }
-                        DropdownMenu(expanded = attach, onDismissRequest = { attach = false }, containerColor = DarkSurfaceVariant) {
-                            val options = remember(attach) { if (attach) shareables() else emptyList() }
-                            DropdownMenuItem(
-                                leadingIcon = { Icon(QMusicIcons.Add, null, tint = Ink) },
-                                text = { Text(s.photo, color = TextPrimary, fontSize = 14.sp) },
-                                onClick = { attach = false; pickPhoto() },
-                            )
-                            DropdownMenuItem(
-                                leadingIcon = { Icon(QMusicIcons.Camera, null, tint = Ink) },
-                                text = { Text(s.camera, color = TextPrimary, fontSize = 14.sp) },
-                                onClick = { attach = false; takePhoto() },
-                            )
-                            DropdownMenuItem(
-                                leadingIcon = { Icon(QMusicIcons.VideoPlay, null, tint = Ink) },
-                                text = { Text(s.videoAttach, color = TextPrimary, fontSize = 14.sp) },
-                                onClick = { attach = false; pickVideo() },
-                            )
-                            DropdownMenuItem(
-                                leadingIcon = { Icon(QMusicIcons.File, null, tint = Ink) },
-                                text = { Text(s.fileAttach, color = TextPrimary, fontSize = 14.sp) },
-                                onClick = { attach = false; pickFile() },
-                            )
-                            if (!isClaude) {
-                                DropdownMenuItem(
-                                    leadingIcon = { Icon(QMusicIcons.Poll, null, tint = Ink) },
-                                    text = { Text(s.poll, color = TextPrimary, fontSize = 14.sp) },
-                                    onClick = { attach = false; pollDialog = true },
-                                )
-                            }
-                            DropdownMenuItem(
-                                leadingIcon = { Icon(QMusicIcons.Location, null, tint = Ink) },
-                                text = { Text(s.location, color = TextPrimary, fontSize = 14.sp) },
-                                onClick = {
-                                    attach = false
-                                    controller.reportInfo(s.locationFinding)
-                                    pickLocation()
-                                },
-                            )
-                            DropdownMenuItem(
-                                leadingIcon = { Icon(QMusicIcons.Contact, null, tint = Ink) },
-                                text = { Text(s.contact, color = TextPrimary, fontSize = 14.sp) },
-                                onClick = { attach = false; pickContact() },
-                            )
-                            options.forEach { item ->
-                                DropdownMenuItem(
-                                    leadingIcon = { Icon(if (item.kind == ShareKind.SONG) QMusicIcons.Headphones else QMusicIcons.VideoPlay, null, tint = Ink) },
-                                    text = {
-                                        Column {
-                                            Text(if (item.kind == ShareKind.SONG) s.shareSong else s.shareVideo, color = TextPrimary, fontSize = 14.sp)
-                                            Text(item.title, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        }
-                                    },
-                                    onClick = {
-                                        attach = false
-                                        controller.send(other, "", item)
-                                    },
-                                )
-                            }
+                    IconButton(onClick = {
+                        attach = !attach
+                        if (attach) {
+                            emojiOpen = false
+                            keyboard?.hide()
                         }
-                    }
+                    }) { Icon(if (attach) QMusicIcons.Close else QMusicIcons.Add, contentDescription = null, tint = Ink) }
                     Row(
                         modifier = Modifier
                             .weight(1f)
@@ -1588,6 +1534,7 @@ private fun ConversationPage(
                         Box(
                             Modifier.size(40.dp).clip(CircleShape).clickable {
                                 emojiOpen = !emojiOpen
+                                if (emojiOpen) attach = false
                                 if (emojiOpen) keyboard?.hide() else { runCatching { inputFocus.requestFocus() }; keyboard?.show() }
                             },
                             contentAlignment = Alignment.Center,
@@ -1606,7 +1553,7 @@ private fun ConversationPage(
                             cursorBrush = SolidColor(Ink),
                             maxLines = 6,
                             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                            modifier = Modifier.fillMaxWidth().focusRequester(inputFocus).onFocusChanged { if (it.isFocused) emojiOpen = false },
+                            modifier = Modifier.fillMaxWidth().focusRequester(inputFocus).onFocusChanged { if (it.isFocused) { emojiOpen = false; attach = false } },
                         )
                     }
                     }
@@ -1713,6 +1660,39 @@ private fun ConversationPage(
                 }
             }
         }
+        if (attach && !isBlocked && !writeLocked) {
+            val tr = !s.english
+            val actions = buildList {
+                add(AttachAction(if (tr) "Galeri" else "Gallery", QMusicIcons.Samples, Color(0xFF1E88E5)) { attach = false; pickPhoto() })
+                add(AttachAction(s.camera, QMusicIcons.Camera, Color(0xFFE91E63)) { attach = false; takePhoto() })
+                add(AttachAction(s.location, QMusicIcons.Location, Color(0xFF00B86B)) {
+                    attach = false
+                    controller.reportInfo(s.locationFinding)
+                    pickLocation()
+                })
+                add(AttachAction(s.contact, QMusicIcons.Contact, Color(0xFF2196F3)) { attach = false; pickContact() })
+                add(AttachAction(if (tr) "Belge" else "Document", QMusicIcons.File, Color(0xFF7E57C2)) { attach = false; pickFile() })
+                add(AttachAction(s.videoAttach, QMusicIcons.VideoPlay, Color(0xFFF4511E)) { attach = false; pickVideo() })
+                if (!isClaude) add(AttachAction(s.poll, QMusicIcons.Poll, Color(0xFFFFB300)) { attach = false; pollDialog = true })
+                // What plays in Nuvelo now: sent as a card.
+                shareables().forEach { item ->
+                    val song = item.kind == ShareKind.SONG
+                    add(AttachAction(if (song) s.shareSong else s.shareVideo, if (song) QMusicIcons.Headphones else QMusicIcons.VideoPlay, Color(0xFF1DB954)) {
+                        attach = false
+                        controller.send(other, "", item)
+                    })
+                }
+            }
+            AttachPanel(
+                actions = actions,
+                onPhoto = { photo ->
+                    attach = false
+                    sendPhotos(listOf(photo))
+                },
+                onDismiss = { attach = false },
+                modifier = Modifier.navigationBarsPadding(),
+            )
+        }
         if (emojiOpen && !isBlocked && !writeLocked) {
             MediaKeyboard(
                 controller, s,
@@ -1722,6 +1702,7 @@ private fun ConversationPage(
                     replyTo = null
                     emojiOpen = false
                 },
+                onDismiss = { emojiOpen = false },
                 modifier = Modifier.navigationBarsPadding(),
             )
         }
@@ -2252,10 +2233,7 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
             }
         }
         if (bigPhoto && user.photo != null) {
-            PlatformBackHandler(enabled = true) { bigPhoto = false }
-            Box(Modifier.fillMaxSize().background(InkInverse).clickable { bigPhoto = false }, contentAlignment = Alignment.Center) {
-                AsyncImage(model = user.photo.replace("=s96-c", "=s1024-c"), contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth())
-            }
+            ZoomablePhoto(user.photo, user.name) { bigPhoto = false }
         }
         viewingPhotos?.let { (list, index) ->
             PhotoViewer(list, index, load = { i -> controller.imageBytes(user, i) }) { viewingPhotos = null }
@@ -2315,7 +2293,21 @@ private fun withDays(list: List<ChatMessage>, unreadAfter: Long = Long.MAX_VALUE
 private fun LinkedText(text: String, color: Color, linkColor: Color, modifier: Modifier) {
     val found = links(text)
     if (found.isEmpty()) {
-        Text(text = text, color = color, fontSize = 16.sp, lineHeight = 21.sp, modifier = modifier)
+        // Calls logged in the conversation ("📞 Missed call"): a drawn phone in front, not the emoji.
+        val parts = ChatPreview.split(text, false)
+        if (parts.kind == PreviewKind.CALL || parts.kind == PreviewKind.MISSED_CALL || parts.kind == PreviewKind.VIDEO_CALL) {
+            Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    ChatPreview.icon(parts.kind),
+                    contentDescription = null,
+                    tint = if (parts.kind == PreviewKind.MISSED_CALL) Color(0xFFFF5A5F) else color,
+                    modifier = Modifier.padding(end = 8.dp).size(18.dp),
+                )
+                Text(text = parts.text, color = color, fontSize = 16.sp, lineHeight = 21.sp)
+            }
+            return
+        }
+        Text(text = emojiFitted(text), color = color, fontSize = 16.sp, lineHeight = 21.sp, style = androidx.compose.ui.text.TextStyle(lineHeightStyle = EvenLines), modifier = modifier)
         return
     }
     val annotated = androidx.compose.ui.text.buildAnnotatedString {
@@ -2539,7 +2531,15 @@ private fun Bubble(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
-                        Text(ChatPreview.plain(quoted.text, s.english), color = fgSoft, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            emojiFitted(ChatPreview.plain(quoted.text, s.english)),
+                            color = fgSoft,
+                            fontSize = 13.sp,
+                            lineHeight = 17.sp,
+                            style = androidx.compose.ui.text.TextStyle(lineHeightStyle = EvenLines),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                     if (quoted.thumb.isNotEmpty()) QuoteThumb(quoted.thumb)
                 }

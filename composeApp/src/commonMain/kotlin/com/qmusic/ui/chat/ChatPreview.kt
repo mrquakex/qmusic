@@ -2,6 +2,7 @@ package com.qmusic.ui.chat
 
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.qmusic.ui.theme.QMusicIcons
+import androidx.compose.ui.text.withStyle
 
 /** What a message preview is about, shown as a drawn icon in front of its words (never as an emoji). */
 enum class PreviewKind { MISSED_CALL, CALL, VIDEO_CALL, VOICE, VIDEO, FILE, PHOTO, LOCATION, CONTACT, POLL, SONG, WATCH, TIMER, ATTACH }
@@ -77,3 +78,40 @@ object ChatPreview {
         PreviewKind.ATTACH -> QMusicIcons.Attach
     }
 }
+
+/**
+ * [text] with its emoji a little smaller than the system draws them (at the text's size they stood bigger than the
+ * letters and pushed their lines apart, as on WhatsApp they do not).
+ */
+fun emojiFitted(text: String, scale: Float = 0.9f): androidx.compose.ui.text.AnnotatedString = androidx.compose.ui.text.buildAnnotatedString {
+    var i = 0
+    var runStart = -1
+    fun isEmoji(cp: Int) = cp >= 0x1F000 || cp in 0x2600..0x27BF || cp in 0x2B00..0x2BFF || cp in 0x2300..0x23FF
+    fun joins(cp: Int) = cp == 0x200D || cp in 0xFE00..0xFE0F || cp in 0x1F3FB..0x1F3FF || cp == 0x20E3 || cp in 0xE0020..0xE007F
+    while (i < text.length) {
+        val c = text[i]
+        val cp = if (c.isHighSurrogate() && i + 1 < text.length && text[i + 1].isLowSurrogate()) {
+            ((c.code - 0xD800) shl 10) + (text[i + 1].code - 0xDC00) + 0x10000
+        } else {
+            c.code
+        }
+        val size = if (cp > 0xFFFF) 2 else 1
+        val emojiPart = isEmoji(cp) || (runStart >= 0 && joins(cp))
+        if (emojiPart && runStart < 0) runStart = i
+        if (!emojiPart && runStart >= 0) {
+            withStyle(androidx.compose.ui.text.SpanStyle(fontSize = androidx.compose.ui.unit.TextUnit(scale, androidx.compose.ui.unit.TextUnitType.Em))) { append(text, runStart, i) }
+            runStart = -1
+        }
+        if (!emojiPart) append(text, i, i + size)
+        i += size
+    }
+    if (runStart >= 0) {
+        withStyle(androidx.compose.ui.text.SpanStyle(fontSize = androidx.compose.ui.unit.TextUnit(scale, androidx.compose.ui.unit.TextUnitType.Em))) { append(text, runStart, text.length) }
+    }
+}
+
+/** Lines that keep an even height whether or not they hold an emoji (it is centred in the line, not let out of it). */
+val EvenLines: androidx.compose.ui.text.style.LineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+    alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+    trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None,
+)

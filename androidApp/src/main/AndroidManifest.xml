@@ -39,6 +39,10 @@
     <!-- Ringtones: setting the phone's ringtone, notification and alarm sounds, and giving a contact a ringtone. -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- The latest photos in the chat's attach panel (Android 14+: only the ones the person allows, if so). -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_CONTACTS" />
 
     <queries>

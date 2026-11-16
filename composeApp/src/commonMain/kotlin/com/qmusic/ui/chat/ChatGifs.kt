@@ -1,5 +1,8 @@
 package com.qmusic.ui.chat
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -67,23 +70,33 @@ internal fun MediaKeyboard(
     s: ChatStrings,
     onEmoji: (String) -> Unit,
     onGif: (GifItem, sticker: Boolean) -> Unit,
+    onDismiss: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var tab by remember { mutableIntStateOf(0) }
-    Column(modifier.fillMaxWidth().background(DarkSurface)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    ExpandablePanel(collapsed = 360.dp, onDismiss = onDismiss, modifier = modifier) {
+        // Emoji, GIF and stickers as one segmented control (as on WhatsApp).
+        Row(
+            Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp).clip(RoundedCornerShape(50))
+                .border(1.dp, TextSecondary.copy(alpha = 0.3f), RoundedCornerShape(50)),
+        ) {
             listOf(s.emojiTab, s.gifTab, s.stickerTab).forEachIndexed { i, label ->
-                Text(
-                    label,
-                    color = if (tab == i) InkInverse else TextPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clip(RoundedCornerShape(50)).background(if (tab == i) Ink else DarkSurfaceVariant).clickable { tab = i }.padding(horizontal = 14.dp, vertical = 7.dp),
-                )
+                val on = tab == i
+                Box(
+                    Modifier.width(76.dp).height(38.dp).background(if (on) Ink.copy(alpha = 0.12f) else Color.Transparent).clickable { tab = i },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val tint = if (on) TextPrimary else TextSecondary
+                    when (i) {
+                        0 -> Icon(QMusicIcons.Mood, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
+                        1 -> Text("GIF", color = tint, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                        else -> StickerGlyph(tint, 21.dp)
+                    }
+                }
             }
         }
         when (tab) {
-            0 -> EmojiPanel(onEmoji = onEmoji)
+            0 -> EmojiPanel(onEmoji = onEmoji, modifier = Modifier.weight(1f))
             else -> GifGrid(controller, s, sticker = tab == 2, onPick = { onGif(it, tab == 2) })
         }
     }
@@ -108,7 +121,7 @@ private fun GifGrid(controller: ChatController, s: ChatStrings, sticker: Boolean
             grid.scrollToItem(0)
         }
     }
-    Column(Modifier.fillMaxWidth().height(300.dp)) {
+    Column(Modifier.fillMaxWidth().fillMaxHeight()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp).clip(RoundedCornerShape(20.dp)).background(DarkSurfaceVariant).padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
