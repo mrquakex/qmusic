@@ -363,9 +363,10 @@ private fun TopBar(s: VideoStrings, onSearch: () -> Unit, onAccount: () -> Unit)
         modifier = Modifier.fillMaxWidth().background(VideoColors.Background).padding(start = 12.dp, end = 4.dp).height(52.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        com.qmusic.ui.theme.QMusicLogo(size = 30.dp, tint = Ink)
-        Spacer(Modifier.width(8.dp))
-        Text(s.section, color = VideoColors.Text, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        // The app's written logo, as on the music and the messages.
+        Box(Modifier.weight(1f).padding(start = 4.dp), contentAlignment = Alignment.CenterStart) {
+            com.qmusic.ui.theme.NuveloWordmark(letterHeight = 18.dp, color = VideoColors.Text)
+        }
         IconButton(onClick = onSearch) { Icon(QMusicIcons.Search, s.searchHint, tint = VideoColors.Text) }
         IconButton(onClick = onAccount) { Icon(QMusicIcons.Account, s.account, tint = VideoColors.Text) }
     }

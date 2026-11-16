@@ -57,6 +57,7 @@ import com.qmusic.ui.rememberShare
 import com.qmusic.ui.theme.BgRoot
 import com.qmusic.ui.theme.DarkSurfaceVariant
 import com.qmusic.ui.theme.QMusicIcons
+import com.qmusic.ui.theme.DarkSurface
 import com.qmusic.ui.theme.TextMuted
 import com.qmusic.ui.theme.TextPrimary
 import com.qmusic.ui.theme.TextSecondary
@@ -142,8 +143,13 @@ internal fun InviteDialog(controller: ChatController, s: ChatStrings, group: Cha
     val scope = rememberCoroutineScope()
     val share = rememberShare()
     var code by remember(group.uid) { mutableStateOf<String?>(null) }
+    var failed by remember(group.uid) { mutableStateOf(false) }
     var confirmReset by remember { mutableStateOf(false) }
-    LaunchedEffect(group.uid) { code = controller.inviteCode(group) }
+    // A member gets the link an admin made; with none yet, it says who can make it (not a raw database error).
+    LaunchedEffect(group.uid) {
+        code = controller.inviteCode(group, report = false)
+        failed = code == null
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DarkSurfaceVariant,
@@ -151,15 +157,28 @@ internal fun InviteDialog(controller: ChatController, s: ChatStrings, group: Cha
         text = {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 val c = code
-                if (c == null) {
+                if (c == null && failed) {
+                    Box(Modifier.size(56.dp).clip(CircleShape).background(DarkSurface), contentAlignment = Alignment.Center) {
+                        Icon(QMusicIcons.Lock, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(24.dp))
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        if (admin) s.inviteFailed else s.inviteAdminsOnly,
+                        color = TextPrimary,
+                        fontSize = 15.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                } else if (c == null) {
                     CircularProgressIndicator(color = Ink, strokeWidth = 2.dp, modifier = Modifier.padding(24.dp))
                 } else {
                     Box(Modifier.clip(RoundedCornerShape(16.dp)).background(Color.White).padding(12.dp)) { QrCode(qeyfGroupLink(c), Modifier.size(200.dp)) }
                     Spacer(Modifier.height(10.dp))
                     Text(qeyfGroupLink(c), color = TextSecondary, fontSize = 12.sp, textAlign = TextAlign.Center)
                 }
-                Spacer(Modifier.height(8.dp))
-                Text(s.inviteLinkNote, color = TextMuted, fontSize = 12.sp, textAlign = TextAlign.Center)
+                if (!failed) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(s.inviteLinkNote, color = TextMuted, fontSize = 12.sp, textAlign = TextAlign.Center)
+                }
                 if (admin && c != null) {
                     Text(
                         s.inviteReset,
@@ -187,7 +206,11 @@ internal fun InviteDialog(controller: ChatController, s: ChatStrings, group: Cha
                 TextButton(onClick = {
                     confirmReset = false
                     code = null
-                    scope.launch { code = controller.inviteCode(group, renew = true) }
+                    failed = false
+                    scope.launch {
+                        code = controller.inviteCode(group, renew = true, report = false)
+                        failed = code == null
+                    }
                 }) { Text(s.inviteReset, color = Color(0xFFFF5A5F)) }
             },
             dismissButton = { TextButton(onClick = { confirmReset = false }) { Text(s.cancel, color = TextSecondary) } },

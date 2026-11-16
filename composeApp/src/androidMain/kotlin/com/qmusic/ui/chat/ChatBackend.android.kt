@@ -388,6 +388,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             typingRec = child("typingRec").getValue(Boolean::class.java) == true,
             favorite = child("favorite").getValue(Boolean::class.java) == true,
             locked = child("locked").getValue(Boolean::class.java) == true,
+            mentioned = child("mention").getValue(Boolean::class.java) == true,
         )
     }
 
@@ -947,6 +948,10 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         updates["userChats/${me.uid}/$groupId/read"] = ServerValue.TIMESTAMP
         @Suppress("UNCHECKED_CAST")
         val mentions = (message["mentions"] as? Map<String, Boolean>)?.takeIf { it.isNotEmpty() }
+        // Who is named in it sees an @ beside the group in their list, until they read it (as on WhatsApp).
+        mentions?.keys?.filter { uid -> uid != me.uid && group.members.any { it.user.uid == uid } }?.forEach { uid ->
+            updates["userChats/$uid/$groupId/mention"] = true
+        }
         updates["notify/${root.child("notify").push().key}"] = buildMap<String, Any?> {
             put("from", me.uid)
             put("to", groupId)
@@ -1676,6 +1681,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val updates = hashMapOf<String, Any?>(
             "userChats/$uid/$chatId/read" to ServerValue.TIMESTAMP,
             "userChats/$uid/$chatId/unread" to 0,
+            "userChats/$uid/$chatId/mention" to null,
         )
         // Who hides their read marks only marks it for themselves.
         if (!_privacy.value.hideReadReceipts) updates["chats/$chatId/read/$uid"] = ServerValue.TIMESTAMP

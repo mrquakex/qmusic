@@ -194,6 +194,7 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
                 }
                 Spacer(Modifier.height(12.dp))
                 Text(me.name, color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                UserBadge(me.uid, modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
                 Text("@" + me.username, color = TextSecondary, fontSize = 14.sp)
             }
         }

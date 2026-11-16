@@ -218,7 +218,7 @@ internal fun StatusGlyph(tint: Color, size: Dp) {
 
 /** The big title bar of a tab: the title on the left, the actions on the right. */
 @Composable
-internal fun HomeTitle(title: String, onExit: () -> Unit, actions: @Composable () -> Unit = {}) {
+internal fun HomeTitle(title: String, onExit: () -> Unit, logo: Boolean = false, actions: @Composable () -> Unit = {}) {
     Row(
         // It stays at the top while the list scrolls under it (on the page's colour, so nothing shows through).
         Modifier.fillMaxWidth().background(BgRoot).statusBarsPadding().height(60.dp).padding(start = 4.dp, end = 4.dp),
@@ -231,7 +231,14 @@ internal fun HomeTitle(title: String, onExit: () -> Unit, actions: @Composable (
         } else {
             IconButton(onClick = onExit) { Icon(QMusicIcons.Back, contentDescription = null, tint = Ink) }
         }
-        Text(title, color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        if (logo) {
+            // The chats' page carries the app's name, as WhatsApp does.
+            Box(Modifier.weight(1f).padding(start = 4.dp), contentAlignment = Alignment.CenterStart) {
+                com.qmusic.ui.theme.NuveloWordmark(letterHeight = 18.dp, color = TextPrimary)
+            }
+        } else {
+            Text(title, color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        }
         actions()
     }
 }
@@ -358,7 +365,7 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
             stickyHeader(key = "title") {
-                HomeTitle(s.title, onExit) {
+                HomeTitle(s.title, onExit, logo = true) {
                     val incoming by controller.friendRequests.collectAsState()
                     IconButton(onClick = { camera() }) { Icon(QMusicIcons.Camera, contentDescription = s.camera, tint = Ink) }
                     IconButton(onClick = { controller.openFriends() }) {
@@ -396,7 +403,8 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
                     FilterChip(s.filterAll, filter == ChatFilter.ALL) { controller.setFilter(ChatFilter.ALL) }
                     FilterChip(if (unreadTotal > 0) "${s.filterUnread} $unreadTotal" else s.filterUnread, filter == ChatFilter.UNREAD) { controller.setFilter(ChatFilter.UNREAD) }
                     FilterChip(s.filterFavorites, filter == ChatFilter.FAVORITES) { controller.setFilter(ChatFilter.FAVORITES) }
-                    FilterChip(s.filterGroups, filter == ChatFilter.GROUPS) { controller.setFilter(ChatFilter.GROUPS) }
+                    val groupsUnread = all.orEmpty().count { it.isGroup && it.unread }
+                    FilterChip(if (groupsUnread > 0) "${s.filterGroups} $groupsUnread" else s.filterGroups, filter == ChatFilter.GROUPS) { controller.setFilter(ChatFilter.GROUPS) }
                     FilterChip(if (archived.isNotEmpty()) "${s.filterArchived} ${archived.size}" else s.filterArchived, filter == ChatFilter.ARCHIVED) { controller.setFilter(ChatFilter.ARCHIVED) }
                 }
             }
@@ -463,6 +471,7 @@ private fun ChatsTab(controller: ChatController, s: ChatStrings, me: ChatUser, o
                         ring = if (hasStatus) (if (t.other.uid in unseen) RingUnseen else RingSeen) else null,
                         listening = if (t.isGroup) null else listeningNow[t.other.uid],
                         onListening = { listeningNow[t.other.uid]?.let { controller.openShare(it) } },
+                        tick = rememberListTick(controller, t, me),
                     ) { controller.openConversation(t.other) }
                 }
             }
@@ -581,6 +590,7 @@ private fun GroupsTab(controller: ChatController, s: ChatStrings, me: ChatUser, 
                     onAvatar = { controller.openGroupInfo(t.other) },
                     actions = threadActions(controller, s, t, now) { muteFor = t },
                     now = now,
+                    tick = rememberListTick(controller, t, me),
                 ) { controller.openConversation(t.other) }
             }
         }
@@ -859,5 +869,34 @@ private fun DetailAction(label: String, icon: ImageVector, onClick: () -> Unit) 
         Icon(icon, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
         Spacer(Modifier.height(6.dp))
         Text(label, color = TextPrimary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/**
+ * The ticks of our last message in a one-to-one conversation of the list: read (green), on their phone (two grey),
+ * or only sent (one); null when the last message is not ours (or it is a group, or Claude).
+ */
+@Composable
+private fun rememberListTick(controller: ChatController, t: ChatThread, me: ChatUser): TickState? {
+    if (t.lastFrom != me.uid || t.other.uid == CLAUDE_BOT_UID) return null
+    if (t.isGroup) {
+        // A group: green once every other member read it, two grey once it is on all their phones.
+        val group by remember(t.id) { controller.group(t.other) }.collectAsState(initial = null)
+        val read by remember(t.id) { controller.readMarks(t.other) }.collectAsState(initial = emptyMap())
+        val delivered by remember(t.id) { controller.deliveredMarks(t.other) }.collectAsState(initial = emptyMap())
+        val others = group?.members?.map { it.user.uid }?.filter { it != me.uid && it != CLAUDE_BOT_UID }.orEmpty()
+        if (others.isEmpty()) return TickState.SENT
+        return when {
+            others.all { (read[it] ?: 0L) >= t.lastAt } -> TickState.READ
+            others.all { (read[it] ?: 0L) >= t.lastAt || (delivered[it] ?: 0L) >= t.lastAt } -> TickState.DELIVERED
+            else -> TickState.SENT
+        }
+    }
+    val read by remember(t.id) { controller.otherReadAt(t.other) }.collectAsState(initial = 0L)
+    val delivered by remember(t.id) { controller.otherDeliveredAt(t.other) }.collectAsState(initial = 0L)
+    return when {
+        read >= t.lastAt -> TickState.READ
+        delivered >= t.lastAt -> TickState.DELIVERED
+        else -> TickState.SENT
     }
 }

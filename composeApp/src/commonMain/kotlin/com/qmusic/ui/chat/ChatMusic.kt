@@ -3,7 +3,9 @@ package com.qmusic.ui.chat
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,6 +48,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -745,4 +749,160 @@ internal fun StatusSongPart(song: SharedItem, onPick: (Long) -> Unit, onDismiss:
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(w.cancel, color = TextSecondary) } },
     )
+}
+
+// ==================================================================== the founder's badge
+
+/** Whether [uid] is the founder of Nuvelo (who made it): they wear its badge. */
+fun isFounder(uid: String): Boolean = uid == CLAUDE_OWNER_UID
+
+/**
+ * The founder's badge: a pill of the ink with the n and "Founder" (on a profile, in a group's members); [compact]: a
+ * small round seal with the n alone, beside a name in the lists.
+ */
+@Composable
+fun FounderBadge(compact: Boolean = false, modifier: Modifier = Modifier) {
+    val english = ChatMusic.english
+    // It glows on and off, slowly (a heartbeat, not a blinker).
+    val glow by androidx.compose.animation.core.rememberInfiniteTransition(label = "founder").animateFloat(
+        initialValue = 1f,
+        targetValue = 0.45f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(1100, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "founderGlow",
+    )
+    @Suppress("NAME_SHADOWING")
+    val modifier = modifier.graphicsLayer { alpha = glow }
+    if (compact) {
+        Box(
+            modifier.size(17.dp).clip(CircleShape).background(Ink),
+            contentAlignment = Alignment.Center,
+        ) { com.qmusic.ui.theme.QMusicLogo(size = 12.dp, tint = InkInverse) }
+        return
+    }
+    Row(
+        modifier.clip(RoundedCornerShape(50)).background(Ink).padding(start = 5.dp, end = 10.dp, top = 3.dp, bottom = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(18.dp).clip(CircleShape).background(InkInverse), contentAlignment = Alignment.Center) {
+            com.qmusic.ui.theme.QMusicLogo(size = 13.dp, tint = Ink)
+        }
+        Spacer(Modifier.width(6.dp))
+        Text(if (english) "Founder" else "Kurucu", color = InkInverse, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.3.sp)
+    }
+}
+
+// ==================================================================== the developer's badge
+
+/** Badges given by the founder (badges/{uid} = "developer"); read by everyone, set only by the founder. */
+object Badges {
+    /** Who wears the developer's badge. */
+    val developers = MutableStateFlow<Set<String>>(emptySet())
+    /** Gives or takes [uid]'s developer badge (the founder only); false when it could not. */
+    var setDeveloper: suspend (String, Boolean) -> Boolean = { _, _ -> false }
+}
+
+/** The badge [uid] wears, if any: the founder's, or a developer's ([compact]: the small seal beside a name). */
+@Composable
+fun UserBadge(uid: String, compact: Boolean = false, modifier: Modifier = Modifier) {
+    val developers by Badges.developers.collectAsState()
+    when {
+        isFounder(uid) -> FounderBadge(compact, modifier)
+        uid in developers -> DeveloperBadge(compact, modifier)
+    }
+}
+
+/** Whether [uid] wears any badge (to space things around it). */
+@Composable
+fun hasBadge(uid: String): Boolean {
+    val developers by Badges.developers.collectAsState()
+    return isFounder(uid) || uid in developers
+}
+
+/**
+ * A developer's badge: the founder's pill turned inside out (an outline of the ink, the code sign in it, "Developer"),
+ * so the two go together and the founder's stays the solid one; [compact]: a small outlined seal with the sign.
+ */
+@Composable
+fun DeveloperBadge(compact: Boolean = false, modifier: Modifier = Modifier) {
+    val english = ChatMusic.english
+    // A band of light sweeps across it now and then (drawn only over the badge's own lines and letters).
+    val sweep by androidx.compose.animation.core.rememberInfiniteTransition(label = "developer").animateFloat(
+        initialValue = -1f,
+        targetValue = 2f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(2200, delayMillis = 600, easing = androidx.compose.animation.core.LinearEasing),
+        ),
+        label = "developerSweep",
+    )
+    val shine = if (com.qmusic.ui.theme.lightTheme) Color.White.copy(alpha = 0.85f) else Color(0xFF7A7A86)
+    @Suppress("NAME_SHADOWING")
+    val modifier = modifier
+        .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            val x = size.width * sweep
+            val band = size.width.coerceAtLeast(size.height) * 0.45f
+            drawRect(
+                androidx.compose.ui.graphics.Brush.linearGradient(
+                    listOf(Color.Transparent, shine, Color.Transparent),
+                    start = androidx.compose.ui.geometry.Offset(x - band, 0f),
+                    end = androidx.compose.ui.geometry.Offset(x + band, size.height),
+                ),
+                blendMode = androidx.compose.ui.graphics.BlendMode.SrcAtop,
+            )
+        }
+    if (compact) {
+        Box(
+            modifier.size(17.dp).clip(CircleShape).border(1.5.dp, Ink, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) { CodeSign(Ink, 9.dp) }
+        return
+    }
+    Row(
+        modifier.clip(RoundedCornerShape(50)).border(1.5.dp, Ink, RoundedCornerShape(50)).padding(start = 6.dp, end = 10.dp, top = 3.dp, bottom = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(17.dp).clip(CircleShape).background(Ink), contentAlignment = Alignment.Center) { CodeSign(InkInverse, 10.dp) }
+        Spacer(Modifier.width(6.dp))
+        Text(if (english) "Developer" else "Geliştirici", color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.3.sp)
+    }
+}
+
+/** The code sign, drawn: "< >" with a slash between. */
+@Composable
+private fun CodeSign(color: Color, size: androidx.compose.ui.unit.Dp) {
+    androidx.compose.foundation.Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = w * 0.14f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+        drawPath(androidx.compose.ui.graphics.Path().apply { moveTo(w * 0.3f, h * 0.22f); lineTo(w * 0.05f, h * 0.5f); lineTo(w * 0.3f, h * 0.78f) }, color, style = stroke)
+        drawPath(androidx.compose.ui.graphics.Path().apply { moveTo(w * 0.7f, h * 0.22f); lineTo(w * 0.95f, h * 0.5f); lineTo(w * 0.7f, h * 0.78f) }, color, style = stroke)
+        drawLine(color, androidx.compose.ui.geometry.Offset(w * 0.58f, h * 0.12f), androidx.compose.ui.geometry.Offset(w * 0.42f, h * 0.88f), strokeWidth = w * 0.12f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+    }
+}
+
+/** On someone's profile, for the founder alone: giving or taking their developer badge. */
+@Composable
+internal fun DeveloperBadgeSwitch(controller: ChatController, user: ChatUser) {
+    val english = ChatMusic.english
+    val developers by Badges.developers.collectAsState()
+    val on = user.uid in developers
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    SettingSwitch(
+        if (english) "Developer badge" else "Geliştirici rozeti",
+        if (english) "Only you can give it; everyone sees it on them" else "Bunu yalnızca sen verebilirsin; herkes onda görür",
+        on,
+    ) { give ->
+        if (!busy) {
+            busy = true
+            scope.launch {
+                if (!Badges.setDeveloper(user.uid, give)) controller.reportError(if (english) "That did not work, try again" else "Olmadı, tekrar dene")
+                busy = false
+            }
+        }
+    }
 }

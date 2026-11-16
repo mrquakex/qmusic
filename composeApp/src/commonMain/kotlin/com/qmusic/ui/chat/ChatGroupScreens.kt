@@ -215,7 +215,10 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
         item { SectionTitle(s.members) }
         items(g?.members.orEmpty(), key = { it.user.uid }) { m ->
             PersonRow(m.user, onClick = { if (m.user.uid != me.uid) memberMenu = m.user }) {
-                if (m.admin) Text(s.admin, color = ClaudeCoral, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    UserBadge(m.user.uid, modifier = Modifier.padding(end = if (m.admin && hasBadge(m.user.uid)) 8.dp else 0.dp))
+                    if (m.admin) Text(s.admin, color = ClaudeCoral, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
             }
         }
         if (!messages.isNullOrEmpty()) {

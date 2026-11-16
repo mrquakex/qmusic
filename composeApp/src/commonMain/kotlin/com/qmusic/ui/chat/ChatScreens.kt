@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.horizontalScroll
@@ -567,6 +568,8 @@ internal fun ThreadRow(
     ring: Color? = null,
     listening: SharedItem? = null,
     onListening: () -> Unit = {},
+    /** The state of our last message, when the last one is ours (sent, on their phone, read). */
+    tick: TickState? = null,
     onClick: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -583,15 +586,18 @@ internal fun ThreadRow(
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    t.other.name,
-                    color = TextPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = if (t.unread) FontWeight.Bold else FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        t.other.name,
+                        color = TextPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = if (t.unread) FontWeight.Bold else FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (!t.isGroup) UserBadge(t.other.uid, compact = true, modifier = Modifier.padding(start = 5.dp))
+                }
                 if (t.muted(if (now > 0) now else Clock.System.now().toEpochMilliseconds())) Icon(QMusicIcons.VolumeMute, contentDescription = null, tint = TextMuted, modifier = Modifier.padding(end = 6.dp).size(14.dp))
                 if (t.pinned > 0) Icon(QMusicIcons.Pin, contentDescription = null, tint = TextMuted, modifier = Modifier.padding(end = 6.dp).size(14.dp))
                 Text(listTime(t.lastAt, s), color = if (t.unread) TickRead else TextMuted, fontSize = 12.sp)
@@ -599,6 +605,8 @@ internal fun ThreadRow(
             Spacer(Modifier.height(3.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val prefix = when {
+                    // Ours: the ticks say it (as on WhatsApp), not "You:".
+                    t.lastFrom == me.uid && tick != null -> ""
                     t.lastFrom == me.uid -> "${s.you}: "
                     t.isGroup && t.lastFromName.isNotEmpty() && !t.lastText.startsWith("Claude: ") -> "${t.lastFromName}: "
                     else -> ""
@@ -613,6 +621,7 @@ internal fun ThreadRow(
                         modifier = Modifier.weight(1f),
                     )
                 } else {
+                    if (tick != null) Box(Modifier.padding(end = 4.dp)) { MessageTick(tick, TextSecondary) }
                     val parts = remember(t.lastText, s.english) { ChatPreview.split(t.lastText, s.english) }
                     parts.kind?.let { kind ->
                         Text(prefix, color = if (t.unread) TextPrimary else TextSecondary, fontSize = 14.sp, maxLines = 1)
@@ -632,6 +641,13 @@ internal fun ThreadRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
+                }
+                if (t.unread && t.mentioned) {
+                    // Named in it: a green @ before the count.
+                    Box(
+                        Modifier.padding(start = 8.dp).size(20.dp).clip(CircleShape).background(TickRead),
+                        contentAlignment = Alignment.Center,
+                    ) { Text("@", color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
                 }
                 if (t.unread) {
                     val n = t.unreadCount.coerceAtLeast(1)
@@ -862,6 +878,7 @@ private fun ConversationPage(
     val callPeople by remember(other.uid) { if (other.isGroup) controller.groupCallParticipants(other) else kotlinx.coroutines.flow.flowOf(emptyList()) }.collectAsState(initial = emptyList())
     val group by remember(other.uid) { if (isGroup) controller.group(other) else kotlinx.coroutines.flow.flowOf(null) }.collectAsState(initial = null)
     val memberNames = remember(group) { group?.members?.associate { it.user.uid to it.user.name }.orEmpty() }
+    val memberUsers = remember(group) { group?.members?.associate { it.user.uid to it.user }.orEmpty() }
     val title = group?.name ?: other.name
     val blocked by controller.blocked.collectAsState()
     val isBlocked = !isGroup && other.uid in blocked
@@ -1049,7 +1066,10 @@ private fun ConversationPage(
                     ChatAvatar(other.copy(name = title), 38.dp)
                     Spacer(Modifier.width(10.dp))
                     Column {
-                        Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                            if (!isGroup) UserBadge(other.uid, compact = true, modifier = Modifier.padding(start = 5.dp))
+                        }
                         val seen = presence
                         val status = when {
                             recordingThem -> s.recordingVoice
@@ -1289,7 +1309,7 @@ private fun ConversationPage(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
-                    items(shown, key = { it.key }) { row ->
+                    itemsIndexed(shown, key = { _, it -> it.key }) { index, row ->
                         when (row) {
                             is ListRow.Day -> Text(
                                 dayLabel(row.at, s),
@@ -1353,6 +1373,10 @@ private fun ConversationPage(
                                     otherName = title,
                                     names = memberNames,
                                     senderName = if (isGroup && !mine) (memberNames[row.m.from] ?: if (row.m.from == CLAUDE_BOT_UID) "Claude" else "?") else null,
+                                    // In a group, others' messages carry their picture, on the first of a run of theirs
+                                    // (the list is newest first: the one above is the next item).
+                                    avatar = if (isGroup && !mine) (memberUsers[row.m.from] ?: ChatUser(row.m.from, memberNames[row.m.from] ?: if (row.m.from == CLAUDE_BOT_UID) "Claude" else "?", "")) else null,
+                                    firstOfRun = (shown.getOrNull(index + 1) as? ListRow.Message)?.m?.let { above -> above.from != row.m.from || above.system } ?: true,
                                     reactions = reactions[row.m.id].orEmpty(),
                                     myUid = me.uid,
                                     onOpenShare = onOpenShare,
@@ -2168,6 +2192,7 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
                     Box(Modifier.clip(CircleShape).clickable(enabled = user.photo != null) { bigPhoto = true }) { ChatAvatar(user, 132.dp) }
                     Spacer(Modifier.height(16.dp))
                     Text(user.name, color = TextPrimary, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                    UserBadge(user.uid, modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
                     if (user.username.isNotEmpty() && !isClaude) Text("@" + user.username, color = TextSecondary, fontSize = 15.sp)
                     if (fresh.about.isNotBlank()) {
                         Spacer(Modifier.height(6.dp))
@@ -2210,6 +2235,7 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
                 }
             }
             // Their own ringtone for Qeyf calls (a song, or one of Qeyf's sounds).
+            if (isFounder(me.uid) && !isClaude && user.uid != me.uid) item { DeveloperBadgeSwitch(controller, user) }
             if (!isClaude && user.uid != me.uid) item { PersonRingRow(s, user) }
             if (!messages.isNullOrEmpty()) {
                 item { SectionTitle(s.media) }
@@ -2364,6 +2390,10 @@ private fun Bubble(
     openedOnce: Boolean = false,
     onOpenOnce: () -> Unit = {},
     mentionsMe: Boolean = false,
+    /** In a group, the sender (their picture beside the bubble); null for one's own and in a chat of two. */
+    avatar: ChatUser? = null,
+    /** The first of a run of the same sender's messages: it has the picture, the name and the tail. */
+    firstOfRun: Boolean = true,
 ) {
     if (m.system) {
         SystemLine(m.text)
@@ -2419,17 +2449,44 @@ private fun Bubble(
                 modifier = Modifier.align(Alignment.CenterStart).padding(start = 8.dp).size(20.dp).graphicsLayer { rotationZ = 180f },
             )
         }
+        // In a group: the picture, then a tail from the bubble's top corner towards it (the first of a run).
+        val tailed = avatar != null && firstOfRun && !bigEmoji
+        val bubbleShape = if (avatar != null) {
+            RoundedCornerShape(topStart = if (tailed) 0.dp else 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
+        } else {
+            RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp)
+        }
+        val bubbleColor = if (bigEmoji) Color.Transparent else if (m.deleted) DarkSurface else if (mine) Ink else if (fromClaude) ClaudeBubble else DarkSurfaceVariant
+        Row(Modifier.offset { androidx.compose.ui.unit.IntOffset(swipe.value.roundToInt(), 0) }, verticalAlignment = Alignment.Top) {
+        if (avatar != null) {
+            if (firstOfRun) ChatAvatar(avatar, 30.dp) else Spacer(Modifier.width(30.dp))
+            Spacer(Modifier.width(2.dp))
+            if (tailed) {
+                androidx.compose.foundation.Canvas(Modifier.size(width = 7.dp, height = 12.dp)) {
+                    drawPath(
+                        androidx.compose.ui.graphics.Path().apply {
+                            moveTo(size.width, 0f)
+                            lineTo(0f, 0f)
+                            quadraticBezierTo(size.width * 0.55f, size.height * 0.35f, size.width, size.height)
+                            close()
+                        },
+                        bubbleColor,
+                    )
+                }
+            } else {
+                Spacer(Modifier.width(7.dp))
+            }
+        }
         Column(
             modifier = Modifier
-                .offset { androidx.compose.ui.unit.IntOffset(swipe.value.roundToInt(), 0) }
                 .widthIn(max = 300.dp)
-                .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp))
-                .background(if (bigEmoji) Color.Transparent else if (m.deleted) DarkSurface else if (mine) Ink else if (fromClaude) ClaudeBubble else DarkSurfaceVariant)
+                .clip(bubbleShape)
+                .background(bubbleColor)
                 .then(
                     if (highlight) {
-                        Modifier.border(2.dp, ClaudeCoral, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp))
+                        Modifier.border(2.dp, ClaudeCoral, bubbleShape)
                     } else if (assisting != null) {
-                        Modifier.border(2.dp, ClaudeCoral.copy(alpha = pulse), RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp))
+                        Modifier.border(2.dp, ClaudeCoral.copy(alpha = pulse), bubbleShape)
                     } else {
                         Modifier
                     },
@@ -2447,7 +2504,7 @@ private fun Bubble(
             if (m.forwarded && !m.deleted) {
                 Text(s.forwarded, color = fgSoft, fontSize = 11.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, modifier = Modifier.padding(start = 10.dp, end = 12.dp, top = 6.dp))
             }
-            if (senderName != null) {
+            if (senderName != null && firstOfRun) {
                 Text(
                     senderName,
                     color = if (m.from == CLAUDE_BOT_UID) ClaudeCoral else memberColor(m.from),
@@ -2559,6 +2616,7 @@ private fun Bubble(
                     )
                 }
             }
+        }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
             Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {

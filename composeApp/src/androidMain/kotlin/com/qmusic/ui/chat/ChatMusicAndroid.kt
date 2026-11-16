@@ -79,6 +79,42 @@ object ChatMusicAndroid {
         m.removeFromList = { chatId, key -> runCatching { root()?.child("chatLists")?.child(chatId)?.child(key)?.removeValue()?.await() } }
         m.reactions = { chatId -> reactions(chatId) }
         m.react = { chatId, text -> react(chatId, text) }
+        Badges.setDeveloper = { uid, on -> setDeveloper(uid, on) }
+        watchBadges()
+    }
+
+    // ---------------------------------------------------------------- badges
+
+    private var badgesListener: ValueEventListener? = null
+
+    /** Who wears a developer's badge, kept up to date (a small node, read by everyone signed in). */
+    private fun watchBadges() {
+        val ref = root()?.child("badges") ?: return
+        if (badgesListener != null) return
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snap: DataSnapshot) {
+                Badges.developers.value = snap.children.filter { it.getValue(String::class.java) == "developer" }.mapNotNull { it.key }.toSet()
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                Log.w(TAG, "badges: ${error.message}")
+                // Not signed in yet: tried again once there is an account.
+                badgesListener = null
+                scope.launch {
+                    delay(30_000)
+                    watchBadges()
+                }
+            }
+        }
+        badgesListener = listener
+        ref.addValueEventListener(listener)
+    }
+
+    private suspend fun setDeveloper(uid: String, on: Boolean): Boolean {
+        val ref = root()?.child("badges")?.child(uid) ?: return false
+        return withTimeoutOrNull(15_000) {
+            runCatching { if (on) ref.setValue("developer").await() else ref.removeValue().await() }.isSuccess
+        } == true
     }
 
     // ---------------------------------------------------------------- what plays here now

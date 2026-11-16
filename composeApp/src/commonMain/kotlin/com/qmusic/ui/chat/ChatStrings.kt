@@ -353,6 +353,8 @@ data class ChatStrings(
     val unlockToSee: String get() = if (english) "Unlock to see" else "Görmek için kilidi aç"
     val inviteLink: String get() = if (english) "Invite link" else "Davet bağlantısı"
     val inviteLinkNote: String get() = if (english) "Anyone with this link or code can join the group." else "Bu bağlantıya ya da koda sahip herkes gruba katılabilir."
+    val inviteAdminsOnly: String get() = if (english) "Only the group's admins can make its invite link. Ask one of them to share it." else "Davet bağlantısını yalnızca grubun yöneticileri oluşturabilir. Bir yöneticiden paylaşmasını iste."
+    val inviteFailed: String get() = if (english) "The link could not be made. Check the connection and try again." else "Bağlantı oluşturulamadı. İnterneti kontrol edip tekrar dene."
     val inviteShare: String get() = if (english) "Share link" else "Bağlantıyı paylaş"
     val inviteReset: String get() = if (english) "Reset link" else "Bağlantıyı sıfırla"
     val inviteResetNote: String get() = if (english) "The old link stops working." else "Eski bağlantı artık çalışmaz."

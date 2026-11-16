@@ -367,6 +367,8 @@ data class ChatThread(
     val favorite: Boolean = false,
     /** Kept in the locked chats (opened with the phone's lock; notifications do not show it). */
     val locked: Boolean = false,
+    /** Someone named the person with @ in what came since they last read (a group). */
+    val mentioned: Boolean = false,
 ) {
     fun muted(now: Long): Boolean = mutedUntil == -1L || mutedUntil > now
 

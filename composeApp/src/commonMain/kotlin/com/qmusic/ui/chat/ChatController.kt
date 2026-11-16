@@ -239,8 +239,9 @@ class ChatController(
 
     // ------------------------------------------------------------------ group invite links
 
-    suspend fun inviteCode(group: ChatUser, renew: Boolean = false): String? =
-        backend.groupInviteCode(group.uid, renew).onFailure { _error.value = it.message }.getOrNull()
+    /** The group's invite code (made when there is none yet, which only admins may); [report]: a failure shows. */
+    suspend fun inviteCode(group: ChatUser, renew: Boolean = false, report: Boolean = true): String? =
+        backend.groupInviteCode(group.uid, renew).onFailure { if (report) _error.value = it.message }.getOrNull()
 
     suspend fun groupInvite(code: String): GroupInvite? = backend.groupInvite(code)
 
