@@ -81,3 +81,6 @@ actual fun DialogEdgeToEdge() = Unit
 
 @androidx.compose.runtime.Composable
 actual fun rememberRecentPhotos(enabled: Boolean): RecentPhotos = RecentPhotos(emptyList(), false, {}, { null })
+
+@androidx.compose.runtime.Composable
+actual fun rememberStickerMaker(onStep: (StickerMaking) -> Unit, onMade: (GifItem?) -> Unit): () -> Unit = { onMade(null) }

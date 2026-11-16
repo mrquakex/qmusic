@@ -906,3 +906,36 @@ internal fun DeveloperBadgeSwitch(controller: ChatController, user: ChatUser) {
         }
     }
 }
+
+// ==================================================================== Claude for others
+
+/** Who may call Claude: the founder (whose subscription it runs on) and those they gave it to (claudeAccess/{uid}). */
+object ClaudeAccess {
+    val granted = MutableStateFlow<Set<String>>(emptySet())
+    var set: suspend (String, Boolean) -> Boolean = { _, _ -> false }
+    fun allowed(uid: String) = uid == CLAUDE_OWNER_UID || uid in granted.value
+}
+
+/** On someone's profile, for the founder alone: giving or taking Claude (they get their own Claude conversation). */
+@Composable
+internal fun ClaudeAccessSwitch(controller: ChatController, user: ChatUser) {
+    val english = ChatMusic.english
+    val granted by ClaudeAccess.granted.collectAsState()
+    val on = user.uid in granted
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    SettingSwitch(
+        if (english) "Claude" else "Claude yetkisi",
+        if (english) "They get their own Claude chat and can call it in their chats; it runs on your subscription"
+        else "Kendi Claude sohbeti olur, sohbetlerinde de çağırabilir; senin aboneliğinle çalışır",
+        on,
+    ) { give ->
+        if (!busy) {
+            busy = true
+            scope.launch {
+                if (!ClaudeAccess.set(user.uid, give)) controller.reportError(if (english) "That did not work, try again" else "Olmadı, tekrar dene")
+                busy = false
+            }
+        }
+    }
+}

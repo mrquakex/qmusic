@@ -1,5 +1,7 @@
 package com.qmusic.ui.chat
 
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.border
@@ -110,6 +112,25 @@ private fun GifGrid(controller: ChatController, s: ChatStrings, sticker: Boolean
     var problem by remember(sticker) { mutableStateOf<String?>(null) }
     val loader = rememberAnimatedImageLoader()
     val grid = rememberLazyGridState()
+    val english = ChatMusic.english
+    // The person's own stickers (made, favourite, last sent), kept with their account.
+    LaunchedEffect(sticker) { if (sticker) Stickers.start() }
+    val recent by Stickers.recent.collectAsState()
+    val favorites by Stickers.favorites.collectAsState()
+    val mine by Stickers.mine.collectAsState()
+    var making by remember { mutableStateOf(StickerMaking.IDLE) }
+    val makeSticker = rememberStickerMaker(onStep = { making = it }) { made ->
+        if (made != null) {
+            Stickers.addMine(made)
+            controller.reportInfo(if (english) "Your sticker is ready: tap it to send" else "Çıkartman hazır: göndermek için dokun")
+        } else {
+            controller.reportError(if (english) "The sticker could not be made" else "Çıkartma yapılamadı")
+        }
+    }
+    val pick: (GifItem) -> Unit = { item ->
+        if (sticker) Stickers.used(item)
+        onPick(item)
+    }
     // Typing waits a moment before it asks, so each letter is not a search.
     LaunchedEffect(sticker) {
         snapshotFlow { query.trim() }.debounce(350).distinctUntilChanged().collect { q ->
@@ -152,17 +173,49 @@ private fun GifGrid(controller: ChatController, s: ChatStrings, sticker: Boolean
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                items(list, key = { it.id }) { item ->
-                    AsyncImage(
-                        model = item.preview,
-                        imageLoader = loader,
-                        contentDescription = null,
-                        contentScale = if (sticker) ContentScale.Fit else ContentScale.Crop,
-                        modifier = Modifier.aspectRatio(1f).clip(RoundedCornerShape(8.dp))
-                            .background(if (sticker) androidx.compose.ui.graphics.Color.Transparent else DarkSurfaceVariant)
-                            .clickable { onPick(item) },
-                    )
+                if (sticker && query.isBlank()) {
+                    // Making one from a photo, first (as on WhatsApp).
+                    item(key = "make") {
+                        Column(
+                            Modifier.aspectRatio(1f).clip(RoundedCornerShape(12.dp)).border(1.dp, TextSecondary.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                .clickable(enabled = making == StickerMaking.IDLE) { makeSticker() }.padding(6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            if (making != StickerMaking.IDLE) {
+                                CircularProgressIndicator(color = Ink, strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
+                            } else {
+                                Box(Modifier.size(32.dp).clip(androidx.compose.foundation.shape.CircleShape).background(QeyfGreen), contentAlignment = Alignment.Center) {
+                                    Icon(QMusicIcons.Edit, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                when (making) {
+                                    StickerMaking.CUTTING -> if (english) "Cutting out" else "Kesiliyor"
+                                    StickerMaking.UPLOADING -> if (english) "Saving" else "Kaydediliyor"
+                                    StickerMaking.IDLE -> if (english) "Make a sticker" else "Çıkartma oluştur"
+                                },
+                                color = QeyfGreen,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 13.sp,
+                            )
+                        }
+                    }
+                    items(mine, key = { "m" + it.url }) { item -> StickerCell(item, loader, true, pick) }
+                    if (favorites.isNotEmpty()) {
+                        item(key = "favHead", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { GridHeading(if (english) "Favourites" else "Favoriler") }
+                        items(favorites, key = { "f" + it.url }) { item -> StickerCell(item, loader, true, pick) }
+                    }
+                    if (recent.isNotEmpty()) {
+                        item(key = "recentHead", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { GridHeading(if (english) "Recent" else "Son kullanılanlar") }
+                        items(recent, key = { "r" + it.url }) { item -> StickerCell(item, loader, true, pick) }
+                    }
+                    item(key = "popHead", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { GridHeading(if (english) "Popular" else "Popüler") }
                 }
+                items(list, key = { "s" + it.id }) { item -> StickerCell(item, loader, sticker, pick) }
             }
         }
         // KLIPY asks apps to name it where its results show.
@@ -186,4 +239,41 @@ internal fun GifView(gif: ChatGif) {
             Modifier.padding(4.dp).widthIn(max = 240.dp).fillMaxWidth().aspectRatio(ratio).clip(RoundedCornerShape(14.dp))
         },
     )
+}
+
+private val QeyfGreen = Color(0xFF1DAA61)
+
+@Composable
+private fun GridHeading(text: String) {
+    Text(text, color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp, top = 10.dp, bottom = 2.dp))
+}
+
+/** A GIF or a sticker of the panel: a tap sends it; a sticker held goes in or out of the favourites (a star on it). */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun StickerCell(item: GifItem, loader: ImageLoader, sticker: Boolean, onPick: (GifItem) -> Unit) {
+    val favorites by Stickers.favorites.collectAsState()
+    val favorite = sticker && favorites.any { it.url == item.url }
+    Box(
+        Modifier.aspectRatio(1f).clip(RoundedCornerShape(8.dp))
+            .background(if (sticker) Color.Transparent else DarkSurfaceVariant)
+            .combinedClickable(
+                onClick = { onPick(item) },
+                onLongClick = if (sticker) ({ Stickers.toggleFavorite(item) }) else null,
+            ),
+    ) {
+        AsyncImage(
+            model = item.preview,
+            imageLoader = loader,
+            contentDescription = null,
+            contentScale = if (sticker) ContentScale.Fit else ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        if (favorite) {
+            Box(
+                Modifier.align(Alignment.BottomEnd).padding(2.dp).size(18.dp).clip(androidx.compose.foundation.shape.CircleShape).background(QeyfGreen),
+                contentAlignment = Alignment.Center,
+            ) { Icon(QMusicIcons.Star, contentDescription = null, tint = Color.White, modifier = Modifier.size(11.dp)) }
+        }
+    }
 }

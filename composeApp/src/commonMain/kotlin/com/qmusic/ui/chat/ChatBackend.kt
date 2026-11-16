@@ -97,6 +97,9 @@ data class CallLogEntry(
 /** A poll: a question, its choices (2-12), and whether more than one can be picked. */
 data class ChatPoll(val question: String, val options: List<String>, val multiple: Boolean)
 
+/** An event sent in a message: what, when (epoch ms) and where; the answers are its votes (0 going, 1 maybe, 2 not). */
+data class ChatEvent(val title: String, val at: Long, val place: String = "")
+
 /** A place sent in a message. */
 data class ChatLocation(val lat: Double, val lng: Double, val label: String = "")
 
@@ -268,7 +271,14 @@ data class ClaudeState(val model: String, val label: String)
 val CLAUDE_MODELS = listOf("opus", "sonnet", "haiku")
 
 /** Claude at work on a message: [phase] is looking (at a photo), thinking or writing. */
-data class ClaudeAssist(val target: String, val phase: String)
+data class ClaudeAssist(
+    val target: String,
+    val phase: String,
+    /** What it does right now, in words ("Web'de arıyor: ..."); empty when nothing particular. */
+    val detail: String = "",
+    /** Its thoughts so far (the last part). */
+    val thought: String = "",
+)
 
 /** The message a message answers: shown quoted above it. */
 /** A quoted message; [thumb] is a tiny base64 picture (a status answered). */
@@ -313,6 +323,7 @@ data class ChatMessage(
     /** A disappearing message: when it goes (server time), 0 when it stays. */
     val expireAt: Long = 0,
     val poll: ChatPoll? = null,
+    val event: ChatEvent? = null,
     val location: ChatLocation? = null,
     val contact: ChatContact? = null,
     /** A photo that opens once, then is gone for whoever got it. */
@@ -583,6 +594,7 @@ interface ChatBackend {
     // ------------------------------------------------------------------ polls, places, contacts
 
     suspend fun sendPoll(other: ChatUser, poll: ChatPoll): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun sendEvent(other: ChatUser, event: ChatEvent): Result<Unit> = Result.failure(UnsupportedOperationException())
 
     /** The votes of [chatId]'s polls: message id → (person → the choices they picked). */
     fun pollVotes(chatId: String): Flow<Map<String, Map<String, List<Int>>>> = kotlinx.coroutines.flow.flowOf(emptyMap())

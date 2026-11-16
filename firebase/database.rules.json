@@ -412,6 +412,13 @@
         ".write": "auth != null && auth.uid === '2hxOw0dRcwUwsW7N6ogH4fRcqXo1'",
         ".validate": "!newData.exists() || newData.val() === 'developer'"
       }
+    },
+    "claudeAccess": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && auth.uid === '2hxOw0dRcwUwsW7N6ogH4fRcqXo1'",
+        ".validate": "!newData.exists() || newData.val() === true"
+      }
     }
   }
 }

@@ -868,6 +868,7 @@ private fun ConversationPage(
     var lastHeard by remember(other.uid) { mutableStateOf<String?>(null) }
     val pollVotes by remember(other.uid) { controller.pollVotes(other) }.collectAsState(initial = emptyMap())
     var pollDialog by remember { mutableStateOf(false) }
+    var eventDialog by remember { mutableStateOf(false) }
     var votersFor by remember { mutableStateOf<ChatMessage?>(null) }
     var reactionsFor by remember { mutableStateOf<ChatMessage?>(null) }
     val saveContact = rememberContactSaver()
@@ -1072,9 +1073,19 @@ private fun ConversationPage(
                             if (!isGroup) UserBadge(other.uid, compact = true, modifier = Modifier.padding(start = 5.dp))
                         }
                         val seen = presence
+                        // A group: how many of the others are here now (as on WhatsApp), else who is in it.
+                        val onlineInGroup by remember(group?.members?.size, group?.id) {
+                            val others = group?.members?.map { it.user }?.filter { it.uid != me.uid && it.uid != CLAUDE_BOT_UID }.orEmpty()
+                            if (!isGroup || others.isEmpty()) {
+                                kotlinx.coroutines.flow.flowOf(0)
+                            } else {
+                                kotlinx.coroutines.flow.combine(others.map { controller.presence(it) }) { all -> all.count { it?.online == true } }
+                            }
+                        }.collectAsState(initial = 0)
                         val status = when {
                             recordingThem -> s.recordingVoice
                             typing -> s.typing
+                            isGroup && onlineInGroup > 0 -> if (s.english) "$onlineInGroup online" else "$onlineInGroup kişi çevrimiçi"
                             isGroup -> group?.members?.joinToString(", ") { if (it.user.uid == me.uid) s.you else it.user.name.substringBefore(' ') }.orEmpty()
                             seen?.online == true -> s.online
                             seen != null && seen.lastSeen > 0 -> s.lastSeen + " " + seenLabel(seen.lastSeen, s)
@@ -1387,6 +1398,7 @@ private fun ConversationPage(
                                     loadImage = { image -> controller.imageBytes(other, image) },
                                     onOpenImages = { images, index -> viewing = images to index },
                                     assisting = assist?.takeIf { it.target == row.m.id }?.phase,
+                                    assistWork = assist?.takeIf { it.target == row.m.id },
                                     inClaudeChat = isClaude,
                                     voicePlayer = voicePlayer,
                                     onOpenVideo = { url -> videoOpen = url },
@@ -1473,7 +1485,7 @@ private fun ConversationPage(
                     },
                 )
             }
-            if (!isClaude && me.uid == CLAUDE_OWNER_UID && callsClaude(text)) {
+            if (!isClaude && ClaudeAccess.allowed(me.uid) && callsClaude(text)) {
                 Row(
                     modifier = Modifier
                         .padding(start = 16.dp, top = 6.dp)
@@ -1674,6 +1686,7 @@ private fun ConversationPage(
                 add(AttachAction(if (tr) "Belge" else "Document", QMusicIcons.File, Color(0xFF7E57C2)) { attach = false; pickFile() })
                 add(AttachAction(s.videoAttach, QMusicIcons.VideoPlay, Color(0xFFF4511E)) { attach = false; pickVideo() })
                 if (!isClaude) add(AttachAction(s.poll, QMusicIcons.Poll, Color(0xFFFFB300)) { attach = false; pollDialog = true })
+                if (!isClaude) add(AttachAction(if (tr) "Etkinlik" else "Event", QMusicIcons.Timer, Color(0xFFE53958)) { attach = false; eventDialog = true })
                 // What plays in Nuvelo now: sent as a card.
                 shareables().forEach { item ->
                     val song = item.kind == ShareKind.SONG
@@ -1766,6 +1779,7 @@ private fun ConversationPage(
         MessageInfoDialog(m, people, read, delivered, s) { infoFor = null }
     }
     if (pollDialog) PollDialog(s, onSend = { poll -> controller.sendPoll(other, poll) }) { pollDialog = false }
+    if (eventDialog) EventDialog(onSend = { event -> controller.sendEvent(other, event) }) { eventDialog = false }
     // A person's name in this conversation (us, the other, or a group member).
     val nameOfUid: (String) -> String = { uid ->
         when (uid) {
@@ -2217,6 +2231,7 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
             }
             // Their own ringtone for Qeyf calls (a song, or one of Qeyf's sounds).
             if (isFounder(me.uid) && !isClaude && user.uid != me.uid) item { DeveloperBadgeSwitch(controller, user) }
+            if (isFounder(me.uid) && !isClaude && user.uid != me.uid) item { ClaudeAccessSwitch(controller, user) }
             if (!isClaude && user.uid != me.uid) item { PersonRingRow(s, user) }
             if (!messages.isNullOrEmpty()) {
                 item { SectionTitle(s.media) }
@@ -2348,6 +2363,8 @@ private fun Bubble(
     onOpenImages: (List<ChatImage>, Int) -> Unit,
     /** Claude is answering this message: looking, thinking or writing. */
     assisting: String? = null,
+    /** What Claude does and thinks while it answers this message. */
+    assistWork: ClaudeAssist? = null,
     inClaudeChat: Boolean = false,
     /** The group members' names, for quotes. */
     names: Map<String, String> = emptyMap(),
@@ -2393,9 +2410,9 @@ private fun Bubble(
     }
     var menu by remember { mutableStateOf(false) }
     // One to three emoji alone: big, without a bubble, as people expect.
-    val bigEmoji = !m.deleted && m.images.isEmpty() && m.attachment == null && m.share == null && m.replyTo == null && m.poll == null && m.location == null && m.contact == null &&
+    val bigEmoji = !m.deleted && m.images.isEmpty() && m.attachment == null && m.share == null && m.replyTo == null && m.poll == null && m.event == null && m.location == null && m.contact == null &&
         (isBigEmoji(m.text) || (m.gif?.sticker == true && m.text.isBlank()))
-    val hasCard = m.share != null || m.images.isNotEmpty() || m.attachment != null || m.poll != null || m.location != null || m.contact != null
+    val hasCard = m.share != null || m.images.isNotEmpty() || m.attachment != null || m.poll != null || m.event != null || m.location != null || m.contact != null
     val fromClaude = m.from == CLAUDE_BOT_UID
     // Pull a message to the right to answer it.
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
@@ -2578,6 +2595,7 @@ private fun Bubble(
             }
             if (!m.deleted) {
                 m.poll?.let { poll -> PollCard(poll, pollVotes, myUid, mine, s, onVote = onVote, onShowVoters = onShowVoters) }
+                m.event?.let { event -> EventCard(event, pollVotes, myUid, mine, onVote = onVote) }
                 m.location?.let { place -> LocationCard(place, mine, s) }
                 m.contact?.let { c -> ContactCard(c, mine, s) { onSaveContact(c) } }
             }
@@ -2637,7 +2655,7 @@ private fun Bubble(
             }
             if (!m.deleted) DropdownMenuItem(text = { Text(s.reply, color = TextPrimary) }, onClick = { menu = false; onReply() })
             if (onCopy != null && m.text.isNotEmpty() && !m.deleted) DropdownMenuItem(text = { Text(s.copy, color = TextPrimary) }, onClick = { menu = false; onCopy() })
-            if (onForward != null && !m.deleted && m.poll == null) DropdownMenuItem(text = { Text(s.forward, color = TextPrimary) }, onClick = { menu = false; onForward() })
+            if (onForward != null && !m.deleted && m.poll == null && m.event == null) DropdownMenuItem(text = { Text(s.forward, color = TextPrimary) }, onClick = { menu = false; onForward() })
             if (onEdit != null) DropdownMenuItem(text = { Text(s.edit, color = TextPrimary) }, onClick = { menu = false; onEdit() })
             if (!m.deleted && !m.viewOnce) DropdownMenuItem(text = { Text(if (starred) s.unstar else s.star, color = TextPrimary) }, onClick = { menu = false; onStar() })
             if (onPin != null) DropdownMenuItem(text = { Text(if (pinned) s.unpinMessage else s.pinMessage, color = TextPrimary) }, onClick = { menu = false; onPin() })
@@ -2648,13 +2666,17 @@ private fun Bubble(
     }
     if (assisting != null) {
         Box(Modifier.fillMaxWidth(), contentAlignment = if (mine) Alignment.CenterEnd else Alignment.CenterStart) {
-            ClaudeWorking(
-                when (assisting) {
-                    "looking" -> s.claudeLooking
-                    "writing" -> s.claudeWriting
-                    else -> s.claudeThinking
-                },
-            )
+            Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+                ClaudeWorking(
+                    assistWork?.detail?.takeIf { it.isNotBlank() } ?: when (assisting) {
+                        "looking" -> s.claudeLooking
+                        "writing" -> s.claudeWriting
+                        else -> s.claudeThinking
+                    },
+                )
+                // Its thoughts as they come (the last few lines; a tap shows them all).
+                assistWork?.thought?.takeIf { it.isNotBlank() && assisting != "writing" }?.let { ClaudeThoughts(it) }
+            }
         }
     }
     // Reactions under the message: each emoji once, with how many put it.
@@ -2892,4 +2914,26 @@ internal fun listTime(ms: Long, s: ChatStrings): String = when (daysAgo(ms)) {
     0 -> clock(ms)
     1 -> s.yesterday
     else -> local(ms).let { "${two(it.dayOfMonth)}.${two(it.monthNumber)}" }
+}
+
+/** Claude's thoughts while it works: soft, in italics, the last lines; a tap opens them all. */
+@Composable
+private fun ClaudeThoughts(thought: String) {
+    var open by remember { mutableStateOf(false) }
+    Column(
+        Modifier.padding(horizontal = 8.dp, vertical = 2.dp).widthIn(max = 300.dp).clip(RoundedCornerShape(12.dp))
+            .background(ClaudeCoral.copy(alpha = 0.08f)).clickable { open = !open }.padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text(if (ChatMusic.english) "Thinking" else "Düşünüyor", color = ClaudeCoral, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(2.dp))
+        Text(
+            if (open) thought.trim() else thought.trim().takeLast(260),
+            color = TextSecondary,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+            maxLines = if (open) 40 else 4,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }

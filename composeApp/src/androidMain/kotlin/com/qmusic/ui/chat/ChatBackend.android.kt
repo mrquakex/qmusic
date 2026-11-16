@@ -603,6 +603,15 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
 
     // ------------------------------------------------------------------ polls, places, contacts
 
+    override suspend fun sendEvent(other: ChatUser, event: ChatEvent): Result<Unit> = runCatching {
+        val title = event.title.trim().take(100)
+        require(title.isNotEmpty()) { "event" }
+        sendMessage(
+            other, "", null, null, null, "📅 $title",
+            extra = mapOf("event" to mapOf("t" to title, "at" to event.at, "p" to event.place.trim().take(100).takeIf { it.isNotEmpty() })),
+        )
+    }
+
     override suspend fun sendPoll(other: ChatUser, poll: ChatPoll): Result<Unit> = runCatching {
         val question = poll.question.trim().take(300)
         val options = poll.options.map { it.trim().take(100) }.filter { it.isNotEmpty() }.distinct().take(12)
@@ -749,6 +758,10 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 val question = p.child("q").getValue(String::class.java) ?: return@let null
                 val options = p.child("o").children.mapNotNull { it.getValue(String::class.java) }
                 if (options.size < 2) null else ChatPoll(question, options, p.child("m").getValue(Boolean::class.java) == true)
+            },
+            event = child("event").takeIf { it.exists() }?.let { e ->
+                val title = e.child("t").getValue(String::class.java) ?: return@let null
+                ChatEvent(title, e.child("at").getValue(Long::class.java) ?: 0L, e.child("p").getValue(String::class.java).orEmpty())
             },
             location = child("location").takeIf { it.exists() }?.let { l ->
                 val lat = l.child("lat").getValue(Double::class.java) ?: return@let null
@@ -1762,7 +1775,18 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             listen(root.child("assist").child(chatId)).collect { snap ->
                 val target = snap.child("target").getValue(String::class.java)
                 val phase = snap.child("phase").getValue(String::class.java)
-                trySend(if (target != null && phase != null) ClaudeAssist(target, phase) else null)
+                trySend(
+                    if (target != null && phase != null) {
+                        ClaudeAssist(
+                            target,
+                            phase,
+                            detail = snap.child("detail").getValue(String::class.java).orEmpty(),
+                            thought = snap.child("thought").getValue(String::class.java).orEmpty(),
+                        )
+                    } else {
+                        null
+                    },
+                )
             }
         }
         awaitClose { job.cancel() }

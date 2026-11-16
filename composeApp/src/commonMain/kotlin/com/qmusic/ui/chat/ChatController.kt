@@ -1,5 +1,6 @@
 package com.qmusic.ui.chat
 
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -485,6 +486,10 @@ class ChatController(
 
     // ------------------------------------------------------------------ polls, places, contacts
 
+    fun sendEvent(other: ChatUser, event: ChatEvent) {
+        scope.launch { backend.sendEvent(other, event).onFailure { _error.value = it.message } }
+    }
+
     fun sendPoll(other: ChatUser, poll: ChatPoll) {
         scope.launch { backend.sendPoll(other, poll).onFailure { _error.value = it.message } }
     }
@@ -839,7 +844,9 @@ class ChatController(
 
     /** The owner's Claude: the model answering now. */
     val claudeState: StateFlow<ClaudeState?> = ready
-        .flatMapLatest { if (it?.me?.uid == CLAUDE_OWNER_UID) backend.claudeState().catch { emit(null) } else flowOf(null) }
+        .combine(ClaudeAccess.granted) { account, granted -> account?.me?.uid?.takeIf { it == CLAUDE_OWNER_UID || it in granted } }
+        .distinctUntilChanged()
+        .flatMapLatest { uid -> if (uid != null) backend.claudeState().catch { emit(null) } else flowOf(null) }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
     fun setClaudeModel(model: String) {

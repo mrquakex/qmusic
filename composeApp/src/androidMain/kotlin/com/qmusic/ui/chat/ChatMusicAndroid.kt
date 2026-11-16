@@ -80,6 +80,9 @@ object ChatMusicAndroid {
         m.reactions = { chatId -> reactions(chatId) }
         m.react = { chatId, text -> react(chatId, text) }
         Badges.setDeveloper = { uid, on -> setDeveloper(uid, on) }
+        Stickers.start = { StickerMaker.start(c) }
+        ClaudeAccess.set = { uid, on -> setClaudeAccess(uid, on) }
+        watchClaudeAccess()
         watchBadges()
     }
 
@@ -108,6 +111,36 @@ object ChatMusicAndroid {
         }
         badgesListener = listener
         ref.addValueEventListener(listener)
+    }
+
+    private var claudeListener: ValueEventListener? = null
+
+    /** Who the founder gave Claude to (read by everyone signed in: it decides who sees Claude's buttons). */
+    private fun watchClaudeAccess() {
+        val ref = root()?.child("claudeAccess") ?: return
+        if (claudeListener != null) return
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snap: DataSnapshot) {
+                ClaudeAccess.granted.value = snap.children.filter { it.getValue(Boolean::class.java) == true }.mapNotNull { it.key }.toSet()
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                claudeListener = null
+                scope.launch {
+                    delay(30_000)
+                    watchClaudeAccess()
+                }
+            }
+        }
+        claudeListener = listener
+        ref.addValueEventListener(listener)
+    }
+
+    private suspend fun setClaudeAccess(uid: String, on: Boolean): Boolean {
+        val ref = root()?.child("claudeAccess")?.child(uid) ?: return false
+        return withTimeoutOrNull(15_000) {
+            runCatching { if (on) ref.setValue(true).await() else ref.removeValue().await() }.isSuccess
+        } == true
     }
 
     private suspend fun setDeveloper(uid: String, on: Boolean): Boolean {

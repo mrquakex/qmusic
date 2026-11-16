@@ -98,6 +98,8 @@ kotlin {
                 // GIFs and stickers move (animated GIF and WebP).
                 implementation("io.coil-kt.coil3:coil-gif:3.0.4")
                 implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+                // Stickers made from a photo: the subject cut out of its background, on the phone (downloaded by Play services).
+                implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
                 implementation("androidx.biometric:biometric:1.1.0")
                 implementation(libs.okhttp)
                 implementation("androidx.appcompat:appcompat:1.7.0")

@@ -26,6 +26,7 @@ object ChatPreview {
         "📍" to PreviewKind.LOCATION,
         "👤" to PreviewKind.CONTACT,
         "📊" to PreviewKind.POLL,
+        "📅" to PreviewKind.TIMER,
         "🎵" to PreviewKind.SONG,
         "🎧" to PreviewKind.SONG,
         "🍿" to PreviewKind.WATCH,
