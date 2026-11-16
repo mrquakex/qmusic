@@ -184,7 +184,7 @@ class UpdatedReceiver : BroadcastReceiver() {
                 1004,
                 NotificationCompat.Builder(context, "qmusic_updates")
                     .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
-                    .setContentTitle(if (english) "Qeyf updated to $version" else "Qeyf $version sürümüne güncellendi")
+                    .setContentTitle(if (english) "Nuvelo updated to $version" else "Nuvelo $version sürümüne güncellendi")
                     .setContentText(if (english) "Open it to see what's new" else "Yenilikleri görmek için aç")
                     .setAutoCancel(true)
                     .setContentIntent(open)

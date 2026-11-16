@@ -500,7 +500,7 @@ fun SettingsScreen(
         Section(s.sectionAbout) {
             ActionRow(
                 icon = QMusicIcons.Headphones,
-                title = "Qeyf",
+                title = "Nuvelo",
                 subtitle = s.madeBy,
             )
             RowDivider()

@@ -2070,7 +2070,10 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
 
     override suspend fun deleteStatus(id: String) {
         val uid = me()
-        root.updateChildren(mapOf("statuses/$uid/$id" to null, "statusViews/$uid/$id" to null))
+        // The status itself first, on its own: it must go even if what comes with it cannot (one write for both
+        // was refused as a whole when the views could not be removed, and the status stayed).
+        root.child("statuses").child(uid).child(id).removeValue().await()
+        runCatching { root.updateChildren(mapOf("statusViews/$uid/$id" to null, "statusLikes/$uid/$id" to null)).await() }
     }
 
     override suspend fun markStatusSeen(item: StatusItem) {

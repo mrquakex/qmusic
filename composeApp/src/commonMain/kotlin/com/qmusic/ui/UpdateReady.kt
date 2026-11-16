@@ -64,7 +64,7 @@ fun UpdateReadyBanner(english: Boolean) {
             Icon(QMusicIcons.Download, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(10.dp))
             Text(
-                if (english) "Qeyf $v is ready" else "Qeyf $v hazır",
+                if (english) "Nuvelo $v is ready" else "Nuvelo $v hazır",
                 color = TextPrimary,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,

@@ -87,7 +87,7 @@ data class VideoStrings(
 
     companion object {
         val Turkish = VideoStrings(
-            section = "QVideo",
+            section = "Video",
             backToMusic = "Müzik",
             tabHome = "Ana sayfa",
             tabSubscriptions = "Abonelikler",
@@ -164,7 +164,7 @@ data class VideoStrings(
         )
 
         val English = VideoStrings(
-            section = "QVideo",
+            section = "Video",
             backToMusic = "Music",
             tabHome = "Home",
             tabSubscriptions = "Subscriptions",

@@ -168,14 +168,14 @@ private fun TvHomeScreen(english: Boolean) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("Qeyf", color = TvAccent, fontSize = 40.sp, fontWeight = FontWeight.Black)
+            Text("Nuvelo", color = TvAccent, fontSize = 40.sp, fontWeight = FontWeight.Black)
             Spacer(Modifier.height(18.dp))
             Text(if (english) "Link your phone" else "Telefonunu bağla", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(18.dp))
             val steps = if (english) {
-                listOf("Open a video or a song in Qeyf on the phone", "Tap the TV button, then \"Link a new TV\"", "Enter this code, or scan it")
+                listOf("Open a video or a song in Nuvelo on the phone", "Tap the TV button, then \"Link a new TV\"", "Enter this code, or scan it")
             } else {
-                listOf("Telefonda Qeyf'te bir video ya da şarkı aç", "TV düğmesine bas, \"Yeni TV bağla\"yı seç", "Bu kodu gir ya da kodu okut")
+                listOf("Telefonda Nuvelo'da bir video ya da şarkı aç", "TV düğmesine bas, \"Yeni TV bağla\"yı seç", "Bu kodu gir ya da kodu okut")
             }
             steps.forEachIndexed { i, step ->
                 Text("${i + 1}.  $step", color = Color.White.copy(alpha = 0.8f), fontSize = 18.sp, modifier = Modifier.padding(vertical = 4.dp))
@@ -352,7 +352,7 @@ private fun TvPicker(onDismiss: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             Text(if (english) "Link a new TV" else "Yeni TV bağla", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Text(
-                if (english) "Install Qeyf on the TV and open it: it shows a code." else "TV'ye Qeyf'i kur ve aç: ekranda bir kod çıkar.",
+                if (english) "Install Nuvelo on the TV and open it: it shows a code." else "TV'ye Nuvelo'yu kur ve aç: ekranda bir kod çıkar.",
                 color = Color.White.copy(alpha = 0.6f),
                 fontSize = 12.sp,
                 modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),

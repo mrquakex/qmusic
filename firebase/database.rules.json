@@ -279,6 +279,7 @@
       "$owner": {
         ".read": "auth != null && auth.uid === $owner",
         "$id": {
+          ".write": "auth != null && auth.uid === $owner && !newData.exists()",
           "$viewer": {
             ".write": "auth != null && auth.uid === $viewer && root.child('statuses').child($owner).child($id).exists()"
           }
@@ -330,6 +331,7 @@
       "$owner": {
         ".read": "auth != null && auth.uid === $owner",
         "$id": {
+          ".write": "auth != null && auth.uid === $owner && !newData.exists()",
           "$uid": {
             ".write": "auth != null && auth.uid === $uid && root.child('statuses').child($owner).child($id).exists()",
             ".validate": "!newData.exists() || newData.isNumber()",

@@ -271,7 +271,7 @@ fun DesktopTopNavBar(
                 CastButton(modifier = Modifier.size(40.dp))
                 if (onOpenVideos != null) {
                     IconButton(onClick = onOpenVideos, modifier = Modifier.size(40.dp)) {
-                        Icon(QMusicIcons.VideoPlay, contentDescription = "QVideo", tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f), modifier = Modifier.size(20.dp))
+                        Icon(QMusicIcons.VideoPlay, contentDescription = "Video", tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f), modifier = Modifier.size(20.dp))
                     }
                 }
                 if (onOpenChat != null) {

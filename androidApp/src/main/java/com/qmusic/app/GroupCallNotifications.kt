@@ -50,7 +50,7 @@ object GroupCallNotifications {
 
     fun showRinging(context: Context, data: Map<String, String>) {
         val groupId = data["chatId"] ?: return
-        val group = ChatUser(groupId, data["name"].orEmpty().ifBlank { "Qeyf" }, "", data["photo"]?.ifBlank { null })
+        val group = ChatUser(groupId, data["name"].orEmpty().ifBlank { "Nuvelo" }, "", data["photo"]?.ifBlank { null })
         val video = data["video"] == "1"
         val starter = data["starter"].orEmpty()
         val callKey = groupId + ":" + (data["callAt"] ?: System.currentTimeMillis().toString())

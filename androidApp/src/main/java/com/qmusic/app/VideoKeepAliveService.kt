@@ -34,7 +34,7 @@ class VideoKeepAliveService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(NotificationManager::class.java)
             if (manager.getNotificationChannel(CHANNEL) == null) {
-                manager.createNotificationChannel(NotificationChannel(CHANNEL, "QVideo", NotificationManager.IMPORTANCE_LOW))
+                manager.createNotificationChannel(NotificationChannel(CHANNEL, "Video", NotificationManager.IMPORTANCE_LOW))
             }
         }
         val open = PendingIntent.getActivity(
@@ -47,8 +47,8 @@ class VideoKeepAliveService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
-            .setContentTitle(title.ifBlank { "QVideo" })
-            .setContentText("QVideo")
+            .setContentTitle(title.ifBlank { "Video" })
+            .setContentText("Video")
             .setContentIntent(open)
             .setOngoing(true)
             .setSilent(true)

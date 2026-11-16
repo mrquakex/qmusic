@@ -497,7 +497,7 @@ object TurkishStrings : AppStrings {
     override val ringtonePhoneSet: String = "Telefon zil sesi ayarlandı"
     override val ringtoneNotificationSet: String = "Bildirim sesi ayarlandı"
     override val ringtoneAlarmSet: String = "Alarm sesi ayarlandı"
-    override val ringtoneNeedsPermission: String = "Sesi değiştirebilmek için Qeyf'e izin vermelisin."
+    override val ringtoneNeedsPermission: String = "Sesi değiştirebilmek için Nuvelo'ya izin vermelisin."
     override val ringtoneContactsPermission: String = "Kişiye zil sesi atamak için Kişiler izni gerekir."
     override val ringtoneNotAccepted: String = "Telefon bu sesi kabul etmedi. Ses ayarlarından kendin seçebilirsin."
     override val ringtoneEditAgain: String = "Düzenlemeye dön"
@@ -592,7 +592,7 @@ object TurkishStrings : AppStrings {
     override val backupImportSubtitle: String = "Bir yedek dosyasındakileri bu cihaza ekle."
     override val backupSaved: String = "Yedek kaydedildi"
     override val backupFailed: String = "Yedek kaydedilemedi"
-    override val backupInvalid: String = "Bu dosya bir Qeyf yedeği değil"
+    override val backupInvalid: String = "Bu dosya bir Nuvelo yedeği değil"
     override fun backupRestored(favorites: Int, playlists: Int): String = "Geri yüklendi: $favorites favori, $playlists liste"
     override val removedFromPlaylist: String = "Listeden çıkarıldı"
     override val couldNotChangePlaylist: String = "Liste değiştirilemedi"
@@ -616,7 +616,7 @@ object TurkishStrings : AppStrings {
     override fun statsTimes(count: Int): String = "$count kez"
     override val statsEmpty: String = "Henüz yeterince dinleme yok. Biraz müzik dinle, burası dolsun."
     override fun statsShare(period: String, minutes: Int, topSong: String?, topArtist: String?): String = buildString {
-        append("Qeyf ile ").append(period.lowercase()).append(" içinde ").append(minutes).append(" dakika müzik dinledim.")
+        append("Nuvelo ile ").append(period.lowercase()).append(" içinde ").append(minutes).append(" dakika müzik dinledim.")
         topArtist?.let { append(" En çok dinlediğim sanatçı: ").append(it).append('.') }
         topSong?.let { append(" En çok dinlediğim şarkı: ").append(it).append('.') }
     }
@@ -750,7 +750,7 @@ object TurkishStrings : AppStrings {
     override val normalizeTitle: String = "Ses seviyesini eşitle"
     override val normalizeSubtitle: String = "Her şarkı aynı yükseklikte çalar; biri bağırıp diğeri fısıldamaz."
     override val autoUpdateSubtitle: String = "Yeni sürümü sormadan indirip kur."
-    override fun updateDialogTitle(version: String): String = "Qeyf $version hazır"
+    override fun updateDialogTitle(version: String): String = "Nuvelo $version hazır"
     override val updateDialogBody: String = "Yeni sürümde iyileştirmeler ve yeni özellikler var."
     override val updateNow: String = "Güncelle"
     override val updateLater: String = "Sonra"
@@ -922,7 +922,7 @@ object EnglishStrings : AppStrings {
     override val ringtonePhoneSet: String = "Phone ringtone set"
     override val ringtoneNotificationSet: String = "Notification sound set"
     override val ringtoneAlarmSet: String = "Alarm sound set"
-    override val ringtoneNeedsPermission: String = "Qeyf needs permission to change your sounds."
+    override val ringtoneNeedsPermission: String = "Nuvelo needs permission to change your sounds."
     override val ringtoneContactsPermission: String = "Assigning a ringtone to a contact needs the Contacts permission."
     override val ringtoneNotAccepted: String = "Your phone didn't accept it. You can pick it yourself in the sound settings."
     override val ringtoneEditAgain: String = "Back to editing"
@@ -1017,7 +1017,7 @@ object EnglishStrings : AppStrings {
     override val backupImportSubtitle: String = "Add what a backup file holds to this device."
     override val backupSaved: String = "Backup saved"
     override val backupFailed: String = "Could not save the backup"
-    override val backupInvalid: String = "This file is not a Qeyf backup"
+    override val backupInvalid: String = "This file is not a Nuvelo backup"
     override fun backupRestored(favorites: Int, playlists: Int): String = "Restored $favorites favorites and $playlists playlists"
     override val removedFromPlaylist: String = "Removed from the playlist"
     override val couldNotChangePlaylist: String = "Could not change the playlist"
@@ -1041,7 +1041,7 @@ object EnglishStrings : AppStrings {
     override fun statsTimes(count: Int): String = if (count == 1) "1 play" else "$count plays"
     override val statsEmpty: String = "Not much listening yet. Play some music and this fills up."
     override fun statsShare(period: String, minutes: Int, topSong: String?, topArtist: String?): String = buildString {
-        append("I listened to ").append(minutes).append(" minutes of music on Qeyf (").append(period.lowercase()).append(").")
+        append("I listened to ").append(minutes).append(" minutes of music on Nuvelo (").append(period.lowercase()).append(").")
         topArtist?.let { append(" Top artist: ").append(it).append('.') }
         topSong?.let { append(" Top song: ").append(it).append('.') }
     }
@@ -1176,7 +1176,7 @@ object EnglishStrings : AppStrings {
     override val normalizeTitle: String = "Normalize volume"
     override val normalizeSubtitle: String = "Every song plays at the same loudness."
     override val autoUpdateSubtitle: String = "Download and install new versions without asking."
-    override fun updateDialogTitle(version: String): String = "Qeyf $version is ready"
+    override fun updateDialogTitle(version: String): String = "Nuvelo $version is ready"
     override val updateDialogBody: String = "The new version has improvements and new features."
     override val updateNow: String = "Update"
     override val updateLater: String = "Later"

@@ -86,7 +86,7 @@ fun WelcomeScreen(
             QMusicLogo(size = 72.dp, tint = Ink)
             Spacer(Modifier.height(24.dp))
             Text(
-                text = if (english) "Welcome to Qeyf" else "Qeyf'e hoş geldin",
+                text = if (english) "Welcome to Nuvelo" else "Nuvelo'ya hoş geldin",
                 style = MaterialTheme.typography.headlineLarge.copy(fontSize = 30.sp, lineHeight = 36.sp),
                 color = Ink,
                 textAlign = TextAlign.Center,

@@ -43,7 +43,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.qmusic.ui.theme.Q_GLYPH_PATH
+import com.qmusic.ui.theme.N_MARK_PATH
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -51,7 +51,7 @@ import kotlinx.coroutines.launch
 private val SplashBackground = Color(0xFF050507)
 
 /** The name, written the way the logo is: a bold "q", the rest lighter. */
-private const val WORD = "qeyf"
+private const val WORD = "nuvelo"
 
 /** A warm light behind the logo: keyif. */
 private val Glow = Color(0xFFFF8A3D)
@@ -127,7 +127,7 @@ fun QMusicSplash(
         label = "eq2",
     )
 
-    val glyph = remember { PathParser().parsePathString(Q_GLYPH_PATH).toPath() }
+    val glyph = remember { PathParser().parsePathString(N_MARK_PATH).toPath() }
     val outline = remember(glyph) {
         // Measure only the first (outer) contour for the laser trace.
         PathMeasure().apply { setPath(glyph, false) }
@@ -149,7 +149,8 @@ fun QMusicSplash(
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Canvas(modifier = Modifier.size(148.dp).graphicsLayer { val k = 1f + (1f - exit.value) * 0.08f; scaleX = k; scaleY = k }) {
-                val s = size.minDimension / 512f
+                // The mark is drawn in 100 units.
+                val s = size.minDimension / 100f
                 withTransform({
                     translate(0f, 0f)
                     scale(s, s, pivot = Offset.Zero)
@@ -162,25 +163,25 @@ fun QMusicSplash(
                         drawPath(
                             path = segment,
                             color = Color.White.copy(alpha = traceAlpha),
-                            style = Stroke(width = 3.5f, cap = StrokeCap.Round, join = StrokeJoin.Round),
+                            style = Stroke(width = 0.7f, cap = StrokeCap.Round, join = StrokeJoin.Round),
                         )
                     }
 
                     // Stage 2: liquid circle fill clipped to the glyph.
                     if (fill.value > 0f) {
-                        val radius = 240f * fill.value
+                        val radius = 50f * fill.value
                         val circle = Path().apply {
-                            addOval(Rect(Offset(232f - radius, 248f - radius), Size(radius * 2, radius * 2)))
+                            addOval(Rect(Offset(50f - radius, 55f - radius), Size(radius * 2, radius * 2)))
                         }
                         clipPath(circle) {
                             drawPath(glyph, Color.White)
                         }
                     }
 
-                    // Stage 3: equalizer bars pop in, then keep pulsing.
-                    if (bars.value > 0f) {
-                        drawBar(214f, 48f, bars.value * eq1)
-                        drawBar(246f, 80f, bars.value * eq2)
+                    // (The n has no bowl for the old equalizer bars.)
+                    if (bars.value < 0f) {
+                        drawBar(214f, 48f, eq1)
+                        drawBar(246f, 80f, eq2)
                     }
                 }
             }

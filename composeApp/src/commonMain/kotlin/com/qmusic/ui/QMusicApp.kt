@@ -1443,7 +1443,7 @@ fun QMusicApp(
                                     navTabs.forEachIndexed { index, item ->
                                         if (item.tab != ScreenTab.SETTINGS) QeyfBarItem(item.title, item.icon, item.tab == currentTab) { selectTab(index) }
                                     }
-                                    QeyfBarItem("QVideo", QMusicIcons.VideoPlay, false) { videosOpen = true }
+                                    QeyfBarItem("Video", QMusicIcons.VideoPlay, false) { videosOpen = true }
                                     if (chatAvailable) {
                                         QeyfBarItem(com.qmusic.ui.chat.ChatMusic.words().messages, QMusicIcons.Chat, false, count = chatUnread) { chatOpen = true }
                                     }
@@ -1731,7 +1731,7 @@ private fun WhatsNewDialog(news: com.qmusic.ui.viewmodel.MainViewModel.WhatsNew,
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { com.qmusic.ui.theme.QMusicLogo(size = 40.dp, tint = MaterialTheme.colorScheme.primary) },
-        title = { Text(if (english) "Updated to Qeyf ${news.version}" else "Qeyf ${news.version} sürümüne güncellendi") },
+        title = { Text(if (english) "Updated to Nuvelo ${news.version}" else "Nuvelo ${news.version} sürümüne güncellendi") },
         text = {
             Column(modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
                 Text(
@@ -1773,7 +1773,7 @@ private fun UpdatingDialog(progress: Float, info: com.qmusic.updater.model.Updat
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Qeyf " + (info?.versionName ?: ""),
+                    "Nuvelo " + (info?.versionName ?: ""),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                 )
@@ -1821,7 +1821,7 @@ private fun UpdatingDialog(progress: Float, info: com.qmusic.updater.model.Updat
                 }
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    if (english) "Qeyf restarts by itself when it is done." else "Bitince Qeyf kendiliğinden yeniden açılır.",
+                    if (english) "Nuvelo restarts by itself when it is done." else "Bitince Nuvelo kendiliğinden yeniden açılır.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1853,7 +1853,7 @@ fun cleanReleaseNotes(markdown: String): String {
         if (!emoji) out.append(markdown, i, i + size)
         i += size
     }
-    val versionLine = Regex("""^#+\s*Qeyf\s+[0-9.]+\s*$""", RegexOption.IGNORE_CASE)
+    val versionLine = Regex("""^#+\s*(?:Nuvelo|Qeyf|QMusic)\s+[0-9.]+\s*$""", RegexOption.IGNORE_CASE)
     return out.lines()
         // Where an emoji stood: "**🔔 Title**" became "** Title**", "- 🎵 x" became "-  x"; the space goes.
         .map { line ->
@@ -1863,6 +1863,8 @@ fun cleanReleaseNotes(markdown: String): String {
                 .trimEnd()
         }
         .filterNot { line -> versionLine.matches(line.trim()) }
+        // The dialog says "what changed" already: a heading of the notes saying it again goes.
+        .filterNot { line -> Regex("""^#+\s*(Neler değişti|What's new|What changed)\s*$""", RegexOption.IGNORE_CASE).matches(line.trim()) }
         .joinToString("\n")
         .trim()
 }

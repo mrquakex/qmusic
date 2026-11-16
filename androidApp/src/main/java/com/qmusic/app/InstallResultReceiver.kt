@@ -66,7 +66,7 @@ class InstallResultReceiver : BroadcastReceiver() {
                 1003,
                 androidx.core.app.NotificationCompat.Builder(context, "qmusic_updates")
                     .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
-                    .setContentTitle(if (english) "Qeyf update is ready" else "Qeyf güncellemesi hazır")
+                    .setContentTitle(if (english) "Nuvelo update is ready" else "Nuvelo güncellemesi hazır")
                     .setContentText(
                         when {
                             isXiaomi() -> if (english) "Tap to install" else "Kurmak için dokun"

@@ -52,7 +52,7 @@ class DownloadKeepAliveService : Service() {
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
             .setContentTitle(heading)
-            .setContentText(title.ifBlank { "QVideo" })
+            .setContentText(title.ifBlank { "Video" })
             .setProgress(100, percent, percent == 0)
             .setContentIntent(open)
             .setOngoing(true)

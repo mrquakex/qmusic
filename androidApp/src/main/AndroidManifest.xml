@@ -151,7 +151,7 @@
         <receiver
             android:name=".QMusicWidget"
             android:exported="false"
-            android:label="Qeyf">
+            android:label="Nuvelo">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>

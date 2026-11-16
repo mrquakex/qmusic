@@ -215,7 +215,9 @@ class ChatController(
     var songAudio: suspend (String) -> String? = { null }
 
     fun deleteStatus(item: StatusItem) {
-        scope.launch { runCatching { backend.deleteStatus(item.id) } }
+        scope.launch {
+            runCatching { backend.deleteStatus(item.id) }.onFailure { e -> if (e !is CancellationException) _error.value = e.message }
+        }
     }
 
     fun markStatusSeen(item: StatusItem) {

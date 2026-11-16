@@ -1181,7 +1181,7 @@ private fun ConversationPage(
                                 controller.reportInfo(s.exporting)
                                 exportScope.launch {
                                     val body = controller.exportText(other, me, s)
-                                    if (body.isNotEmpty()) shareTextFile("Qeyf - " + title.take(40) + ".txt", body)
+                                    if (body.isNotEmpty()) shareTextFile("Nuvelo - " + title.take(40) + ".txt", body)
                                 }
                             },
                         )

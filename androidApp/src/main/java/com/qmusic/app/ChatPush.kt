@@ -52,7 +52,7 @@ object ChatPush {
                 NotificationChannel(FRIEND_CHANNEL, if (tr) "Arkadaşlık" else "Friends", NotificationManager.IMPORTANCE_DEFAULT),
             )
         }
-        val name = data["name"].orEmpty().ifBlank { "Qeyf" }
+        val name = data["name"].orEmpty().ifBlank { "Nuvelo" }
         val accepted = data["action"] == "accepted"
         val text = when {
             accepted && tr -> "$name arkadaşlık isteğini kabul etti"
@@ -104,7 +104,7 @@ object ChatPush {
         if (from != null && !com.qmusic.ui.chat.CallHooks.appVisible) {
             CallNotifications.showIncoming(
                 context,
-                ChatUser(from, data["name"].orEmpty().ifBlank { "Qeyf" }, data["username"].orEmpty(), data["photo"]?.ifBlank { null }),
+                ChatUser(from, data["name"].orEmpty().ifBlank { "Nuvelo" }, data["username"].orEmpty(), data["photo"]?.ifBlank { null }),
                 data["video"] == "1",
                 data["callId"].orEmpty(),
             )
@@ -156,8 +156,8 @@ object ChatPush {
         // A locked conversation: neither who nor what, and a tap opens the messages (the lock asks first).
         if (chatId in com.qmusic.ui.chat.LockedChats.ids) {
             val tr = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
-            val hidden = ChatUser(LOCKED_UID, "Qeyf", "", null)
-            val line = Line(if (tr) "Yeni mesaj" else "New message", System.currentTimeMillis(), false, LOCKED_UID, "Qeyf", null)
+            val hidden = ChatUser(LOCKED_UID, "Nuvelo", "", null)
+            val line = Line(if (tr) "Yeni mesaj" else "New message", System.currentTimeMillis(), false, LOCKED_UID, "Nuvelo", null)
             val (lines, count) = synchronized(history) {
                 val list = history.getOrPut(chatId) { ArrayDeque() }
                 list.clear()
@@ -168,7 +168,7 @@ object ChatPush {
             show(context, chatId, hidden, false, lines, count, alert = true)
             return
         }
-        val conversation = ChatUser(from, data["name"].orEmpty().ifBlank { "Qeyf" }, data["username"].orEmpty(), data["photo"]?.ifBlank { null })
+        val conversation = ChatUser(from, data["name"].orEmpty().ifBlank { "Nuvelo" }, data["username"].orEmpty(), data["photo"]?.ifBlank { null })
         val group = data["group"] == "1"
         // In a group each line has its writer; one-to-one, the other person (or Claude speaking in the conversation).
         val authorKey = data["author"]?.ifBlank { null } ?: from

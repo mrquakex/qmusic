@@ -48,7 +48,7 @@ object ChatSoundCatalog {
             SoundOption("kus", "Kuş", "Chirp"),
         ),
         SoundKind.RECEIVE to listOf(
-            SoundOption("yeni", "Qeyf mesajı", "Qeyf message"),
+            SoundOption("yeni", "Nuvelo mesajı", "Nuvelo message"),
             SoundOption("cit", "Çıt", "Click"),
             SoundOption("ikinota", "İki nota", "Two notes"),
             SoundOption("pit", "Pıt", "Pip"),
@@ -57,18 +57,18 @@ object ChatSoundCatalog {
             SoundOption("yumusak", "Yumuşak", "Soft"),
         ),
         SoundKind.NOTIFY to listOf(
-            SoundOption("yeni", "Qeyf mesajı", "Qeyf message"),
+            SoundOption("yeni", "Nuvelo mesajı", "Nuvelo message"),
             SoundOption("soru", "Soru", "Question"),
-            SoundOption("qeyf", "Qeyf", "Qeyf"),
+            SoundOption("qeyf", "Nuvelo", "Nuvelo"),
             SoundOption("cay", "Çay kaşığı", "Tea spoon"),
             SoundOption("marimba", "Marimba", "Marimba"),
             SoundOption("yukselen", "Yükselen", "Rising"),
             SoundOption("kristal", "Kristal", "Crystal"),
         ),
         SoundKind.RING to listOf(
-            SoundOption("plucky", "Qeyf zili", "Qeyf ring"),
+            SoundOption("plucky", "Nuvelo zili", "Nuvelo ring"),
             SoundOption("hicaz", "Hicaz", "Hijaz"),
-            SoundOption("ritim", "Qeyf ritmi", "Qeyf rhythm"),
+            SoundOption("ritim", "Nuvelo ritmi", "Nuvelo rhythm"),
             SoundOption("eskizil", "Eski zil", "Old bell"),
             SoundOption("gece", "Gece", "Night"),
             SoundOption("darbuka", "Darbuka", "Darbuka"),
@@ -76,7 +76,7 @@ object ChatSoundCatalog {
         SoundKind.RINGBACK to listOf(
             SoundOption("klasik", "Klasik", "Classic"),
             SoundOption("yumusakbek", "Yumuşak", "Soft"),
-            SoundOption("qeyfbek", "Qeyf", "Qeyf"),
+            SoundOption("qeyfbek", "Nuvelo", "Nuvelo"),
         ),
     )
 

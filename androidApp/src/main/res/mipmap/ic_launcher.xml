@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Before Android 8 (older TVs) there are no adaptive icons: the same "q" on its round background. -->
+<!-- Before Android 8 (older TVs) there are no adaptive icons: the same n on its round background. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="oval">

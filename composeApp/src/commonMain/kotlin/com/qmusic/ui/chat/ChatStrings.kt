@@ -207,7 +207,7 @@ data class ChatStrings(
     val emoji: String get() = if (english) "Emoji" else "Emoji"
     val voiceLocked: String get() = if (english) "Recording locked" else "Kayıt kilitlendi"
     val voiceSlideLock: String get() = if (english) "▲ lock" else "▲ kilitle"
-    val e2eNote: String get() = if (english) "Your messages and files are kept on Qeyf's servers (Firebase and Qeyf's media server); they are not end-to-end encrypted. You can delete your account and messages at any time." else "Mesajların ve dosyaların Qeyf'in sunucularında (Firebase ve Qeyf medya sunucusu) saklanır; uçtan uca şifreli değildir. Hesabını ve mesajlarını istediğin zaman silebilirsin."
+    val e2eNote: String get() = if (english) "Your messages and files are kept on Nuvelo's servers (Firebase and Nuvelo's media server); they are not end-to-end encrypted. You can delete your account and messages at any time." else "Mesajların ve dosyaların Nuvelo'nun sunucularında (Firebase ve Nuvelo medya sunucusu) saklanır; uçtan uca şifreli değildir. Hesabını ve mesajlarını istediğin zaman silebilirsin."
     val editPhoto: String get() = if (english) "Edit" else "Düzenle"
     val addCaption: String get() = if (english) "Add a caption…" else "Açıklama ekle…"
     val scrollDown: String get() = if (english) "Down" else "Aşağı"
@@ -328,7 +328,7 @@ data class ChatStrings(
     val minutesAgo: String get() = if (english) "min ago" else "dk önce"
     val hoursAgo: String get() = if (english) "h ago" else "sa önce"
     val myQrTitle: String get() = if (english) "My code" else "Kodum"
-    val myQrNote: String get() = if (english) "Friends can scan this code to find you on Qeyf." else "Arkadaşların seni Qeyf'te bulmak için bu kodu tarayabilir."
+    val myQrNote: String get() = if (english) "Friends can scan this code to find you on Nuvelo." else "Arkadaşların seni Nuvelo'da bulmak için bu kodu tarayabilir."
     val shareProfile: String get() = if (english) "Share profile" else "Profili paylaş"
     val accountSection: String get() = if (english) "Account" else "Hesap"
     val starredShort: String get() = if (english) "Starred messages" else "Yıldızlı mesajlar"
@@ -356,7 +356,7 @@ data class ChatStrings(
     val inviteShare: String get() = if (english) "Share link" else "Bağlantıyı paylaş"
     val inviteReset: String get() = if (english) "Reset link" else "Bağlantıyı sıfırla"
     val inviteResetNote: String get() = if (english) "The old link stops working." else "Eski bağlantı artık çalışmaz."
-    val inviteShareText: String get() = if (english) "Join my Qeyf group" else "Qeyf grubuma katıl"
+    val inviteShareText: String get() = if (english) "Join my Nuvelo group" else "Nuvelo grubuma katıl"
     val joinGroup: String get() = if (english) "Join group" else "Gruba katıl"
     val joinGroupTitle: String get() = if (english) "Group invite" else "Grup daveti"
     val inviteInvalid: String get() = if (english) "This invite link is not valid any more." else "Bu davet bağlantısı artık geçerli değil."
@@ -379,7 +379,7 @@ data class ChatStrings(
     val visFriends: String get() = if (english) "My friends" else "Arkadaşlarım"
     val visNobody: String get() = if (english) "Nobody" else "Hiç kimse"
     val callLink: String get() = if (english) "Share call link" else "Arama bağlantısı paylaş"
-    val callLinkText: String get() = if (english) "Call me on Qeyf" else "Qeyf'te beni ara"
+    val callLinkText: String get() = if (english) "Call me on Nuvelo" else "Nuvelo'da beni ara"
 
     val pinMessage: String get() = if (english) "Pin" else "Sabitle"
     val unpinMessage: String get() = if (english) "Unpin" else "Sabitlemeyi kaldır"
@@ -416,7 +416,7 @@ data class ChatStrings(
 
     val readinessLockScreen: String get() = if (english) "Show on the lock screen" else "Kilit ekranında göster"
     val setupTitle: String get() = if (english) "Get calls on this phone" else "Aramaları bu cihazda al"
-    val setupBody: String get() = if (english) "So that calls ring and messages arrive even when Qeyf is closed, this phone needs a few settings. Tap Set up: each page opens by itself; turn on what it shows and come back." else "Qeyf kapalıyken de aramaların çalması ve mesajların gelmesi için bu cihazda birkaç ayar gerekiyor. Hazırla'ya dokun: sayfalar sırayla kendiliğinden açılır; gösterileni aç ve geri dön."
+    val setupBody: String get() = if (english) "So that calls ring and messages arrive even when Nuvelo is closed, this phone needs a few settings. Tap Set up: each page opens by itself; turn on what it shows and come back." else "Nuvelo kapalıyken de aramaların çalması ve mesajların gelmesi için bu cihazda birkaç ayar gerekiyor. Hazırla'ya dokun: sayfalar sırayla kendiliğinden açılır; gösterileni aç ve geri dön."
     val setupStart: String get() = if (english) "Set up" else "Hazırla"
     val setupLater: String get() = if (english) "Later" else "Sonra"
     val setupDone: String get() = if (english) "All set. Calls and messages will reach this phone." else "Hazır. Aramalar ve mesajlar bu cihaza ulaşacak."
@@ -424,9 +424,9 @@ data class ChatStrings(
     val setupAgain: String get() = if (english) "Try again" else "Tekrar dene"
     val setupHintNotifications: String get() = if (english) "Turn notifications on." else "Bildirimleri aç."
     val setupHintChannels: String get() = if (english) "Turn the message and call notifications on." else "Mesaj ve arama bildirimlerini aç."
-    val setupHintFullScreen: String get() = if (english) "Allow full-screen notifications for Qeyf." else "Qeyf için tam ekran bildirime izin ver."
+    val setupHintFullScreen: String get() = if (english) "Allow full-screen notifications for Nuvelo." else "Nuvelo için tam ekran bildirime izin ver."
     val setupHintBattery: String get() = if (english) "Choose Allow (no battery limits)." else "İzin ver'i seç (pil kısıtlaması yok)."
-    val setupHintAutostart: String get() = if (english) "Find Qeyf and turn autostart on." else "Qeyf'i bul ve otomatik başlatmayı aç."
+    val setupHintAutostart: String get() = if (english) "Find Nuvelo and turn autostart on." else "Nuvelo'yu bul ve otomatik başlatmayı aç."
     val setupHintLockScreen: String get() = if (english) "Turn on Show on lock screen and Display pop-up windows." else "Kilit ekranında göster ve Açılır pencereleri göster'i aç."
 
     val soundTyping: String get() = if (english) "Keyboard sound while typing" else "Yazarken klavye sesi"
@@ -437,7 +437,7 @@ data class ChatStrings(
     val statusTextHint: String get() = if (english) "Write something" else "Bir şey yaz"
     val statusDone: String get() = if (english) "Done" else "Tamam"
     val statusSongPick: String get() = if (english) "Add a song" else "Şarkı ekle"
-    val statusNoSong: String get() = if (english) "Play a song in Qeyf first, then add it here." else "Önce Qeyf'te bir şarkı çal, sonra buradan ekle."
+    val statusNoSong: String get() = if (english) "Play a song in Nuvelo first, then add it here." else "Önce Nuvelo'da bir şarkı çal, sonra buradan ekle."
     val statusSongRemove: String get() = if (english) "Remove the song" else "Şarkıyı kaldır"
     val statusListen: String get() = if (english) "Listen" else "Dinle"
 
@@ -466,7 +466,7 @@ data class ChatStrings(
             signInTitle = "Arkadaşlarınla yazış",
             signInBody = "Mesaj gönder, dinlediğin şarkıyı ve izlediğin videoyu tek dokunuşla paylaş.",
             signInButton = "Google ile giriş yap",
-            privacy = "Mesajların ve dosyaların Qeyf'in sunucularında (Firebase ve Qeyf medya sunucusu) saklanır; aktarım sırasında şifrelidir ama uçtan uca şifreli değildir. Hesabını ve mesajlarını istediğin zaman silebilirsin.",
+            privacy = "Mesajların ve dosyaların Nuvelo'nun sunucularında (Firebase ve Nuvelo medya sunucusu) saklanır; aktarım sırasında şifrelidir ama uçtan uca şifreli değildir. Hesabını ve mesajlarını istediğin zaman silebilirsin.",
             profileTitle = "Profilini oluştur",
             profileBody = "Arkadaşların seni kullanıcı adınla bulur.",
             nameLabel = "Adın",
@@ -564,7 +564,7 @@ data class ChatStrings(
             signInTitle = "Chat with your friends",
             signInBody = "Send messages, share the song you play and the video you watch with one tap.",
             signInButton = "Sign in with Google",
-            privacy = "Your messages and files are kept on Qeyf's servers (Firebase and Qeyf's media server); they are encrypted in transit but not end-to-end. You can delete your account and messages at any time.",
+            privacy = "Your messages and files are kept on Nuvelo's servers (Firebase and Nuvelo's media server); they are encrypted in transit but not end-to-end. You can delete your account and messages at any time.",
             profileTitle = "Create your profile",
             profileBody = "Your friends find you by your username.",
             nameLabel = "Your name",
