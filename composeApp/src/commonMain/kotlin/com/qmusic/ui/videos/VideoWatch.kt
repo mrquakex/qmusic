@@ -67,6 +67,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.layout.onSizeChanged
 
 /** The page of one video: the picture on top, then what it is, what the account can do with it, comments, what's next. */
@@ -134,9 +136,21 @@ fun WatchPage(
             // enough and the video goes full screen, else it all settles back.
             var pull by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
             val pullFull = with(density) { PULL_FULLSCREEN.toPx() }
+            var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
             val settle: () -> Unit = {
                 val from = pull
-                scope.launch { androidx.compose.animation.core.animate(from, 0f, animationSpec = tween(220)) { v, _ -> pull = v } }
+                settleJob?.cancel()
+                settleJob = scope.launch { androidx.compose.animation.core.animate(from, 0f, animationSpec = tween(220)) { v, _ -> pull = v } }
+            }
+            // The finger lifted (with or without a fling): far enough, full screen (sideways); else back in place.
+            val release: () -> Unit = {
+                if (pull >= pullFull) {
+                    settleJob?.cancel()
+                    pull = 0f
+                    controller.setFullscreen(true)
+                } else if (pull > 0f) {
+                    settle()
+                }
             }
             val pullConnection = remember(pullFull) {
                 object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
@@ -161,12 +175,7 @@ fun WatchPage(
 
                     override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
                         if (pull <= 0f) return androidx.compose.ui.unit.Velocity.Zero
-                        if (pull >= pullFull) {
-                            pull = 0f
-                            controller.setFullscreen(true)
-                        } else {
-                            settle()
-                        }
+                        release()
                         return available
                     }
                 }
@@ -259,6 +268,16 @@ fun WatchPage(
                             fade
                                 .graphicsLayer { translationY = pull }
                                 .nestedScroll(pullConnection)
+                                // A slow lift sends no fling: the lift itself is watched too (nothing is consumed).
+                                .pointerInput(Unit) {
+                                    awaitEachGesture {
+                                        awaitFirstDown(requireUnconsumed = false)
+                                        do {
+                                            val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final)
+                                        } while (event.changes.any { it.pressed })
+                                        if (pull > 0f) release()
+                                    }
+                                }
                                 // Darker the further it is pulled.
                                 .drawWithContent {
                                     drawContent()
