@@ -815,6 +815,8 @@ private fun SettingsBody(controller: VideosController, s: VideoStrings, signedIn
         if (!signedIn) Text(s.signInBody, color = VideoColors.TextSecondary, fontSize = 14.sp)
         SwitchRow(x.autoplay, null, autoplay != "0") { controller.setAutoplay(it) }
         SwitchRow(x.sponsorBlock, x.sponsorBlockHint, sponsor != "0") { controller.setSponsorBlock(it) }
+        val feedPreview by controller.feedPreviewSetting.collectAsState()
+        SwitchRow(x.feedPreview, x.feedPreviewHint, feedPreview != "0") { controller.setFeedPreview(it) }
         Text(s.qualityWifi, color = VideoColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(QUALITY_CHOICES) { h -> LabelChip("${h}p", wifi == h) { controller.setWifiQuality(h) } }

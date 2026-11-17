@@ -32,6 +32,9 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -91,9 +94,13 @@ fun Avatar(url: String?, size: androidx.compose.ui.unit.Dp, modifier: Modifier =
 }
 
 @Composable
-fun VideoThumbnail(item: VideoItem, s: VideoStrings, modifier: Modifier = Modifier) {
+fun VideoThumbnail(item: VideoItem, s: VideoStrings, modifier: Modifier = Modifier, preview: Boolean = false) {
     Box(modifier = modifier.aspectRatio(16f / 9f).background(VideoColors.Surface)) {
-        if (item.thumbnail != null) {
+        // Playing silently in the list: the player's picture under the thumbnail, which steps aside once the first
+        // frame is there (the picture needs its surface to be drawn at all).
+        val showing by FeedPreview.showing.collectAsState()
+        if (preview) FeedPreviewSurface(Modifier.fillMaxSize())
+        if (item.thumbnail != null && !(preview && showing)) {
             AsyncImage(model = item.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
         val badge = if (item.isLive) s.live else item.duration
@@ -144,9 +151,9 @@ fun Modifier.warmVideoOnPress(item: VideoItem): Modifier = pointerInput(item.id)
 
 /** The big card of a feed: picture across the width, then avatar, title and who/how many/when. */
 @Composable
-fun VideoCard(item: VideoItem, s: VideoStrings, onClick: () -> Unit, onChannel: (() -> Unit)?, modifier: Modifier = Modifier, onMore: (() -> Unit)? = null) {
+fun VideoCard(item: VideoItem, s: VideoStrings, onClick: () -> Unit, onChannel: (() -> Unit)?, modifier: Modifier = Modifier, onMore: (() -> Unit)? = null, previewing: Boolean = false) {
     Column(modifier = modifier.fillMaxWidth().warmVideoOnPress(item).clickable(onClick = onClick).padding(bottom = 16.dp)) {
-        VideoThumbnail(item, s, Modifier.fillMaxWidth())
+        VideoThumbnail(item, s, Modifier.fillMaxWidth(), preview = previewing)
         Row(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp)) {
             if (item.channelAvatar != null || item.channelId != null) {
                 Avatar(
@@ -328,6 +335,34 @@ fun SkeletonCard() {
     }
 }
 
+/** Waiting over a picture: a white ring on a soft dark disc, seen over anything (as YouTube's). */
+@Composable
+fun PlayerSpinner() {
+    Box(Modifier.size(64.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.35f)), Alignment.Center) {
+        CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp, modifier = Modifier.size(40.dp))
+    }
+}
+
+/** How long a list stays still before its video starts previewing. */
+private const val PREVIEW_SETTLE_MS = 800L
+
+/** A row of a list (picture on the left, lines on the right) not loaded yet. */
+@Composable
+fun SkeletonRow() {
+    val pulse by rememberInfiniteTransition().animateFloat(0.35f, 0.7f, infiniteRepeatable(tween(800), RepeatMode.Reverse))
+    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).graphicsLayer { alpha = pulse }) {
+        Box(Modifier.width(168.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp)).background(VideoColors.Surface))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f).padding(top = 2.dp)) {
+            Box(Modifier.fillMaxWidth(0.95f).height(13.dp).clip(RoundedCornerShape(4.dp)).background(VideoColors.Surface))
+            Spacer(Modifier.height(6.dp))
+            Box(Modifier.fillMaxWidth(0.7f).height(13.dp).clip(RoundedCornerShape(4.dp)).background(VideoColors.Surface))
+            Spacer(Modifier.height(10.dp))
+            Box(Modifier.fillMaxWidth(0.5f).height(11.dp).clip(RoundedCornerShape(4.dp)).background(VideoColors.Surface))
+        }
+    }
+}
+
 @Composable
 fun Loading(modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
@@ -403,6 +438,36 @@ private fun FeedList(
             last >= listState.layoutInfo.totalItemsCount - 4
         }.distinctUntilChanged().collect { near -> if (near) onLoadMore() }
     }
+    val previewId by FeedPreview.playing.collectAsState()
+    if (!compact) {
+        LaunchedEffect(listState, state.entries) {
+            val videoByKey = state.entries.mapIndexedNotNull { i, e -> (e as? VideoEntry.Video)?.let { ((e.ids().firstOrNull() ?: "e") + "#" + i) to it.item } }.toMap()
+            snapshotFlow { listState.isScrollInProgress }.collectLatest { scrolling ->
+                if (scrolling) {
+                    FeedPreview.stopAll()
+                    return@collectLatest
+                }
+                kotlinx.coroutines.delay(PREVIEW_SETTLE_MS)
+                if (!FeedPreview.allowed()) {
+                    FeedPreview.stopAll()
+                    return@collectLatest
+                }
+                val info = listState.layoutInfo
+                val pictureHeight = info.viewportSize.width * 9 / 16
+                val item = info.visibleItemsInfo.firstNotNullOfOrNull { visible ->
+                    val video = videoByKey[visible.key as? String] ?: return@firstNotNullOfOrNull null
+                    video.takeIf { visible.offset >= info.viewportStartOffset && visible.offset + pictureHeight <= info.viewportEndOffset && !it.isLive }
+                } ?: return@collectLatest
+                if (FeedPreview.playing.value == item.id) return@collectLatest
+                FeedPreview.stopAll()
+                val quality = FeedPreview.resolve(item) ?: return@collectLatest
+                if (listState.isScrollInProgress || !FeedPreview.allowed()) return@collectLatest
+                FeedPreview.playing.value = item.id
+                FeedPreview.play(quality)
+            }
+        }
+        DisposableEffect(Unit) { onDispose { FeedPreview.stopAll() } }
+    }
     LazyColumn(state = listState, modifier = modifier.fillMaxSize()) {
         header?.invoke(this)
         when {
@@ -422,6 +487,7 @@ private fun FeedList(
                         onClick = { onVideo(entry.item) },
                         onChannel = entry.item.channelId?.let { id -> { onChannel(id, entry.item.channelName) } },
                         onMore = onMore?.let { m -> { m(entry.item) } },
+                        previewing = previewId == entry.item.id,
                     )
                 }
                 is VideoEntry.Channel -> ChannelResultRow(entry.item) { onChannel(entry.item.id, entry.item.name) }

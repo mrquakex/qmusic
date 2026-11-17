@@ -263,19 +263,23 @@ private fun PlayerBox(w: WatchState, playback: VideoPlayback?, s: VideoStrings, 
         val isPlaying = playback?.isPlaying?.collectAsState()?.value ?: false
         val buffering = playback?.buffering?.collectAsState()?.value ?: false
         val playError = playback?.error?.collectAsState()?.value
+        val picture = playback?.showingPicture?.collectAsState()?.value ?: false
+        // Starting: nothing of the video is on screen yet (its picture stands in, as on YouTube).
+        val starting = playback != null && !w.streamError && playError == null && (w.quality == null || !picture)
         if (playback != null && w.quality != null) {
             VideoPlaybackSurface(playback, Modifier.fillMaxSize(), fill = fullscreen && fill)
-        } else if (w.video.thumbnail != null) {
+        }
+        if ((starting || playback == null || w.quality == null) && w.video.thumbnail != null) {
             AsyncImage(model = w.video.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
 
         when {
             playback == null -> Overlay(s.desktopWatch)
             w.streamError || playError != null -> Overlay(s.streamError, s.retry) { controller.retryStream() }
-            w.streamLoading || (buffering && !isPlaying) -> Box(Modifier.fillMaxSize(), Alignment.Center) { Loading(Modifier.size(64.dp)) }
+            starting || w.streamLoading || (buffering && !isPlaying) -> Box(Modifier.fillMaxSize(), Alignment.Center) { PlayerSpinner() }
         }
         if (playback != null && w.quality != null && !w.streamError) {
-            PlayerControls(playback, w, s, controller, fullscreen)
+            PlayerControls(playback, w, s, controller, fullscreen, starting = starting)
             // Watching together: everyone's reactions over the picture.
             com.qmusic.ui.chat.TogetherReactionsLayer(w.video.id)
         }
@@ -388,7 +392,7 @@ private fun WatchDetails(
                     },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Avatar(details?.channelAvatar ?: w.video.channelAvatar, 40.dp)
+                    Avatar(w.video.channelAvatar ?: details?.channelAvatar, 40.dp)
                     Spacer(Modifier.width(10.dp))
                     Column {
                         Text(details?.channelName ?: w.video.channelName ?: "", color = VideoColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -544,7 +548,7 @@ private fun LazyListScope.relatedItems(controller: VideosController, w: WatchSta
             )
         }
     }
-    if (w.details == null && !w.detailsError) item(key = "related-loading") { Loading() }
+    if (w.details == null && !w.detailsError) items(4, key = { "related-loading-$it" }) { SkeletonRow() }
     items(w.related.size, key = { i -> (w.related[i].ids().firstOrNull() ?: "r") + "#" + i }) { i ->
         when (val e = w.related[i]) {
             is VideoEntry.Video -> VideoRowCard(e.item, s, onClick = { controller.open(e.item) }, onMore = { controller.openMenu(e.item) })

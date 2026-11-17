@@ -155,7 +155,7 @@ private fun ShortItem(
         if (active && quality != null && playback != null) VideoPlaybackSurface(playback, Modifier.fillMaxSize(), fill = true)
 
         if (active && (quality == null && !failed || buffering && !isPlaying)) {
-            Box(Modifier.fillMaxSize(), Alignment.Center) { Loading(Modifier.size(64.dp)) }
+            Box(Modifier.fillMaxSize(), Alignment.Center) { PlayerSpinner() }
         }
         if (failed) Box(Modifier.fillMaxSize(), Alignment.Center) { Text(s.streamError, color = Color.White, fontSize = 14.sp) }
         if (active && quality != null && !isPlaying && !buffering && !failed) {

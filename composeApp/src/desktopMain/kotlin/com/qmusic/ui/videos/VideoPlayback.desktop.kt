@@ -9,3 +9,6 @@ actual fun rememberVideoPlayback(): VideoPlayback? = null
 
 @Composable
 actual fun VideoPlaybackSurface(playback: VideoPlayback, modifier: Modifier, fill: Boolean) = Unit
+
+@androidx.compose.runtime.Composable
+actual fun FeedPreviewSurface(modifier: androidx.compose.ui.Modifier) {}

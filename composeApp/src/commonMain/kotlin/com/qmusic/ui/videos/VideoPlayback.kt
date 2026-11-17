@@ -20,6 +20,9 @@ interface VideoPlayback {
     /** Why it cannot play (null while it can). */
     val error: StateFlow<String?>
 
+    /** The first frame of what was loaded last is drawn (until then the page shows the video's picture). */
+    val showingPicture: StateFlow<Boolean> get() = kotlinx.coroutines.flow.MutableStateFlow(true)
+
     /** Plays [quality] from [startMs]; picture and sound are merged when they are separate streams. */
     fun load(quality: VideoQuality, startMs: Long = 0, autoPlay: Boolean = true, caption: VideoCaption? = null)
     fun togglePlay()

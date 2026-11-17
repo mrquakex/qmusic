@@ -135,7 +135,7 @@ private fun qeyfBrush(width: Float) = Brush.horizontalGradient(listOf(VideoColor
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStrings, controller: VideosController, fullscreen: Boolean) {
+internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStrings, controller: VideosController, fullscreen: Boolean, starting: Boolean = false) {
     var visible by remember { mutableStateOf(true) }
     var sheet by remember { mutableStateOf(false) }
     var speed by remember { mutableStateOf(1f) }
@@ -160,6 +160,18 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
     val sleep by controller.sleep.collectAsState()
     val skipTick by controller.skipTick.collectAsState()
     val preview by controller.preview.collectAsState()
+    // The preview pictures over the seek bar: the sheets of where it is now and the next ones are fetched ahead, so
+    // a held bar shows its picture at once rather than a black box while the sheet comes.
+    val imageContext = coil3.compose.LocalPlatformContext.current
+    val sheetNow = remember(preview, position / 60_000) { preview?.frameAt(position)?.sheetUrl }
+    LaunchedEffect(preview, sheetNow) {
+        val frames = preview ?: return@LaunchedEffect
+        val loader = coil3.SingletonImageLoader.get(imageContext)
+        val from = frames.sheetUrls.indexOf(sheetNow).coerceAtLeast(0)
+        (listOf(0) + (from until from + 3)).distinct().mapNotNull { frames.sheetUrls.getOrNull(it) }.forEach { url ->
+            loader.enqueue(coil3.request.ImageRequest.Builder(imageContext).data(url).size(coil3.size.Size.ORIGINAL).build())
+        }
+    }
     val segments by controller.segments.collectAsState()
     val cancelled by controller.autoplayCancelled.collectAsState()
     val chapters = remember(w.details?.description) { chaptersOf(w.details?.description) }
@@ -411,8 +423,8 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                 IconButton(onClick = { sheet = true }) { Icon(QMusicIcons.Settings, x.playerSettings, tint = Color.White, modifier = Modifier.size(22.dp)) }
             }
 
-            // Middle: previous, play / pause, next.
-            Row(
+            // Middle: previous, play / pause, next (not while it starts: the spinner is there then).
+            if (!starting) Row(
                 modifier = Modifier.align(Alignment.Center),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(28.dp),
@@ -437,7 +449,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                 Row(modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     val chapter = currentChapter(chapters, scrubbing?.toLong() ?: position)
                     Text(
-                        if (live) s.live else "${clock(scrubbing?.toLong() ?: position)} / ${clock(duration)}" + (chapter?.let { "  •  ${it.title}" } ?: ""),
+                        if (starting) "" else if (live) s.live else "${clock(scrubbing?.toLong() ?: position)} / ${clock(duration)}" + (chapter?.let { "  •  ${it.title}" } ?: ""),
                         color = Color.White,
                         fontSize = 12.sp,
                         maxLines = 1,
@@ -448,7 +460,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                         Icon(if (fullscreen) VideoIcons.FullscreenExit else VideoIcons.Fullscreen, null, tint = Color.White, modifier = Modifier.size(22.dp))
                     }
                 }
-                if (!live) {
+                if (!live && !starting) {
                     SeekBar(
                         position = position,
                         duration = duration,

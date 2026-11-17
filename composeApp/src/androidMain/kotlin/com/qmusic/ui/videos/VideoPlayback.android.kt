@@ -62,6 +62,8 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
     override val ended: StateFlow<Boolean> = _ended.asStateFlow()
     private val _error = MutableStateFlow<String?>(null)
     override val error: StateFlow<String?> = _error.asStateFlow()
+    private val _picture = MutableStateFlow(false)
+    override val showingPicture: StateFlow<Boolean> = _picture.asStateFlow()
     private val _rebuffers = MutableStateFlow(0)
     override val rebuffers: StateFlow<Int> = _rebuffers.asStateFlow()
 
@@ -89,6 +91,7 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
         // The first seconds of a video about to be opened go into the cache this player reads.
         VideoWarm.bytes = { quality -> VideoStreaming.preload(appContext, quality) }
         VideoWarm.prepare = { quality -> prepareAhead(quality) }
+        FeedPreviewPlayer.install(appContext)
     }
 
     /** Loaded ahead (a card touched, nothing open): the stream it holds, until opened or let go. */
@@ -116,6 +119,10 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _isPlaying.value = isPlaying
+            }
+
+            override fun onRenderedFirstFrame() {
+                _picture.value = true
             }
 
             override fun onPlaybackStateChanged(state: Int) {
@@ -159,6 +166,9 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
             player.playWhenReady = autoPlay
             return
         }
+        // Another quality (or subtitles) of the same video keeps its picture; a new video waits for its first frame.
+        val videoOf = { url: String -> runCatching { android.net.Uri.parse(url).getQueryParameter("id") }.getOrNull() ?: url }
+        if (lastLoad == null || videoOf(lastLoad!!.first.videoUrl) != videoOf(quality.videoUrl)) _picture.value = false
         _error.value = null
         _ended.value = false
         wasReady = false

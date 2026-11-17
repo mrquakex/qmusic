@@ -340,6 +340,11 @@ class VideosController(
     init {
         refreshAccount()
         VideoWarm.touch = { item -> warm(item, bytes = true, prepare = true) }
+        FeedPreview.allowed = { feedPreviewSetting.value != "0" && isUnmetered() && _watch.value == null }
+        // The lightest picture there is (360p at most): a preview is small and silent.
+        FeedPreview.resolve = { item ->
+            qualitiesOf(item.id).getOrNull()?.filter { !it.isLive && it.height in 1..360 }?.maxByOrNull { it.height }
+        }
         // The first videos of a list: their streams looked up (cheap); their first seconds only on Wi-Fi.
         VideoWarm.list = { entries ->
             entries.mapNotNull { (it as? VideoEntry.Video)?.item }.take(WARM_LIST).forEach { warm(it, bytes = isUnmetered()) }
@@ -532,6 +537,7 @@ class VideosController(
 
     private fun startWatching(video: VideoItem, queue: List<VideoItem> = emptyList(), queueIndex: Int = 0) {
         watchJob?.cancel()
+        FeedPreview.stopAll()
         _watch.value = WatchState(video = video, queue = queue, queueIndex = queueIndex)
         val id = video.id
         watchJob = scope.launch {
@@ -1165,6 +1171,14 @@ class VideosController(
     val mobileQuality = settings.string(KEY_Q_MOBILE, "480")
     private val captionsSetting = settings.string(KEY_CAPTIONS, "0")
 
+    /** The silent previews of the lists ("1" on, the default; only on Wi-Fi anyway). */
+    val feedPreviewSetting = settings.string(KEY_FEED_PREVIEW, "1")
+
+    fun setFeedPreview(on: Boolean) {
+        settings.setString(KEY_FEED_PREVIEW, if (on) "1" else "0")
+        if (!on) FeedPreview.stopAll()
+    }
+
     fun setWifiQuality(height: String) = settings.setString(KEY_Q_WIFI, height)
 
     fun setMobileQuality(height: String) = settings.setString(KEY_Q_MOBILE, height)
@@ -1417,6 +1431,7 @@ class VideosController(
         const val KEY_Q_WIFI = "video_quality_wifi"
         const val KEY_Q_MOBILE = "video_quality_mobile"
         const val KEY_CAPTIONS = "video_captions"
+        const val KEY_FEED_PREVIEW = "video_feed_preview"
         const val KEY_RESUME = "video_resume"
         private const val RESUME_MIN_LENGTH_MS = 120_000L
         private const val RESUME_MIN_POSITION_MS = 10_000L
