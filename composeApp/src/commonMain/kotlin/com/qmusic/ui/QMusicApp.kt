@@ -761,7 +761,7 @@ fun QMusicApp(
         val homeChips by viewModel.homeChips.collectAsState()
         val speedDial by viewModel.speedDial.collectAsState()
         // A song touched anywhere starts getting ready before the tap is even finished.
-        androidx.compose.runtime.LaunchedEffect(viewModel) { com.qmusic.ui.components.SongPress.warm = { song -> viewModel.playerController.warmUp(listOf(song)) } }
+        androidx.compose.runtime.LaunchedEffect(viewModel) { com.qmusic.ui.components.SongPress.warm = { song -> viewModel.playerController.preparePress(song) } }
         val speedDialPins by viewModel.speedDialPins.collectAsState()
         val isOnline by viewModel.isOnline.collectAsState()
         val libraryStartTab by viewModel.libraryStartTab.collectAsState()

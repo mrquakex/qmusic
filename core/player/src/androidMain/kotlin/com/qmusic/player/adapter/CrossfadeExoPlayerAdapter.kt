@@ -778,6 +778,15 @@ class CrossfadeExoPlayerAdapter(
         measure(song.id)
 
         val manual = fadeMs == MANUAL_FADE_MS
+        // Touched a moment ago and made ready on the free player: it only has to start.
+        if (startPositionMs == 0L && startPreloaded(song)) {
+            prefetchNext()
+            return
+        }
+        // Another song than the one held ready: the free player is the usual way's again (and no timer of the
+        // preload may stop it later, in the middle of a blend).
+        preloadJob?.cancel()
+        preloaded = null
         resolveJob = scope.launch {
             // Tapping next several times in a row only changes what is selected; the song is loaded once the
             // taps stop, so nothing is resolved, fetched or half-started for the ones skipped over.
@@ -855,6 +864,73 @@ class CrossfadeExoPlayerAdapter(
         if (upcoming.isEmpty()) return
         prefetchJob?.cancel()
         prefetchJob = scope.launch { upcoming.forEach { warm(it) } }
+    }
+
+    // ------------------------------------------------------------------ ready before the tap
+
+    /** The song held ready on the player that is not playing (touched, not yet tapped), and when it expires. */
+    @Volatile private var preloaded: Pair<String, ExoPlayer>? = null
+    private var preloadJob: Job? = null
+
+    override fun preparePress(song: SongItem) {
+        warmUp(listOf(song))
+        if (remote != null || crossfadeJob?.isActive == true || handOffJob?.isActive == true) return
+        if (_videoMode.value && song.hasVideo) return
+        if (_currentTrack.value?.id == song.id) return
+        if (preloaded?.first == song.id) return
+        preloadJob?.cancel()
+        preloadJob = scope.launch {
+            val source = resolveSource(song) ?: return@launch
+            if (source.isVideo) return@launch
+            // Still free (nothing started a blend meanwhile) and the song still not playing.
+            if (crossfadeJob?.isActive == true || handOffJob?.isActive == true || _currentTrack.value?.id == song.id) return@launch
+            val idle = if (activePlayer === playerA) playerB else playerA
+            val idleFade = if (idle === playerA) crossfadeProcessorA else crossfadeProcessorB
+            idle.stop()
+            idle.clearMediaItems()
+            idleFade.setVolume(1f)
+            idle.volume = 1f
+            idle.playWhenReady = false
+            idle.setMediaItem(checkNotNull(prepared(song, source).item))
+            idle.prepare()
+            preloaded = song.id to idle
+            // Not tapped after all (a scroll, a slip): the decoder and the buffer are let go again.
+            delay(PRELOAD_KEEP_MS)
+            if (preloaded?.first == song.id && preloaded?.second === idle && idle !== activePlayer) {
+                preloaded = null
+                idle.stop()
+                idle.clearMediaItems()
+            }
+        }
+    }
+
+    /** Starts [song] from the free player if it is held ready there; false when it is not (the usual way then). */
+    private fun startPreloaded(song: SongItem): Boolean {
+        val (id, incoming) = preloaded ?: return false
+        if (id != song.id || incoming === activePlayer || incoming.currentMediaItem?.mediaId != song.id) return false
+        if (incoming.playbackState == Player.STATE_IDLE || incoming.playerError != null) return false
+        if (_videoMode.value && song.hasVideo) return false
+        preloaded = null
+        preloadJob?.cancel()
+        resolveJob?.cancel()
+        crossfadeJob?.cancel()
+        handOffJob?.cancel()
+        val outgoing = activePlayer
+        val incomingFade = if (incoming === playerA) crossfadeProcessorA else crossfadeProcessorB
+        val outgoingFade = if (outgoing === playerA) crossfadeProcessorA else crossfadeProcessorB
+        incomingFade.setVolume(1f)
+        incoming.volume = 1f
+        forwardingPlayer.setDelegate(incoming)
+        setActive(incoming)
+        outgoing.stop()
+        outgoing.clearMediaItems()
+        outgoing.volume = 1f
+        outgoingFade.setVolume(1f)
+        forwardingPlayer.suppressPlaybackEnded = false
+        incoming.playWhenReady = true
+        incoming.play()
+        applyLoudness()
+        return true
     }
 
     override fun warmUp(songs: List<SongItem>) {
@@ -1187,6 +1263,7 @@ class CrossfadeExoPlayerAdapter(
         const val PREFETCH_AHEAD = 2
         const val WARM_BYTES = 400_000L
         const val WARM_PARALLEL = 4
+        const val PRELOAD_KEEP_MS = 8_000L
         const val WARM_TAIL_BYTES = 96_000L
         val CONTENT_LENGTH_PARAM = Regex("[?&]clen=(\\d+)")
         const val SWEEP_MIN_MS = 1_500L

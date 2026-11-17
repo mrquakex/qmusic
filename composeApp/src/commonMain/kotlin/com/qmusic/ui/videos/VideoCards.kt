@@ -4,6 +4,9 @@ import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -116,10 +119,33 @@ fun VideoThumbnail(item: VideoItem, s: VideoStrings, modifier: Modifier = Modifi
 internal fun VideoItem.subtitle(): String =
     listOfNotNull(channelName, views, published).filter { it.isNotBlank() }.joinToString(" · ")
 
+/**
+ * Videos made ready ahead: a card touched (before the tap is over), or the first ones of a list as it appears, get
+ * their streams looked up and their first seconds fetched. The controller and the phone's player fill the hooks.
+ */
+object VideoWarm {
+    /** A video about to be opened (a finger on its card). */
+    var touch: (VideoItem) -> Unit = {}
+    /** A list just shown: its first videos. */
+    var list: (List<VideoEntry>) -> Unit = {}
+    /** The first bytes of a chosen stream (picture and sound) into the player's cache. */
+    var bytes: (com.qmusic.engine.video.VideoQuality) -> Unit = {}
+    /** Nothing open: the player itself loads the touched video, silent and still, so the tap only starts it. */
+    var prepare: (com.qmusic.engine.video.VideoQuality) -> Unit = {}
+}
+
+/** Gets [item] ready as soon as a finger lands on it; the touch goes on to the click as before. */
+fun Modifier.warmVideoOnPress(item: VideoItem): Modifier = pointerInput(item.id) {
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false)
+        VideoWarm.touch(item)
+    }
+}
+
 /** The big card of a feed: picture across the width, then avatar, title and who/how many/when. */
 @Composable
 fun VideoCard(item: VideoItem, s: VideoStrings, onClick: () -> Unit, onChannel: (() -> Unit)?, modifier: Modifier = Modifier, onMore: (() -> Unit)? = null) {
-    Column(modifier = modifier.fillMaxWidth().clickable(onClick = onClick).padding(bottom = 16.dp)) {
+    Column(modifier = modifier.fillMaxWidth().warmVideoOnPress(item).clickable(onClick = onClick).padding(bottom = 16.dp)) {
         VideoThumbnail(item, s, Modifier.fillMaxWidth())
         Row(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp)) {
             if (item.channelAvatar != null || item.channelId != null) {
@@ -154,7 +180,7 @@ fun MoreButton(onClick: () -> Unit) {
 /** The small card of "up next" and channel lists: picture on the left, text on the right. */
 @Composable
 fun VideoRowCard(item: VideoItem, s: VideoStrings, onClick: () -> Unit, modifier: Modifier = Modifier, onMore: (() -> Unit)? = null) {
-    Row(modifier = modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp)) {
+    Row(modifier = modifier.fillMaxWidth().warmVideoOnPress(item).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp)) {
         VideoThumbnail(item, s, Modifier.width(168.dp).clip(RoundedCornerShape(8.dp)))
         Spacer(Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {

@@ -77,6 +77,7 @@ class FeedLoader(
             val result = if (chip != null) service.more(chip.token) else first()
             result.fold(
                 onSuccess = { feed ->
+                    if (chip == null || _state.value.entries.isEmpty()) VideoWarm.list(feed.entries)
                     _state.value = FeedState(
                         entries = feed.entries,
                         // A filter's own answer carries no chips: keep the row that was there.
@@ -338,6 +339,23 @@ class VideosController(
 
     init {
         refreshAccount()
+        VideoWarm.touch = { item -> warm(item, bytes = true, prepare = true) }
+        // The first videos of a list: their streams looked up (cheap); their first seconds only on Wi-Fi.
+        VideoWarm.list = { entries ->
+            entries.mapNotNull { (it as? VideoEntry.Video)?.item }.take(WARM_LIST).forEach { warm(it, bytes = isUnmetered()) }
+        }
+    }
+
+    /** Looks [item]'s streams up ahead, and with [bytes] fetches the first seconds of the one it would play. */
+    fun warm(item: VideoItem, bytes: Boolean, prepare: Boolean = false) {
+        scope.launch {
+            qualitiesOf(item.id).onSuccess { list ->
+                val q = list.pickDefault(maxHeight()) ?: return@onSuccess
+                // With no video open (none playing, none small in the corner) the player may take it now.
+                if (prepare && _watch.value == null && resumeFor(item.id) == 0L) VideoWarm.prepare(q)
+                else if (bytes) VideoWarm.bytes(q)
+            }
+        }
     }
 
     /** Called when the section opens: the first list is asked for with everything ready. */
@@ -1413,6 +1431,7 @@ class VideosController(
         private const val SHORTS_ROW_AT = 3
         private val CACHE_LIFETIME = kotlin.time.Duration.parse("30m")
         private const val CACHE_SIZE = 12
+        private const val WARM_LIST = 2
         private const val PREFETCH_DELAY_MS = 2_500L
         private const val SUGGEST_DELAY_MS = 180L
         private const val MAX_SUGGESTIONS = 8

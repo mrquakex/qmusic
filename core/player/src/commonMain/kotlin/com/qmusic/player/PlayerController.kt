@@ -107,6 +107,12 @@ interface PlayerController {
     /** A hint that these songs are likely to be played next: their streams can be looked up and started early. */
     fun warmUp(songs: List<SongItem>) = Unit
 
+    /**
+     * A finger just landed on [song]: besides warming it, the player may get it fully ready to sound (decoder open,
+     * first seconds loaded) so the tap that follows starts it at once.
+     */
+    fun preparePress(song: SongItem) = warmUp(listOf(song))
+
     /** The stream quality for what is resolved from now on (Wi-Fi and mobile data are chosen by the caller). */
     fun setAudioQuality(quality: AudioQuality) = Unit
 

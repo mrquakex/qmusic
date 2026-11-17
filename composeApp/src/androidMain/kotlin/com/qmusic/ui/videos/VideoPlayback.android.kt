@@ -84,6 +84,32 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
 
     /** Videos come through the cache, in bounded pieces (full speed); live streams only in pieces. */
     private val dataSources = VideoStreaming.cached(appContext)
+
+    init {
+        // The first seconds of a video about to be opened go into the cache this player reads.
+        VideoWarm.bytes = { quality -> VideoStreaming.preload(appContext, quality) }
+        VideoWarm.prepare = { quality -> prepareAhead(quality) }
+    }
+
+    /** Loaded ahead (a card touched, nothing open): the stream it holds, until opened or let go. */
+    private var ahead: VideoQuality? = null
+    private val dropAhead = Runnable {
+        if (ahead != null) {
+            ahead = null
+            lastLoad = null
+            player.stop()
+            player.clearMediaItems()
+        }
+    }
+
+    private fun prepareAhead(quality: VideoQuality) {
+        if (quality.isLive || player.playWhenReady && player.mediaItemCount > 0) return
+        load(quality, 0L, autoPlay = false, caption = null)
+        ahead = quality
+        handler.removeCallbacks(dropAhead)
+        // Touched but not opened (a scroll, a slip): the decoders and the buffer are let go again.
+        handler.postDelayed(dropAhead, AHEAD_KEEP_MS)
+    }
     private val liveSources = VideoStreaming.network()
 
     init {
@@ -125,6 +151,14 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
     }
 
     override fun load(quality: VideoQuality, startMs: Long, autoPlay: Boolean, caption: VideoCaption?) {
+        handler.removeCallbacks(dropAhead)
+        val wasAhead = ahead
+        ahead = null
+        // Opened what was loaded ahead: it only has to start.
+        if (wasAhead == quality && startMs == 0L && caption == null && player.mediaItemCount > 0 && player.playerError == null) {
+            player.playWhenReady = autoPlay
+            return
+        }
         _error.value = null
         _ended.value = false
         wasReady = false
@@ -186,6 +220,7 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
     private companion object {
         const val TICK_MS = 400L
         const val SEEK_GRACE_MS = 2_500L
+        const val AHEAD_KEEP_MS = 8_000L
     }
 }
 
