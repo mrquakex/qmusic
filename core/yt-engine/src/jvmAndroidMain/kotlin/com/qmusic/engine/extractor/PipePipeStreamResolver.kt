@@ -68,7 +68,7 @@ private object PipePipeStreamResolver : ExtractorStreamResolver {
                 .filter { (item, _) -> item.indexEnd > 0 && item.initEnd > 0 }
                 .maxWithOrNull(compareBy<Pair<dev.maxrave.pipepipe.extractor.services.youtube.ItagItem, dev.maxrave.pipepipe.extractor.stream.VideoStream>>({ it.second.height }, { it.second.fps }, { it.second.bitrate }))
                 ?: return@withContext null
-            val audio = info.audioStreams
+            val audio = info.audioStreams.originalSound()
                 .filter { it.isUrl && it.format?.mimeType == "audio/mp4" }
                 .mapNotNull { a -> a.itagItem?.let { it to a } }
                 .filter { (item, _) -> item.indexEnd > 0 && item.initEnd > 0 }
@@ -133,7 +133,7 @@ private object PipePipeStreamResolver : ExtractorStreamResolver {
     override suspend fun audioStreams(videoId: String): List<AudioStream> =
         withContext(Dispatchers.IO) {
             check(initialised)
-            info(videoId).audioStreams.mapNotNull { stream ->
+            info(videoId).audioStreams.originalSound().mapNotNull { stream ->
                 if (!stream.isUrl) return@mapNotNull null
                 val bitrate = if (stream.bitrate > 0) stream.bitrate else stream.averageBitrate * 1000
                 AudioStream(
@@ -160,7 +160,7 @@ private fun qualitiesOf(info: StreamInfo): List<VideoQuality> {
     if (!live.isNullOrBlank() && info.streamType.name.contains("LIVE")) {
         return listOf(VideoQuality(height = 0, fps = 0, videoUrl = live, audioUrl = null, isLive = true))
     }
-    val audio = info.audioStreams
+    val audio = info.audioStreams.originalSound()
         .filter { it.isUrl }
         .sortedWith(compareByDescending<dev.maxrave.pipepipe.extractor.stream.AudioStream> { it.format?.mimeType == "audio/mp4" }
             .thenByDescending { it.averageBitrate })
@@ -193,7 +193,7 @@ private fun pickVideoSource(info: StreamInfo, maxHeight: Int): VideoSource? {
             .thenByDescending { it.bitrate })
         .firstOrNull()
     if (pictureOnly != null) {
-        val audio = info.audioStreams
+        val audio = info.audioStreams.originalSound()
             .filter { it.isUrl }
             .sortedWith(compareByDescending<dev.maxrave.pipepipe.extractor.stream.AudioStream> { it.format?.mimeType == "audio/mp4" }
                 .thenByDescending { it.averageBitrate })
@@ -280,4 +280,26 @@ private class OkHttpExtractorDownloader : Downloader() {
         )
         return cancellable
     }
+}
+
+/**
+ * Which sound track a stream is: YouTube adds dubbed tracks (often made by AI) beside a video's own sound, and marks
+ * them in the address ("acont=original" / "acont=dubbed-auto") and in the track's name. 0: the original, 1: a video
+ * with one track only, 2: another track, 3: a dub.
+ */
+private fun dev.maxrave.pipepipe.extractor.stream.AudioStream.trackRank(): Int {
+    val url = content.orEmpty()
+    val name = audioTrackName.orEmpty().lowercase()
+    return when {
+        "acont%3doriginal" in url.lowercase() || "acont=original" in url || "original" in name || "orijinal" in name -> 0
+        audioTrackId.isNullOrBlank() -> 1
+        "acont%3ddubbed" in url.lowercase() || "acont=dubbed" in url || "dubbed" in name || "dublaj" in name -> 3
+        else -> 2
+    }
+}
+
+/** Only the streams of the video's own sound (a Turkish video plays in Turkish, not in a dub of another language). */
+private fun List<dev.maxrave.pipepipe.extractor.stream.AudioStream>.originalSound(): List<dev.maxrave.pipepipe.extractor.stream.AudioStream> {
+    val best = minOfOrNull { it.trackRank() } ?: return this
+    return filter { it.trackRank() == best }
 }

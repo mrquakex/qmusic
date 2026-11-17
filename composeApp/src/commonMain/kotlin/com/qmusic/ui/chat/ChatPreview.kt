@@ -34,7 +34,14 @@ object ChatPreview {
         "📎" to PreviewKind.ATTACH,
     )
 
+    fun isE2eNotice(preview: String): Boolean {
+        val t = preview.trimStart().removePrefix("🔒").trimStart()
+        return t.startsWith("Mesajlar artık uçtan uca şifreli") || t.startsWith("Messages are now end-to-end encrypted")
+    }
+
     fun split(preview: String, english: Boolean): PreviewParts {
+        // The old "messages are now end-to-end encrypted" line: no longer shown in the list either.
+        if (isE2eNotice(preview)) return PreviewParts(null, "")
         val t = preview.trimStart()
         // A group line "Ali: 📷": the writer stays in front.
         val (who, body) = t.indexOf(": ").takeIf { it in 1..40 }?.let { i ->

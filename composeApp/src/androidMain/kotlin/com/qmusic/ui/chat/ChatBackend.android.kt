@@ -727,6 +727,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     private fun MsgNode.toMessage(pending: Set<String>): ChatMessage? {
         val id = key ?: return null
         val from = child("from").getValue(String::class.java) ?: return null
+        // "Messages are now end-to-end encrypted": no longer shown (encryption is simply how chats are).
+        if (child("system").getValue(String::class.java) == "e2e") return null
         val shareSnap = child("share")
         val share = if (!shareSnap.exists()) {
             null
@@ -2348,19 +2350,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         }
         if (CLAUDE_BOT_UID in members) return false
         if (!e2e.allHaveKeys(members.filter { it != uid })) return false
-        return e2e.enable(chatId, members).isSuccess.also { ok -> if (ok) e2eNotice(chatId) }
-    }
-
-    /** The line in the conversation: from now on its messages are end-to-end encrypted. */
-    private suspend fun e2eNotice(chatId: String) {
-        val me = (_account.value as? ChatAccount.Ready)?.me ?: return
-        val tr = app.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
-        val line = if (tr) "Mesajlar artık uçtan uca şifreli. Bu sohbettekiler dışında kimse, Nuvelo bile okuyamaz." else "Messages are now end-to-end encrypted. No one outside this chat, not even Nuvelo, can read them."
-        val target = if (isGroupId(chatId)) groupInfo(chatId)?.let { ChatUser(chatId, it.name, "", it.photo) } else {
-            val other = chatId.split("_").firstOrNull { it != me.uid } ?: return
-            runCatching { user(other) }.getOrNull() ?: ChatUser(other, "", "", null)
-        } ?: return
-        runCatching { sendMessage(target, line, null, null, null, "🔒 $line", extra = mapOf("system" to "e2e", "who" to me.name.substringBefore(' '), "whom" to ""), noExpiry = true) }
+        return e2e.enable(chatId, members).isSuccess
     }
 
     override suspend fun enableEncryption(other: ChatUser): Result<Unit> = runCatching {

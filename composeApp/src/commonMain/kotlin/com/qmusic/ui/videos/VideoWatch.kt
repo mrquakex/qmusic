@@ -58,6 +58,8 @@ import com.qmusic.engine.video.VideoQuality
 import com.qmusic.ui.theme.QMusicIcons
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -126,6 +128,48 @@ fun WatchPage(
             val progress = { (offset.value / travel).coerceIn(0f, 1f) }
             LaunchedEffect(Unit) {
                 androidx.compose.runtime.snapshotFlow { progress() }.collect { controller.watchDrag.value = it }
+            }
+            // Pulling the page down from its top (the title, not the picture), as on YouTube: the picture slides
+            // down a little, what is about it slides down more and darkens, black opens between them; let go far
+            // enough and the video goes full screen, else it all settles back.
+            var pull by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+            val pullFull = with(density) { PULL_FULLSCREEN.toPx() }
+            val settle: () -> Unit = {
+                val from = pull
+                scope.launch { androidx.compose.animation.core.animate(from, 0f, animationSpec = tween(220)) { v, _ -> pull = v } }
+            }
+            val pullConnection = remember(pullFull) {
+                object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+                    override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
+                        // Pulled and now pushed back up: the pull gives way first, then the page scrolls.
+                        if (pull > 0f && available.y < 0f) {
+                            val take = maxOf(available.y, -pull)
+                            pull += take
+                            return androidx.compose.ui.geometry.Offset(0f, take)
+                        }
+                        return androidx.compose.ui.geometry.Offset.Zero
+                    }
+
+                    override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
+                        // At the top and pulled further down by a finger: the page follows it (more slowly).
+                        if (source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput && available.y > 0f) {
+                            pull = (pull + available.y * 0.55f).coerceAtMost(pullFull * 2.2f)
+                            return androidx.compose.ui.geometry.Offset(0f, available.y)
+                        }
+                        return androidx.compose.ui.geometry.Offset.Zero
+                    }
+
+                    override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
+                        if (pull <= 0f) return androidx.compose.ui.unit.Velocity.Zero
+                        if (pull >= pullFull) {
+                            pull = 0f
+                            controller.setFullscreen(true)
+                        } else {
+                            settle()
+                        }
+                        return available
+                    }
+                }
             }
             androidx.compose.runtime.DisposableEffect(Unit) { onDispose { controller.watchDrag.value = 0f } }
             // Ambient light: the video's colours glow softly around it, on the dark theme (as on YouTube).
@@ -205,9 +249,22 @@ fun WatchPage(
             } else {
                 Box(modifier = layer) {
                     if (ambient) AmbientGlow(w.video.thumbnail, Modifier.fillMaxWidth().then(fade))
-                    Column {
-                        Box(Modifier.drawBehind { if (progress() > 0f) drawRect(Color.Black) }) { player() }
-                        Box(fade) { WatchDetails(controller, w, s, onShare, onSignIn, seek, showRelated = true) }
+                    Column(Modifier.drawBehind { if (pull > 0f) drawRect(Color.Black) }) {
+                        Box(
+                            Modifier
+                                .drawBehind { if (progress() > 0f) drawRect(Color.Black) }
+                                .graphicsLayer { translationY = pull * 0.45f },
+                        ) { player() }
+                        Box(
+                            fade
+                                .graphicsLayer { translationY = pull }
+                                .nestedScroll(pullConnection)
+                                // Darker the further it is pulled.
+                                .drawWithContent {
+                                    drawContent()
+                                    if (pull > 0f) drawRect(Color.Black.copy(alpha = (pull / pullFull).coerceIn(0f, 1f) * 0.55f))
+                                },
+                        ) { WatchDetails(controller, w, s, onShare, onSignIn, seek, showRelated = true) }
                     }
                 }
             }
@@ -308,6 +365,9 @@ private fun Overlay(text: String, action: String? = null, onAction: (() -> Unit)
 internal fun WatchState.isLive() = quality?.isLive == true || video.isLive || details?.isLive == true
 
 private const val SWIPE_PX = 120f
+
+/** How far the page is pulled down (from its title) for the video to go full screen when let go. */
+private val PULL_FULLSCREEN = 150.dp
 
 internal fun clock(ms: Long): String {
     val total = (ms / 1000).coerceAtLeast(0)
