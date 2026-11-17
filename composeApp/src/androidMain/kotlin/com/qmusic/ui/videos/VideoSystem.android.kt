@@ -68,17 +68,17 @@ private fun Context.activity(): Activity? {
 }
 
 @Composable
-actual fun FullscreenEffect(enabled: Boolean) {
+actual fun FullscreenEffect(enabled: Boolean, upright: Boolean) {
     val activity = LocalContext.current.activity()
-    DisposableEffect(enabled, activity) {
+    DisposableEffect(enabled, upright, activity) {
         val window = activity?.window
         if (activity != null && window != null && enabled) {
             val controller = WindowCompat.getInsetsController(window, window.decorView)
-            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            if (!upright) activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(WindowInsetsCompat.Type.systemBars())
             onDispose {
-                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                if (!upright) activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                 controller.show(WindowInsetsCompat.Type.systemBars())
             }
         } else {

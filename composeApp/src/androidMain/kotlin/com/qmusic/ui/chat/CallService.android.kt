@@ -365,6 +365,7 @@ internal class FirebaseCallService(
             // The caller sees "Ringing…" from here on: this phone has the call.
             s.callRef.child("ringing").setValue(id)
             watchCall(s)
+            MusicDuringCall.pause()
             if (CallHooks.appVisible) startRinging() else CallHooks.onIncoming?.invoke(id, peer, video)
             s.timeout = scope.launch {
                 delay(RING_MS)
@@ -539,6 +540,7 @@ internal class FirebaseCallService(
                     // In a voice call their camera coming on makes it a video call here too.
                     if (theirCamera && !s.video && !s.upgraded) s.upgraded = true
                     _state.update { it?.copy(remoteVideo = theirCamera && remoteTrack.value != null, video = it.video || theirCamera) }
+                    if (theirCamera) releaseProximity()
                 }
                 // After a network change the caller sends a new offer (ICE restart); the other side answers it.
                 val reoffer = snap.child("reoffer").child("sdp").getValue(String::class.java)
@@ -828,6 +830,7 @@ internal class FirebaseCallService(
             s.upgraded = true
             me()?.uid?.let { s.callRef.child("cam").child(it).setValue(true) }
             _state.update { it?.copy(video = true, cameraOn = true) }
+            releaseProximity()
             // A video call is held away from the ear.
             if (_state.value?.speaker != true) toggleSpeaker()
             return
@@ -994,6 +997,7 @@ internal class FirebaseCallService(
         // "Ended", for a call that was on (still in the call's sound route, before it is let go).
         if (s.connectedOnce) QeyfSounds.playSmall(app, SmallSound.ENDED, call = true)
         stopAudio()
+        MusicDuringCall.resume()
         CallHooks.onActive?.invoke(false, null, false)
         _state.update { it?.copy(phase = CallPhase.ENDED, endReason = reason) }
         scope.launch {
@@ -1079,6 +1083,7 @@ internal class FirebaseCallService(
     private var proximity: PowerManager.WakeLock? = null
 
     private fun startAudio(video: Boolean) {
+        MusicDuringCall.pause()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             // Taking the focus pauses the music (and a video) for the call.
             focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
@@ -1132,6 +1137,11 @@ internal class FirebaseCallService(
         audioManager.mode = AudioManager.MODE_NORMAL
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) focus?.let { audioManager.abandonAudioFocusRequest(it) }
         focus = null
+        releaseProximity()
+    }
+
+    /** The screen-off-near-the-ear lock of a voice call let go: a video call keeps its screen on. */
+    private fun releaseProximity() {
         proximity?.let { if (it.isHeld) it.release() }
         proximity = null
     }
@@ -1245,6 +1255,7 @@ actual fun CallVideo(service: CallService, remote: Boolean, modifier: Modifier) 
                 setScalingType(if (remote) RendererCommon.ScalingType.SCALE_ASPECT_FILL else RendererCommon.ScalingType.SCALE_ASPECT_FILL)
                 setEnableHardwareScaler(true)
                 if (!remote) setZOrderMediaOverlay(true)
+                keepScreenOn = true
                 rendererView = this
             }
         },

@@ -231,6 +231,18 @@ object QMusicIcons {
         "M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z",
     )
 
+    /** A filled handset, small: a call line in the chat list. */
+    val PhoneFilled: ImageVector = filled(
+        "PhoneFilled",
+        "M20.01 15.38c-1.23 0-2.42-.2-3.53-.56-.35-.12-.74-.03-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z",
+    )
+
+    /** A filled camera, small: a video call line in the chat list. */
+    val VideoCallFilled: ImageVector = filled(
+        "VideoCallFilled",
+        "M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z",
+    )
+
     /** The handset turned down: end the call. */
     val PhoneEnd: ImageVector = stroked(
         "PhoneEnd",

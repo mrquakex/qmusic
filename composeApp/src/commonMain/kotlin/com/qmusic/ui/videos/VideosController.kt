@@ -675,7 +675,13 @@ class VideosController(
     private val _fullscreen = MutableStateFlow(false)
     val fullscreen: StateFlow<Boolean> = _fullscreen.asStateFlow()
 
-    fun setFullscreen(on: Boolean) {
+    private val _fullscreenUpright = MutableStateFlow(false)
+
+    /** Full screen without turning the phone (the page pulled down from its title); false: turned sideways. */
+    val fullscreenUpright: StateFlow<Boolean> = _fullscreenUpright.asStateFlow()
+
+    fun setFullscreen(on: Boolean, upright: Boolean = false) {
+        _fullscreenUpright.value = on && upright
         _fullscreen.value = on && _watch.value != null
     }
 

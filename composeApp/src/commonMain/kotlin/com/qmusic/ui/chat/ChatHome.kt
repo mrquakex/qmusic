@@ -113,15 +113,25 @@ internal fun ChatHome(
         val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
         // A tap on the bar slides there; a far tab is not reached through every tab between (one step, then the
         // slide), as WhatsApp does.
+        // While a tap's slide runs, the pages it passes are not "landed on": the tab between (Status, on the way from
+        // Chats to Groups) was taken as chosen, which turned the slide back, then forward again: the shaking.
+        var sliding by remember { mutableStateOf(false) }
         LaunchedEffect(tab) {
             val target = tabs.indexOf(tab)
             if (pager.targetPage == target && !pager.isScrollInProgress) return@LaunchedEffect
-            if (kotlin.math.abs(pager.currentPage - target) > 1) pager.scrollToPage(if (target > pager.currentPage) target - 1 else target + 1)
-            pager.animateScrollToPage(target, animationSpec = androidx.compose.animation.core.tween(280, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+            sliding = true
+            try {
+                if (kotlin.math.abs(pager.currentPage - target) > 1) pager.scrollToPage(if (target > pager.currentPage) target - 1 else target + 1)
+                pager.animateScrollToPage(target, animationSpec = androidx.compose.animation.core.tween(280, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+            } finally {
+                sliding = false
+            }
         }
         // A swipe that lands on a tab makes it the tab (its badge clears, Back comes home from it).
         LaunchedEffect(pager) {
-            androidx.compose.runtime.snapshotFlow { pager.settledPage }.collect { page -> if (controller.tab.value != tabs[page]) controller.selectTab(tabs[page]) }
+            androidx.compose.runtime.snapshotFlow { pager.settledPage to sliding }.collect { (page, busy) ->
+                if (!busy && controller.tab.value != tabs[page]) controller.selectTab(tabs[page])
+            }
         }
         // Leaving a tab puts its keyboard away (a search typed on it).
         LaunchedEffect(pager) {
@@ -955,20 +965,35 @@ private fun rememberListTick(controller: ChatController, t: ChatThread, me: Chat
         val read by remember(t.id) { controller.readMarks(t.other) }.collectAsState(initial = emptyMap())
         val delivered by remember(t.id) { controller.deliveredMarks(t.other) }.collectAsState(initial = emptyMap())
         val others = group?.members?.map { it.user.uid }?.filter { it != me.uid && it != CLAUDE_BOT_UID }.orEmpty()
+        val known = ListTickMemory.group[t.id]?.takeIf { it.first == t.lastAt }?.second
+        // The group or its marks not in yet: what it showed before (same last message), not a grey tick.
+        if (group == null || (known != null && read.isEmpty())) return known ?: TickState.SENT
         if (others.isEmpty()) return TickState.SENT
-        return when {
+        val state = when {
             others.all { (read[it] ?: 0L) >= t.lastAt } -> TickState.READ
             others.all { (read[it] ?: 0L) >= t.lastAt || (delivered[it] ?: 0L) >= t.lastAt } -> TickState.DELIVERED
             else -> TickState.SENT
         }
+        ListTickMemory.group[t.id] = t.lastAt to state
+        return state
     }
-    val read by remember(t.id) { controller.otherReadAt(t.other) }.collectAsState(initial = 0L)
-    val delivered by remember(t.id) { controller.otherDeliveredAt(t.other) }.collectAsState(initial = 0L)
+    val read by remember(t.id) { controller.otherReadAt(t.other) }.collectAsState(initial = ListTickMemory.read[t.id] ?: 0L)
+    val delivered by remember(t.id) { controller.otherDeliveredAt(t.other) }.collectAsState(initial = ListTickMemory.delivered[t.id] ?: 0L)
+    // Kept for the next time the row is drawn (coming back from the chat), so it starts as it was.
+    if (read > 0L) ListTickMemory.read[t.id] = maxOf(read, ListTickMemory.read[t.id] ?: 0L)
+    if (delivered > 0L) ListTickMemory.delivered[t.id] = maxOf(delivered, ListTickMemory.delivered[t.id] ?: 0L)
     return when {
         read >= t.lastAt -> TickState.READ
         delivered >= t.lastAt -> TickState.DELIVERED
         else -> TickState.SENT
     }
+}
+
+/** The ticks' last known marks per chat, for this run of the app (the rows start from them, not from nothing). */
+private object ListTickMemory {
+    val read = HashMap<String, Long>()
+    val delivered = HashMap<String, Long>()
+    val group = HashMap<String, Pair<Long, TickState>>()
 }
 
 /**

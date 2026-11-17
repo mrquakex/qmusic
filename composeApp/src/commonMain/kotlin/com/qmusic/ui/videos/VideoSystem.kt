@@ -2,9 +2,13 @@ package com.qmusic.ui.videos
 
 import androidx.compose.runtime.Composable
 
-/** Landscape with the system bars hidden while [enabled] (full-screen video); everything is put back after. */
+/**
+ * The system bars hidden while [enabled] (full-screen video), and the screen turned sideways unless [upright] (the
+ * page pulled down from its title: the video fills the upright screen, centred on black, as on YouTube); everything
+ * is put back after.
+ */
 @Composable
-expect fun FullscreenEffect(enabled: Boolean)
+expect fun FullscreenEffect(enabled: Boolean, upright: Boolean = false)
 
 /** While [armed] (a video is playing on screen), leaving the app shrinks the video into a floating window. */
 @Composable

@@ -3,7 +3,7 @@ package com.qmusic.ui.videos
 import androidx.compose.runtime.Composable
 
 @Composable
-actual fun FullscreenEffect(enabled: Boolean) = Unit
+actual fun FullscreenEffect(enabled: Boolean, upright: Boolean) = Unit
 
 @Composable
 actual fun PictureInPictureEffect(armed: Boolean) = Unit

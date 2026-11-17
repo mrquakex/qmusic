@@ -661,18 +661,29 @@ internal fun ThreadRow(
                 } else {
                     if (tick != null) Box(Modifier.padding(end = 4.dp)) { MessageTick(tick, TextSecondary) }
                     val parts = remember(t.lastText, s.english) { ChatPreview.split(t.lastText, s.english) }
+                    // A call (made, missed, video) is a line about the chat, not a message: softer.
+                    val callLine = parts.kind == PreviewKind.CALL || parts.kind == PreviewKind.MISSED_CALL || parts.kind == PreviewKind.VIDEO_CALL
+                    val lineColour = when {
+                        t.unread -> TextPrimary
+                        callLine -> TextMuted
+                        else -> TextSecondary
+                    }
                     parts.kind?.let { kind ->
-                        Text(prefix, color = if (t.unread) TextPrimary else TextSecondary, fontSize = 14.sp, maxLines = 1)
+                        Text(prefix, color = lineColour, fontSize = 14.sp, maxLines = 1)
                         Icon(
                             ChatPreview.icon(kind),
                             contentDescription = null,
-                            tint = if (kind == PreviewKind.MISSED_CALL) Color(0xFFFF5A5F) else TextSecondary,
-                            modifier = Modifier.padding(end = 4.dp).size(16.dp),
+                            tint = when {
+                                kind == PreviewKind.MISSED_CALL -> Color(0xFFE5484D)
+                                callLine -> TextMuted
+                                else -> TextSecondary
+                            },
+                            modifier = Modifier.padding(end = 5.dp).size(if (callLine) 15.dp else 16.dp),
                         )
                     }
                     Text(
                         if (parts.kind != null) parts.text else prefix + parts.text,
-                        color = if (t.unread) TextPrimary else TextSecondary,
+                        color = lineColour,
                         fontSize = 14.sp,
                         fontWeight = if (t.unread) FontWeight.SemiBold else FontWeight.Normal,
                         maxLines = 1,
@@ -865,10 +876,10 @@ private fun ConversationPage(
     // The last messages; scrolling up to the oldest shown asks for more.
     val limit = remember(other.uid) { kotlinx.coroutines.flow.MutableStateFlow(PAGE) }
     val messages by remember(other.uid) { controller.messages(other, limit) }.collectAsState(initial = null)
-    val readAt by remember(other.uid) { controller.otherReadAt(other) }.collectAsState(initial = 0L)
-    val deliveredAt by remember(other.uid) { controller.otherDeliveredAt(other) }.collectAsState(initial = 0L)
-    val readMarks by remember(other.uid) { controller.readMarks(other) }.collectAsState(initial = emptyMap())
-    val deliveredMarks by remember(other.uid) { controller.deliveredMarks(other) }.collectAsState(initial = emptyMap())
+    val readAt by rememberLastKnown("readAt/" + other.uid, 0L) { controller.otherReadAt(other) }
+    val deliveredAt by rememberLastKnown("deliveredAt/" + other.uid, 0L) { controller.otherDeliveredAt(other) }
+    val readMarks by rememberLastKnown("readMarks/" + other.uid, emptyMap()) { controller.readMarks(other) }
+    val deliveredMarks by rememberLastKnown("deliveredMarks/" + other.uid, emptyMap()) { controller.deliveredMarks(other) }
     val starredList by controller.starred.collectAsState()
     val ttl by remember(other.uid) { controller.ttl(other) }.collectAsState(initial = 0L)
     // Where the person had read up to when they opened it: the "unread" line goes there and stays.
@@ -922,6 +933,9 @@ private fun ConversationPage(
     val sounds = rememberChatSounds()
     // The last message heard here: a new one after it plays the send or arrive sound (not the first load).
     var lastHeard by remember(other.uid) { mutableStateOf<String?>(null) }
+    // Only what comes after the chat was opened makes a sound: messages that were already there (still loading in
+    // when it opens) are quiet.
+    val soundsFrom = remember(other.uid) { controller.serverNow() }
     val pollVotes by remember(other.uid) { controller.pollVotes(other) }.collectAsState(initial = emptyMap())
     var pollDialog by remember { mutableStateOf(false) }
     var eventDialog by remember { mutableStateOf(false) }
@@ -942,7 +956,7 @@ private fun ConversationPage(
     val title = group?.name ?: other.name
     val blocked by controller.blocked.collectAsState()
     val isBlocked = !isGroup && other.uid in blocked
-    val pins by remember(other.uid) { controller.pinned(other) }.collectAsState(initial = emptyList())
+    val pins by rememberLastKnown("pins/" + other.uid, emptyList()) { controller.pinned(other) }
     val openedMap by remember(other.uid) { controller.opened(other) }.collectAsState(initial = emptyMap())
     val iAmAdmin = group?.members?.any { it.user.uid == me.uid && it.admin } == true
     // A group where only admins write: the box gives way to a note for everyone else.
@@ -1053,11 +1067,11 @@ private fun ConversationPage(
     var query by remember(other.uid) { mutableStateOf("") }
     var matchIndex by remember(other.uid) { mutableStateOf(0) }
 
-    val presence by remember(other.uid) { controller.presence(other) }.collectAsState(initial = null)
+    val presence by rememberLastKnown("presence/" + other.uid, null) { controller.presence(other) }
     val typing by remember(other.uid) { controller.typing(other) }.collectAsState(initial = false)
     val recordingThem by remember(other.uid) { controller.recording(other) }.collectAsState(initial = false)
     DisposableEffect(other.uid) { onDispose { controller.stopRecordingIfAny(other) } }
-    val reactions by remember(other.uid) { controller.reactions(other) }.collectAsState(initial = emptyMap())
+    val reactions by rememberLastKnown("reactions/" + other.uid, emptyMap()) { controller.reactions(other) }
     val assist by remember(other.uid) { controller.assist(other) }.collectAsState(initial = null)
     DisposableEffect(other.uid) {
         onDispose {
@@ -1450,7 +1464,7 @@ private fun ConversationPage(
                     if (newest != null) {
                         val before = lastHeard
                         lastHeard = newest.id
-                        if (before != null && before != newest.id && !newest.system) {
+                        if (before != null && before != newest.id && !newest.system && (newest.pending || newest.at > soundsFrom)) {
                             sounds?.play(if (newest.from == me.uid) SoundKind.SEND else SoundKind.RECEIVE)
                         }
                     }
@@ -2743,32 +2757,43 @@ private fun Bubble(
             .then(if (selecting) Modifier.clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { onToggleSelect() } else Modifier)
             .pointerInput(m.id, selecting) {
                 if (selecting) return@pointerInput
+                // Where the finger has pulled it, kept here: each move adds to this, not to the shown value (which
+                // lags a frame behind on a slow phone, so the bubble jumped back and forth: the shaking).
+                var pulled = 0f
                 detectHorizontalDragGestures(
+                    onDragStart = { pulled = swipe.value },
                     onDragEnd = {
-                        if (swipe.value >= threshold) onReply()
-                        swipeScope.launch { swipe.animateTo(0f, androidx.compose.animation.core.spring(dampingRatio = 0.6f)) }
+                        if (pulled >= threshold) onReply()
+                        pulled = 0f
+                        swipeScope.launch { swipe.animateTo(0f, androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 600f)) }
                     },
-                    onDragCancel = { swipeScope.launch { swipe.animateTo(0f) } },
+                    onDragCancel = {
+                        pulled = 0f
+                        swipeScope.launch { swipe.animateTo(0f) }
+                    },
                     onHorizontalDrag = { change, amount ->
-                        val before = swipe.value
-                        val next = (before + amount * 0.6f).coerceIn(0f, threshold * 1.4f)
-                        if (before < threshold && next >= threshold) haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                        swipeScope.launch { swipe.snapTo(next) }
+                        val before = pulled
+                        pulled = (before + amount * 0.6f).coerceIn(0f, threshold * 1.4f)
+                        if (before < threshold && pulled >= threshold) haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        val to = pulled
+                        swipeScope.launch { swipe.snapTo(to) }
                         change.consume()
                     },
                 )
             },
         contentAlignment = if (mine) Alignment.CenterEnd else Alignment.CenterStart,
     ) {
-        // The answer arrow that appears while pulling.
-        if (swipe.value > 4f) {
-            Icon(
-                QMusicIcons.Back,
-                contentDescription = null,
-                tint = Ink.copy(alpha = (swipe.value / threshold).coerceIn(0f, 1f)),
-                modifier = Modifier.align(Alignment.CenterStart).padding(start = 8.dp).size(20.dp).graphicsLayer { rotationZ = 180f },
-            )
-        }
+        // The answer arrow that appears while pulling (read while drawing only: the bubble is not rebuilt on every
+        // move of the finger, which on a slow phone made it stutter).
+        Icon(
+            QMusicIcons.Back,
+            contentDescription = null,
+            tint = Ink,
+            modifier = Modifier.align(Alignment.CenterStart).padding(start = 8.dp).size(20.dp).graphicsLayer {
+                rotationZ = 180f
+                alpha = if (swipe.value > 4f) (swipe.value / threshold).coerceIn(0f, 1f) else 0f
+            },
+        )
         // In a group: the picture, then a tail from the bubble's top corner towards it (the first of a run).
         val tailed = avatar != null && firstOfRun && !bigEmoji
         val bubbleShape = if (avatar != null) {

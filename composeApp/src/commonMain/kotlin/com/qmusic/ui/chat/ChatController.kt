@@ -1116,6 +1116,9 @@ class ChatController(
         }
     }
 
+    /** Now on the server's clock (the messages' times are the server's). */
+    fun serverNow(): Long = Clock.System.now().toEpochMilliseconds() + backend.serverOffset.value
+
     fun setBlocked(other: ChatUser, block: Boolean) {
         scope.launch { backend.setBlocked(other.uid, block).onFailure { _error.value = it.message } }
         if (block) _routes.update { list -> list.filterNot { it is ChatRoute.Conversation && it.other.uid == other.uid } }

@@ -134,7 +134,10 @@ fun HomeScreen(
     }
 
     val tintSong = currentTrack ?: speedDial.firstOrNull() ?: ordered.firstOrNull()?.songs?.firstOrNull()
-    val tint = rememberDominantColor(tintSong?.let { it.thumbnail ?: it.thumbnails.firstOrNull()?.url })?.asBackdrop()
+    // The colour the page last had stays until the new one is known (never a blank top that fills in).
+    val found = rememberDominantColor(tintSong?.let { it.thumbnail ?: it.thumbnails.firstOrNull()?.url })
+    if (found != null) lastHomeColour = found
+    val tint = (found ?: lastHomeColour)?.asBackdrop()
     // Heights of the rows seen so far: the logo row is short, so "how far the page has moved" has to add up the
     // rows above the first visible one, not only that row's own offset (which made the colour vanish at once).
     val itemSizes = remember { HashMap<Int, Int>() }
@@ -1239,3 +1242,6 @@ fun SongListItem(
 }
 
 private const val HEADER_FADE_PX = 220f
+
+/** The home page's last colour, for this run of the app: coming back to the page starts with it. */
+private var lastHomeColour: Color? = null

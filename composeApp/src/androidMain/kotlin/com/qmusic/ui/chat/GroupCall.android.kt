@@ -456,6 +456,7 @@ internal class FirebaseGroupCallService(
     private var focus: AudioFocusRequest? = null
 
     private fun startAudio() {
+        MusicDuringCall.pause()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
                 .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
@@ -487,6 +488,7 @@ internal class FirebaseGroupCallService(
     }
 
     private fun stopAudio() {
+        MusicDuringCall.resume()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audioManager.clearCommunicationDevice()
         audioManager.mode = AudioManager.MODE_NORMAL
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) focus?.let { audioManager.abandonAudioFocusRequest(it) }
@@ -510,6 +512,8 @@ actual fun GroupCallVideo(service: GroupCallService, uid: String?, modifier: Mod
                 init(calls.egl.eglBaseContext, null)
                 setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
                 setEnableHardwareScaler(true)
+                // A group's video keeps the screen on while it shows.
+                keepScreenOn = true
                 view = this
             }
         },

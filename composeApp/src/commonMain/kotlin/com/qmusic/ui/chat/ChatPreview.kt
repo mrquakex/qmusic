@@ -73,8 +73,9 @@ object ChatPreview {
     fun plain(preview: String, english: Boolean): String = split(preview, english).text
 
     fun icon(kind: PreviewKind): ImageVector = when (kind) {
-        PreviewKind.MISSED_CALL, PreviewKind.CALL -> QMusicIcons.Phone
-        PreviewKind.VIDEO_CALL, PreviewKind.PHOTO -> QMusicIcons.Camera
+        PreviewKind.MISSED_CALL, PreviewKind.CALL -> QMusicIcons.PhoneFilled
+        PreviewKind.VIDEO_CALL -> QMusicIcons.VideoCallFilled
+        PreviewKind.PHOTO -> QMusicIcons.Camera
         PreviewKind.VOICE -> QMusicIcons.Mic
         PreviewKind.VIDEO, PreviewKind.WATCH -> QMusicIcons.VideoPlay
         PreviewKind.FILE -> QMusicIcons.File

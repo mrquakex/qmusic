@@ -200,7 +200,8 @@ fun VideosApp(
             controller.clearSleep()
         }
     }
-    FullscreenEffect(fullscreen && top is VideoRoute.Watch)
+    val upright by controller.fullscreenUpright.collectAsState()
+    FullscreenEffect(fullscreen && top is VideoRoute.Watch, upright = upright)
     PictureInPictureEffect(watch != null && top is VideoRoute.Watch && playing)
 
     val exit: () -> Unit = {

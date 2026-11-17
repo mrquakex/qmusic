@@ -20,9 +20,10 @@ import kotlinx.coroutines.withContext
 @Composable
 actual fun rememberDominantColor(url: String?): Color? {
     val context = LocalContext.current
-    var color by remember(url) { mutableStateOf<Color?>(null) }
+    // A cover worked out once is there at once afterwards (coming back to a page draws its colour straight away).
+    var color by remember(url) { mutableStateOf(url?.let { dominantColors[it] }) }
     LaunchedEffect(url) {
-        if (url == null) return@LaunchedEffect
+        if (url == null || color != null) return@LaunchedEffect
         val request = ImageRequest.Builder(context)
             .data(url)
             .size(48) // a thumbnail is plenty to judge the colour, and cheap
@@ -30,10 +31,15 @@ actual fun rememberDominantColor(url: String?): Color? {
             .build()
         val bitmap = (SingletonImageLoader.get(context).execute(request) as? SuccessResult)?.image?.toBitmap()
             ?: return@LaunchedEffect
-        color = withContext(Dispatchers.Default) { tint(bitmap) }
+        val found = withContext(Dispatchers.Default) { tint(bitmap) }
+        dominantColors[url] = found
+        color = found
     }
     return color
 }
+
+/** Covers' colours already worked out, for this run of the app. */
+private val dominantColors = java.util.concurrent.ConcurrentHashMap<String, Color>()
 
 /** Average of the colourful pixels (greys and near-black/white count little), then set to a deep, rich shade. */
 private fun tint(bitmap: Bitmap): Color {

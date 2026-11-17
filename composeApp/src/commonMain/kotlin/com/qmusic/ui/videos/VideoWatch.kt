@@ -142,12 +142,13 @@ fun WatchPage(
                 settleJob?.cancel()
                 settleJob = scope.launch { androidx.compose.animation.core.animate(from, 0f, animationSpec = tween(220)) { v, _ -> pull = v } }
             }
-            // The finger lifted (with or without a fling): far enough, full screen (sideways); else back in place.
+            // The finger lifted (with or without a fling): far enough, full screen upright (the phone is not
+            // turned: the video fills the screen as it is held, centred on black); else back in place.
             val release: () -> Unit = {
                 if (pull >= pullFull) {
                     settleJob?.cancel()
                     pull = 0f
-                    controller.setFullscreen(true)
+                    controller.setFullscreen(true, upright = true)
                 } else if (pull > 0f) {
                     settle()
                 }
