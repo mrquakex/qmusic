@@ -1,5 +1,6 @@
 package com.qmusic.ui.chat
 
+import kotlinx.datetime.Clock
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -52,7 +53,24 @@ sealed interface ChatRoute {
     data class BroadcastEdit(val id: String?) : ChatRoute
     data class BroadcastChat(val id: String) : ChatRoute
     data object Settings : ChatRoute
+    /** The secret space (behind the PIN), and its pages. */
+    data object Secret : ChatRoute
+    data object SecretNewGroup : ChatRoute
+    data object SecretStartChat : ChatRoute
+    data object SecretMove : ChatRoute
+    data object SecretSettings : ChatRoute
+    /** The safety code of an encrypted conversation with [user]. */
+    data class SafetyCode(val user: ChatUser) : ChatRoute
+    /** End-to-end encryption: what it is, the backup PIN, encrypting new chats. */
+    data object Encryption : ChatRoute
+    /** Everyone sharing their live location with this person, on one map. */
+    data object LivePeople : ChatRoute
 }
+
+/** The routes that belong to the secret space (closed when it locks). */
+internal fun ChatRoute.inSecret(): Boolean =
+    this is ChatRoute.Secret || this is ChatRoute.SecretNewGroup || this is ChatRoute.SecretStartChat ||
+        this is ChatRoute.SecretMove || this is ChatRoute.SecretSettings
 
 /**
  * The messages section: the account, the list of conversations, the one open, and what is being typed. Lives as long
@@ -94,24 +112,111 @@ class ChatController(
         }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
-    /** The list: conversations not archived and not locked. */
+    /** The list: conversations not archived, not locked, not in the secret space. */
     val threads: StateFlow<List<ChatThread>?> = allThreads
-        .map { list -> list?.filter { !it.archived && !it.locked } }
+        .map { list -> list?.filter { !it.archived && !it.locked && !it.secret } }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
     /** The conversations moved to "Archived" (locked ones stay in the locked folder). */
     val archived: StateFlow<List<ChatThread>> = allThreads
-        .map { list -> list.orEmpty().filter { it.archived && !it.locked } }
+        .map { list -> list.orEmpty().filter { it.archived && !it.locked && !it.secret } }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     /** The locked conversations: opened with the phone's lock, hidden from the list and from notifications. */
     val lockedThreads: StateFlow<List<ChatThread>> = allThreads
-        .map { list -> list.orEmpty().filter { it.locked } }
+        .map { list -> list.orEmpty().filter { it.locked && !it.secret } }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** The secret space's conversations (invitations first): shown nowhere else. */
+    val secretThreads: StateFlow<List<ChatThread>> = allThreads
+        .map { list -> list.orEmpty().filter { it.secret }.sortedWith(compareByDescending<ChatThread> { it.invite }.thenByDescending { it.pinned }.thenByDescending { it.lastAt }) }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     init {
         // The app keeps the locked ones' ids so a notification for them shows no name and no text.
         scope.launch { lockedThreads.collect { list -> LockedChats.update(list.map { it.id }.toSet()) } }
+        // And the secret ones' (the same, and their calls may hide who calls).
+        scope.launch { secretThreads.collect { list -> SecretChats.update(list.map { it.id }.toSet()) } }
+    }
+
+    // ------------------------------------------------------------------ the secret space
+
+    /** Moves the conversation into the secret space (it is encrypted from then on) or back to the list. */
+    fun setSecret(thread: ChatThread, secret: Boolean) {
+        scope.launch {
+            runCatching { backend.setSecret(thread.id, secret) }
+            if (secret) SecretSpace.defaultTtl.takeIf { it > 0 }?.let { ttl -> backend.setTtl(thread.other, ttl) }
+        }
+    }
+
+    /** Makes a secret group with [members] (friends only) and opens it. */
+    fun createSecretGroup(name: String, members: List<ChatUser>, endsAt: Long = 0L) {
+        run {
+            backend.createSecretGroup(name, members, endsAt).onSuccess { group ->
+                SecretSpace.defaultTtl.takeIf { it > 0 }?.let { ttl -> backend.setTtl(group, ttl) }
+                _routes.update { list -> list.filter { it !is ChatRoute.SecretNewGroup } + ChatRoute.Conversation(group) }
+            }
+        }
+    }
+
+    /** Starts a secret conversation with [user]: it stays in the secret space from its first message. */
+    fun startSecretChat(user: ChatUser) {
+        val id = chatIdWith(user) ?: return
+        val existing = allThreads.value?.firstOrNull { it.id == id }
+        scope.launch {
+            if (existing != null) backend.setSecret(id, true) else {
+                backend.markSecretPending(id)
+                backend.setSecret(id, true)
+            }
+        }
+        _routes.update { list -> list.filter { it !is ChatRoute.SecretStartChat } + ChatRoute.Conversation(user) }
+    }
+
+    /** Secret notes: a conversation with oneself, kept in the secret space and encrypted. */
+    fun openSecretNotes(me: ChatUser) {
+        val id = chatIdWith(me) ?: return
+        scope.launch {
+            backend.markSecretPending(id)
+            backend.setSecret(id, true)
+        }
+        openConversation(me)
+    }
+
+    /** Everyone sharing a live location with this person now, in any conversation (the secret ones while open). */
+    fun livePeople(includeSecret: Boolean): kotlinx.coroutines.flow.Flow<List<Pair<ChatThread, LiveLocation>>> {
+        val list = (threads.value.orEmpty() + archived.value + if (includeSecret) secretThreads.value else emptyList()).distinctBy { it.id }
+        if (list.isEmpty()) return flowOf(emptyList())
+        return combine(list.map { t -> LiveShare.watch(t.id).map { m -> m.values.map { t to it } } }) { parts -> parts.flatMap { it.toList() } }
+    }
+
+    fun acceptInvite(thread: ChatThread) {
+        scope.launch { backend.acceptInvite(thread.id).onFailure { _error.value = it.message } }
+    }
+
+    fun declineInvite(thread: ChatThread) {
+        scope.launch { backend.declineInvite(thread.id).onFailure { _error.value = it.message } }
+    }
+
+    /** The secret space locked: its pages and its conversations close. */
+    fun closeSecret() {
+        val secretIds = secretThreads.value.map { it.other.uid }.toSet()
+        _routes.update { list ->
+            list.filterNot { r -> r.inSecret() || (r is ChatRoute.Conversation && r.other.uid in secretIds) || (r is ChatRoute.GroupInfo && r.group.uid in secretIds) }
+        }
+    }
+
+    /** Whether the conversation with [other] is kept in the secret space. */
+    fun isSecret(other: ChatUser): Boolean = chatIdWith(other)?.let { id -> secretThreads.value.any { it.id == id } } == true
+
+    /** Turns end-to-end encryption on for the conversation with [other]. */
+    fun enableEncryption(other: ChatUser, quiet: Boolean = false) {
+        scope.launch {
+            backend.enableEncryption(other).onFailure { if (!quiet) _error.value = if (it.message == "e2e-nokeys") E2eWords(ChatMusic.english).noKeys else it.message }
+        }
+    }
+
+    fun setShareHistory(group: ChatUser, share: Boolean) {
+        scope.launch { backend.setShareHistory(group.uid, share).onFailure { _error.value = it.message } }
     }
 
     fun setLocked(thread: ChatThread, locked: Boolean) {
@@ -319,7 +424,7 @@ class ChatController(
     suspend fun searchMessages(query: String): List<FoundMessage> {
         val q = query.trim()
         if (q.length < 2) return emptyList()
-        val all = allThreads.value.orEmpty().filter { !it.locked }
+        val all = allThreads.value.orEmpty().filter { !it.locked && !it.secret }
         val found = kotlinx.coroutines.coroutineScope {
             all.map { t ->
                 async {
@@ -458,7 +563,7 @@ class ChatController(
 
     /** Conversations a message can be forwarded to (the list, archived ones too). */
     val forwardTargets: StateFlow<List<ChatUser>> = allThreads
-        .map { list -> list.orEmpty().map { it.other } }
+        .map { list -> list.orEmpty().filter { !it.secret }.map { it.other } }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     val starred: StateFlow<List<StarredMessage>> = ready
@@ -499,6 +604,21 @@ class ChatController(
     fun vote(other: ChatUser, message: ChatMessage, choices: List<Int>) {
         val id = chatIdWith(other) ?: return
         scope.launch { runCatching { backend.vote(id, message.id, choices) } }
+    }
+
+    /**
+     * Starts sharing this phone's live location in the conversation with [other] for [durationMs]: a message with
+     * the place now (its card follows the sharing), and the phone keeps updating it until then.
+     */
+    fun shareLiveLocation(other: ChatUser, place: ChatLocation, durationMs: Long) {
+        val chatId = chatIdWith(other) ?: return
+        val until = Clock.System.now().toEpochMilliseconds() + backend.serverOffset.value + durationMs
+        LiveShare.start(chatId, until)
+        sendLocation(other, place.copy(live = true, until = until))
+    }
+
+    fun stopLiveLocation(other: ChatUser) {
+        chatIdWith(other)?.let { LiveShare.stop(it) }
     }
 
     fun sendLocation(other: ChatUser, location: ChatLocation) {
@@ -554,7 +674,7 @@ class ChatController(
 
     /** People who can be put in a group: friends, and the people of the conversations. */
     val groupCandidates: StateFlow<List<ChatUser>> = combine(friends(), allThreads) { f, t ->
-        (f + t.orEmpty().map { it.other }.filter { !it.isGroup && it.uid != CLAUDE_BOT_UID })
+        (f + t.orEmpty().filter { !it.secret }.map { it.other }.filter { !it.isGroup && it.uid != CLAUDE_BOT_UID })
             .distinctBy { it.uid }
             .sortedBy { it.name.lowercase() }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())

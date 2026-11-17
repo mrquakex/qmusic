@@ -24,6 +24,12 @@
           ".write": "(auth != null && $chatId.matches(/^[A-Za-z0-9]+_[A-Za-z0-9]+$/) && ($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) && ($chatId.beginsWith($uid + '_') || $chatId.endsWith('_' + $uid)) && (auth.uid === $uid || root.child('blocked').child($uid).child(auth.uid).val() !== true)) || (auth != null && $chatId.matches(/^grp[A-Za-z0-9]{20}$/) && (auth.uid === $uid || (root.child('groups').child($chatId).child('members').child(auth.uid).exists() && (!newData.exists() || newData.parent().parent().parent().child('groups').child($chatId).child('members').child($uid).exists()))))",
           "read": {
             ".validate": "auth.uid === $uid"
+          },
+          "secret": {
+            ".validate": "newData.isBoolean() && (auth.uid === $uid || (newData.val() === true && root.child('groups').child($chatId).child('secret').val() === true))"
+          },
+          "invite": {
+            ".validate": "newData.isBoolean() && (auth.uid === $uid || root.child('groups').child($chatId).child('secret').val() === true)"
           }
         }
       }
@@ -86,6 +92,10 @@
               ".write": "auth != null && auth.uid === $uid && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists())) && !data.exists()"
             }
           }
+        },
+        "e2e": {
+          ".write": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))",
+          ".validate": "newData.child('v').isNumber() && newData.child('v').val() >= 1 && (!data.exists() || newData.child('v').val() > data.child('v').val()) && newData.child('by').val() === auth.uid"
         }
       }
     },
@@ -224,8 +234,21 @@
           "editAdmins": {
             ".validate": "newData.isBoolean()"
           }
+        },
+        "shareHistory": {
+          ".write": "auth != null && root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin'",
+          ".validate": "newData.isBoolean()"
+        },
+        "secret": {
+          ".validate": "newData.isBoolean() && (!data.exists() || newData.val() === data.val())"
+        },
+        "endsAt": {
+          ".validate": "newData.isNumber() && !data.exists()"
         }
-      }
+      },
+      ".indexOn": [
+        "endsAt"
+      ]
     },
     "together": {
       "$chatId": {
@@ -418,6 +441,46 @@
       "$uid": {
         ".write": "auth != null && auth.uid === '2hxOw0dRcwUwsW7N6ogH4fRcqXo1'",
         ".validate": "!newData.exists() || newData.val() === true"
+      }
+    },
+    "liveLocations": {
+      "$chatId": {
+        ".read": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))",
+        "$uid": {
+          ".write": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists())) && auth.uid === $uid",
+          ".validate": "!newData.exists() || (((newData.child('lat').isNumber() && newData.child('lng').isNumber()) || (newData.child('e').isString() && newData.child('e').val().length < 600)) && newData.child('until').isNumber() && newData.child('until').val() <= now + 29100000)"
+        }
+      }
+    },
+    "publicKeys": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "!newData.exists() || (newData.child('k').isString() && newData.child('k').val().length < 400 && newData.child('fp').isString())"
+      }
+    },
+    "chatKeys": {
+      "$chatId": {
+        ".read": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))",
+        "$uid": {
+          ".write": "(auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))) && (auth.uid === $uid || !newData.exists() || (auth != null && (($chatId.beginsWith($uid + '_') || $chatId.endsWith('_' + $uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child($uid).exists()))))",
+          "$version": {
+            ".validate": "!newData.exists() || (newData.child('epk').isString() && newData.child('c').isString() && newData.child('c').val().length < 400)"
+          }
+        }
+      }
+    },
+    "keyBackup": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "!newData.exists() || (newData.child('c').isString() && newData.child('salt').isString() && newData.child('rounds').isNumber())"
+      }
+    },
+    "secretSpace": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
       }
     }
   }

@@ -1,5 +1,6 @@
 package com.qmusic.ui.chat
 
+import kotlinx.datetime.toLocalDateTime
 import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import androidx.compose.animation.core.animateFloat
@@ -165,6 +166,10 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
     var viewingPhotos by remember { mutableStateOf<Pair<List<ChatImage>, Int>?>(null) }
     var videoOpen by remember { mutableStateOf<String?>(null) }
     val openFile = rememberAttachmentOpener()
+    val e2eTick by E2e.api.changes.collectAsState()
+    val encrypted = remember(e2eTick, group.uid) { E2e.api.version(group.uid) != null }
+    val e2eWords = remember(ChatMusic.english) { E2eWords(ChatMusic.english) }
+    if (g?.secret == true) SecureScreen()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item { TopBar("", { controller.pop() }) }
         item {
@@ -175,6 +180,17 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
                 Text(s.changePhoto, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { pickPhoto() }.padding(8.dp))
                 Text(g?.name ?: group.name, color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 Text("${g?.members?.size ?: 0} ${s.membersCount}", color = TextSecondary, fontSize = 14.sp)
+                val ends = g?.endsAt ?: 0L
+                if (ends > 0L) {
+                    val day = kotlinx.datetime.Instant.fromEpochMilliseconds(ends).toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault())
+                    val two: (Int) -> String = { it.toString().padStart(2, '0') }
+                    Text(
+                        e2eWords.endsOn("${two(day.dayOfMonth)}.${two(day.monthNumber)}.${day.year} ${two(day.hour)}:${two(day.minute)}"),
+                        color = Color(0xFFFFB74D),
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
                 Spacer(Modifier.height(10.dp))
                 Text(
                     g?.description?.ifBlank { null } ?: s.descriptionHint,
@@ -190,7 +206,8 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
                 }
             }
         }
-        item {
+        // A secret group has no invite link: its members are invited one by one, and accept.
+        if (g?.secret != true) item {
             var inviteOpen by remember { mutableStateOf(false) }
             Row(
                 Modifier.fillMaxWidth().clickable { inviteOpen = true }.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -210,6 +227,7 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
             item {
                 SettingSwitch(s.sendAdminsOnly, s.sendAdminsOnlyNote, g.settings.sendAdmins) { controller.setGroupSettings(group, g.settings.copy(sendAdmins = it)) }
                 SettingSwitch(s.editAdminsOnly, s.editAdminsOnlyNote, g.settings.editAdmins) { controller.setGroupSettings(group, g.settings.copy(editAdmins = it)) }
+                if (encrypted) SettingSwitch(e2eWords.shareHistory, e2eWords.shareHistoryNote, g.shareHistory) { controller.setShareHistory(group, it) }
             }
         }
         item { SectionTitle(s.members) }

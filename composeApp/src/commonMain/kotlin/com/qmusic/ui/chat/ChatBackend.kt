@@ -100,8 +100,8 @@ data class ChatPoll(val question: String, val options: List<String>, val multipl
 /** An event sent in a message: what, when (epoch ms) and where; the answers are its votes (0 going, 1 maybe, 2 not). */
 data class ChatEvent(val title: String, val at: Long, val place: String = "")
 
-/** A place sent in a message. */
-data class ChatLocation(val lat: Double, val lng: Double, val label: String = "")
+/** A place sent in a message; [live]: a live location, shared until [until] (where it is now: [LiveShare]). */
+data class ChatLocation(val lat: Double, val lng: Double, val label: String = "", val live: Boolean = false, val until: Long = 0)
 
 /** A contact sent in a message. */
 data class ChatContact(val name: String, val phone: String)
@@ -173,7 +173,8 @@ data class SharedItem(
  * A photo in a conversation: its size, and a tiny blurred preview (base64 JPEG, ~1 KB) that shows at once; the photo
  * itself ([id] under media/) is fetched when it is shown.
  */
-data class ChatImage(val id: String, val width: Int, val height: Int, val thumb: String, val url: String? = null)
+/** [key]: in an encrypted conversation, the key the file at [url] is sealed with. */
+data class ChatImage(val id: String, val width: Int, val height: Int, val thumb: String, val url: String? = null, val key: String = "")
 
 enum class AttachmentKind { VOICE, VIDEO, FILE }
 
@@ -192,6 +193,8 @@ data class ChatAttachment(
     val height: Int = 0,
     val thumb: String = "",
     val wave: List<Int> = emptyList(),
+    /** In an encrypted conversation: the key the file at [url] is sealed with. */
+    val key: String = "",
 )
 
 /**
@@ -220,6 +223,12 @@ data class GroupInfo(
     val createdBy: String?,
     val description: String = "",
     val settings: GroupSettings = GroupSettings(),
+    /** Made in the secret space: hidden in every member's list, its notifications say nothing. */
+    val secret: Boolean = false,
+    /** New members may read what was said before they came (an encrypted group's keys are shared with them). */
+    val shareHistory: Boolean = false,
+    /** A group that deletes itself then (with everything in it); 0: never. */
+    val endsAt: Long = 0L,
 )
 
 data class GroupMember(val user: ChatUser, val admin: Boolean)
@@ -332,6 +341,9 @@ data class ChatMessage(
     val mentions: Set<String> = emptySet(),
     /** A GIF or a sticker (KLIPY). */
     val gif: ChatGif? = null,
+    /** Sent end-to-end encrypted; [locked]: its key is not on this phone (yet), so it cannot be read. */
+    val e2e: Boolean = false,
+    val locked: Boolean = false,
 )
 
 /** A GIF or a sticker in a message: where it is and its size; a sticker shows without a bubble. */
@@ -380,6 +392,10 @@ data class ChatThread(
     val locked: Boolean = false,
     /** Someone named the person with @ in what came since they last read (a group). */
     val mentioned: Boolean = false,
+    /** Kept in the secret space (shown nowhere else; its notifications say only "New message"). */
+    val secret: Boolean = false,
+    /** An invitation to a secret group, not accepted yet: nothing of it shows until it is. */
+    val invite: Boolean = false,
 ) {
     fun muted(now: Long): Boolean = mutedUntil == -1L || mutedUntil > now
 
@@ -644,6 +660,27 @@ interface ChatBackend {
     // ------------------------------------------------------------------ more
 
     suspend fun setLocked(chatId: String, locked: Boolean) {}
+
+    /** Moves the conversation into the secret space (or back out); only for this person. */
+    suspend fun setSecret(chatId: String, secret: Boolean) {}
+
+    /** A group made in the secret space: hidden for everyone, encrypted, the others invited (they accept first). */
+    suspend fun createSecretGroup(name: String, members: List<ChatUser>, endsAt: Long = 0L): Result<ChatUser> = Result.failure(UnsupportedOperationException())
+
+    /** Takes a secret group's invitation: it shows, and its messages can be read. */
+    suspend fun acceptInvite(chatId: String): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    /** Turns it down: out of the group quietly (no one is told). */
+    suspend fun declineInvite(chatId: String): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    /** A conversation started in the secret space: its first message keeps it there. */
+    fun markSecretPending(chatId: String) {}
+
+    /** Turns end-to-end encryption on for the conversation (every member must have a key). */
+    suspend fun enableEncryption(other: ChatUser): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    /** Whether the group lets new members read its past. */
+    suspend fun setShareHistory(groupId: String, share: Boolean): Result<Unit> = Result.failure(UnsupportedOperationException())
 
     /** The group's invite code (made when there is none; admins only). */
     suspend fun groupInviteCode(groupId: String, renew: Boolean = false): Result<String> = Result.failure(UnsupportedOperationException())

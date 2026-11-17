@@ -236,7 +236,7 @@ internal fun StatusGlyph(tint: Color, size: Dp) {
 
 /** The big title bar of a tab: the title on the left, the actions on the right. */
 @Composable
-internal fun HomeTitle(title: String, onExit: () -> Unit, logo: Boolean = false, actions: @Composable () -> Unit = {}) {
+internal fun HomeTitle(title: String, onExit: () -> Unit, logo: Boolean = false, onSecret: (() -> Unit)? = null, actions: @Composable () -> Unit = {}) {
     Row(
         // It stays at the top while the list scrolls under it (on the page's colour, so nothing shows through).
         Modifier.fillMaxWidth().background(BgRoot).statusBarsPadding().height(60.dp).padding(start = 4.dp, end = 4.dp),
@@ -252,7 +252,10 @@ internal fun HomeTitle(title: String, onExit: () -> Unit, logo: Boolean = false,
         if (logo) {
             // The chats' page carries the app's name, as WhatsApp does.
             Box(Modifier.weight(1f).padding(start = 4.dp), contentAlignment = Alignment.CenterStart) {
-                com.qmusic.ui.theme.NuveloWordmark(letterHeight = 18.dp, color = TextPrimary)
+                // Six quick taps on the name open the secret space (nothing shows for fewer).
+                Box(if (onSecret != null) Modifier.secretTaps(onSecret).padding(vertical = 10.dp) else Modifier) {
+                    com.qmusic.ui.theme.NuveloWordmark(letterHeight = 18.dp, color = TextPrimary)
+                }
             }
         } else {
             Text(title, color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
@@ -403,7 +406,7 @@ private fun ChatsTab(
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
             stickyHeader(key = "title") {
-                HomeTitle(s.title, onExit, logo = true) {
+                HomeTitle(s.title, onExit, logo = true, onSecret = { controller.push(ChatRoute.Secret) }) {
                     val incoming by controller.friendRequests.collectAsState()
                     IconButton(onClick = { camera() }) { Icon(QMusicIcons.Camera, contentDescription = s.camera, tint = Ink) }
                     IconButton(onClick = { controller.openFriends() }) {
@@ -433,6 +436,25 @@ private fun ChatsTab(
                 }
             }
             item(key = "search") { SearchPill(search, { search = it }, s.searchChats) }
+            // A new phone: the encryption key is backed up; the PIN brings the old encrypted messages back.
+            item(key = "e2eRestore") {
+                val needsRestore by E2e.api.needsRestore.collectAsState()
+                if (needsRestore) {
+                    val w = remember(ChatMusic.english) { E2eWords(ChatMusic.english) }
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).clip(RoundedCornerShape(16.dp)).background(DarkSurfaceVariant)
+                            .clickable { controller.push(ChatRoute.Encryption) }.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(QMusicIcons.Lock, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(w.restoreTitle, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text(w.restoreBody, color = TextSecondary, fontSize = 12.sp, maxLines = 2)
+                        }
+                    }
+                }
+            }
             item(key = "chips") {
                 Row(
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp),

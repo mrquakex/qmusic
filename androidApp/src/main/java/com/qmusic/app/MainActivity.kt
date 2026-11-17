@@ -112,6 +112,30 @@ class MainActivity : AppCompatActivity() {
         com.qmusic.ui.chat.CallTonesAndroid.init(this)
         // Music in the messages: profile songs, what friends play, shared playlists, reactions.
         com.qmusic.ui.chat.ChatMusicAndroid.init(this)
+        // Live location: sharings that were going on carry on.
+        com.qmusic.ui.chat.LiveLocations.init(this)
+        com.qmusic.ui.chat.ArrivalWatch.init(this)
+        // The secret space: its settings kept, screenshots blocked while it shows, and it locks when the screen goes off.
+        val secretPrefs = getSharedPreferences("nuvelo_secret_chats", MODE_PRIVATE)
+        com.qmusic.ui.chat.SecretSpace.load = { key -> secretPrefs.getString("s_$key", null) ?: if (key == "showCaller") (if (secretPrefs.getBoolean("showCaller", true)) "1" else "0") else null }
+        com.qmusic.ui.chat.SecretSpace.save = { key, value ->
+            secretPrefs.edit().apply {
+                if (key == "showCaller") putBoolean("showCaller", value != "0") else if (value == null) remove("s_$key") else putString("s_$key", value)
+            }.apply()
+        }
+        com.qmusic.ui.chat.SecretSpace.secureWindow = { on ->
+            runOnUiThread {
+                if (on) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            }
+        }
+        runCatching {
+            androidx.core.content.ContextCompat.registerReceiver(
+                this,
+                screenOff,
+                android.content.IntentFilter(Intent.ACTION_SCREEN_OFF),
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+        }
 
         // The heart in the playback notification: shows and toggles the like of the playing song.
         MediaActions.onToggleLike = { viewModel.currentTrack.value?.let(viewModel::toggleFavorite) }
@@ -244,7 +268,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** The screen went off: the secret space locks. */
+    private val screenOff = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: Intent?) {
+            com.qmusic.ui.chat.SecretSpace.onScreenOff()
+        }
+    }
+
     override fun onDestroy() {
+        runCatching { unregisterReceiver(screenOff) }
+        com.qmusic.ui.chat.SecretSpace.secureWindow = {}
         RingtoneBridge.pickContact = null
         RingtoneBridge.requestContactsPermission = null
         RingtoneBridge.openWriteSettings = null
@@ -317,11 +350,13 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         com.qmusic.ui.chat.CallHooks.setVisible(true)
         com.qmusic.ui.chat.ChatLock.onShown(System.currentTimeMillis())
+        com.qmusic.ui.chat.SecretSpace.onForeground()
     }
 
     override fun onStop() {
         com.qmusic.ui.chat.CallHooks.setVisible(false)
         com.qmusic.ui.chat.ChatLock.onHidden(System.currentTimeMillis())
+        com.qmusic.ui.chat.SecretSpace.onBackground()
         AutoUpdate.onAppHidden(this)
         super.onStop()
     }

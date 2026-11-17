@@ -96,6 +96,9 @@ async function reportCallPush(n, ok) {
 
 const GROUP = /^grp[A-Za-z0-9]{20}$/;
 
+/** Shortens a preview; a sealed one (end-to-end encrypted, "e2e:…") whole, or it could not be opened. */
+const cut = (text, n) => (text.startsWith("e2e:") ? text.slice(0, 2000) : text.slice(0, n));
+
 /** A message in a group: every member but the sender gets it, titled with the group, "Name: text" as the body. */
 async function handleGroup(n) {
   if ((n.type !== "chat" && n.type !== "groupcall") || n.to !== n.chatId) return;
@@ -111,22 +114,36 @@ async function handleGroup(n) {
     name: String(group.name || "Grup"),
     username: "",
     photo: String(group.photo || ""),
-    body: (senderName ? senderName + ": " : "") + String(n.body || "").replace(/^Claude: /, "").slice(0, 280),
+    body: (senderName ? senderName + ": " : "") + cut(String(n.body || "").replace(/^Claude: /, ""), 280),
     group: "1",
     // Who wrote it: the notification shows each message under its writer's name and picture.
     author: String(n.from),
     authorName: senderName,
     authorPhoto: n.from === "claudebot" ? "" : String((group.members[n.from] || {}).photo || ""),
-    text: String(n.body || "").replace(/^Claude: /, "").slice(0, 280),
+    text: cut(String(n.body || "").replace(/^Claude: /, ""), 280),
   };
   const call = n.type === "groupcall";
+  // A secret group (made in the secret space): nothing of it in the notification, not even its name.
+  if (group.secret === true) {
+    Object.assign(data, {
+      name: "Nuvelo",
+      photo: "",
+      body: n.invite ? "Gizli bir sohbete davet edildin" : "Yeni mesaj",
+      text: n.invite ? "Gizli bir sohbete davet edildin" : "Yeni mesaj",
+      author: n.chatId,
+      authorName: "",
+      authorPhoto: "",
+      secret: "1",
+    });
+  }
   if (call) {
     // A group call rings each member like a phone call (the app shows it full screen, with Join and Decline).
     data.type = "groupcall";
     data.starter = senderName || "Biri";
     data.video = n.video ? "1" : "0";
     data.callAt = String(Number(n.at) || Date.now());
-    data.body = `${senderName || "Biri"} grup araması başlattı`;
+    data.body = group.secret === true ? "Nuvelo araması" : `${senderName || "Biri"} grup araması başlattı`;
+    if (group.secret === true) data.starter = "Nuvelo";
   }
   const targets = Object.keys(group.members).filter((uid) => uid !== n.from);
   // People named with @ in the message hear it even when the group is muted.
@@ -186,6 +203,8 @@ async function handleReaction(n) {
   }
   if ((await db.ref(`blocked/${n.to}/${n.from}`).get()).val() === true) return;
   if (await isMuted(n.to, n.chatId)) return;
+  // A secret group's reactions are not told.
+  if (group && group.secret === true) return;
   const who = (await db.ref(`users/${n.from}`).get()).val() || {};
   const emoji = String(n.emoji || "").slice(0, 8);
   const quote = plainPreview(n.body).slice(0, 120);
@@ -196,7 +215,11 @@ async function handleReaction(n) {
     name: group ? String(group.name || "Grup") : String(who.name || ""),
     username: group ? "" : String(who.username || ""),
     photo: group ? String(group.photo || "") : String(who.photo || ""),
-    body: `${group ? String(who.name || "") + " " : ""}${emoji} tepki verdi: "${quote}"`.trim(),
+    // An encrypted message is quoted sealed (data.enc): the phone opens it with the conversation's key.
+    body: String(n.body || "").startsWith("e2e:")
+      ? `${group ? String(who.name || "") + " " : ""}${emoji} tepki verdi`.trim()
+      : `${group ? String(who.name || "") + " " : ""}${emoji} tepki verdi: "${quote}"`.trim(),
+    enc: String(n.body || "").startsWith("e2e:") ? String(n.body).slice(0, 600) : "",
     emoji,
     author: String(n.from),
     authorName: String(who.name || ""),
@@ -243,7 +266,7 @@ async function handle(n) {
     name: String(sender.name || ""),
     username: String(sender.username || ""),
     photo: String(sender.photo || ""),
-    body: String(n.body || "").slice(0, 300),
+    body: cut(String(n.body || ""), 300),
   };
   if (friend) data.action = n.action === "accepted" ? "accepted" : "request";
   if (call) {
@@ -280,8 +303,25 @@ db.ref("notify").on("child_added", async (snap) => {
 
 // ------------------------------------------------------------------ disappearing messages
 
+/** Self-deleting groups (made in the secret space with an end): the group and all in it go at that time. */
+async function sweepEndedGroups() {
+  try {
+    const ended = (await db.ref("groups").orderByChild("endsAt").startAt(1).endAt(Date.now()).get()).val() || {};
+    for (const [id, group] of Object.entries(ended)) {
+      if (!GROUP.test(id)) continue;
+      const updates = { [`groups/${id}`]: null, [`chats/${id}`]: null, [`chatKeys/${id}`]: null, [`typing/${id}`]: null, [`liveLocations/${id}`]: null, [`ttlChats/${id}`]: null };
+      for (const uid of Object.keys((group && group.members) || {})) updates[`userChats/${uid}/${id}`] = null;
+      await db.ref().update(updates);
+      log("a self-deleting group ended");
+    }
+  } catch (e) {
+    log("ended groups sweep failed:", e.message);
+  }
+}
+
 /** Removes the messages whose time is up, in the conversations that have disappearing messages on. */
 async function sweepExpired() {
+  sweepEndedGroups();
   try {
     const chats = Object.keys((await db.ref("ttlChats").get()).val() || {});
     let removed = 0;

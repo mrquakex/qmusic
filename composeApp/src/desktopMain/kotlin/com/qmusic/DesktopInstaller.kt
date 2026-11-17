@@ -66,7 +66,7 @@ import com.qmusic.ui.theme.QMusicHeaderLogo
 import com.qmusic.ui.theme.QMusicIcons
 import com.qmusic.ui.theme.QMusicTheme
 import com.qmusic.ui.theme.QMusicWordmark
-import com.qmusic.ui.theme.Q_GLYPH_PATH
+import com.qmusic.ui.theme.N_MARK_PATH
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -742,7 +742,7 @@ private fun InstallerBrandPanel(
         animationSpec = infiniteRepeatable(tween(720, easing = LinearEasing), RepeatMode.Reverse),
         label = "eq2",
     )
-    val glyph = remember { PathParser().parsePathString(Q_GLYPH_PATH).toPath() }
+    val glyph = remember { PathParser().parsePathString(N_MARK_PATH).toPath() }
 
     Column(
         modifier = modifier

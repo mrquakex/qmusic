@@ -26,6 +26,8 @@
     <!-- Calls as the phone's own calls (Jetpack Core-Telecom), kept alive in the background as a phone call. -->
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <!-- Live location: the place keeps being sent while the person shares it (a notification says so and stops it). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <!-- Asking once to leave Qeyf out of battery limits, so calls and messages reach a sleeping phone. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -132,6 +134,11 @@
             android:name=".DownloadKeepAliveService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name="com.qmusic.ui.chat.LiveLocationService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
 
         <service
             android:name=".CallKeepAliveService"

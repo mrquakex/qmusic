@@ -85,6 +85,16 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     private val auth = FirebaseAuth.getInstance()
     private val db: FirebaseDatabase = openDatabase()
     private val root: DatabaseReference = db.reference
+
+    /** End-to-end encryption (see E2eEngine): made here, so it shares the database. */
+    private val e2e: E2eEngine = E2eEngine(app, root).also {
+        E2eEngine.instance = it
+        E2e.api = it
+        it.groupMembers = { id ->
+            groupInfo(id, fresh = true)?.let { g -> g.members.map { m -> m.user.uid } to g.members.filter { m -> m.admin }.map { m -> m.user.uid }.minOrNull() }
+        }
+        it.shareHistoryOf = { id -> groupInfo(id)?.shareHistory == true }
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     /** The screen Google's account picker opens over. */
@@ -129,6 +139,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         runCatching { calls.listenFor(user?.uid) }
         trackPresence(user?.uid)
         runCatching { watchDeliveries(user?.uid) }
+        runCatching { e2e.signedIn(user?.uid) }
         if (user == null) {
             _account.value = if (webClientId == null) ChatAccount.Unavailable(SETUP_NEEDED) else ChatAccount.SignedOut
             return
@@ -349,7 +360,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         ref.keepSynced(true)
         return callbackFlow {
             val job = launch {
-                listen(ref).collect { snap ->
+                combine(listen(ref), e2e.changes) { snap, _ -> snap }.collect { snap ->
                     trySend(snap.children.mapNotNull { it.toThread() }.sortedByDescending { it.lastAt })
                 }
             }
@@ -371,7 +382,14 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 username = child("username").getValue(String::class.java).orEmpty(),
                 photo = child("photo").getValue(String::class.java),
             ),
-            lastText = child("lastText").getValue(String::class.java).orEmpty(),
+            lastText = child("lastText").getValue(String::class.java).orEmpty().let { last ->
+                if (!last.startsWith("e2e:")) {
+                    last
+                } else {
+                    e2e.watch(chatId)
+                    e2e.openText(chatId, last)?.takeIf { it != E2e.UNREADABLE } ?: "🔒"
+                }
+            },
             lastAt = lastAt,
             lastFrom = lastFrom,
             // From them, or from Claude speaking in this conversation: anything not ours that came after our last look.
@@ -389,6 +407,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             favorite = child("favorite").getValue(Boolean::class.java) == true,
             locked = child("locked").getValue(Boolean::class.java) == true,
             mentioned = child("mention").getValue(Boolean::class.java) == true,
+            secret = child("secret").getValue(Boolean::class.java) == true,
+            invite = child("invite").getValue(Boolean::class.java) == true,
         )
     }
 
@@ -398,9 +418,10 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val ref = root.child("chats").child(chatId).child("messages")
         ref.keepSynced(true)
         val query = ref.orderByChild("at").limitToLast(limit)
-        return combine(listen(query), pendingIds, outbox, _uploads, hidden(chatId)) { snap, pending, out, progress, hidden ->
+        e2e.watch(chatId)
+        return combine(listen(query), pendingIds, outbox, _uploads, combine(hidden(chatId), e2e.changes) { h, _ -> h }) { snap, pending, out, progress, hidden ->
             val now = System.currentTimeMillis() + _serverOffset.value
-            val sent = snap.children.mapNotNull { it.toMessage(pending) }.filter { it.id !in hidden && (it.expireAt == 0L || it.expireAt > now) }
+            val sent = snap.children.mapNotNull { MsgNode.of(chatId, it).toMessage(pending) }.filter { it.id !in hidden && (it.expireAt == 0L || it.expireAt > now) }
             val ids = sent.mapTo(HashSet()) { it.id }
             sent + out[chatId].orEmpty().filter { it.id !in ids }.map { it.copy(progress = progress[it.id] ?: 0f) }
         }
@@ -426,7 +447,17 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     override suspend fun editMessage(chatId: String, messageId: String, text: String): Result<Unit> = runCatching {
         val body = text.trim()
         require(body.isNotEmpty() && body.length <= 4000) { "text" }
-        root.child("chats").child(chatId).child("messages").child(messageId).updateChildren(mapOf("text" to body, "edited" to true)).await()
+        val ref = root.child("chats").child(chatId).child("messages").child(messageId)
+        val sealed = ref.child("e2e").get().await().getValue(String::class.java)
+        if (sealed != null) {
+            val version = sealed.substringAfter("e2e:").substringBefore(':').toIntOrNull() ?: error("e2e")
+            e2e.loadKey(chatId, version) ?: error("e2e-key")
+            val content = e2e.openContent(chatId, sealed)?.toMutableMap() ?: error("e2e-key")
+            content["text"] = body
+            ref.updateChildren(mapOf("e2e" to (e2e.sealContent(chatId, version, content) ?: error("e2e-key")), "edited" to true)).await()
+        } else {
+            ref.updateChildren(mapOf("text" to body, "edited" to true)).await()
+        }
     }
 
     override suspend fun deleteForEveryone(chatId: String, messageId: String): Result<Unit> = runCatching {
@@ -444,6 +475,9 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 "poll" to null,
                 "location" to null,
                 "contact" to null,
+                "e2e" to null,
+                "event" to null,
+                "gif" to null,
             ),
         ).await()
     }
@@ -457,6 +491,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 "w" to img.width,
                 "h" to img.height,
                 "thumb" to img.thumb,
+                "key" to img.key.ifEmpty { null },
             )
         }.ifEmpty { null }
         val extra = HashMap<String, Any?>()
@@ -475,6 +510,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 if (a.height > 0) put("h", a.height)
                 if (a.thumb.isNotEmpty()) put("thumb", a.thumb)
                 if (a.wave.isNotEmpty()) put("wave", a.wave.joinToString("") { ('A' + (it / 4).coerceIn(0, 25)).toString() })
+                if (a.key.isNotEmpty()) put("key", a.key)
             }
         }
         val label = when {
@@ -492,13 +528,16 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
 
     override fun starred(): Flow<List<StarredMessage>> = callbackFlow {
         val job = launch {
-            listen(root.child("starred").child(me())).collect { snap ->
+            combine(listen(root.child("starred").child(me())), e2e.changes) { snap, _ -> snap }.collect { snap ->
                 trySend(
                     snap.children.mapNotNull { m ->
+                        val starChat = m.child("chatId").getValue(String::class.java) ?: return@mapNotNull null
                         StarredMessage(
-                            chatId = m.child("chatId").getValue(String::class.java) ?: return@mapNotNull null,
+                            chatId = starChat,
                             messageId = m.child("messageId").getValue(String::class.java) ?: return@mapNotNull null,
-                            text = m.child("text").getValue(String::class.java).orEmpty(),
+                            text = m.child("text").getValue(String::class.java).orEmpty().let { t ->
+                                if (t.startsWith("e2e:")) e2e.openText(starChat, t)?.takeIf { it != E2e.UNREADABLE } ?: "🔒" else t
+                            },
                             from = m.child("from").getValue(String::class.java).orEmpty(),
                             fromName = m.child("fromName").getValue(String::class.java).orEmpty(),
                             chatName = m.child("chatName").getValue(String::class.java).orEmpty(),
@@ -530,7 +569,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 else -> ""
             }
         }
-        ref.setValue(mapOf("chatId" to chatId, "messageId" to message.id, "text" to text.take(300), "from" to message.from, "fromName" to fromName, "chatName" to chatName, "at" to message.at))
+        val starText = e2e.versionNow(chatId)?.let { v -> e2e.loadKey(chatId, v); e2e.sealText(chatId, v, text.take(300)) } ?: text.take(300)
+        ref.setValue(mapOf("chatId" to chatId, "messageId" to message.id, "text" to starText, "from" to message.from, "fromName" to fromName, "chatName" to chatName, "at" to message.at))
     }
 
     // ------------------------------------------------------------------ disappearing messages, muting
@@ -645,7 +685,15 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val tr = app.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
         sendMessage(
             other, "", null, null, null, if (tr) "📍 Konum" else "📍 Location",
-            extra = mapOf("location" to mapOf("lat" to location.lat, "lng" to location.lng, "label" to location.label.take(120))),
+            extra = mapOf(
+                "location" to mapOf(
+                    "lat" to location.lat,
+                    "lng" to location.lng,
+                    "label" to location.label.take(120),
+                    "live" to location.live.takeIf { it },
+                    "until" to location.until.takeIf { location.live },
+                ),
+            ),
         )
     }
 
@@ -676,7 +724,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         }
     }
 
-    private fun DataSnapshot.toMessage(pending: Set<String>): ChatMessage? {
+    private fun MsgNode.toMessage(pending: Set<String>): ChatMessage? {
         val id = key ?: return null
         val from = child("from").getValue(String::class.java) ?: return null
         val shareSnap = child("share")
@@ -708,14 +756,15 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 replySnap.child("thumb").getValue(String::class.java).orEmpty(),
             )
         }
-        fun DataSnapshot.toImage(): ChatImage? = child("id").getValue(String::class.java)?.let { imageId ->
+        fun MsgNode.toImage(): ChatImage? = child("id").getValue(String::class.java)?.let { imageId ->
             ChatImage(
                 id = imageId,
                 width = child("w").getValue(Int::class.java) ?: 0,
                 height = child("h").getValue(Int::class.java) ?: 0,
                 thumb = child("thumb").getValue(String::class.java).orEmpty(),
                 url = child("url").getValue(String::class.java),
-            )
+                key = child("key").getValue(String::class.java).orEmpty(),
+            ).also { if (it.url != null) E2eMedia.remember(it.url, it.key) }
         }
         val att = child("attachment")
         val attachment = att.child("url").getValue(String::class.java)?.let { url ->
@@ -731,15 +780,17 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                     height = att.child("h").getValue(Int::class.java) ?: 0,
                     thumb = att.child("thumb").getValue(String::class.java).orEmpty(),
                     wave = att.child("wave").getValue(String::class.java).orEmpty().map { (it - 'A').coerceIn(0, 25) * 4 },
-                )
+                    key = att.child("key").getValue(String::class.java).orEmpty(),
+                ).also { E2eMedia.remember(url, it.key) }
             }
         }
         // An album ("images"), or one photo as the first version wrote it ("image").
         val images = child("images").children.mapNotNull { it.toImage() }.ifEmpty { listOfNotNull(child("image").toImage()) }
+        val locked = child("_locked").getValue(Boolean::class.java) == true
         return ChatMessage(
             id = id,
             from = from,
-            text = child("text").getValue(String::class.java).orEmpty(),
+            text = if (locked) E2e.UNREADABLE else child("text").getValue(String::class.java).orEmpty(),
             replyTo = reply,
             images = images,
             model = child("model").getValue(String::class.java),
@@ -766,7 +817,13 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             location = child("location").takeIf { it.exists() }?.let { l ->
                 val lat = l.child("lat").getValue(Double::class.java) ?: return@let null
                 val lng = l.child("lng").getValue(Double::class.java) ?: return@let null
-                ChatLocation(lat, lng, l.child("label").getValue(String::class.java).orEmpty())
+                ChatLocation(
+                    lat,
+                    lng,
+                    l.child("label").getValue(String::class.java).orEmpty(),
+                    live = l.child("live").getValue(Boolean::class.java) == true,
+                    until = l.child("until").getValue(Long::class.java) ?: 0L,
+                )
             },
             contact = child("contact").takeIf { it.exists() }?.let { c ->
                 ChatContact(c.child("name").getValue(String::class.java).orEmpty(), c.child("phone").getValue(String::class.java) ?: return@let null)
@@ -781,6 +838,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                     sticker = g.child("sticker").getValue(Boolean::class.java) == true,
                 )
             },
+            e2e = child("_e2e").getValue(Boolean::class.java) == true,
+            locked = locked,
         )
     }
 
@@ -856,7 +915,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         text: String,
         share: SharedItem?,
         replyTo: ChatReply?,
-        images: List<Map<String, Any>>?,
+        images: List<Map<String, Any?>>?,
         preview: String?,
         extra: Map<String, Any?> = emptyMap(),
         fixedId: String? = null,
@@ -866,7 +925,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val chatId = conversationId(me.uid, other)
         val messageId = fixedId ?: root.child("chats").child(chatId).child("messages").push().key ?: error("no id")
         val ttl = if (noExpiry || other.uid == CLAUDE_BOT_UID) 0L else ttlOf(chatId)
-        val message = buildMap<String, Any?> {
+        var message: Map<String, Any?> = buildMap<String, Any?> {
             putAll(extra)
             if (ttl > 0) put("expireAt", System.currentTimeMillis() + _serverOffset.value + ttl)
             put("from", me.uid)
@@ -892,7 +951,23 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             }
         }
         val shown = preview ?: text.ifBlank { share?.let { (if (it.kind == ShareKind.SONG) "🎵 " else "🎬 ") + it.title }.orEmpty() }
-        val preview = shown.take(PREVIEW_LENGTH)
+        val plainPreview = shown.take(PREVIEW_LENGTH)
+        var preview = plainPreview
+        // An encrypted conversation: the content and the preview go sealed (system lines stay readable).
+        if (other.uid != CLAUDE_BOT_UID && !message.containsKey("system")) {
+            var version = e2e.versionNow(chatId)
+            // New conversations are encrypted from their first message (when everyone's app can take it).
+            val now = System.currentTimeMillis()
+            if (version == null && SecretSpace.encryptNewChats && (noKeysUntil[chatId] ?: 0L) < now) {
+                if (encryptIfPossible(chatId)) version = e2e.versionNow(chatId) else noKeysUntil[chatId] = now + 10 * 60_000L
+            }
+            if (version != null) {
+                e2e.loadKey(chatId, version) ?: error("e2e-key")
+                val sealed = e2e.sealContent(chatId, version, message.filterKeys { it !in MsgNode.ROUTING && it != "mentions" }) ?: error("e2e-key")
+                message = message.filterKeys { it in MsgNode.ROUTING || it == "mentions" } + mapOf("e2e" to sealed, "text" to "")
+                preview = e2e.sealText(chatId, version, plainPreview) ?: error("e2e-key")
+            }
+        }
         if (other.isGroup) {
             sendToGroup(me, chatId, messageId, message, preview)
             return
@@ -931,7 +1006,11 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 "body" to preview,
                 "at" to ServerValue.TIMESTAMP,
             ),
-        )
+        ).let { all ->
+            // The first message of a conversation started in the secret space keeps it there (only ever set, never
+            // cleared here: a later message must not take a secret conversation out).
+            if (secretPending.remove(chatId)) all + ("$mine/secret" to true) else all
+        }
         // Not awaited: without a connection it waits on the phone (shown with a clock) and goes when there is one.
         pendingIds.update { it + messageId }
         root.updateChildren(updates).addOnCompleteListener { pendingIds.update { it - messageId } }
@@ -970,9 +1049,13 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             put("to", groupId)
             put("chatId", groupId)
             put("type", "chat")
-            put("body", preview)
+            put("body", if (group.secret) "" else preview)
             put("at", ServerValue.TIMESTAMP)
             if (mentions != null) put("mentions", mentions)
+            if (group.secret) {
+                put("secret", true)
+                if (message["system"] == "created") put("invite", true)
+            }
         }
         pendingIds.update { it + messageId }
         root.updateChildren(updates).addOnCompleteListener { pendingIds.update { it - messageId } }
@@ -993,16 +1076,21 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         try {
             val sent = LongArray(images.size)
             val total = images.sumOf { it.jpeg.size.toLong() }.coerceAtLeast(1)
+            val sealed = other.uid != CLAUDE_BOT_UID && e2e.versionNow(chatId) != null
             val entries = kotlinx.coroutines.coroutineScope {
                 images.mapIndexed { i, image ->
                     async(Dispatchers.IO) {
-                        val url = MediaUpload.upload(token(), chatId, "jpg", "image/jpeg", image.jpeg.size.toLong(), { image.jpeg.inputStream() }) { done ->
+                        // Encrypted: the server gets only sealed bytes; the key goes inside the sealed message.
+                        val key = if (sealed) E2eCrypto.bytes(32) else null
+                        val body = if (key == null) image.jpeg else java.io.ByteArrayOutputStream().also { o -> E2eStream.seal(key, image.jpeg.inputStream(), o) }.toByteArray()
+                        val url = MediaUpload.upload(token(), chatId, if (key == null) "jpg" else "bin", if (key == null) "image/jpeg" else "application/octet-stream", body.size.toLong(), { body.inputStream() }) { done ->
                             sent[i] = done
                             _uploads.update { it + (messageId to sent.sum().toFloat() / total) }
                         }
                         imageCache.put(url, image.jpeg)
+                        key?.let { E2eMedia.remember(url, E2eCrypto.b64(it)) }
                         // A view-once photo has no blurred preview: nothing of it shows before it is opened.
-                        mapOf("id" to local[i].id, "url" to url, "w" to image.width, "h" to image.height, "thumb" to if (viewOnce) "" else image.thumb)
+                        mapOf("id" to local[i].id, "url" to url, "w" to image.width, "h" to image.height, "thumb" to if (viewOnce) "" else image.thumb, "key" to key?.let { E2eCrypto.b64(it) })
                     }
                 }.map { it.await() }
             }
@@ -1069,11 +1157,32 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 share = 0.4f
             }
             require(size <= MediaUpload.MAX_BYTES) { "max 100 MB" }
-            val url = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                MediaUpload.upload(token(), chatId, ext, file.mime.ifBlank { "application/octet-stream" }, size, { openLocation(source) }) { done ->
-                    _uploads.update { it + (messageId to share + (1 - share) * done.toFloat() / size.coerceAtLeast(1)) }
-                }
+            // Encrypted: sealed on the phone first, and the sealed copy goes up.
+            val seal = if (other.uid != CLAUDE_BOT_UID && e2e.versionNow(chatId) != null) {
+                val from = source
+                kotlinx.coroutines.withContext(Dispatchers.IO) { E2eMedia.sealToFile(app, { openLocation(from) }) }
+            } else {
+                null
             }
+            val upSize = seal?.first?.length() ?: size
+            val url = try {
+                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    val from = source
+                    MediaUpload.upload(
+                        token(),
+                        chatId,
+                        if (seal == null) ext else "bin",
+                        if (seal == null) file.mime.ifBlank { "application/octet-stream" } else "application/octet-stream",
+                        upSize,
+                        { seal?.first?.inputStream() ?: openLocation(from) },
+                    ) { done ->
+                        _uploads.update { it + (messageId to share + (1 - share) * done.toFloat() / upSize.coerceAtLeast(1)) }
+                    }
+                }
+            } finally {
+                seal?.first?.delete()
+            }
+            seal?.let { E2eMedia.remember(url, it.second) }
             if (source != file.location) runCatching { java.io.File(source).delete() }
             // Our own voice message plays from the phone's copy, without fetching it back.
             if (file.kind == AttachmentKind.VOICE) localCopies[url] = file.location
@@ -1089,6 +1198,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 if (file.thumb.isNotEmpty()) put("thumb", file.thumb)
                 // The shape of the sound as letters A-Z (one per bar), small enough to sit in the message.
                 if (file.wave.isNotEmpty()) put("wave", file.wave.joinToString("") { ('A' + (it / 4).coerceIn(0, 25)).toString() })
+                seal?.let { put("key", it.second) }
             }
             val label = when (file.kind) {
                 AttachmentKind.VOICE -> "🎤 " + duration(file.durationMs / 1000)
@@ -1154,6 +1264,9 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 sendAdmins = child("settings").child("sendAdmins").getValue(Boolean::class.java) == true,
                 editAdmins = child("settings").child("editAdmins").getValue(Boolean::class.java) == true,
             ),
+            secret = child("secret").getValue(Boolean::class.java) == true,
+            shareHistory = child("shareHistory").getValue(Boolean::class.java) == true,
+            endsAt = child("endsAt").getValue(Long::class.java) ?: 0L,
         )
     }
 
@@ -1227,7 +1340,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                     trySend(
                         snap.children.mapNotNull { p ->
                             val id = p.key ?: return@mapNotNull null
-                            PinnedMessage(id, p.child("text").getValue(String::class.java).orEmpty(), p.child("from").getValue(String::class.java).orEmpty(), p.child("at").getValue(Long::class.java) ?: 0L)
+                            val pinText = p.child("text").getValue(String::class.java).orEmpty().let { t -> e2e.openText(chatId, t)?.takeIf { it != E2e.UNREADABLE } ?: if (t.startsWith("e2e:")) "🔒" else t }
+                            PinnedMessage(id, pinText, p.child("from").getValue(String::class.java).orEmpty(), p.child("at").getValue(Long::class.java) ?: 0L)
                         }.sortedByDescending { it.at },
                     )
                 }
@@ -1246,7 +1360,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val current = ref.get().await().children.mapNotNull { c -> c.key?.let { it to (c.child("at").getValue(Long::class.java) ?: 0L) } }
         val updates = HashMap<String, Any?>()
         current.filter { it.first != message.id }.sortedByDescending { it.second }.drop(2).forEach { updates[it.first] = null }
-        updates[message.id] = mapOf("text" to preview.take(300), "from" to message.from, "at" to ServerValue.TIMESTAMP)
+        val pinText = e2e.versionNow(chatId)?.let { v -> e2e.loadKey(chatId, v); e2e.sealText(chatId, v, preview.take(300)) } ?: preview.take(300)
+        updates[message.id] = mapOf("text" to pinText, "from" to message.from, "at" to ServerValue.TIMESTAMP)
         ref.updateChildren(updates).await()
     }
 
@@ -1401,13 +1516,23 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val current = groupInfo(groupId, fresh = true) ?: error("no group")
         val fresh = members.filter { m -> current.members.none { it.user.uid == m.uid } && !m.isGroup && m.uid != CLAUDE_BOT_UID }
         if (fresh.isEmpty()) return@runCatching
-        root.updateChildren(fresh.associate { "groups/$groupId/members/${it.uid}" to it.asMember("member") }).await()
+        val before = groupInfo(groupId, fresh = true)
+        val marks = HashMap<String, Any?>()
+        fresh.forEach { marks["groups/$groupId/members/${it.uid}"] = it.asMember("member") }
+        // A secret group: the newcomers have it in their secret space, as an invitation.
+        if (before?.secret == true) fresh.forEach { p ->
+            marks["userChats/${p.uid}/$groupId/secret"] = true
+            marks["userChats/${p.uid}/$groupId/invite"] = true
+        }
+        root.updateChildren(marks).await()
+        runCatching { rekey(groupId, fresh.map { it.uid }) }
         val info = groupInfo(groupId, fresh = true) ?: return@runCatching
         systemMessage(ChatUser(groupId, info.name, "", info.photo), "added", fresh.joinToString(", ") { it.name.substringBefore(' ') })
     }
 
     override suspend fun removeMember(groupId: String, member: ChatUser): Result<Unit> = runCatching {
         root.updateChildren(mapOf("groups/$groupId/members/${member.uid}" to null, "userChats/${member.uid}/$groupId" to null)).await()
+        runCatching { rekey(groupId) }
         val info = groupInfo(groupId, fresh = true) ?: return@runCatching
         systemMessage(ChatUser(groupId, info.name, "", info.photo), "removed", member.name.substringBefore(' '))
     }
@@ -1664,7 +1789,14 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         if (file.exists()) return file.readBytes().also { imageCache.put(url, it) }
         // Not on the phone yet: from the network only when the setting allows it now, or it was tapped.
         if (!mayAutoDownload() && image.id !in forcedImages) return null
-        val bytes = kotlinx.coroutines.withContext(Dispatchers.IO) { MediaUpload.download(url) } ?: return null
+        val bytes = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val got = MediaUpload.download(url) ?: return@withContext null
+            if (image.key.isEmpty()) {
+                got
+            } else {
+                runCatching { java.io.ByteArrayOutputStream().also { o -> E2eStream.open(E2eCrypto.unb64(image.key), got.inputStream(), o) }.toByteArray() }.getOrNull()
+            }
+        } ?: return null
         runCatching { file.writeBytes(bytes) }
         imageCache.put(url, bytes)
         return bytes
@@ -1899,7 +2031,9 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         if (author != null && author != uid && author != CLAUDE_BOT_UID) {
             updates["notify/${root.child("notify").push().key}"] = mapOf(
                 "from" to uid, "to" to author, "chatId" to chatId, "type" to "reaction",
-                "emoji" to emoji, "body" to preview.take(120), "at" to ServerValue.TIMESTAMP,
+                "emoji" to emoji,
+                "body" to (e2e.version(chatId)?.let { v -> e2e.sealText(chatId, v, preview.take(120)) } ?: preview.take(120)),
+                "at" to ServerValue.TIMESTAMP,
             )
         }
         root.updateChildren(updates)
@@ -2175,6 +2309,127 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         root.child("userChats").child(me()).child(chatId).child("locked").setValue(if (locked) true else null)
     }
 
+    // ------------------------------------------------------------------ the secret space
+    //
+    //   userChats/{uid}/{chatId}/secret   kept in the secret space (for that person)
+    //   userChats/{uid}/{chatId}/invite   a secret group's invitation not taken yet
+    //   groups/{id}/secret                made in the secret space (every member keeps it there)
+
+    /** Conversations whose members could not all take encryption a moment ago (asked again after a while). */
+    private val noKeysUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Conversations started in the secret space whose first message has not gone yet. */
+    private val secretPending = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    override fun markSecretPending(chatId: String) {
+        secretPending.add(chatId)
+    }
+
+    override suspend fun setSecret(chatId: String, secret: Boolean) {
+        val uid = me()
+        val ref = root.child("userChats").child(uid).child(chatId)
+        val exists = runCatching { ref.child("lastAt").get().await().exists() }.getOrDefault(false)
+        if (exists) ref.child("secret").setValue(if (secret) true else null).await() else if (secret) secretPending.add(chatId) else secretPending.remove(chatId)
+        // Kept in the secret space: from now on its messages are encrypted (when everyone can take them).
+        if (secret) runCatching { encryptIfPossible(chatId) }
+    }
+
+    /** Turns encryption on for [chatId] when it is not yet and every member has a key. */
+    private suspend fun encryptIfPossible(chatId: String): Boolean {
+        if (e2e.versionNow(chatId) != null) return true
+        val uid = me()
+        val members = if (isGroupId(chatId)) {
+            groupInfo(chatId, fresh = true)?.members?.map { it.user.uid } ?: return false
+        } else {
+            chatId.split("_").takeIf { it.size == 2 } ?: return false
+        }
+        if (CLAUDE_BOT_UID in members) return false
+        if (!e2e.allHaveKeys(members.filter { it != uid })) return false
+        return e2e.enable(chatId, members).isSuccess.also { ok -> if (ok) e2eNotice(chatId) }
+    }
+
+    /** The line in the conversation: from now on its messages are end-to-end encrypted. */
+    private suspend fun e2eNotice(chatId: String) {
+        val me = (_account.value as? ChatAccount.Ready)?.me ?: return
+        val tr = app.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+        val line = if (tr) "Mesajlar artık uçtan uca şifreli. Bu sohbettekiler dışında kimse, Nuvelo bile okuyamaz." else "Messages are now end-to-end encrypted. No one outside this chat, not even Nuvelo, can read them."
+        val target = if (isGroupId(chatId)) groupInfo(chatId)?.let { ChatUser(chatId, it.name, "", it.photo) } else {
+            val other = chatId.split("_").firstOrNull { it != me.uid } ?: return
+            runCatching { user(other) }.getOrNull() ?: ChatUser(other, "", "", null)
+        } ?: return
+        runCatching { sendMessage(target, line, null, null, null, "🔒 $line", extra = mapOf("system" to "e2e", "who" to me.name.substringBefore(' '), "whom" to ""), noExpiry = true) }
+    }
+
+    override suspend fun enableEncryption(other: ChatUser): Result<Unit> = runCatching {
+        val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
+        val chatId = conversationId(me.uid, other)
+        require(other.uid != CLAUDE_BOT_UID) { "claude" }
+        check(encryptIfPossible(chatId)) { "e2e-nokeys" }
+    }
+
+    override suspend fun createSecretGroup(name: String, members: List<ChatUser>, endsAt: Long): Result<ChatUser> = runCatching {
+        val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
+        val clean = name.trim().take(50)
+        require(clean.isNotEmpty()) { "name" }
+        val people = members.filter { it.uid != me.uid && !it.isGroup && it.uid != CLAUDE_BOT_UID }
+        require(people.isNotEmpty()) { "members" }
+        val alphabet = ('a'..'z') + ('A'..'Z') + ('0'..'9')
+        val random = java.security.SecureRandom()
+        val id = GROUP_PREFIX + (1..20).map { alphabet[random.nextInt(alphabet.size)] }.joinToString("")
+        val memberMap = HashMap<String, Any?>()
+        memberMap[me.uid] = me.copy(photo = me.publicPhoto()).asMember("admin")
+        people.forEach { memberMap[it.uid] = it.asMember("member") }
+        root.child("groups").child(id).setValue(
+            buildMap<String, Any?> {
+                put("name", clean)
+                put("createdBy", me.uid)
+                put("createdAt", ServerValue.TIMESTAMP)
+                put("members", memberMap)
+                put("secret", true)
+                // A group that deletes itself: the server removes it, and all in it, at that time.
+                if (endsAt > 0) put("endsAt", endsAt)
+            },
+        ).await()
+        // In everyone's secret space; the others as an invitation until they take it.
+        val marks = HashMap<String, Any?>()
+        marks["userChats/${me.uid}/$id/secret"] = true
+        people.forEach { p ->
+            marks["userChats/${p.uid}/$id/secret"] = true
+            marks["userChats/${p.uid}/$id/invite"] = true
+        }
+        root.updateChildren(marks).await()
+        val group = ChatUser(id, clean, "", null)
+        groupInfo(id, fresh = true)
+        // Encrypted from the first line: those who have no key yet get it once they update (the group asks then).
+        runCatching { e2e.enable(id, (people.map { it.uid } + me.uid).filter { e2e.allHaveKeys(listOf(it)) }) }
+        systemMessage(group, "created")
+        group
+    }
+
+    override suspend fun acceptInvite(chatId: String): Result<Unit> = runCatching {
+        root.child("userChats").child(me()).child(chatId).child("invite").removeValue().await()
+    }
+
+    override suspend fun declineInvite(chatId: String): Result<Unit> = runCatching {
+        val uid = me()
+        // Quietly: no line in the group, nobody told.
+        root.updateChildren(mapOf("groups/$chatId/members/$uid" to null, "userChats/$uid/$chatId" to null, "chatKeys/$chatId/$uid" to null)).await()
+        groups.remove(chatId)
+    }
+
+    override suspend fun setShareHistory(groupId: String, share: Boolean): Result<Unit> = runCatching {
+        root.child("groups").child(groupId).child("shareHistory").setValue(if (share) true else null).await()
+        groupInfo(groupId, fresh = true)
+    }
+
+    /** The members changed: an encrypted group gets a new key, so who left reads nothing new (and who came, nothing old). */
+    private suspend fun rekey(groupId: String, newcomers: List<String> = emptyList()) {
+        if (e2e.versionNow(groupId) == null) return
+        val info = groupInfo(groupId, fresh = true) ?: return
+        val members = info.members.map { it.user.uid }.filter { e2e.allHaveKeys(listOf(it)) }
+        e2e.enable(groupId, members, if (info.shareHistory) newcomers else emptyList())
+    }
+
     // ------------------------------------------------------------------ group invite links
     //
     //   groups/{id}/invite      the code (admins set it)
@@ -2267,12 +2522,12 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
 
     override suspend fun recentMessages(chatId: String, limit: Int): List<ChatMessage> = runCatching {
         root.child("chats").child(chatId).child("messages").orderByChild("at").limitToLast(limit).get().await()
-            .children.mapNotNull { it.toMessage(emptySet()) }
+            .children.mapNotNull { MsgNode.of(chatId, it).toMessage(emptySet()) }
     }.getOrDefault(emptyList())
 
     override suspend fun allMessages(chatId: String): List<ChatMessage> {
         val snap = root.child("chats").child(chatId).child("messages").orderByChild("at").get().await()
-        return snap.children.mapNotNull { it.toMessage(emptySet()) }
+        return snap.children.mapNotNull { MsgNode.of(chatId, it).toMessage(emptySet()) }
     }
 
     override suspend fun setStatusPrivacy(privacy: StatusPrivacy) {

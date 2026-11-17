@@ -104,7 +104,12 @@ object ChatPush {
         if (from != null && !com.qmusic.ui.chat.CallHooks.appVisible) {
             CallNotifications.showIncoming(
                 context,
-                ChatUser(from, data["name"].orEmpty().ifBlank { "Nuvelo" }, data["username"].orEmpty(), data["photo"]?.ifBlank { null }),
+                // Someone kept in the secret space: who calls is not shown, when the person chose so.
+                if (data["chatId"].orEmpty() in com.qmusic.ui.chat.SecretChats.ids && !com.qmusic.ui.chat.SecretChats.showCallerName) {
+                    ChatUser(from, if (tr(context)) "Nuvelo araması" else "Nuvelo call", "", null)
+                } else {
+                    ChatUser(from, data["name"].orEmpty().ifBlank { "Nuvelo" }, data["username"].orEmpty(), data["photo"]?.ifBlank { null })
+                },
                 data["video"] == "1",
                 data["callId"].orEmpty(),
             )
@@ -153,11 +158,19 @@ object ChatPush {
             background.launch { runCatching { com.qmusic.ui.chat.ChatNotificationActions.delivered(context.applicationContext, chatId) } }
         }
         if (ChatPresence.openChatId == chatId) return
-        // A locked conversation: neither who nor what, and a tap opens the messages (the lock asks first).
-        if (chatId in com.qmusic.ui.chat.LockedChats.ids) {
+        // A locked conversation, or one in the secret space: neither who nor what, and a tap opens the messages (the
+        // lock, or the secret space's PIN, asks first).
+        val secret = chatId in com.qmusic.ui.chat.SecretChats.ids || data["secret"] == "1"
+        if (chatId in com.qmusic.ui.chat.LockedChats.ids || secret) {
             val tr = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
             val hidden = ChatUser(LOCKED_UID, "Nuvelo", "", null)
-            val line = Line(if (tr) "Yeni mesaj" else "New message", System.currentTimeMillis(), false, LOCKED_UID, "Nuvelo", null)
+            val invite = secret && data["body"].orEmpty().startsWith("Gizli bir sohbete")
+            val said = when {
+                invite -> if (tr) "Gizli bir sohbete davet edildin" else "You were invited to a secret chat"
+                tr -> "Yeni mesaj"
+                else -> "New message"
+            }
+            val line = Line(said, System.currentTimeMillis(), false, LOCKED_UID, "Nuvelo", null)
             val (lines, count) = synchronized(history) {
                 val list = history.getOrPut(chatId) { ArrayDeque() }
                 list.clear()
@@ -174,7 +187,12 @@ object ChatPush {
         val authorKey = data["author"]?.ifBlank { null } ?: from
         val authorName = data["authorName"]?.ifBlank { null } ?: if (group) "" else conversation.name
         val english = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") == "en"
-        val raw = if (group && data["text"] != null && data["type"] != "reaction") data["text"].orEmpty() else data["body"].orEmpty()
+        val given = if (group && data["text"] != null && data["type"] != "reaction") data["text"].orEmpty() else data["body"].orEmpty()
+        // End-to-end encrypted: opened here with the conversation's key ("New message" when it cannot be).
+        var raw = com.qmusic.ui.chat.E2ePush.open(context.applicationContext, chatId, given) ?: if (english) "New message" else "Yeni mesaj"
+        data["enc"]?.takeIf { it.startsWith("e2e:") }?.let { enc ->
+            com.qmusic.ui.chat.E2ePush.open(context.applicationContext, chatId, enc)?.let { quote -> raw = "$raw: \"${quote.take(120)}\"" }
+        }
         // Kept with a mark in front ("📷", "🎤 0:12"): the notification says it in words.
         val text = com.qmusic.ui.chat.ChatPreview.plain(raw, english)
         val line = Line(text, System.currentTimeMillis(), false, authorKey, authorName, data["authorPhoto"]?.ifBlank { null } ?: if (group) null else conversation.photo)

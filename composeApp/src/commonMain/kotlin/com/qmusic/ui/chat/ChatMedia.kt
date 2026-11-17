@@ -119,6 +119,29 @@ object ChatLock {
  * The ids of the locked conversations, kept by the app on the phone too: a notification for one of them shows
  * neither who wrote nor what (the app sets [onChanged] to save them).
  */
+/**
+ * The secret space's conversations (ids and names), kept by the app so a notification or a call for one shows nothing
+ * of it, even with the app closed.
+ */
+object SecretChats {
+    var ids: Set<String> = emptySet()
+        private set
+    var onChanged: ((Set<String>) -> Unit)? = null
+
+    fun update(next: Set<String>) {
+        if (next == ids) return
+        ids = next
+        onChanged?.invoke(next)
+    }
+
+    fun restore(saved: Set<String>) {
+        ids = saved
+    }
+
+    /** Whether a call from a secret contact or group shows who calls (a setting; on by default). */
+    var showCallerName: Boolean = true
+}
+
 object LockedChats {
     var ids: Set<String> = emptySet()
         private set

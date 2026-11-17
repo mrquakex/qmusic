@@ -84,7 +84,7 @@ fun CallScreen(
             if (call.remoteVideo) {
                 CallVideo(service, remote = true, modifier = Modifier.fillMaxSize())
             } else {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { ChatAvatar(call.peer, 72.dp) }
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { ChatAvatar(callerUser(call.peer), 72.dp) }
             }
         }
         return
@@ -128,12 +128,12 @@ fun CallScreen(
                                     .background(Color.White.copy(alpha = 0.10f + level * 0.25f)),
                             )
                         }
-                        ChatAvatar(call.peer, 120.dp)
+                        ChatAvatar(callerUser(call.peer), 120.dp)
                     }
                 }
                 Spacer(Modifier.height(24.dp))
             }
-            Text(call.peer.name, color = TextPrimary, fontSize = if (videoUp) 20.sp else 28.sp, fontWeight = FontWeight.Bold)
+            Text(callerShown(call.peer), color = TextPrimary, fontSize = if (videoUp) 20.sp else 28.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(statusText(call, s), color = TextSecondary, fontSize = 15.sp)
@@ -145,6 +145,13 @@ fun CallScreen(
             if (call.weak && call.phase == CallPhase.ACTIVE) {
                 Spacer(Modifier.height(6.dp))
                 Text(s.callWeak, color = TextSecondary, fontSize = 13.sp)
+            }
+            // Calls go end to end encrypted (WebRTC's DTLS-SRTP: not even the relay server can listen).
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(com.qmusic.ui.theme.QMusicIcons.Lock, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(12.dp))
+                Spacer(Modifier.width(5.dp))
+                Text(E2eWords(ChatMusic.english).encrypted, color = TextSecondary, fontSize = 12.sp)
             }
             Spacer(Modifier.weight(1f))
 
@@ -425,7 +432,7 @@ fun CallBubbleOverlay() {
             } else {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.size(56.dp).clip(CircleShape).border(2.dp, Color(0xFF1DAA61), CircleShape).padding(3.dp), contentAlignment = Alignment.Center) {
-                        ChatAvatar(call.peer, 50.dp)
+                        ChatAvatar(callerUser(call.peer), 50.dp)
                     }
                     Spacer(Modifier.height(6.dp))
                     Text(statusText(call, s), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
@@ -433,4 +440,17 @@ fun CallBubbleOverlay() {
             }
         }
     }
+}
+
+/** The caller's name, or "Nuvelo call" for someone kept in the secret space (when the person chose not to show it). */
+internal fun callerShown(peer: ChatUser): String {
+    if (SecretChats.showCallerName) return peer.name
+    val secret = SecretChats.ids.any { id -> id.split("_").contains(peer.uid) }
+    return if (secret) (if (ChatMusic.english) "Nuvelo call" else "Nuvelo araması") else peer.name
+}
+
+/** The caller as shown: hidden behind "Nuvelo" for someone kept in the secret space (when chosen so). */
+internal fun callerUser(peer: ChatUser): ChatUser {
+    val shown = callerShown(peer)
+    return if (shown == peer.name) peer else ChatUser(peer.uid, "Nuvelo", "", null)
 }

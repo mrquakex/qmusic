@@ -207,7 +207,7 @@ data class ChatStrings(
     val emoji: String get() = if (english) "Emoji" else "Emoji"
     val voiceLocked: String get() = if (english) "Recording locked" else "Kayıt kilitlendi"
     val voiceSlideLock: String get() = if (english) "▲ lock" else "▲ kilitle"
-    val e2eNote: String get() = if (english) "Your messages and files are kept on Nuvelo's servers (Firebase and Nuvelo's media server); they are not end-to-end encrypted. You can delete your account and messages at any time." else "Mesajların ve dosyaların Nuvelo'nun sunucularında (Firebase ve Nuvelo medya sunucusu) saklanır; uçtan uca şifreli değildir. Hesabını ve mesajlarını istediğin zaman silebilirsin."
+    val e2eNote: String get() = if (english) "Your messages and files are kept on Nuvelo's servers (Firebase and Nuvelo's media server). Chats are end-to-end encrypted when everyone's app supports it: then only the people in them can read them. You can delete your account and messages at any time." else "Mesajların ve dosyaların Nuvelo'nun sunucularında (Firebase ve Nuvelo medya sunucusu) saklanır. Sohbettekilerin hepsinin uygulaması destekliyorsa sohbetler uçtan uca şifrelenir; o zaman onları sadece sohbettekiler okuyabilir. Hesabını ve mesajlarını istediğin zaman silebilirsin."
     val editPhoto: String get() = if (english) "Edit" else "Düzenle"
     val addCaption: String get() = if (english) "Add a caption…" else "Açıklama ekle…"
     val scrollDown: String get() = if (english) "Down" else "Aşağı"
@@ -468,7 +468,7 @@ data class ChatStrings(
             signInTitle = "Arkadaşlarınla yazış",
             signInBody = "Mesaj gönder, dinlediğin şarkıyı ve izlediğin videoyu tek dokunuşla paylaş.",
             signInButton = "Google ile giriş yap",
-            privacy = "Mesajların ve dosyaların Nuvelo'nun sunucularında (Firebase ve Nuvelo medya sunucusu) saklanır; aktarım sırasında şifrelidir ama uçtan uca şifreli değildir. Hesabını ve mesajlarını istediğin zaman silebilirsin.",
+            privacy = "Mesajların ve dosyaların Nuvelo'nun sunucularında (Firebase ve Nuvelo medya sunucusu) saklanır. Sohbettekilerin hepsinin uygulaması destekliyorsa sohbetler uçtan uca şifrelenir; o zaman onları sadece sohbettekiler okuyabilir. Hesabını ve mesajlarını istediğin zaman silebilirsin.",
             profileTitle = "Profilini oluştur",
             profileBody = "Arkadaşların seni kullanıcı adınla bulur.",
             nameLabel = "Adın",
@@ -566,7 +566,7 @@ data class ChatStrings(
             signInTitle = "Chat with your friends",
             signInBody = "Send messages, share the song you play and the video you watch with one tap.",
             signInButton = "Sign in with Google",
-            privacy = "Your messages and files are kept on Nuvelo's servers (Firebase and Nuvelo's media server); they are encrypted in transit but not end-to-end. You can delete your account and messages at any time.",
+            privacy = "Your messages and files are kept on Nuvelo's servers (Firebase and Nuvelo's media server). Chats are end-to-end encrypted when everyone's app supports it: then only the people in them can read them. You can delete your account and messages at any time.",
             profileTitle = "Create your profile",
             profileBody = "Your friends find you by your username.",
             nameLabel = "Your name",

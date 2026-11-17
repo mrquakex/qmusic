@@ -14,6 +14,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -162,6 +168,7 @@ actual fun rememberVoiceRecorder(): VoiceRecorder? {
 // ------------------------------------------------------------------ playing voice messages
 
 private class AndroidVoicePlayer(context: Context) : VoicePlayer {
+    private val appContext: Context = context.applicationContext
     private val player = ExoPlayer.Builder(context)
         // The music player hears this and pauses for the voice message.
         .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build(), true)
@@ -203,6 +210,17 @@ private class AndroidVoicePlayer(context: Context) : VoicePlayer {
         }
         loaded = url
         _progress.value = 0f
+        // An encrypted voice message: opened on the phone first, played from there.
+        if (E2eMedia.isSealed(url)) {
+            scope.launch {
+                val file = withContext(Dispatchers.IO) { E2eMedia.openedFile(appContext, url, "voice.m4a") } ?: return@launch
+                if (loaded != url) return@launch
+                player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
+                player.prepare()
+                player.play()
+            }
+            return
+        }
         player.setMediaItem(MediaItem.fromUri(if (url.startsWith("/")) Uri.fromFile(File(url)) else Uri.parse(url)))
         player.prepare()
         player.play()
@@ -318,7 +336,27 @@ private fun preview(frame: Bitmap): String {
 @Composable
 actual fun rememberAttachmentOpener(): (ChatAttachment) -> Unit {
     val context = LocalContext.current
-    return { attachment ->
+    val scope = rememberCoroutineScope()
+    return returnLabel@{ attachment ->
+        // An encrypted file: opened on the phone and saved to Downloads/Nuvelo itself (the system downloader would
+        // only get sealed bytes).
+        if (E2eMedia.isSealed(attachment.url)) {
+            val tr = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+            val name = attachment.name.ifBlank { "file" }.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            android.widget.Toast.makeText(context, if (tr) "İndiriliyor: $name" else "Downloading: $name", android.widget.Toast.LENGTH_SHORT).show()
+            scope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    val opened = E2eMedia.openedFile(context, attachment.url, name) ?: return@withContext false
+                    saveToDownloads(context, opened, name, attachment.mime)
+                }
+                android.widget.Toast.makeText(
+                    context,
+                    if (ok) (if (tr) "İndirildi: $name" else "Downloaded: $name") else (if (tr) "İndirilemedi" else "Could not download"),
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
+            return@returnLabel
+        }
         runCatching {
             val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
             val name = attachment.name.ifBlank { attachment.url.substringAfterLast('/') }.replace(Regex("[\\\\/:*?\"<>|]"), "_")
@@ -334,14 +372,44 @@ actual fun rememberAttachmentOpener(): (ChatAttachment) -> Unit {
     }
 }
 
+/** Puts [file] in Downloads/Nuvelo (MediaStore from Android 10, the folder itself before). */
+private fun saveToDownloads(context: Context, file: File, name: String, mime: String): Boolean = runCatching {
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
+            put(android.provider.MediaStore.Downloads.MIME_TYPE, mime.ifBlank { "application/octet-stream" })
+            put(android.provider.MediaStore.Downloads.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/Nuvelo")
+        }
+        val uri = context.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: error("insert")
+        context.contentResolver.openOutputStream(uri)?.use { o -> file.inputStream().use { it.copyTo(o) } } ?: error("open")
+    } else {
+        @Suppress("DEPRECATION")
+        val dir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "Nuvelo").apply { mkdirs() }
+        file.copyTo(File(dir, name), overwrite = true)
+    }
+    true
+}.getOrDefault(false)
+
 // ------------------------------------------------------------------ video messages
 
 @Composable
 actual fun VideoMessagePlayer(url: String, modifier: Modifier) {
     val context = LocalContext.current
-    val player = remember(url) {
+    // An encrypted video: opened on the phone first (a moment), then played from there.
+    var opened by remember(url) { mutableStateOf<String?>(if (E2eMedia.isSealed(url)) null else url) }
+    LaunchedEffect(url) {
+        if (opened == null) opened = withContext(Dispatchers.IO) { E2eMedia.openedFile(context, url, "video.mp4")?.absolutePath } ?: ""
+    }
+    val source = opened
+    if (source == null) {
+        Box(modifier.background(androidx.compose.ui.graphics.Color.Black), contentAlignment = androidx.compose.ui.Alignment.Center) {
+            androidx.compose.material3.CircularProgressIndicator(color = androidx.compose.ui.graphics.Color.White)
+        }
+        return
+    }
+    val player = remember(source) {
         ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(if (url.startsWith("/")) Uri.fromFile(File(url)) else Uri.parse(url)))
+            setMediaItem(MediaItem.fromUri(if (source.startsWith("/")) Uri.fromFile(File(source)) else Uri.parse(source)))
             prepare()
             playWhenReady = true
         }

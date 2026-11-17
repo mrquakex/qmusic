@@ -514,6 +514,31 @@ fun QMusicApp(
             val call by (callService?.state ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
             // A downloaded update while the app is open: a tap restarts it in the new version (never during a call).
             if (call == null) UpdateReadyBanner(english = language == "en")
+            // The update offer, its progress and "what changed": over whichever section is open (the messages, the
+            // videos or the music), not only the music as before (the app opens on the messages now).
+            if (call == null) {
+                val offerUpdateNow by viewModel.offerUpdate.collectAsState()
+                val updateInfoNow by viewModel.updateInfo.collectAsState()
+                val updateProgressNow by viewModel.updateProgress.collectAsState()
+                val newVersion = updateInfoNow
+                if (offerUpdateNow && newVersion != null && updateProgressNow == null) {
+                    AlertDialog(
+                        onDismissRequest = { viewModel.dismissUpdateOffer() },
+                        title = { Text(strings.updateDialogTitle(newVersion.versionName)) },
+                        text = { Text(strings.updateDialogBody) },
+                        confirmButton = { TextButton(onClick = { viewModel.installUpdate() }) { Text(strings.updateNow) } },
+                        dismissButton = { TextButton(onClick = { viewModel.dismissUpdateOffer() }) { Text(strings.updateLater) } },
+                    )
+                }
+                updateProgressNow?.let { progress ->
+                    UpdatingDialog(progress = progress, info = updateInfoNow, english = language == "en")
+                }
+                // The first opening after an update: what changed, once.
+                val whatsNew by viewModel.whatsNew.collectAsState()
+                whatsNew?.let { news ->
+                    WhatsNewDialog(news, english = language == "en", onDismiss = { viewModel.dismissWhatsNew() })
+                }
+            }
             // Shrunk into its bubble (Back or the chevron), the call leaves the app usable; a new call starts full.
             val callMinimized by com.qmusic.ui.chat.CallUi.minimized.collectAsState()
             LaunchedEffect(call?.id) { com.qmusic.ui.chat.CallUi.minimized.value = false }
@@ -1682,26 +1707,6 @@ fun QMusicApp(
             }
 
             // Spotify Import Dialog
-            // A new version: offered when "update automatically" is off, and a progress box while it downloads.
-            val newVersion = updateInfo
-            if (offerUpdate && newVersion != null && updateProgress == null) {
-                AlertDialog(
-                    onDismissRequest = { viewModel.dismissUpdateOffer() },
-                    title = { Text(strings.updateDialogTitle(newVersion.versionName)) },
-                    text = { Text(strings.updateDialogBody) },
-                    confirmButton = { TextButton(onClick = { viewModel.installUpdate() }) { Text(strings.updateNow) } },
-                    dismissButton = { TextButton(onClick = { viewModel.dismissUpdateOffer() }) { Text(strings.updateLater) } },
-                )
-            }
-            updateProgress?.let { progress ->
-                UpdatingDialog(progress = progress, info = updateInfo, english = language == "en")
-            }
-
-            // The first opening after an update: what changed, once.
-            val whatsNew by viewModel.whatsNew.collectAsState()
-            whatsNew?.let { news ->
-                WhatsNewDialog(news, english = language == "en", onDismiss = { viewModel.dismissWhatsNew() })
-            }
 
             if (showSpotifyImportDialog) {
                 SpotifyImportDialog(

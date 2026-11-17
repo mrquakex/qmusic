@@ -145,6 +145,14 @@ private fun ChatAppContent(
     val lock = rememberAppLock()
     val lockOn by (lock?.enabled ?: remember { kotlinx.coroutines.flow.MutableStateFlow(false) }).collectAsState()
     val unlocked by ChatLock.unlocked.collectAsState()
+    // The secret space: when it locks, its pages and conversations close.
+    val secretOpen by SecretSpace.unlocked.collectAsState()
+    val secretList by controller.secretThreads.collectAsState()
+    var wasOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(secretOpen) {
+        if (wasOpen && !secretOpen) controller.closeSecret()
+        wasOpen = secretOpen
+    }
     val calls = controller.calls
     val onCall: ((ChatUser, Boolean) -> Unit)? = calls?.let { service ->
         { other, video -> askPermissions(video) { granted -> if (granted) service.call(other, video) else controller.reportError(s.callPermission) } }
@@ -160,7 +168,12 @@ private fun ChatAppContent(
             ChatAccount.SignedOut -> SignInPage(controller, s, onExit)
             is ChatAccount.NeedsProfile -> ProfilePage(controller, s, a, onExit)
             is ChatAccount.Ready -> if (lock != null && lockOn && !unlocked && lock.available) LockedPage(lock, s, onExit) else when (val top = routes.lastOrNull()) {
-                is ChatRoute.Conversation -> ConversationPage(controller, s, a.me, top.other, shareables, onOpenShare, onCall, voicePlayer)
+                // A secret conversation opened from elsewhere (a search, a link): the secret space's PIN first.
+                is ChatRoute.Conversation -> if (!secretOpen && secretList.any { it.other.uid == top.other.uid }) {
+                    SecretPage(controller, s, a.me)
+                } else {
+                    ConversationPage(controller, s, a.me, top.other, shareables, onOpenShare, onCall, voicePlayer)
+                }
                 ChatRoute.NewChat -> NewChatPage(controller, s)
                 ChatRoute.NewGroup -> NewGroupPage(controller, s)
                 is ChatRoute.GroupInfo -> GroupInfoPage(controller, s, a.me, top.group)
@@ -180,6 +193,14 @@ private fun ChatAppContent(
                 is ChatRoute.BroadcastEdit -> BroadcastEditPage(controller, s, top.id)
                 is ChatRoute.BroadcastChat -> BroadcastChatPage(controller, s, top.id)
                 ChatRoute.Settings -> SettingsPage(controller, s, a.me)
+                ChatRoute.Secret -> SecretPage(controller, s, a.me)
+                ChatRoute.SecretNewGroup -> SecretNewGroupPage(controller)
+                ChatRoute.SecretStartChat -> SecretStartChatPage(controller)
+                ChatRoute.SecretMove -> SecretMovePage(controller, s, a.me)
+                ChatRoute.SecretSettings -> SecretSettingsPage(controller)
+                is ChatRoute.SafetyCode -> SafetyCodePage(controller, top.user)
+                ChatRoute.Encryption -> EncryptionPage(controller)
+                ChatRoute.LivePeople -> LivePeoplePage(controller, a.me)
                 ChatRoute.Friends -> FriendsPage(controller, s)
                 is ChatRoute.Profile -> ProfilePage(controller, s, a.me, top.user, onCall)
                 null -> ChatHome(controller, s, a.me, onExit, onCall, onGroupCall)
@@ -846,9 +867,27 @@ private fun ConversationPage(
     }
     val threadsNow by controller.threads.collectAsState()
     val archivedNow by controller.archived.collectAsState()
-    val thread = remember(threadsNow, archivedNow, other.uid) {
+    val secretNow by controller.secretThreads.collectAsState()
+    val thread = remember(threadsNow, archivedNow, secretNow, other.uid) {
         val id = controller.chatIdWith(other)
-        threadsNow?.firstOrNull { it.id == id } ?: archivedNow.firstOrNull { it.id == id }
+        threadsNow?.firstOrNull { it.id == id } ?: archivedNow.firstOrNull { it.id == id } ?: secretNow.firstOrNull { it.id == id }
+    }
+    // End-to-end encryption: whether this conversation is encrypted (its key version known), and the secret space.
+    val e2eWords = remember(ChatMusic.english) { E2eWords(ChatMusic.english) }
+    val e2eTick by E2e.api.changes.collectAsState()
+    val e2eReady by E2e.api.ready.collectAsState()
+    val hasSecretPin by E2e.api.hasPin.collectAsState()
+    val keyChangedFor by E2e.api.keyChanged.collectAsState()
+    val convId = remember(other.uid) { controller.chatIdWith(other) }
+    LaunchedEffect(convId) { convId?.let { E2e.api.watch(it) } }
+    val encrypted = remember(e2eTick, convId) { convId?.let { E2e.api.version(it) } != null }
+    val secretChat = thread?.secret == true
+    if (secretChat) SecureScreen()
+    LaunchedEffect(other.uid, e2eReady, messages?.isNotEmpty()) {
+        if (e2eReady && other.uid != CLAUDE_BOT_UID && messages?.isNotEmpty() == true && (SecretSpace.encryptNewChats || secretChat)) {
+            kotlinx.coroutines.delay(1_500)
+            if (convId != null && E2e.api.version(convId) == null) controller.enableEncryption(other, quiet = true)
+        }
     }
     var editing by remember(other.uid) { mutableStateOf<ChatMessage?>(null) }
     var selected by remember(other.uid) { mutableStateOf(setOf<String>()) }
@@ -869,6 +908,9 @@ private fun ConversationPage(
     val pollVotes by remember(other.uid) { controller.pollVotes(other) }.collectAsState(initial = emptyMap())
     var pollDialog by remember { mutableStateOf(false) }
     var eventDialog by remember { mutableStateOf(false) }
+    var locationChoice by remember { mutableStateOf(false) }
+    var liveDuration by remember { mutableStateOf(0L) }
+    var liveMapFocus by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var votersFor by remember { mutableStateOf<ChatMessage?>(null) }
     var reactionsFor by remember { mutableStateOf<ChatMessage?>(null) }
     val saveContact = rememberContactSaver()
@@ -926,6 +968,23 @@ private fun ConversationPage(
     val pickVideo = rememberFilePicker(video = true, onPicked = sendPicked)
     val pickFile = rememberFilePicker(video = false, onPicked = sendPicked)
     val openFile = rememberAttachmentOpener()
+    // Everyone's live location in this conversation (their cards follow it).
+    val liveHere by remember(other.uid) {
+        controller.chatIdWith(other)?.let { LiveShare.watch(it) } ?: kotlinx.coroutines.flow.flowOf(emptyMap())
+    }.collectAsState(initial = emptyMap())
+    // A live location: where the phone is now first (its card), then it keeps sharing.
+    val pickLiveLocation = rememberLocationPicker(
+        onPicked = { place -> controller.shareLiveLocation(other, place, liveDuration) },
+        onError = { problem ->
+            controller.reportError(
+                when (problem) {
+                    "permission" -> s.locationDenied
+                    "off" -> s.locationOff
+                    else -> s.locationNone
+                },
+            )
+        },
+    )
     val pickLocation = rememberLocationPicker(
         onPicked = { place -> controller.sendLocation(other, place) },
         onError = { why ->
@@ -1053,7 +1112,7 @@ private fun ConversationPage(
                     selectedMessages.forEach { m -> controller.setStarred(other, m, if (m.from == me.uid) me.name else memberNames[m.from] ?: other.name, chatName, !allStarred) }
                     selected = emptySet()
                 }) { Icon(QMusicIcons.Star, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(22.dp)) }
-                TextButton(onClick = { forwarding = selectedMessages.filter { !it.deleted } }) { Text(s.forward, color = Ink) }
+                if (!secretChat) TextButton(onClick = { forwarding = selectedMessages.filter { !it.deleted } }) { Text(s.forward, color = Ink) }
                 IconButton(onClick = { deleting = selectedMessages }) { Icon(QMusicIcons.Trash, null, tint = Ink) }
             }
         } else
@@ -1070,6 +1129,7 @@ private fun ConversationPage(
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                            if (encrypted) Icon(QMusicIcons.Lock, contentDescription = e2eWords.encrypted, tint = TextSecondary, modifier = Modifier.padding(start = 5.dp).size(13.dp))
                             if (!isGroup) UserBadge(other.uid, compact = true, modifier = Modifier.padding(start = 5.dp))
                         }
                         val seen = presence
@@ -1200,13 +1260,40 @@ private fun ConversationPage(
                                 onClick = { menu = false; sharedListOpen = true },
                             )
                         }
-                        thread?.let { t ->
+                        if (!isClaude && !encrypted) {
                             DropdownMenuItem(
-                                text = { Text(if (t.locked) s.unlockChat else s.lockChat, color = TextPrimary) },
-                                onClick = { menu = false; controller.setLocked(t, !t.locked) },
+                                leadingIcon = { Icon(QMusicIcons.Lock, null, tint = Ink) },
+                                text = { Text(e2eWords.encrypt, color = TextPrimary) },
+                                onClick = { menu = false; controller.enableEncryption(other) },
                             )
                         }
-                        DropdownMenuItem(
+                        if (encrypted && !isGroup) {
+                            DropdownMenuItem(
+                                leadingIcon = { Icon(QMusicIcons.Lock, null, tint = Ink) },
+                                text = { Text(e2eWords.safetyCode, color = TextPrimary) },
+                                onClick = { menu = false; controller.push(ChatRoute.SafetyCode(other)) },
+                            )
+                        }
+                        thread?.let { t ->
+                            if (!t.secret) {
+                                DropdownMenuItem(
+                                    text = { Text(if (t.locked) s.unlockChat else s.lockChat, color = TextPrimary) },
+                                    onClick = { menu = false; controller.setLocked(t, !t.locked) },
+                                )
+                            }
+                            // Into the secret space (once it is set up), or back out (a secret group stays in it).
+                            if (!isClaude && (t.secret || hasSecretPin) && !(t.secret && isGroup)) {
+                                DropdownMenuItem(
+                                    text = { Text(if (t.secret) e2eWords.takeOut else e2eWords.moveIn, color = TextPrimary) },
+                                    onClick = {
+                                        menu = false
+                                        controller.setSecret(t, !t.secret)
+                                        if (!t.secret) controller.pop()
+                                    },
+                                )
+                            }
+                        }
+                        if (!secretChat) DropdownMenuItem(
                             text = { Text(s.exportChat, color = TextPrimary) },
                             onClick = {
                                 menu = false
@@ -1230,6 +1317,17 @@ private fun ConversationPage(
                 }
             },
         )
+        if (!isGroup && other.uid in keyChangedFor) {
+            Row(
+                Modifier.fillMaxWidth().background(DarkSurfaceVariant).clickable { controller.push(ChatRoute.SafetyCode(other)) }.padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(QMusicIcons.Lock, contentDescription = null, tint = Color(0xFFFFB74D), modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(e2eWords.keyChanged(title.substringBefore(' ')), color = TextPrimary, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                IconButton(onClick = { E2e.api.dismissKeyChange(other.uid) }) { Icon(QMusicIcons.Close, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp)) }
+            }
+        }
         if (pins.isNotEmpty() && !searching) {
             var pinIndex by remember(other.uid) { mutableStateOf(0) }
             val pin = pins[pinIndex.coerceIn(0, pins.lastIndex)]
@@ -1354,7 +1452,7 @@ private fun ConversationPage(
                                         clipboard.setText(androidx.compose.ui.text.AnnotatedString(m.text))
                                         controller.reportInfo(s.copied)
                                     },
-                                    onForward = if (m.viewOnce) null else ({ forwarding = listOf(m) }),
+                                    onForward = if (m.viewOnce || secretChat || m.locked) null else ({ forwarding = listOf(m) }),
                                     pinned = pins.any { it.messageId == m.id },
                                     onPin = if (canPin && !m.deleted && !m.pending) ({ controller.pin(other, m, quoteText(m), pins.none { it.messageId == m.id }) }) else null,
                                     openedOnce = if (mine) openedMap[m.id].orEmpty().any { it != me.uid } else me.uid in openedMap[m.id].orEmpty(),
@@ -1387,6 +1485,10 @@ private fun ConversationPage(
                                     senderName = if (isGroup && !mine) (memberNames[row.m.from] ?: if (row.m.from == CLAUDE_BOT_UID) "Claude" else "?") else null,
                                     // In a group, others' messages carry their picture, on the first of a run of theirs
                                     // (the list is newest first: the one above is the next item).
+                                    liveNow = if (row.m.location?.live == true) liveHere[row.m.from] else null,
+                                    liveSender = if (mine) me else memberUsers[row.m.from] ?: other.takeIf { it.uid == row.m.from },
+                                    onOpenLive = { liveMapFocus = it },
+                                    onStopLive = { controller.stopLiveLocation(other) },
                                     avatar = if (isGroup && !mine) (memberUsers[row.m.from] ?: ChatUser(row.m.from, memberNames[row.m.from] ?: if (row.m.from == CLAUDE_BOT_UID) "Claude" else "?", "")) else null,
                                     firstOfRun = (shown.getOrNull(index + 1) as? ListRow.Message)?.m?.let { above -> above.from != row.m.from || above.system } ?: true,
                                     reactions = reactions[row.m.id].orEmpty(),
@@ -1485,7 +1587,10 @@ private fun ConversationPage(
                     },
                 )
             }
-            if (!isClaude && ClaudeAccess.allowed(me.uid) && callsClaude(text)) {
+            if (!isClaude && encrypted && ClaudeAccess.allowed(me.uid) && callsClaude(text)) {
+                Text(e2eWords.noClaude, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 6.dp))
+            }
+            if (!isClaude && !encrypted && ClaudeAccess.allowed(me.uid) && callsClaude(text)) {
                 Row(
                     modifier = Modifier
                         .padding(start = 16.dp, top = 6.dp)
@@ -1679,8 +1784,7 @@ private fun ConversationPage(
                 add(AttachAction(s.camera, QMusicIcons.Camera, Color(0xFFE91E63)) { attach = false; takePhoto() })
                 add(AttachAction(s.location, QMusicIcons.Location, Color(0xFF00B86B)) {
                     attach = false
-                    controller.reportInfo(s.locationFinding)
-                    pickLocation()
+                    locationChoice = true
                 })
                 add(AttachAction(s.contact, QMusicIcons.Contact, Color(0xFF2196F3)) { attach = false; pickContact() })
                 add(AttachAction(if (tr) "Belge" else "Document", QMusicIcons.File, Color(0xFF7E57C2)) { attach = false; pickFile() })
@@ -1780,6 +1884,28 @@ private fun ConversationPage(
     }
     if (pollDialog) PollDialog(s, onSend = { poll -> controller.sendPoll(other, poll) }) { pollDialog = false }
     if (eventDialog) EventDialog(onSend = { event -> controller.sendEvent(other, event) }) { eventDialog = false }
+    if (locationChoice) {
+        LiveDurationDialog(
+            onPick = { duration ->
+                liveDuration = duration
+                controller.reportInfo(s.locationFinding)
+                pickLiveLocation()
+            },
+            onPlain = {
+                controller.reportInfo(s.locationFinding)
+                pickLocation()
+            },
+        ) { locationChoice = false }
+    }
+    liveMapFocus?.let { focus ->
+        LiveMapScreen(
+            chatId = controller.chatIdWith(other),
+            focus = focus,
+            people = liveHere.mapNotNull { (uid, l) -> (if (uid == me.uid) me else memberUsers[uid] ?: other.takeIf { it.uid == uid })?.let { it to l } },
+            myUid = me.uid,
+            onStop = { controller.stopLiveLocation(other) },
+        ) { liveMapFocus = null }
+    }
     // A person's name in this conversation (us, the other, or a group member).
     val nameOfUid: (String) -> String = { uid ->
         when (uid) {
@@ -2233,6 +2359,26 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
             if (isFounder(me.uid) && !isClaude && user.uid != me.uid) item { DeveloperBadgeSwitch(controller, user) }
             if (isFounder(me.uid) && !isClaude && user.uid != me.uid) item { ClaudeAccessSwitch(controller, user) }
             if (!isClaude && user.uid != me.uid) item { PersonRingRow(s, user) }
+            // An encrypted conversation: its safety code, to check side by side.
+            if (!isClaude && user.uid != me.uid) item {
+                val tick by E2e.api.changes.collectAsState()
+                val id = remember(user.uid) { controller.chatIdWith(user) }
+                LaunchedEffect(id) { id?.let { E2e.api.watch(it) } }
+                if (remember(tick, id) { id?.let { E2e.api.version(it) } != null }) {
+                    val w = remember(ChatMusic.english) { E2eWords(ChatMusic.english) }
+                    Row(
+                        Modifier.fillMaxWidth().clickable { controller.push(ChatRoute.SafetyCode(user)) }.padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(QMusicIcons.Lock, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(w.encrypted, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text(w.safetyCode, color = TextSecondary, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
             if (!messages.isNullOrEmpty()) {
                 item { SectionTitle(s.media) }
                 item {
@@ -2399,6 +2545,11 @@ private fun Bubble(
     openedOnce: Boolean = false,
     onOpenOnce: () -> Unit = {},
     mentionsMe: Boolean = false,
+    /** A live location in it: where its sender is now, who they are, and opening the map / stopping the sharing. */
+    liveNow: LiveLocation? = null,
+    liveSender: ChatUser? = null,
+    onOpenLive: (Pair<Double, Double>) -> Unit = {},
+    onStopLive: () -> Unit = {},
     /** In a group, the sender (their picture beside the bubble); null for one's own and in a chat of two. */
     avatar: ChatUser? = null,
     /** The first of a run of the same sender's messages: it has the picture, the name and the tail. */
@@ -2596,14 +2747,33 @@ private fun Bubble(
             if (!m.deleted) {
                 m.poll?.let { poll -> PollCard(poll, pollVotes, myUid, mine, s, onVote = onVote, onShowVoters = onShowVoters) }
                 m.event?.let { event -> EventCard(event, pollVotes, myUid, mine, onVote = onVote) }
-                m.location?.let { place -> LocationCard(place, mine, s) }
+                m.location?.let { place ->
+                    if (place.live) {
+                        LiveLocationCard(
+                            place = place,
+                            sender = liveSender ?: ChatUser(m.from, "", ""),
+                            live = liveNow,
+                            mine = mine,
+                            onOpen = { onOpenLive((liveNow?.lat ?: place.lat) to (liveNow?.lng ?: place.lng)) },
+                            onStop = onStopLive,
+                        )
+                    } else {
+                        LocationCard(place, mine, s)
+                    }
+                }
                 m.contact?.let { c -> ContactCard(c, mine, s) { onSaveContact(c) } }
             }
             m.share?.let { ShareCard(it, mine, s) }
             if (m.together && m.share != null && !mine) {
                 Box(Modifier.padding(start = 8.dp, top = 8.dp)) { Pill(s.join, primary = true, onClick = onJoin) }
             }
-            if (m.text.isNotEmpty() && !m.deleted) {
+            if (m.locked && !m.deleted) {
+                Row(Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(QMusicIcons.Lock, contentDescription = null, tint = fg.copy(alpha = 0.6f), modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(E2eWords(ChatMusic.english).unreadable, color = fg.copy(alpha = 0.7f), fontSize = 14.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                }
+            } else if (m.text.isNotEmpty() && !m.deleted) {
                 val textModifier = Modifier.padding(start = 12.dp, end = 12.dp, top = if (!mine && m.model != null) 2.dp else 8.dp)
                 when {
                     fromClaude -> ClaudeMarkdown(m.text, m.streaming, textModifier)

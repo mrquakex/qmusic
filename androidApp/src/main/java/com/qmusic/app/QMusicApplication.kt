@@ -33,6 +33,11 @@ class QMusicApplication : Application() {
         val lockPrefs = getSharedPreferences("qeyf_locked_chats", MODE_PRIVATE)
         com.qmusic.ui.chat.LockedChats.restore(lockPrefs.getStringSet("ids", emptySet()).orEmpty().toSet())
         com.qmusic.ui.chat.LockedChats.onChanged = { ids -> lockPrefs.edit().putStringSet("ids", ids).apply() }
+        // The same for the secret space's conversations, and whether its calls show who calls.
+        val secretPrefs = getSharedPreferences("nuvelo_secret_chats", MODE_PRIVATE)
+        com.qmusic.ui.chat.SecretChats.restore(secretPrefs.getStringSet("ids", emptySet()).orEmpty().toSet())
+        com.qmusic.ui.chat.SecretChats.showCallerName = secretPrefs.getBoolean("showCaller", true)
+        com.qmusic.ui.chat.SecretChats.onChanged = { ids -> secretPrefs.edit().putStringSet("ids", ids).apply() }
         com.qmusic.ui.chat.CallHooks.onGroupJoined = { groupId -> GroupCallNotifications.inCall(app, groupId) }
         com.qmusic.ui.chat.CallHooks.onActive = { active, peer, video ->
             val service = android.content.Intent(app, CallKeepAliveService::class.java)

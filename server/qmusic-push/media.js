@@ -163,6 +163,118 @@ async function gifs(req, res, url) {
   }
 }
 
+// ------------------------------------------------------------------ the key vault (end-to-end encryption recovery)
+//
+// A person's encryption key is backed up in Firebase locked with their 6-digit PIN AND a 32-byte secret only this
+// server holds. The server gives the secret only to the right PIN's proof, and after 10 wrong tries in a row it forgets
+// it for good (the backup can then never be opened), so the PIN cannot be guessed by trying them all.
+//
+//   POST /media/vault/store  {proof}          → {secret}   a new secret for this PIN (replaces the old one)
+//   POST /media/vault/open   {proof}          → {secret}   | 403 {left} | 410 (locked for good) | 404 (none)
+//   POST /media/vault/check                   → {exists, left}
+//   POST /media/vault/forget                  → {}         the person wipes it (a forgotten PIN: start again)
+//
+// proof = PBKDF2(PIN, salt, "proof"), from the phone; kept here only as a salted SHA-256.
+const VAULT = "/var/lib/qeyf-vault";
+const VAULT_TRIES = 10;
+fs.mkdirSync(VAULT, { recursive: true, mode: 0o700 });
+
+function vaultFile(uid) {
+  return path.join(VAULT, crypto.createHash("sha256").update("uid:" + uid).digest("hex") + ".json");
+}
+function readVault(uid) {
+  try {
+    return JSON.parse(fs.readFileSync(vaultFile(uid), "utf8"));
+  } catch (_) {
+    return null;
+  }
+}
+function writeVault(uid, v) {
+  const f = vaultFile(uid);
+  fs.writeFileSync(f + ".tmp", JSON.stringify(v), { mode: 0o600 });
+  fs.renameSync(f + ".tmp", f);
+}
+function readJson(req, limit = 4096) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > limit) {
+        reject(new Error("too large"));
+        req.destroy();
+      } else chunks.push(c);
+    });
+    req.on("end", () => {
+      try {
+        resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {});
+      } catch (e) {
+        reject(e);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+const HEX64 = /^[0-9a-f]{64}$/;
+// One caller at a time per person (two quick wrong tries cannot both count as the first).
+const vaultBusy = new Set();
+
+async function vault(req, res, action) {
+  const token = (req.headers.authorization || "").replace(/^Bearer /, "");
+  let uid;
+  try {
+    uid = (await admin.auth().verifyIdToken(token)).uid;
+  } catch (_) {
+    return reply(res, 401, { error: "sign in" });
+  }
+  if (vaultBusy.has(uid)) return reply(res, 429, { error: "busy" });
+  vaultBusy.add(uid);
+  try {
+    const body = await readJson(req);
+    const proof = String(body.proof || "");
+    const v = readVault(uid);
+    if (action === "check") {
+      return reply(res, 200, { exists: !!(v && !v.locked), locked: !!(v && v.locked), left: v ? Math.max(0, VAULT_TRIES - v.fails) : VAULT_TRIES });
+    }
+    if (action === "forget") {
+      try {
+        fs.unlinkSync(vaultFile(uid));
+      } catch (_) {}
+      log("vault forgotten");
+      return reply(res, 200, {});
+    }
+    if (!HEX64.test(proof)) return reply(res, 400, { error: "bad proof" });
+    if (action === "store") {
+      const salt = crypto.randomBytes(16).toString("hex");
+      const secret = crypto.randomBytes(32).toString("hex");
+      writeVault(uid, { salt, hash: crypto.createHash("sha256").update(salt + proof).digest("hex"), secret, fails: 0, locked: false, at: Date.now() });
+      return reply(res, 200, { secret });
+    }
+    if (action === "open") {
+      if (!v) return reply(res, 404, { error: "none" });
+      if (v.locked) return reply(res, 410, { error: "locked" });
+      const hash = crypto.createHash("sha256").update(v.salt + proof).digest("hex");
+      const ok = crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(v.hash, "hex"));
+      if (ok) {
+        if (v.fails) writeVault(uid, { ...v, fails: 0 });
+        return reply(res, 200, { secret: v.secret });
+      }
+      const fails = (v.fails || 0) + 1;
+      if (fails >= VAULT_TRIES) {
+        // Forgotten for good: the backup can no longer be opened by anyone.
+        writeVault(uid, { locked: true, fails, at: Date.now() });
+        log("vault locked after too many tries");
+        return reply(res, 410, { error: "locked" });
+      }
+      writeVault(uid, { ...v, fails });
+      return reply(res, 403, { error: "wrong", left: VAULT_TRIES - fails });
+    }
+    return reply(res, 404, { error: "not found" });
+  } finally {
+    vaultBusy.delete(uid);
+  }
+}
+
 http
   .createServer((req, res) => {
     if (req.method === "GET" && req.url.startsWith("/media/gifs")) {
@@ -175,6 +287,14 @@ http
     if (req.method === "POST" && url.pathname === "/media/upload") {
       upload(req, res, url).catch((e) => {
         log("upload failed:", e.message);
+        if (!res.headersSent) reply(res, 500, { error: "failed" });
+      });
+      return;
+    }
+    const vaultMatch = /^\/media\/vault\/(store|open|check|forget)$/.exec(url.pathname);
+    if (req.method === "POST" && vaultMatch) {
+      vault(req, res, vaultMatch[1]).catch((e) => {
+        log("vault failed:", e.message);
         if (!res.headersSent) reply(res, 500, { error: "failed" });
       });
       return;

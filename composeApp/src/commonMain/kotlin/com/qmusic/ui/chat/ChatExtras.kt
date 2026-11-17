@@ -217,6 +217,8 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
             MenuRow(s.myQrTitle, s.myQrNote) { controller.push(ChatRoute.MyQr) }
             MenuRow(s.starredShort, null) { controller.openStarred() }
             MenuRow(s.lockedChats, s.lockedChatsNote) { controller.push(ChatRoute.LockedFolder) }
+            E2eWords(ChatMusic.english).let { w -> MenuRow(w.e2eTitle, w.encryptNewNote) { controller.push(ChatRoute.Encryption) } }
+            MenuRow(if (ChatMusic.english) "Live locations" else "Canlı konumlar", if (ChatMusic.english) "Everyone sharing with you, on one map" else "Seninle konum paylaşan herkes tek haritada") { controller.push(ChatRoute.LivePeople) }
             MenuRow(s.broadcastsTitle, null) { controller.push(ChatRoute.Broadcasts) }
             MenuRow(s.statusPrivacyTitle, s.statusPrivacyNote) { controller.push(ChatRoute.StatusPrivacyPage) }
         }

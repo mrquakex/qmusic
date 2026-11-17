@@ -81,6 +81,14 @@ kotlin {
                 implementation(libs.kotlinx.coroutines.test)
             }
         }
+        // Tests of the phone's own code that run on the computer (the encryption).
+        val androidUnitTest by getting {
+            dependencies {
+                implementation(libs.kotlin.test)
+                implementation("junit:junit:4.13.2")
+                implementation("org.json:json:20240303")
+            }
+        }
         val androidMain by getting {
             dependencies {
                 implementation(libs.androidx.core.ktx)
