@@ -241,6 +241,44 @@ internal fun GifView(gif: ChatGif) {
     )
 }
 
+/** A sticker someone sent, tapped: big, with "Add to favourites" (or out again), as on WhatsApp. */
+@Composable
+internal fun StickerSheet(gif: ChatGif, s: ChatStrings, onDismiss: () -> Unit) {
+    val favorites by Stickers.favorites.collectAsState()
+    val item = remember(gif.url) { GifItem(id = gif.url.substringAfterLast('/'), preview = gif.url, url = gif.url, width = gif.width, height = gif.height) }
+    val favorite = favorites.any { it.url == gif.url }
+    val loader = rememberAnimatedImageLoader()
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(DarkSurfaceVariant).padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            AsyncImage(model = gif.url, imageLoader = loader, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(200.dp))
+            if (favorite) {
+                Spacer(Modifier.height(8.dp))
+                Text(s.stickerInFavorites, color = TextSecondary, fontSize = 13.sp)
+            }
+            Spacer(Modifier.height(16.dp))
+            Box(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(if (favorite) Color.Transparent else Ink)
+                    .then(if (favorite) Modifier.border(1.dp, TextSecondary, RoundedCornerShape(24.dp)) else Modifier)
+                    .clickable {
+                        Stickers.toggleFavorite(item)
+                        onDismiss()
+                    }.padding(vertical = 13.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    if (favorite) s.stickerRemoveFavorite else s.stickerAddFavorite,
+                    color = if (favorite) TextPrimary else InkInverse,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
 private val QeyfGreen = Color(0xFF1DAA61)
 
 @Composable

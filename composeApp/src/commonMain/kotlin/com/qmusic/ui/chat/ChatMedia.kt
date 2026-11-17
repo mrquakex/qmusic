@@ -142,6 +142,44 @@ object SecretChats {
     var showCallerName: Boolean = true
 }
 
+/**
+ * What was being written in a conversation and not sent: kept when it is left (and when the app closes), back in the
+ * box when it is opened again, and shown as "Draft: ..." in the list, as on WhatsApp. Only on this phone.
+ */
+/** A message written now, to go at [at] (sent by the phone itself then). */
+data class ScheduledMessage(val id: String, val chatId: String, val peer: ChatUser, val text: String, val at: Long)
+
+/** The messages waiting for their time; the phone's part fills the hooks (alarms, keeping them). */
+object ScheduledMessages {
+    val all = kotlinx.coroutines.flow.MutableStateFlow<List<ScheduledMessage>>(emptyList())
+    var schedule: (ScheduledMessage) -> Unit = {}
+    var cancel: (String) -> Unit = {}
+    var sendNow: (String) -> Unit = {}
+
+    /** Whether this phone can send later (set by the phone's part; not on the desktop). */
+    var supported: Boolean = false
+}
+
+object ChatDrafts {
+    val all = kotlinx.coroutines.flow.MutableStateFlow<Map<String, String>>(emptyMap())
+    var onChanged: ((Map<String, String>) -> Unit)? = null
+
+    fun get(chatId: String): String = all.value[chatId].orEmpty()
+
+    fun set(chatId: String, text: String) {
+        val clean = text.take(4000)
+        // Nothing of a secret conversation is left on the phone in the clear.
+        val next = if (clean.isBlank() || chatId in SecretChats.ids) all.value - chatId else all.value + (chatId to clean)
+        if (next == all.value) return
+        all.value = next
+        onChanged?.invoke(next)
+    }
+
+    fun restore(saved: Map<String, String>) {
+        all.value = saved
+    }
+}
+
 object LockedChats {
     var ids: Set<String> = emptySet()
         private set

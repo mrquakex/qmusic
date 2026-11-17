@@ -160,6 +160,9 @@ object QMusicIcons {
 
     /** Three dots; the round caps of the zero-length segments draw them. */
     val More: ImageVector = stroked("More", "M12 5.5h.01M12 12h.01M12 18.5h.01")
+    val Reply: ImageVector = stroked("Reply", "M10 7l-6 5 6 5", "M4 12h10a6 6 0 0 1 6 6v1")
+    val Forward: ImageVector = stroked("Forward", "M14 7l6 5-6 5", "M20 12H10a6 6 0 0 0-6 6v1")
+    val Copy: ImageVector = stroked("Copy", "M9 9h11v11H9z", "M5 15H4V4h11v1")
 
     val Moon: ImageVector = stroked("Moon", "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z")
 

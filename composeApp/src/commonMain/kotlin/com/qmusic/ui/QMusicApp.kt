@@ -760,6 +760,9 @@ fun QMusicApp(
         val exploreError by viewModel.exploreError.collectAsState()
         val homeChips by viewModel.homeChips.collectAsState()
         val speedDial by viewModel.speedDial.collectAsState()
+        // A song touched anywhere starts getting ready before the tap is even finished.
+        androidx.compose.runtime.LaunchedEffect(viewModel) { com.qmusic.ui.components.SongPress.warm = { song -> viewModel.playerController.warmUp(listOf(song)) } }
+        val speedDialPins by viewModel.speedDialPins.collectAsState()
         val isOnline by viewModel.isOnline.collectAsState()
         val libraryStartTab by viewModel.libraryStartTab.collectAsState()
         val selectedHomeChip by viewModel.selectedHomeChip.collectAsState()
@@ -919,6 +922,8 @@ fun QMusicApp(
                         downloads = downloadedSongs,
                         onOpenDownloads = { viewModel.openDownloads() },
                         speedDial = speedDial,
+                        speedDialPins = speedDialPins,
+                        onTogglePin = { viewModel.toggleSpeedDialPin(it) },
                         onRandomSong = { viewModel.playRandomSong() },
                         chips = homeChips,
                         selectedChip = selectedHomeChip,

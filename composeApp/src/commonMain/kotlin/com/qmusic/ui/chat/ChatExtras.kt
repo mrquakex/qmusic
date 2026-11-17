@@ -581,6 +581,11 @@ internal fun SendPhotosPage(
     var list by remember(photos) { mutableStateOf(photos) }
     var text by remember { mutableStateOf(caption) }
     var editing by remember { mutableStateOf<Int?>(null) }
+    // HD, as on WhatsApp: the photos at full quality instead of the lighter standard ones.
+    var hd by remember { mutableStateOf(false) }
+    var preparing by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val canHd = list.any { it.hd != null }
     val pager = androidx.compose.foundation.pager.rememberPagerState { list.size }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         Column(Modifier.fillMaxSize().imePadding()) {
@@ -589,6 +594,17 @@ internal fun SendPhotosPage(
                 Spacer(Modifier.weight(1f))
                 if (list.size > 1) Text("${pager.currentPage + 1} / ${list.size}", color = Color.White, fontSize = 14.sp)
                 Spacer(Modifier.weight(1f))
+                if (canHd) {
+                    Text(
+                        "HD",
+                        color = if (hd) Color.Black else Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (hd) Color.White else Color.Transparent)
+                            .border(1.5.dp, Color.White, RoundedCornerShape(8.dp))
+                            .clickable { hd = !hd }.padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
                 Text(
                     s.editPhoto,
                     color = Color.White,
@@ -623,8 +639,23 @@ internal fun SendPhotosPage(
                     ) { Text("1", color = if (viewOnce) Color.Black else Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
                     Spacer(Modifier.width(6.dp))
                 }
-                Box(Modifier.size(44.dp).clip(CircleShape).background(Color.White).clickable { onSend(list, text) }, contentAlignment = Alignment.Center) {
-                    Icon(QMusicIcons.Send, null, tint = Color.Black, modifier = Modifier.size(20.dp))
+                Box(
+                    Modifier.size(44.dp).clip(CircleShape).background(Color.White).clickable(enabled = !preparing) {
+                        if (!hd) {
+                            onSend(list, text)
+                        } else {
+                            preparing = true
+                            scope.launch {
+                                val full = list.map { p -> p.hd?.let { make -> runCatching { make() }.getOrNull() } ?: p }
+                                preparing = false
+                                onSend(full, text)
+                            }
+                        }
+                    },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (preparing) androidx.compose.material3.CircularProgressIndicator(color = Color.Black, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                    else Icon(QMusicIcons.Send, null, tint = Color.Black, modifier = Modifier.size(20.dp))
                 }
             }
         }

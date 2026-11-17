@@ -28,4 +28,7 @@ interface MusicRepository {
     suspend fun reorderPlaylist(playlistId: Long, songIds: List<String>) {}
 
     suspend fun playCounts(withinDays: Int?): List<Pair<SongItem, Int>> = emptyList()
+
+    /** Each song played in the last [withinDays] days, with the times (epoch ms) it was played. */
+    suspend fun playTimes(withinDays: Int): List<Pair<SongItem, List<Long>>> = emptyList()
 }

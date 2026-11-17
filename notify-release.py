@@ -2,7 +2,9 @@
 
 Use it right after publishing a release (the GitHub Actions workflow does the same when its account is in good standing):
 
-    python notify-release.py <path-to-firebase-service-account.json> <version>
+    python notify-release.py <path-to-firebase-service-account.json> <version> [release-notes.md]
+
+With the notes file, what is new goes with the message and shows in the phone's notification panel.
 
 Needs only Python and OpenSSL (both come with Git for Windows). The key file is read here and never sent anywhere
 except to Google, to get a short-lived access token.
@@ -52,13 +54,22 @@ def access_token(account: dict) -> str:
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         sys.exit(__doc__)
     key_path, version = sys.argv[1], sys.argv[2].lstrip("v")
+    body = ""
+    if len(sys.argv) == 4:
+        with open(sys.argv[3], encoding="utf-8") as f:
+            lines = [l.strip() for l in f if l.strip()]
+        # One line per change, cut to what a notification shows (the whole list is in the app).
+        body = "\n".join("• " + l.lstrip("-* ").split(": ")[0].split(". ")[0][:90] for l in lines)[:900]
     with open(key_path, encoding="utf-8") as f:
         account = json.load(f)
 
-    message = {"message": {"topic": "releases", "data": {"type": "update", "version": version}, "android": {"priority": "HIGH"}}}
+    data = {"type": "update", "version": version}
+    if body:
+        data["body"] = body
+    message = {"message": {"topic": "releases", "data": data, "android": {"priority": "HIGH"}}}
     request = urllib.request.Request(
         f"https://fcm.googleapis.com/v1/projects/{account['project_id']}/messages:send",
         data=json.dumps(message).encode(),

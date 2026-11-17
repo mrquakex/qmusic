@@ -19,6 +19,8 @@ interface AppStrings {
     val refreshHome: String
     val playAllShelf: String
     val speedDial: String
+    val pinnedToSpeedDial: String
+    val unpinnedFromSpeedDial: String
     val offlineTitle: String
     fun offlineWithDownloads(count: Int): String
     val offlineWithoutDownloads: String
@@ -427,6 +429,8 @@ object TurkishStrings : AppStrings {
     override val refreshHome: String = "Ana sayfayı yenile"
     override val playAllShelf: String = "Tümünü oynat"
     override val speedDial: String = "Hızlı arama"
+    override val pinnedToSpeedDial: String = "Hızlı aramaya sabitlendi"
+    override val unpinnedFromSpeedDial: String = "Hızlı aramadan sabitleme kaldırıldı"
     override val offlineTitle: String = "İnternet bağlantısı yok"
     override fun offlineWithDownloads(count: Int): String = "İndirdiğin $count şarkıyı çevrimdışı dinleyebilirsin."
     override val offlineWithoutDownloads: String = "Bağlandığında ana sayfa kendiliğinden yenilenecek."
@@ -851,6 +855,8 @@ object EnglishStrings : AppStrings {
     override val refreshHome: String = "Refresh Home"
     override val playAllShelf: String = "Play all"
     override val speedDial: String = "Speed dial"
+    override val pinnedToSpeedDial: String = "Pinned to speed dial"
+    override val unpinnedFromSpeedDial: String = "Unpinned from speed dial"
     override val offlineTitle: String = "No internet connection"
     override fun offlineWithDownloads(count: Int): String =
         "You can listen to your $count downloaded ${if (count == 1) "song" else "songs"} offline."

@@ -439,6 +439,7 @@ private fun ChatsTab(
             // A new phone: the encryption key is backed up; the PIN brings the old encrypted messages back.
             item(key = "e2eRestore") {
                 val needsRestore by E2e.api.needsRestore.collectAsState()
+                val hasBackup by E2e.api.hasBackup.collectAsState()
                 if (needsRestore) {
                     val w = remember(ChatMusic.english) { E2eWords(ChatMusic.english) }
                     Row(
@@ -449,8 +450,8 @@ private fun ChatsTab(
                         Icon(QMusicIcons.Lock, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(22.dp))
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(w.restoreTitle, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Text(w.restoreBody, color = TextSecondary, fontSize = 12.sp, maxLines = 2)
+                            Text(w.bannerLinkTitle, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text(if (hasBackup) w.bannerLinkBody else w.bannerLinkBodyNoPin, color = TextSecondary, fontSize = 12.sp, maxLines = 2)
                         }
                     }
                 }

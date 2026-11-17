@@ -105,17 +105,29 @@ class QueueAndSearchTest {
     }
 
     @Test
-    fun historyFollowsEverySongThatPlaysIncludingSkips() = testScope.runTest {
+    fun historyKeepsWhatWasListenedToNotWhatWasSkipped() = testScope.runTest {
         val vm = createViewModel(backgroundScope)
         val songs = listOf(song("a"), song("b"), song("c"))
 
+        // "a" plays half a minute: a listen.
         vm.play(songs[0], songs)
+        testDispatcher.scheduler.runCurrent()
+        playerController.seekTo(31_000)
+        testDispatcher.scheduler.runCurrent()
+        // "b" is skipped at once: not one.
+        vm.next()
+        testDispatcher.scheduler.runCurrent()
+        playerController.seekTo(4_000)
         testDispatcher.scheduler.runCurrent()
         vm.next()
         testDispatcher.scheduler.runCurrent()
+        assertEquals(listOf("a"), fakeRepo.historyList.map { it.id })
+        // "c" (reached by next, as auto-advance does) is heard long enough.
+        playerController.seekTo(45_000)
+        testDispatcher.scheduler.runCurrent()
 
         // The repository lists the most recent song first.
-        assertEquals(listOf("b", "a"), fakeRepo.historyList.map { it.id })
+        assertEquals(listOf("c", "a"), fakeRepo.historyList.map { it.id })
     }
 
     @Test

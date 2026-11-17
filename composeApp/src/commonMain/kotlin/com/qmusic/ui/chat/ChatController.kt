@@ -1060,6 +1060,62 @@ class ChatController(
 
     val blocked: StateFlow<Set<String>> = blockedIds
 
+    private val _transcripts = MutableStateFlow<Map<String, String?>>(emptyMap())
+    /** Voice messages turned to text, by message id (null while it is being done). */
+    val transcripts: StateFlow<Map<String, String?>> = _transcripts
+
+    fun transcribe(m: ChatMessage, s: ChatStrings) {
+        val voice = m.attachment ?: return
+        if (_transcripts.value.containsKey(m.id)) return
+        _transcripts.update { it + (m.id to null) }
+        scope.launch {
+            backend.transcribe(voice)
+                .onSuccess { text -> _transcripts.update { it + (m.id to text.ifBlank { s.nothingHeard }) } }
+                .onFailure { _transcripts.update { it - m.id }; _error.value = s.aiFailed }
+        }
+    }
+
+    /** Reads the message aloud (or stops the one being read). */
+    fun speak(m: ChatMessage, s: ChatStrings) {
+        if (m.text.isBlank()) return
+        scope.launch { backend.speak(m.text).onFailure { _error.value = s.aiFailed } }
+    }
+
+    private val _translations = MutableStateFlow<Map<String, String?>>(emptyMap())
+    /** Messages translated into the app's language, by message id (null while it is being done). */
+    val translations: StateFlow<Map<String, String?>> = _translations
+
+    fun translate(m: ChatMessage, s: ChatStrings) {
+        if (m.text.isBlank()) return
+        if (_translations.value[m.id] != null) {
+            // Shown already: a second "Translate" takes it away.
+            _translations.update { it - m.id }
+            return
+        }
+        _translations.update { it + (m.id to null) }
+        scope.launch {
+            backend.translate(m.text, if (s.english) "en" else "tr")
+                .onSuccess { text -> _translations.update { it + (m.id to text) } }
+                .onFailure { _translations.update { it - m.id }; _error.value = s.aiFailed }
+        }
+    }
+
+    /** Reports [other] (a person or a group) with the last messages of the conversation; blocks (or leaves) too when asked. */
+    fun report(other: ChatUser, reason: String, recent: List<ChatMessage>, alsoBlock: Boolean, s: ChatStrings) {
+        val chatId = chatIdWith(other) ?: other.uid
+        val lines = recent.filter { !it.system && !it.deleted }.takeLast(5).map { m ->
+            m.from to (m.text.ifBlank { if (m.images.isNotEmpty()) "[foto]" else if (m.attachment != null) "[dosya]" else "[mesaj]" })
+        }
+        scope.launch {
+            backend.report(chatId, other.uid, reason, lines)
+                .onSuccess { _info.value = s.reportSent }
+                .onFailure { _error.value = it.message }
+            if (alsoBlock) {
+                if (other.isGroup) leaveGroup(other) else setBlocked(other, true)
+            }
+        }
+    }
+
     fun setBlocked(other: ChatUser, block: Boolean) {
         scope.launch { backend.setBlocked(other.uid, block).onFailure { _error.value = it.message } }
         if (block) _routes.update { list -> list.filterNot { it is ChatRoute.Conversation && it.other.uid == other.uid } }

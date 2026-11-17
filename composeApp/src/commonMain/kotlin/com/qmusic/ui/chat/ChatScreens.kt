@@ -20,6 +20,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,6 +43,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
+import kotlinx.datetime.toInstant
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -595,6 +598,8 @@ internal fun ThreadRow(
 ) {
     var menu by remember { mutableStateOf(false) }
     val typingNow = now > 0 && now - t.typingAt < 8_000
+    val drafts by ChatDrafts.all.collectAsState()
+    val draftText = drafts[t.id].orEmpty()
     Box {
     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
         actions.forEach { (label, run) -> DropdownMenuItem(text = { Text(label, color = TextPrimary) }, onClick = { menu = false; run() }) }
@@ -639,6 +644,18 @@ internal fun ThreadRow(
                         fontSize = 14.sp,
                         fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
                         maxLines = 1,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else if (draftText.isNotBlank()) {
+                    Text(
+                        androidx.compose.ui.text.buildAnnotatedString {
+                            pushStyle(androidx.compose.ui.text.SpanStyle(color = Color(0xFF1DAA61), fontWeight = FontWeight.SemiBold)) ; append(s.draft + ": "); pop()
+                            append(draftText.replace('\n', ' '))
+                        },
+                        color = TextSecondary,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
                 } else {
@@ -932,9 +949,26 @@ private fun ConversationPage(
     val writeLocked = isGroup && group?.settings?.sendAdmins == true && !iAmAdmin
     val canPin = !isGroup || group?.settings?.editAdmins != true || iAmAdmin
     var viewOnceOpen by remember { mutableStateOf<ChatMessage?>(null) }
+    var reporting by remember { mutableStateOf(false) }
+    var scheduling by remember { mutableStateOf(false) }
+    var scheduledOpen by remember { mutableStateOf(false) }
+    val allScheduled by ScheduledMessages.all.collectAsState()
+    val scheduledHere = remember(allScheduled, other.uid) { allScheduled.filter { it.peer.uid == other.uid }.sortedBy { it.at } }
+    val transcripts by controller.transcripts.collectAsState()
+    val translations by controller.translations.collectAsState()
+    // In an encrypted chat, once per visit: the message leaves the phone for this (it is said first).
+    var aiAgreed by remember(other.uid) { mutableStateOf(false) }
+    var aiPending by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val aiAsk: (Boolean, () -> Unit) -> Unit = { sealed, run -> if (!sealed || aiAgreed) run() else aiPending = run }
     // Who is named with @ in the box, by the name written for them.
     var mentionNames by remember(other.uid) { mutableStateOf(mapOf<String, String>()) }
-    var text by remember(other.uid) { mutableStateOf("") }
+    // What was left unsent here last time comes back into the box.
+    val draftId = remember(other.uid) { controller.chatIdWith(other) ?: other.uid }
+    var text by remember(other.uid) { mutableStateOf(ChatDrafts.get(draftId)) }
+    // Kept as it is written (not on leaving only: the app may be closed from the recent apps).
+    LaunchedEffect(draftId) {
+        androidx.compose.runtime.snapshotFlow { text }.collect { typed: String -> if (editing == null) ChatDrafts.set(draftId, typed) }
+    }
     var menu by remember { mutableStateOf(false) }
     var attach by remember { mutableStateOf(false) }
     var replyTo by remember(other.uid) { mutableStateOf<ChatMessage?>(null) }
@@ -1092,28 +1126,43 @@ private fun ConversationPage(
     }
 
     if (selected.isNotEmpty()) PlatformBackHandler(enabled = true) { selected = emptySet() }
+    // Held: the message picked, with the reactions over it until something else is done.
+    var reactFor by remember { mutableStateOf<String?>(null) }
+    var menuFor by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(selected) {
+        if (reactFor != null && selected != setOf(reactFor)) reactFor = null
+        if (menuFor != null && menuFor !in selected) menuFor = null
+    }
     if (emojiOpen) PlatformBackHandler(enabled = true) { emojiOpen = false }
     if (attach) PlatformBackHandler(enabled = true) { attach = false }
     Column(Modifier.fillMaxSize().imePadding()) {
         if (selected.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().statusBarsPadding().height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { selected = emptySet() }) { Icon(QMusicIcons.Close, null, tint = Ink) }
-                Text("${selected.size} ${s.selected}", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                if (selectedMessages.any { it.text.isNotEmpty() }) {
-                    TextButton(onClick = {
-                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(selectedMessages.sortedBy { it.at }.filter { it.text.isNotEmpty() }.joinToString("\n") { it.text }))
-                        controller.reportInfo(s.copied)
-                        selected = emptySet()
-                    }) { Text(s.copy, color = Ink) }
+                Text("${selected.size}", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp).weight(1f))
+                val one = selectedMessages.singleOrNull()
+                if (one != null && !one.deleted) {
+                    IconButton(onClick = { replyTo = one; selected = emptySet() }) { Icon(QMusicIcons.Reply, contentDescription = s.reply, tint = TextPrimary, modifier = Modifier.size(22.dp)) }
                 }
                 IconButton(onClick = {
                     val chatName = title
                     val allStarred = selectedMessages.all { it.id in starredIds }
                     selectedMessages.forEach { m -> controller.setStarred(other, m, if (m.from == me.uid) me.name else memberNames[m.from] ?: other.name, chatName, !allStarred) }
                     selected = emptySet()
-                }) { Icon(QMusicIcons.Star, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(22.dp)) }
-                if (!secretChat) TextButton(onClick = { forwarding = selectedMessages.filter { !it.deleted } }) { Text(s.forward, color = Ink) }
-                IconButton(onClick = { deleting = selectedMessages }) { Icon(QMusicIcons.Trash, null, tint = Ink) }
+                }) { Icon(QMusicIcons.Star, contentDescription = s.star, tint = TextPrimary, modifier = Modifier.size(22.dp)) }
+                IconButton(onClick = { deleting = selectedMessages }) { Icon(QMusicIcons.Trash, contentDescription = s.deleteMessage, tint = TextPrimary, modifier = Modifier.size(22.dp)) }
+                if (selectedMessages.any { it.text.isNotEmpty() }) {
+                    IconButton(onClick = {
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(selectedMessages.sortedBy { it.at }.filter { it.text.isNotEmpty() }.joinToString("\n") { it.text }))
+                        controller.reportInfo(s.copied)
+                        selected = emptySet()
+                    }) { Icon(QMusicIcons.Copy, contentDescription = s.copy, tint = TextPrimary, modifier = Modifier.size(22.dp)) }
+                }
+                if (!secretChat && selectedMessages.none { it.viewOnce || it.locked }) {
+                    IconButton(onClick = { forwarding = selectedMessages.filter { !it.deleted } }) { Icon(QMusicIcons.Forward, contentDescription = s.forward, tint = TextPrimary, modifier = Modifier.size(22.dp)) }
+                }
+                // One picked: the rest of what can be done with it (info, edit, pin...).
+                if (one != null) IconButton(onClick = { menuFor = one.id }) { Icon(QMusicIcons.More, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(22.dp)) }
             }
         } else
         TopBar(
@@ -1134,8 +1183,8 @@ private fun ConversationPage(
                         }
                         val seen = presence
                         // A group: how many of the others are here now (as on WhatsApp), else who is in it.
-                        val onlineInGroup by remember(group?.members?.size, group?.id) {
-                            val others = group?.members?.map { it.user }?.filter { it.uid != me.uid && it.uid != CLAUDE_BOT_UID }.orEmpty()
+                        val onlineInGroup by remember(group?.joined?.size, group?.id) {
+                            val others = group?.joined?.map { it.user }?.filter { it.uid != me.uid && it.uid != CLAUDE_BOT_UID }.orEmpty()
                             if (!isGroup || others.isEmpty()) {
                                 kotlinx.coroutines.flow.flowOf(0)
                             } else {
@@ -1146,7 +1195,7 @@ private fun ConversationPage(
                             recordingThem -> s.recordingVoice
                             typing -> s.typing
                             isGroup && onlineInGroup > 0 -> if (s.english) "$onlineInGroup online" else "$onlineInGroup kişi çevrimiçi"
-                            isGroup -> group?.members?.joinToString(", ") { if (it.user.uid == me.uid) s.you else it.user.name.substringBefore(' ') }.orEmpty()
+                            isGroup -> group?.joined?.joinToString(", ") { if (it.user.uid == me.uid) s.you else it.user.name.substringBefore(' ') }.orEmpty()
                             seen?.online == true -> s.online
                             seen != null && seen.lastSeen > 0 -> s.lastSeen + " " + seenLabel(seen.lastSeen, s)
                             else -> "@" + other.username
@@ -1304,6 +1353,12 @@ private fun ConversationPage(
                                 }
                             },
                         )
+                        if (!isClaude) {
+                            DropdownMenuItem(
+                                text = { Text(s.report, color = Color(0xFFE57373)) },
+                                onClick = { menu = false; reporting = true },
+                            )
+                        }
                         if (!isGroup) {
                             DropdownMenuItem(
                                 text = { Text(if (isBlocked) s.unblock else s.block, color = TextPrimary) },
@@ -1448,6 +1503,15 @@ private fun ConversationPage(
                                     selecting = selected.isNotEmpty(),
                                     selected = m.id in selected,
                                     onToggleSelect = { selected = if (m.id in selected) selected - m.id else selected + m.id },
+                                    onStartSelect = { selected = setOf(m.id); reactFor = m.id },
+                                    reactBar = reactFor == m.id && selected == setOf(m.id),
+                                    showMenu = menuFor == m.id,
+                                    onMenuClosed = { menuFor = null; selected = emptySet() },
+                                    transcript = transcripts.containsKey(m.id) to transcripts[m.id],
+                                    onTranscribe = { aiAsk(encrypted) { controller.transcribe(m, s) } },
+                                    translation = translations.containsKey(m.id) to translations[m.id],
+                                    onTranslate = if (fromClaudeId(m.from)) null else ({ aiAsk(encrypted) { controller.translate(m, s) } }),
+                                    onSpeak = { aiAsk(encrypted) { controller.speak(m, s) } },
                                     onCopy = {
                                         clipboard.setText(androidx.compose.ui.text.AnnotatedString(m.text))
                                         controller.reportInfo(s.copied)
@@ -1541,7 +1605,7 @@ private fun ConversationPage(
             // "@" at the end of the box in a group: its members to name.
             val typedMention = if (isGroup) Regex("(^|\\s)@([^\\s@]*)$").find(text)?.groupValues?.get(2) else null
             if (typedMention != null) {
-                val people = group?.members.orEmpty().map { it.user }.filter { it.uid != me.uid && it.name.contains(typedMention, ignoreCase = true) }.take(6)
+                val people = group?.joined.orEmpty().map { it.user }.filter { it.uid != me.uid && it.name.contains(typedMention, ignoreCase = true) }.take(6)
                 if (people.isNotEmpty()) {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(14.dp)).background(DarkSurfaceVariant)) {
                         people.forEach { person ->
@@ -1559,6 +1623,19 @@ private fun ConversationPage(
                             }
                         }
                     }
+                }
+            }
+            // Waiting to go at their time: a strip over the box (a tap lists them, to send now or not at all).
+            if (scheduledHere.isNotEmpty()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).clip(RoundedCornerShape(12.dp))
+                        .background(DarkSurfaceVariant).clickable { scheduledOpen = true }.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(QMusicIcons.Timer, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(s.scheduledCount(scheduledHere.size), color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Text(whenLabel(scheduledHere.first().at, s), color = TextSecondary, fontSize = 12.sp)
                 }
             }
             editing?.let { e ->
@@ -1756,7 +1833,11 @@ private fun ConversationPage(
                             .size(44.dp)
                             .clip(CircleShape)
                             .background(if (canSend) Ink else DarkSurfaceVariant)
-                            .clickable(enabled = canSend) {
+                            .combinedClickable(
+                                enabled = canSend,
+                                // Held: sent later, at a chosen time (not an edit, not to Claude).
+                                onLongClick = if (editing == null && ScheduledMessages.supported && !isClaude) ({ scheduling = true }) else null,
+                            ) {
                                 val e = editing
                                 if (e != null) {
                                     if (text.trim() != e.text) controller.edit(other, e, text)
@@ -1835,6 +1916,65 @@ private fun ConversationPage(
         }
     }
     videoOpen?.let { url -> VideoViewer(url) { videoOpen = null } }
+    aiPending?.let { run ->
+        AlertDialog(
+            onDismissRequest = { aiPending = null },
+            containerColor = DarkSurfaceVariant,
+            title = { Text(s.aiEncryptedTitle, color = TextPrimary) },
+            text = { Text(s.aiEncryptedNote, color = TextSecondary) },
+            confirmButton = { TextButton(onClick = { aiAgreed = true; aiPending = null; run() }) { Text(s.goOn, color = Ink) } },
+            dismissButton = { TextButton(onClick = { aiPending = null }) { Text(s.cancel, color = TextSecondary) } },
+        )
+    }
+    if (scheduling) {
+        ScheduleDialog(s, onDismiss = { scheduling = false }) { at ->
+            scheduling = false
+            val body = text.trim()
+            if (body.isNotEmpty()) {
+                ScheduledMessages.schedule(
+                    ScheduledMessage(
+                        id = "s" + Clock.System.now().toEpochMilliseconds() + "_" + (0..9999).random(),
+                        chatId = controller.chatIdWith(other) ?: other.uid,
+                        peer = other,
+                        text = body,
+                        at = at,
+                    ),
+                )
+                controller.reportInfo(s.scheduledFor(whenLabel(at, s)))
+                text = ""
+                replyTo = null
+            }
+        }
+    }
+    if (scheduledOpen) {
+        AlertDialog(
+            onDismissRequest = { scheduledOpen = false },
+            containerColor = DarkSurfaceVariant,
+            title = { Text(s.scheduledCount(scheduledHere.size), color = TextPrimary) },
+            text = {
+                Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                    if (scheduledHere.isEmpty()) Text("-", color = TextSecondary)
+                    scheduledHere.forEach { sm ->
+                        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                            Text(whenLabel(sm.at, s), color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(sm.text, color = TextPrimary, fontSize = 15.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                            Row {
+                                TextButton(onClick = { ScheduledMessages.sendNow(sm.id) }) { Text(s.sendNow, color = Ink) }
+                                TextButton(onClick = { ScheduledMessages.cancel(sm.id) }) { Text(s.dontSend, color = Color(0xFFE57373)) }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { scheduledOpen = false }) { Text(s.cancel, color = TextSecondary) } },
+        )
+    }
+    if (reporting) {
+        ReportDialog(title, isGroup, s, onDismiss = { reporting = false }) { reason, alsoBlock ->
+            reporting = false
+            controller.report(other, reason, messages.orEmpty(), alsoBlock, s)
+        }
+    }
     pendingPhotos?.let { photos ->
         SendPhotosPage(
             photos = photos,
@@ -2527,6 +2667,20 @@ private fun Bubble(
     selecting: Boolean = false,
     selected: Boolean = false,
     onToggleSelect: () -> Unit = {},
+    /** Held: starts picking with this one (as on WhatsApp). */
+    onStartSelect: () -> Unit = onToggleSelect,
+    /** The reactions over it (just held). */
+    reactBar: Boolean = false,
+    /** The bar's "more": its menu. */
+    showMenu: Boolean = false,
+    onMenuClosed: () -> Unit = {},
+    /** A voice message as text: absent (not asked), null (being done) or the text. */
+    transcript: Pair<Boolean, String?> = false to null,
+    onTranscribe: () -> Unit = {},
+    /** The message in the app's language, the same way. */
+    translation: Pair<Boolean, String?> = false to null,
+    onTranslate: (() -> Unit)? = null,
+    onSpeak: (() -> Unit)? = null,
     onCopy: (() -> Unit)? = null,
     onForward: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
@@ -2560,6 +2714,10 @@ private fun Bubble(
         return
     }
     var menu by remember { mutableStateOf(false) }
+    LaunchedEffect(showMenu) { if (showMenu) menu = true }
+    // A tap on a sticker: shown big, and kept among the person's own with a tap (as on WhatsApp).
+    var stickerOpen by remember { mutableStateOf(false) }
+    if (stickerOpen) m.gif?.let { g -> StickerSheet(g, s) { stickerOpen = false } }
     // One to three emoji alone: big, without a bubble, as people expect.
     val bigEmoji = !m.deleted && m.images.isEmpty() && m.attachment == null && m.share == null && m.replyTo == null && m.poll == null && m.event == null && m.location == null && m.contact == null &&
         (isBigEmoji(m.text) || (m.gif?.sticker == true && m.text.isBlank()))
@@ -2580,7 +2738,9 @@ private fun Bubble(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (selected) Ink.copy(alpha = 0.10f) else Color.Transparent)
+            .background(if (selected) Ink.copy(alpha = 0.12f) else Color.Transparent)
+            // Picking: a tap anywhere on its row ticks it (or unticks it).
+            .then(if (selecting) Modifier.clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { onToggleSelect() } else Modifier)
             .pointerInput(m.id, selecting) {
                 if (selecting) return@pointerInput
                 detectHorizontalDragGestures(
@@ -2652,8 +2812,17 @@ private fun Bubble(
                     },
                 )
                 .combinedClickable(
-                    onClick = { if (selecting) onToggleSelect() else m.share?.let(onOpenShare) },
-                    onLongClick = { if (selecting) onToggleSelect() else menu = true },
+                    onClick = {
+                        when {
+                            selecting -> onToggleSelect()
+                            m.gif?.sticker == true && !m.deleted -> stickerOpen = true
+                            else -> m.share?.let(onOpenShare)
+                        }
+                    },
+                    onLongClick = {
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        if (selecting) onToggleSelect() else onStartSelect()
+                    },
                     // Two quick taps: a heart (again: taken back).
                     onDoubleClick = if (selecting || m.deleted || m.pending) null else ({ onReact(if (reactions[myUid] == REACTIONS.first()) null else REACTIONS.first()) }),
                 )
@@ -2739,7 +2908,24 @@ private fun Bubble(
             }
             m.attachment?.let { a ->
                 when (a.kind) {
-                    AttachmentKind.VOICE -> VoiceBubble(a, mine, voicePlayer, m.progress)
+                    AttachmentKind.VOICE -> Column {
+                        VoiceBubble(a, mine, voicePlayer, m.progress)
+                        if (!m.deleted && !m.pending) {
+                            val (asked, said) = transcript
+                            val soft = if (mine) InkInverse.copy(alpha = 0.7f) else TextSecondary
+                            when {
+                                !asked -> Text(
+                                    s.transcribe,
+                                    color = soft,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(start = 12.dp, top = 2.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onTranscribe).padding(4.dp),
+                                )
+                                said == null -> Text(s.transcribing, color = soft, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 2.dp))
+                                else -> Text(said, color = if (mine) InkInverse else TextPrimary, fontSize = 14.sp, modifier = Modifier.widthIn(max = 260.dp).padding(start = 12.dp, end = 12.dp, top = 2.dp))
+                            }
+                        }
+                    }
                     AttachmentKind.VIDEO -> VideoBubble(a, m.progress) { onOpenVideo(a.url) }
                     AttachmentKind.FILE -> FileBubble(a, mine, m.progress, s) { onOpenFile(a) }
                 }
@@ -2781,6 +2967,13 @@ private fun Bubble(
                     else -> LinkedText(m.text, fg, if (mine) Color(0xFF0B57D0) else Color(0xFF8AB4F8), textModifier)
                 }
                 if (!fromClaude) firstLink(m.text)?.let { link -> LinkPreviewCard(link, mine, loadPreview) }
+                if (translation.first && !m.deleted) {
+                    val soft = if (mine) InkInverse.copy(alpha = 0.6f) else TextSecondary
+                    Column(Modifier.widthIn(max = 280.dp).padding(start = 12.dp, end = 12.dp, top = 4.dp)) {
+                        Text(s.translation, color = soft, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        Text(translation.second ?: s.translating, color = if (translation.second == null) soft else fg, fontSize = 15.sp)
+                    }
+                }
             }
             Row(
                 modifier = Modifier.align(Alignment.End).padding(start = 12.dp, end = 10.dp, bottom = 6.dp, top = 2.dp),
@@ -2806,7 +2999,32 @@ private fun Bubble(
             }
         }
         }
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
+        // Just held: the reactions over it; touches elsewhere still go through (to pick more).
+        if (reactBar && !m.deleted && !m.pending) {
+            androidx.compose.ui.window.Popup(
+                alignment = if (mine) Alignment.TopEnd else Alignment.TopStart,
+                offset = androidx.compose.ui.unit.IntOffset(0, with(androidx.compose.ui.platform.LocalDensity.current) { -52.dp.roundToPx() }),
+                properties = androidx.compose.ui.window.PopupProperties(focusable = false),
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 8.dp).then(Modifier.shadow(6.dp, RoundedCornerShape(24.dp))).clip(RoundedCornerShape(24.dp))
+                        .background(DarkSurfaceVariant).padding(horizontal = 6.dp, vertical = 4.dp),
+                ) {
+                    REACTIONS.forEach { emoji ->
+                        val chosen = reactions[myUid] == emoji
+                        Box(
+                            Modifier.size(40.dp).clip(CircleShape).background(if (chosen) Ink.copy(alpha = 0.18f) else Color.Transparent)
+                                .clickable {
+                                    onReact(if (chosen) null else emoji)
+                                    onToggleSelect()
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) { Text(emoji, fontSize = 22.sp) }
+                    }
+                }
+            }
+        }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false; if (showMenu) onMenuClosed() }, containerColor = DarkSurfaceVariant) {
             Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
                 REACTIONS.forEach { emoji ->
                     val chosen = reactions[myUid] == emoji
@@ -2817,21 +3035,24 @@ private fun Bubble(
                             .background(if (chosen) Ink.copy(alpha = 0.18f) else Color.Transparent)
                             .clickable {
                                 menu = false
+                                if (showMenu) onMenuClosed()
                                 onReact(if (chosen) null else emoji)
                             },
                         contentAlignment = Alignment.Center,
                     ) { Text(emoji, fontSize = 22.sp) }
                 }
             }
-            if (!m.deleted) DropdownMenuItem(text = { Text(s.reply, color = TextPrimary) }, onClick = { menu = false; onReply() })
-            if (onCopy != null && m.text.isNotEmpty() && !m.deleted) DropdownMenuItem(text = { Text(s.copy, color = TextPrimary) }, onClick = { menu = false; onCopy() })
-            if (onForward != null && !m.deleted && m.poll == null && m.event == null) DropdownMenuItem(text = { Text(s.forward, color = TextPrimary) }, onClick = { menu = false; onForward() })
-            if (onEdit != null) DropdownMenuItem(text = { Text(s.edit, color = TextPrimary) }, onClick = { menu = false; onEdit() })
-            if (!m.deleted && !m.viewOnce) DropdownMenuItem(text = { Text(if (starred) s.unstar else s.star, color = TextPrimary) }, onClick = { menu = false; onStar() })
-            if (onPin != null) DropdownMenuItem(text = { Text(if (pinned) s.unpinMessage else s.pinMessage, color = TextPrimary) }, onClick = { menu = false; onPin() })
-            if (onInfo != null) DropdownMenuItem(text = { Text(s.info, color = TextPrimary) }, onClick = { menu = false; onInfo() })
-            DropdownMenuItem(text = { Text(s.select, color = TextPrimary) }, onClick = { menu = false; onToggleSelect() })
-            DropdownMenuItem(text = { Text(s.deleteMessage, color = TextPrimary) }, onClick = { menu = false; onDelete() })
+            if (!m.deleted) DropdownMenuItem(text = { Text(s.reply, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onReply() })
+            if (onCopy != null && m.text.isNotEmpty() && !m.deleted) DropdownMenuItem(text = { Text(s.copy, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onCopy() })
+            if (onForward != null && !m.deleted && m.poll == null && m.event == null) DropdownMenuItem(text = { Text(s.forward, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onForward() })
+            if (onTranslate != null && m.text.isNotBlank() && !m.deleted) DropdownMenuItem(text = { Text(s.translate, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onTranslate() })
+            if (onSpeak != null && m.text.isNotBlank() && !m.deleted) DropdownMenuItem(text = { Text(s.readAloud, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onSpeak() })
+            if (onEdit != null) DropdownMenuItem(text = { Text(s.edit, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onEdit() })
+            if (!m.deleted && !m.viewOnce) DropdownMenuItem(text = { Text(if (starred) s.unstar else s.star, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onStar() })
+            if (onPin != null) DropdownMenuItem(text = { Text(if (pinned) s.unpinMessage else s.pinMessage, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onPin() })
+            if (onInfo != null) DropdownMenuItem(text = { Text(s.info, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onInfo() })
+            if (!showMenu) DropdownMenuItem(text = { Text(s.select, color = TextPrimary) }, onClick = { menu = false; onToggleSelect() })
+            DropdownMenuItem(text = { Text(s.deleteMessage, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onDelete() })
         }
     }
     if (assisting != null) {
@@ -3106,4 +3327,138 @@ private fun ClaudeThoughts(thought: String) {
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+/** Reporting a person or a group: why, and whether to block them (or leave it) as well. */
+@Composable
+private fun ReportDialog(name: String, group: Boolean, s: ChatStrings, onDismiss: () -> Unit, onReport: (String, Boolean) -> Unit) {
+    var reason by remember { mutableStateOf<String?>(null) }
+    var alsoBlock by remember { mutableStateOf(true) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurfaceVariant,
+        title = { Text(s.reportTitle(name), color = TextPrimary) },
+        text = {
+            Column {
+                Text(s.reportNote, color = TextSecondary, fontSize = 13.sp)
+                Spacer(Modifier.height(8.dp))
+                s.reportReasons.forEach { (code, label) ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { reason = code }.padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.material3.RadioButton(selected = reason == code, onClick = { reason = code })
+                        Text(label, color = TextPrimary, fontSize = 15.sp)
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { alsoBlock = !alsoBlock }.padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    androidx.compose.material3.Checkbox(checked = alsoBlock, onCheckedChange = { alsoBlock = it })
+                    Text(if (group) s.reportAlsoLeave else s.reportAlsoBlock, color = TextPrimary, fontSize = 15.sp)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = reason != null, onClick = { reason?.let { onReport(it, alsoBlock) } }) {
+                Text(s.report, color = if (reason != null) Color(0xFFE57373) else TextMuted)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel, color = TextSecondary) } },
+    )
+}
+
+private fun fromClaudeId(uid: String) = uid == CLAUDE_BOT_UID
+
+/** "today 20:00", "tomorrow 09:00", or the date and the time. */
+private fun whenLabel(at: Long, s: ChatStrings): String {
+    val day = local(at).date.toEpochDays() - Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date.toEpochDays()
+    val d = when (day) {
+        0 -> if (s.english) "today" else "bugün"
+        1 -> if (s.english) "tomorrow" else "yarın"
+        else -> local(at).let { "${two(it.dayOfMonth)}.${two(it.monthNumber)}" }
+    }
+    return "$d ${clock(at)}"
+}
+
+/** When a scheduled message goes: an hour from now, tonight, tomorrow morning, or a day and time picked. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun ScheduleDialog(s: ChatStrings, onDismiss: () -> Unit, onPick: (Long) -> Unit) {
+    val zone = TimeZone.currentSystemDefault()
+    val now = remember { Clock.System.now() }
+    val today = remember { now.toLocalDateTime(zone).date }
+    fun at(dayOffset: Int, hour: Int, minute: Int): Long {
+        val date = kotlinx.datetime.LocalDate.fromEpochDays(today.toEpochDays() + dayOffset)
+        return kotlinx.datetime.LocalDateTime(date.year, date.monthNumber, date.dayOfMonth, hour, minute).toInstant(zone).toEpochMilliseconds()
+    }
+    var custom by remember { mutableStateOf(false) }
+    var day by remember { mutableStateOf(0) }
+    val time = androidx.compose.material3.rememberTimePickerState(initialHour = (now.toLocalDateTime(zone).hour + 1) % 24, initialMinute = 0, is24Hour = true)
+    var problem by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurfaceVariant,
+        title = { Text(s.schedule, color = TextPrimary) },
+        text = {
+            Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                Text(s.scheduleNote, color = TextSecondary, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                if (!custom) {
+                    val nowMs = now.toEpochMilliseconds()
+                    val choices = buildList {
+                        add(s.inAnHour to nowMs + 3600_000L)
+                        if (at(0, 20, 0) > nowMs + 15 * 60_000L) add(s.tonight to at(0, 20, 0))
+                        add(s.tomorrowMorning to at(1, 9, 0))
+                    }
+                    choices.forEach { (label, whenMs) ->
+                        Text(
+                            label,
+                            color = TextPrimary,
+                            fontSize = 16.sp,
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { onPick(whenMs) }.padding(vertical = 12.dp, horizontal = 4.dp),
+                        )
+                    }
+                    Text(
+                        s.pickTime,
+                        color = Ink,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { custom = true }.padding(vertical = 12.dp, horizontal = 4.dp),
+                    )
+                } else {
+                    Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        (0..6).forEach { d ->
+                            val date = kotlinx.datetime.LocalDate.fromEpochDays(today.toEpochDays() + d)
+                            val label = when (d) {
+                                0 -> if (s.english) "Today" else "Bugün"
+                                1 -> if (s.english) "Tomorrow" else "Yarın"
+                                else -> "${two(date.dayOfMonth)}.${two(date.monthNumber)}"
+                            }
+                            Text(
+                                label,
+                                color = if (day == d) InkInverse else TextPrimary,
+                                fontSize = 14.sp,
+                                modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (day == d) Ink else Ink.copy(alpha = 0.08f))
+                                    .clickable { day = d; problem = false }.padding(horizontal = 12.dp, vertical = 7.dp),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    androidx.compose.material3.TimeInput(state = time)
+                    if (problem) Text(s.pastTime, color = Color(0xFFE57373), fontSize = 13.sp)
+                }
+            }
+        },
+        confirmButton = {
+            if (custom) {
+                TextButton(onClick = {
+                    val whenMs = at(day, time.hour, time.minute)
+                    if (whenMs <= Clock.System.now().toEpochMilliseconds() + 30_000L) problem = true else onPick(whenMs)
+                }) { Text(s.scheduleSend, color = Ink) }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel, color = TextSecondary) } },
+    )
 }

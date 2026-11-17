@@ -1054,7 +1054,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             if (mentions != null) put("mentions", mentions)
             if (group.secret) {
                 put("secret", true)
-                if (message["system"] == "created") put("invite", true)
+                // Those just asked in hear of the invitation (the server tells only them so).
+                if (message["system"] == "created" || message["system"] == "added") put("invite", true)
             }
         }
         pendingIds.update { it + messageId }
@@ -1255,6 +1256,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             GroupMember(
                 user = ChatUser(uid, m.child("name").getValue(String::class.java) ?: "?", m.child("username").getValue(String::class.java).orEmpty(), m.child("photo").getValue(String::class.java)),
                 admin = m.child("role").getValue(String::class.java) == "admin",
+                invited = m.child("invited").getValue(Boolean::class.java) == true,
             )
         }.sortedWith(compareByDescending<GroupMember> { it.admin }.thenBy { it.user.name.lowercase() })
         return GroupInfo(
@@ -1487,6 +1489,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             "removed" -> if (tr) "$who, $whom kişisini çıkardı" else "$who removed $whom"
             "left" -> if (tr) "$who gruptan ayrıldı" else "$who left"
             "joined" -> if (tr) "$who davet bağlantısıyla katıldı" else "$who joined via the invite link"
+            "accepted" -> if (tr) "$who daveti kabul etti" else "$who accepted the invitation"
             "renamed" -> if (tr) "$who grup adını \"$whom\" yaptı" else "$who renamed the group to \"$whom\""
             else -> ""
         }
@@ -1518,7 +1521,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         if (fresh.isEmpty()) return@runCatching
         val before = groupInfo(groupId, fresh = true)
         val marks = HashMap<String, Any?>()
-        fresh.forEach { marks["groups/$groupId/members/${it.uid}"] = it.asMember("member") }
+        fresh.forEach { marks["groups/$groupId/members/${it.uid}"] = it.asMember("member") + (if (before?.secret == true) mapOf("invited" to true) else emptyMap()) }
         // A secret group: the newcomers have it in their secret space, as an invitation.
         if (before?.secret == true) fresh.forEach { p ->
             marks["userChats/${p.uid}/$groupId/secret"] = true
@@ -2378,7 +2381,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val id = GROUP_PREFIX + (1..20).map { alphabet[random.nextInt(alphabet.size)] }.joinToString("")
         val memberMap = HashMap<String, Any?>()
         memberMap[me.uid] = me.copy(photo = me.publicPhoto()).asMember("admin")
-        people.forEach { memberMap[it.uid] = it.asMember("member") }
+        // Invited, not in it yet: the others see them apart until they say yes.
+        people.forEach { memberMap[it.uid] = it.asMember("member") + ("invited" to true) }
         root.child("groups").child(id).setValue(
             buildMap<String, Any?> {
                 put("name", clean)
@@ -2407,7 +2411,14 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     }
 
     override suspend fun acceptInvite(chatId: String): Result<Unit> = runCatching {
-        root.child("userChats").child(me()).child(chatId).child("invite").removeValue().await()
+        val uid = me()
+        val updates = HashMap<String, Any?>()
+        updates["userChats/$uid/$chatId/invite"] = null
+        val wasInvited = isGroupId(chatId) && groupInfo(chatId, fresh = true)?.members?.any { it.user.uid == uid && it.invited } == true
+        if (wasInvited) updates["groups/$chatId/members/$uid/invited"] = null
+        root.updateChildren(updates).await()
+        // The others see it: one line in the group.
+        if (wasInvited) groupInfo(chatId, fresh = true)?.let { systemMessage(ChatUser(chatId, it.name, "", it.photo), "accepted") }
     }
 
     override suspend fun declineInvite(chatId: String): Result<Unit> = runCatching {
@@ -2568,6 +2579,94 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             }
         }
         awaitClose { job.cancel() }
+    }
+
+    override suspend fun transcribe(voice: ChatAttachment): Result<String> = runCatching {
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val audio = if (voice.key.isNotEmpty() || E2eMedia.isSealed(voice.url)) {
+                if (voice.key.isNotEmpty()) E2eMedia.remember(voice.url, voice.key)
+                E2eMedia.openedFile(app, voice.url, voice.name)?.readBytes() ?: error("cannot open")
+            } else {
+                MediaUpload.client.newCall(okhttp3.Request.Builder().url(voice.url).build()).execute().use { r ->
+                    check(r.isSuccessful) { "http ${r.code}" }
+                    r.body?.bytes() ?: error("empty")
+                }
+            }
+            val request = okhttp3.Request.Builder()
+                .url(MediaUpload.BASE + "/media/transcribe")
+                .header("Authorization", "Bearer " + token())
+                .post(okhttp3.RequestBody.Companion.run { audio.toRequestBody(okhttp3.MediaType.Companion.run { "application/octet-stream".toMediaType() }) })
+                .build()
+            MediaUpload.client.newCall(request).execute().use { r ->
+                check(r.isSuccessful) { "transcribe ${r.code}" }
+                org.json.JSONObject(r.body?.string() ?: "{}").optString("text")
+            }
+        }
+    }
+
+    @Volatile private var speaker: android.media.MediaPlayer? = null
+
+    override suspend fun speak(text: String): Result<Unit> = runCatching {
+        // Reading already: this tap stops it.
+        speaker?.let { p ->
+            speaker = null
+            runCatching { p.stop() }
+            p.release()
+            return@runCatching
+        }
+        val file = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val body = org.json.JSONObject().put("text", text.take(1500)).toString()
+            val request = okhttp3.Request.Builder()
+                .url(MediaUpload.BASE + "/media/speak")
+                .header("Authorization", "Bearer " + token())
+                .post(okhttp3.RequestBody.Companion.run { body.toRequestBody(okhttp3.MediaType.Companion.run { "application/json".toMediaType() }) })
+                .build()
+            MediaUpload.client.newCall(request).execute().use { r ->
+                check(r.isSuccessful) { "speak ${r.code}" }
+                java.io.File(app.cacheDir, "speak.mp3").also { f -> f.writeBytes(r.body?.bytes() ?: error("empty")) }
+            }
+        }
+        kotlinx.coroutines.withContext(Dispatchers.Main) {
+            val p = android.media.MediaPlayer()
+            p.setAudioAttributes(
+                android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build(),
+            )
+            p.setDataSource(file.absolutePath)
+            p.setOnCompletionListener { done -> if (speaker === done) speaker = null; done.release() }
+            p.prepare()
+            speaker = p
+            p.start()
+        }
+    }
+
+    override suspend fun translate(text: String, to: String): Result<String> = runCatching {
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val body = org.json.JSONObject().put("text", text.take(4000)).put("to", to).toString()
+            val request = okhttp3.Request.Builder()
+                .url(MediaUpload.BASE + "/media/translate")
+                .header("Authorization", "Bearer " + token())
+                .post(okhttp3.RequestBody.Companion.run { body.toRequestBody(okhttp3.MediaType.Companion.run { "application/json".toMediaType() }) })
+                .build()
+            MediaUpload.client.newCall(request).execute().use { r ->
+                check(r.isSuccessful) { "translate ${r.code}" }
+                org.json.JSONObject(r.body?.string() ?: "{}").optString("text")
+            }
+        }
+    }
+
+    override suspend fun report(chatId: String, target: String, reason: String, recent: List<Pair<String, String>>): Result<Unit> = runCatching {
+        root.child("reports").push().setValue(
+            mapOf(
+                "by" to me(),
+                "target" to target,
+                "chatId" to chatId,
+                "reason" to reason.take(40),
+                "recent" to recent.takeLast(5).map { (from, text) -> mapOf("from" to from, "text" to text.take(500)) },
+                "at" to ServerValue.TIMESTAMP,
+            ),
+        ).await()
+        Unit
     }
 
     override suspend fun setBlocked(uid: String, blocked: Boolean): Result<Unit> = runCatching {

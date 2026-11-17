@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
 /**
@@ -829,9 +830,24 @@ class CrossfadeExoPlayerAdapter(
         return Source(url, "${song.id}:${ITAG_PARAM.find(url)?.groupValues?.get(1) ?: "audio"}")
     }
 
+    /** Lookups under way, by song: a tap on a song being prepared joins its lookup rather than starting another. */
+    private val lookups = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<String?>>()
+
     private suspend fun resolveUrl(videoId: String): String? {
-        urlCache[videoId]?.takeIf { !ResolvingDataSource.isUrlExpired(it) }?.let { return it }
-        return streamUrlResolver?.invoke(videoId)?.also { urlCache[videoId] = it }
+        synchronized(urlCache) { urlCache[videoId] }?.takeIf { !ResolvingDataSource.isUrlExpired(it) }?.let { return it }
+        val resolver = streamUrlResolver ?: return null
+        // Started only once it is in the map, so a quick lookup cannot finish (and clear itself) before it is there.
+        val lookup = lookups.getOrPut(videoId) {
+            scope.async(Dispatchers.IO, start = kotlinx.coroutines.CoroutineStart.LAZY) {
+                try {
+                    resolver(videoId)?.also { url -> synchronized(urlCache) { urlCache[videoId] = url } }
+                } finally {
+                    lookups.remove(videoId)
+                }
+            }
+        }
+        lookup.start()
+        return runCatching { lookup.await() }.getOrNull()
     }
 
     private fun prefetchNext() {
@@ -844,8 +860,22 @@ class CrossfadeExoPlayerAdapter(
     override fun warmUp(songs: List<SongItem>) {
         if (songs.isEmpty()) return
         com.qmusic.player.SongDirectory.remember(songs)
-        scope.launch { songs.forEach { warm(it) } }
+        // A few at a time, side by side: the first ones are ready as soon as possible, the line is not jammed.
+        scope.launch {
+            songs.forEach { song ->
+                warmGate.acquire()
+                launch {
+                    try {
+                        warm(song)
+                    } finally {
+                        warmGate.release()
+                    }
+                }
+            }
+        }
     }
+
+    private val warmGate = kotlinx.coroutines.sync.Semaphore(WARM_PARALLEL)
 
     /**
      * Looks the stream up and stores its first seconds in the cache, so when the song is played the sound is
@@ -859,6 +889,14 @@ class CrossfadeExoPlayerAdapter(
             withContext(Dispatchers.IO) {
                 val spec = DataSpec.Builder().setUri(Uri.parse(url)).setKey(key).setLength(WARM_BYTES).build()
                 CacheWriter(dataSourceFactory.createDataSource(), spec, null, null).cache()
+                // The end of the file too: a WebM song keeps its index (where each second is) there, and the player
+                // reads it before the first sound; without it here, the first play waits for one more download.
+                val total = CONTENT_LENGTH_PARAM.find(url)?.groupValues?.get(1)?.toLongOrNull()
+                if (total != null && total > WARM_BYTES + WARM_TAIL_BYTES) {
+                    val tail = DataSpec.Builder().setUri(Uri.parse(url)).setKey(key)
+                        .setPosition(total - WARM_TAIL_BYTES).setLength(WARM_TAIL_BYTES).build()
+                    CacheWriter(dataSourceFactory.createDataSource(), tail, null, null).cache()
+                }
             }
         }
         if (result.isFailure) warmed.remove(song.id)
@@ -1148,6 +1186,9 @@ class CrossfadeExoPlayerAdapter(
         const val SKIP_RAPID_MS = 700L
         const val PREFETCH_AHEAD = 2
         const val WARM_BYTES = 400_000L
+        const val WARM_PARALLEL = 4
+        const val WARM_TAIL_BYTES = 96_000L
+        val CONTENT_LENGTH_PARAM = Regex("[?&]clen=(\\d+)")
         const val SWEEP_MIN_MS = 1_500L
         const val FADE_STEPS = 20
         const val FADE_STEP_MS = 150L

@@ -66,6 +66,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
@@ -301,10 +302,50 @@ class MainViewModel(
         selectTab(ScreenTab.LIBRARY)
     }
 
+    /**
+     * Speed dial, as YouTube Music's: the songs pinned first, then what is listened to most (the last 30 days, the
+     * recent plays weighing more), then the favourites. Worked out when the app opens (and on a home refresh after a
+     * while), never while listening: the tiles stay where they are.
+     */
     val speedDial: StateFlow<List<SongItem>> by lazy {
-        combine(history, favorites) { recent, liked ->
-            (recent + liked).distinctBy { it.id }.take(SPEED_DIAL_SIZE)
+        combine(pinnedSongs, _speedDialRanked, favorites) { pins, ranked, liked ->
+            (pins + ranked + liked).distinctBy { it.id }.take(SPEED_DIAL_SIZE)
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    }
+
+    private val _speedDialRanked = MutableStateFlow<List<SongItem>>(emptyList())
+    private var speedDialRankedAt = 0L
+
+    private val pinnedSongs: StateFlow<List<SongItem>> by lazy {
+        settings.string(SettingKeys.SPEED_DIAL_PINS, "").map { text ->
+            if (text.isBlank()) emptyList()
+            else runCatching { backupJson.decodeFromString(kotlinx.serialization.builtins.ListSerializer(SongItem.serializer()), text) }.getOrDefault(emptyList())
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    }
+
+    /** The ids pinned to the speed dial (the tiles show a pin). */
+    val speedDialPins: StateFlow<Set<String>> by lazy {
+        pinnedSongs.map { list -> list.map { it.id }.toSet() }.stateIn(scope, SharingStarted.Eagerly, emptySet())
+    }
+
+    /** Pins [song] to the speed dial (it stays first), or takes the pin off. */
+    fun toggleSpeedDialPin(song: SongItem) {
+        val now = pinnedSongs.value
+        val pinned = now.any { it.id == song.id }
+        val next = if (pinned) now.filter { it.id != song.id } else (listOf(song) + now).take(SPEED_DIAL_SIZE - 1)
+        settings.setString(SettingKeys.SPEED_DIAL_PINS, backupJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(SongItem.serializer()), next))
+        showMessage(if (pinned) strings.unpinnedFromSpeedDial else strings.pinnedToSpeedDial)
+    }
+
+    /** Works the speed dial's order out again from the plays; [ifOlderThanMs]: only when the last time was that long ago. */
+    private fun rankSpeedDial(ifOlderThanMs: Long = 0L) {
+        val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+        if (speedDialRankedAt != 0L && now - speedDialRankedAt < ifOlderThanMs) return
+        speedDialRankedAt = now
+        scope.launch {
+            val plays = runCatching { repository.playTimes(SPEED_DIAL_DAYS) }.getOrDefault(emptyList())
+            _speedDialRanked.value = speedDialOrder(plays, now)
+        }
     }
 
     /** The dice tile: plays a song picked at random from what the person listens to. */
@@ -744,13 +785,25 @@ class MainViewModel(
             ) { track, on -> track != null && on }
                 .collect { wanted -> if (wanted) loadLyrics() }
         }
-        // History follows what actually plays, so songs reached through next/auto-advance are recorded too.
+        // History follows what actually plays, so songs reached through next/auto-advance are recorded too; a song
+        // counts once it has played for 30 seconds (or most of a short one): one skipped past is not a listen.
         scope.launch {
             playerController.currentTrack
-                .filterNotNull()
-                .distinctUntilChangedBy { it.id }
-                .collect { repository.recordHistory(it) }
+                .distinctUntilChangedBy { it?.id }
+                .collectLatest { track ->
+                    if (track == null) return@collectLatest
+                    // The position is the new song's only once it has been seen near its start (for a moment after a
+                    // change it can still be where the last song was).
+                    var started = false
+                    combine(playerController.playbackPosition, playerController.duration) { position, duration ->
+                        if (position < 5_000) started = true
+                        val needed = if (duration > 0) minOf(LISTENED_MS, duration * 6 / 10) else LISTENED_MS
+                        started && position >= needed
+                    }.first { it }
+                    repository.recordHistory(track)
+                }
         }
+        rankSpeedDial()
     }
 
     // --- Navigation & Sheet Controls ---
@@ -1704,7 +1757,7 @@ class MainViewModel(
             val result = if (isSpotify) runCatching { spotify.search(trimmed, filter) } else youTube.searchPage(query = trimmed, filter = filter)
             result.onSuccess { page ->
                 _searchPage.value = page
-                playerController.warmUp(page.songs.take(3))
+                playerController.warmUp(page.songs.take(WARM_SEARCH))
                 _searchResults.value = page.songs
                 _isSearching.value = false
             }.onFailure { throwable ->
@@ -1756,6 +1809,8 @@ class MainViewModel(
             return
         }
         homeJob?.cancel()
+        // A home refresh a while after the last: the speed dial catches up with the listening since.
+        rankSpeedDial(ifOlderThanMs = SPEED_DIAL_REFRESH_MS)
         _isLoadingHome.value = true
         _isLoadingMoreHome.value = false
         _homeError.value = null
@@ -2425,7 +2480,8 @@ class MainViewModel(
         val backupJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; prettyPrint = true }
         const val WARM_SPEED_DIAL = 4
         const val WARM_QUICK_PICKS = 4
-        const val WARM_PAGE_SONGS = 3
+        const val WARM_PAGE_SONGS = 5
+        const val WARM_SEARCH = 5
         const val SAMPLE_START = 0.3
         /** Where a preview starts when the song's length is not known. */
         const val SAMPLE_FALLBACK_MS = 45_000L
@@ -2434,7 +2490,22 @@ class MainViewModel(
         const val SUGGESTED_SEARCHES = 12
         const val LIBRARY_DOWNLOADS_TAB = 2
         const val SPEED_DIAL_SIZE = 17 // two pages of nine, one slot of which is the dice
+        const val SPEED_DIAL_DAYS = 30
+        const val SPEED_DIAL_REFRESH_MS = 3 * 60 * 60_000L
+        const val LISTENED_MS = 30_000L
         val DOUBLE_TAP_WINDOW = 500.milliseconds
         const val SUGGESTION_DEBOUNCE_MS = 250L
     }
+}
+
+/**
+ * The speed dial's order: each play counts, a recent one more (a play loses half its weight every [halfLifeDays]);
+ * a song played 20 times this month is ahead of one played once yesterday, and one played a lot lately ahead of
+ * one played a lot a month ago.
+ */
+internal fun speedDialOrder(plays: List<Pair<SongItem, List<Long>>>, now: Long, halfLifeDays: Double = 10.0): List<SongItem> {
+    val halfLife = halfLifeDays * 86_400_000.0
+    return plays.map { (song, times) ->
+        song to times.sumOf { at -> kotlin.math.exp(-kotlin.math.ln(2.0) * (now - at).coerceAtLeast(0L) / halfLife) }
+    }.sortedByDescending { it.second }.map { it.first }
 }

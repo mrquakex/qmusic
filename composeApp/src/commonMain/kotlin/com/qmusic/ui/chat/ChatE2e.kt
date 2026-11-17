@@ -17,8 +17,17 @@ interface E2eApi {
     /** This phone has its key pair (false: being made, or waiting for the PIN to bring the old one back). */
     val ready: StateFlow<Boolean>
 
-    /** A backup of the key exists but is not on this phone: the PIN brings it back (or a new key starts over). */
+    /**
+     * The account's key is not on this device: it is on another one (linked here with a QR) or in the backup (the
+     * PIN brings it back); or a new key starts over.
+     */
     val needsRestore: StateFlow<Boolean>
+
+    /** The account's key is backed up with a PIN (it can come back with it). */
+    val hasBackup: StateFlow<Boolean>
+
+    /** This device has a key of its own that is not the account's one now (the account moved on elsewhere). */
+    val hasOwnKey: StateFlow<Boolean>
 
     /** The PIN is set (for the backup and the secret space). */
     val hasPin: StateFlow<Boolean>
@@ -64,6 +73,18 @@ interface E2eApi {
     /** Gives up the old key (a forgotten PIN): a new key pair, the old encrypted messages no longer readable here. */
     suspend fun startOver(): Result<Unit>
 
+    /**
+     * Linking this device: [onCode] gets the QR to show; true once the account's key came over from the other
+     * device (which scanned it, [sendLink]); false when it took too long.
+     */
+    suspend fun awaitLink(onCode: (String) -> Unit): Boolean
+
+    /** On the device that has the key: a scanned link QR of a new device of the same account gets the key. */
+    suspend fun sendLink(scanned: String): LinkResult
+
+    /** This device's own key made the account's again (the others must be linked anew). */
+    suspend fun useThisDevice(): Result<Unit>
+
     /** Removes the PIN and the backup (the secret space off). */
     suspend fun clearPin(): Result<Unit>
 
@@ -72,6 +93,8 @@ interface E2eApi {
 
     fun hasDecoy(): Boolean
 }
+
+enum class LinkResult { Ok, NotALink, OtherAccount, NoKey, Failed }
 
 data class SafetyNumber(val digits: String, val qr: String, val verified: Boolean) {
     val groups: List<String> get() = digits.chunked(5)
@@ -99,6 +122,8 @@ object E2e {
 private object NoE2e : E2eApi {
     override val ready = MutableStateFlow(false)
     override val needsRestore = MutableStateFlow(false)
+    override val hasBackup = MutableStateFlow(false)
+    override val hasOwnKey = MutableStateFlow(false)
     override val hasPin = MutableStateFlow(false)
     override val changes = MutableStateFlow(0)
     override fun version(chatId: String): Int? = null
@@ -115,6 +140,9 @@ private object NoE2e : E2eApi {
     override suspend fun restore(pin: String): PinResult = PinResult.Failed("none")
     override suspend fun startOver() = Result.failure<Unit>(IllegalStateException("none"))
     override suspend fun clearPin() = Result.failure<Unit>(IllegalStateException("none"))
+    override suspend fun awaitLink(onCode: (String) -> Unit) = false
+    override suspend fun sendLink(scanned: String) = LinkResult.Failed
+    override suspend fun useThisDevice() = Result.failure<Unit>(IllegalStateException("none"))
     override fun setDecoyPin(pin: String?) {}
     override fun hasDecoy() = false
 }

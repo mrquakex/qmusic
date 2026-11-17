@@ -65,6 +65,8 @@ import com.qmusic.ui.theme.QMusicIcons
 import com.qmusic.ui.theme.TextMuted
 import com.qmusic.ui.theme.TextPrimary
 import com.qmusic.ui.theme.TextSecondary
+import androidx.compose.ui.draw.alpha
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -218,6 +220,14 @@ internal class E2eWords(private val english: Boolean) {
     val emptyNote get() = t("Gizli bir grup kur ya da bir sohbeti buraya taşı.", "Make a secret group or move a chat here.")
     val invitation get() = t("Gizli sohbet daveti", "Secret chat invitation")
     val accept get() = t("Kabul et", "Accept")
+    val invitedSection get() = t("Davet edilenler", "Invited")
+    val invitePending get() = t("Davet bekliyor", "Invitation pending")
+    val oldVersion get() = t("Nuvelo'yu güncellemesi gerekiyor", "Needs to update Nuvelo")
+    val oldVersionNote get() = t(
+        "Eski sürümdeki biri gizli sohbeti normal bir sohbet gibi görür ve şifreleme onda çalışmaz. Güncelleyince ekleyebilirsin.",
+        "Someone on an older version sees a secret chat as an ordinary one, and encryption does not work for them. Add them once they update.",
+    )
+    fun oldVersionNames(names: String) = t("$names Nuvelo'yu güncelleyince eklenebilir.", "$names can be added once they update Nuvelo.")
     val decline get() = t("Reddet", "Decline")
     val inviteNote get() = t("Kabul edene kadar içeriği görünmez. Reddedersen kimseye bildirilmez.", "Nothing of it shows until you accept. If you decline, no one is told.")
     val takeOut get() = t("Gizli alandan çıkar", "Move out of secret space")
@@ -275,6 +285,35 @@ internal class E2eWords(private val english: Boolean) {
     val startOver get() = t("PIN'i hatırlamıyorum, yeni anahtarla devam et", "I don't remember it, start with a new key")
     val startOverBody get() = t("Yeni bir anahtar oluşturulur. Eski şifreli mesajlar bu telefonda okunamaz, karşı taraflar güvenlik kodunun değiştiğini görür.", "A new key is made. Old encrypted messages can't be read on this phone, and others see that your safety code changed.")
     val goOn get() = t("Devam et", "Go on")
+    val linkTitle get() = t("Bu cihazı bağla", "Link this device")
+    val linkBody get() = t(
+        "Şifreli sohbetlerin başka bir cihazında. Orada Nuvelo'yu aç: Ayarlar, Uçtan uca şifreleme, Cihaz bağla. Sonra bu kodu okut.",
+        "Your encrypted chats are on another device. Open Nuvelo there: Settings, End-to-end encryption, Link a device. Then scan this code.",
+    )
+    val linkWaiting get() = t("Diğer cihazın okutması bekleniyor…", "Waiting for the other device to scan…")
+    val linkExpired get() = t("Kodun süresi doldu.", "The code expired.")
+    val newCode get() = t("Yeni kod", "New code")
+    val usePin get() = t("Yedek PIN'imle getir", "Use my backup PIN")
+    val useQr get() = t("Diğer cihazımdan QR ile bağla", "Link from my other device with a QR")
+    val useThisKey get() = t("Bu cihazdaki anahtarı kullan", "Use this device's key")
+    val useThisKeyBody get() = t(
+        "Bu cihazın eski anahtarı yeniden hesabın anahtarı olur. Diğer cihazlarını bundan sonra QR ile yeniden bağlaman gerekir; karşı taraflar güvenlik kodunun değiştiğini görür.",
+        "This device's old key becomes the account's again. Link your other devices again afterwards with a QR; others see that your safety code changed.",
+    )
+    val newKeyAnyway get() = t("Yeni anahtarla başla", "Start with a new key")
+    val newKeyBody get() = t(
+        "Yeni bir anahtar oluşturulur. Eski şifreli mesajlar okunamaz, diğer cihazlarındaki şifreli sohbetler de durur ve onları yeniden bağlaman gerekir.",
+        "A new key is made. Old encrypted messages can't be read, encrypted chats stop on your other devices and you'll need to link them again.",
+    )
+    val linkDevice get() = t("Cihaz bağla", "Link a device")
+    val linkDeviceNote get() = t("Tablet ya da başka bir telefonda şifreli sohbetlerini aç: oradaki QR kodunu okut", "Open your encrypted chats on a tablet or another phone: scan the QR shown there")
+    val linkSent get() = t("Bağlandı. Şifreli sohbetlerin diğer cihazda da açılıyor.", "Linked. Your encrypted chats now open on the other device too.")
+    val linkNotALink get() = t("Bu bir Nuvelo cihaz bağlama kodu değil.", "This isn't a Nuvelo device link code.")
+    val linkOtherAccount get() = t("Bu kod başka bir hesabın. İki cihazda da aynı hesapla giriş yapmalısın.", "This code belongs to another account. Both devices must be signed in to the same account.")
+    val linkNoKey get() = t("Hesabın şifreleme anahtarı bu cihazda değil. Kodu, şifreli sohbetlerin açıldığı cihazdan okut.", "Your account's key isn't on this device. Scan the code from the device where your encrypted chats open.")
+    val bannerLinkTitle get() = t("Şifreli sohbetlerini bu cihaza getir", "Bring your encrypted chats to this device")
+    val bannerLinkBody get() = t("Diğer cihazından QR ile bağla ya da yedek PIN'ini gir", "Link from your other device with a QR, or enter your backup PIN")
+    val bannerLinkBodyNoPin get() = t("Diğer cihazından QR ile bağla", "Link from your other device with a QR")
     val preparing get() = t("Şifreleme hazırlanıyor…", "Preparing encryption…")
     val encrypted get() = t("Uçtan uca şifreli", "End-to-end encrypted")
     val encrypt get() = t("Uçtan uca şifrele", "Encrypt end to end")
@@ -503,7 +542,7 @@ private fun SecretLock(w: E2eWords, onForgot: () -> Unit) {
 
 /** On a new phone: the PIN brings the key (and the old encrypted messages) back, or a new key starts. */
 @Composable
-internal fun RestoreKey(w: E2eWords, onDone: () -> Unit) {
+internal fun RestoreKey(w: E2eWords, onDone: () -> Unit, onQr: (() -> Unit)? = null) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -528,7 +567,12 @@ internal fun RestoreKey(w: E2eWords, onDone: () -> Unit) {
                 busy = false
             }
         },
-        footer = { TextButton(onClick = { askStartOver = true }) { Text(w.startOver, color = TextSecondary, textAlign = TextAlign.Center) } },
+        footer = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                onQr?.let { TextButton(onClick = it) { Text(w.useQr, color = TextPrimary, textAlign = TextAlign.Center) } }
+                TextButton(onClick = { askStartOver = true }) { Text(w.startOver, color = TextSecondary, textAlign = TextAlign.Center) }
+            }
+        },
     )
     if (askStartOver) {
         AlertDialog(
@@ -543,6 +587,74 @@ internal fun RestoreKey(w: E2eWords, onDone: () -> Unit) {
                 }) { Text(w.goOn, color = Color(0xFFE57373)) }
             },
             dismissButton = { TextButton(onClick = { askStartOver = false }) { Text(w.cancel, color = TextSecondary) } },
+        )
+    }
+}
+
+/** The account's key is not on this device: from the other device (a QR), from the backup (the PIN), or anew. */
+@Composable
+internal fun BringKey(w: E2eWords, onDone: () -> Unit) {
+    val hasBackup by E2e.api.hasBackup.collectAsState()
+    var byPin by remember(hasBackup) { mutableStateOf(false) }
+    if (byPin && hasBackup) RestoreKey(w, onDone, onQr = { byPin = false })
+    else LinkThisDevice(w, onDone, onPin = if (hasBackup) ({ byPin = true }) else null)
+}
+
+/** The new device's side of linking: a QR for the device that has the key to scan. */
+@Composable
+private fun LinkThisDevice(w: E2eWords, onDone: () -> Unit, onPin: (() -> Unit)?) {
+    val scope = rememberCoroutineScope()
+    val hasOwnKey by E2e.api.hasOwnKey.collectAsState()
+    var code by remember { mutableStateOf<String?>(null) }
+    var expired by remember { mutableStateOf(false) }
+    var attempt by remember { mutableStateOf(0) }
+    var asking by remember { mutableStateOf(false) }
+    LaunchedEffect(attempt) {
+        expired = false
+        code = null
+        if (E2e.api.awaitLink { code = it }) onDone() else expired = true
+    }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(w.linkTitle, color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(8.dp))
+        Text(w.linkBody, color = TextSecondary, fontSize = 14.sp, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(20.dp))
+        Box(Modifier.size(240.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(12.dp), contentAlignment = Alignment.Center) {
+            val c = code
+            if (c != null && !expired) QrCode(c, Modifier.fillMaxSize())
+            else if (!expired) CircularProgressIndicator(color = Color.Black, strokeWidth = 2.dp)
+        }
+        Spacer(Modifier.height(12.dp))
+        if (expired) {
+            Text(w.linkExpired, color = TextSecondary, fontSize = 13.sp)
+            Spacer(Modifier.height(8.dp))
+            Box(Modifier.width(220.dp)) { WhiteButton(w.newCode) { attempt++ } }
+        } else {
+            Text(w.linkWaiting, color = TextMuted, fontSize = 13.sp)
+        }
+        Spacer(Modifier.height(16.dp))
+        onPin?.let { TextButton(onClick = it) { Text(w.usePin, color = TextPrimary, textAlign = TextAlign.Center) } }
+        TextButton(onClick = { asking = true }) {
+            Text(if (hasOwnKey) w.useThisKey else w.newKeyAnyway, color = TextSecondary, textAlign = TextAlign.Center)
+        }
+        Spacer(Modifier.navigationBarsPadding().height(12.dp))
+    }
+    if (asking) {
+        AlertDialog(
+            onDismissRequest = { asking = false },
+            containerColor = DarkSurfaceVariant,
+            title = { Text(if (hasOwnKey) w.useThisKey else w.newKeyAnyway, color = TextPrimary) },
+            text = { Text(if (hasOwnKey) w.useThisKeyBody else w.newKeyBody, color = TextSecondary) },
+            confirmButton = {
+                TextButton(onClick = {
+                    asking = false
+                    scope.launch { (if (hasOwnKey) E2e.api.useThisDevice() else E2e.api.startOver()).onSuccess { onDone() } }
+                }) { Text(w.goOn, color = Color(0xFFE57373)) }
+            },
+            dismissButton = { TextButton(onClick = { asking = false }) { Text(w.cancel, color = TextSecondary) } },
         )
     }
 }
@@ -566,7 +678,7 @@ internal fun SecretPage(controller: ChatController, s: ChatStrings, me: ChatUser
         when {
             needsRestore -> {
                 TopBar(w.secretSpace, { controller.pop() })
-                RestoreKey(w) { SecretSpace.unlock(false) }
+                BringKey(w) { SecretSpace.unlock(false) }
             }
             !ready -> {
                 TopBar(w.secretSpace, { controller.pop() })
@@ -779,17 +891,38 @@ private fun InviteRow(t: ChatThread, w: E2eWords, onAccept: () -> Unit, onDeclin
     }
 }
 
-/** A friend to pick, with a tick when [picked]. */
+/**
+ * Of [uids], those whose app is older than end-to-end encryption (no key published): a secret chat would reach them
+ * as an ordinary one, so they are asked in once they update.
+ */
 @Composable
-private fun PersonRow(user: ChatUser, picked: Boolean?, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+internal fun rememberOldVersions(uids: List<String>): Set<String> {
+    val ready by E2e.api.ready.collectAsState()
+    val state = androidx.compose.runtime.produceState(emptySet<String>(), uids, ready) {
+        if (!ready) return@produceState
+        value = kotlinx.coroutines.coroutineScope {
+            uids.map { u -> async { u to E2e.api.allHaveKeys(listOf(u)) } }.map { it.await() }
+        }.filter { !it.second }.map { it.first }.toSet()
+    }
+    return state.value
+}
+
+/** A friend to pick, with a tick when [picked]; [note]: cannot be picked, and why. */
+@Composable
+private fun PersonRow(user: ChatUser, picked: Boolean?, note: String? = null, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().then(if (note == null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 10.dp).then(if (note != null) Modifier.alpha(0.5f) else Modifier),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         ChatAvatar(user, 44.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(user.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            if (user.username.isNotEmpty()) Text("@" + user.username, color = TextSecondary, fontSize = 13.sp)
+            if (note != null) Text(note, color = TextSecondary, fontSize = 13.sp)
+            else if (user.username.isNotEmpty()) Text("@" + user.username, color = TextSecondary, fontSize = 13.sp)
         }
-        if (picked != null) {
+        if (picked != null && note == null) {
             Box(
                 Modifier.size(24.dp).clip(CircleShape).then(if (picked) Modifier.background(Ink) else Modifier.border(1.5.dp, TextSecondary, CircleShape)),
                 contentAlignment = Alignment.Center,
@@ -817,15 +950,17 @@ internal fun SecretNewGroupPage(controller: ChatController) {
         if (friends.isEmpty()) {
             Text(w.noFriends, color = TextSecondary, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(32.dp))
         }
+        val old = rememberOldVersions(friends.map { it.uid })
+        if (old.isNotEmpty()) Text(w.oldVersionNote, color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
         LazyColumn(Modifier.weight(1f)) {
             items(friends, key = { it.uid }) { f ->
-                PersonRow(f, f.uid in picked) { if (f.uid in picked) picked.remove(f.uid) else picked.add(f.uid) }
+                PersonRow(f, f.uid in picked, if (f.uid in old) w.oldVersion else null) { if (f.uid in picked) picked.remove(f.uid) else picked.add(f.uid) }
             }
         }
         Box(Modifier.navigationBarsPadding().padding(16.dp)) {
             WhiteButton(w.create, enabled = name.isNotBlank() && picked.isNotEmpty() && !decoy, busy = busy) {
                 busy = true
-                controller.createSecretGroup(name, friends.filter { it.uid in picked }, if (life > 0) Clock.System.now().toEpochMilliseconds() + life else 0L)
+                controller.createSecretGroup(name, friends.filter { it.uid in picked && it.uid !in old }, if (life > 0) Clock.System.now().toEpochMilliseconds() + life else 0L)
             }
         }
     }
@@ -842,8 +977,10 @@ internal fun SecretStartChatPage(controller: ChatController) {
         TopBar(w.newSecretChat, { controller.pop() })
         Text(w.pickFriend, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
         if (friends.isEmpty()) Text(w.noFriends, color = TextSecondary, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(32.dp))
+        val old = rememberOldVersions(friends.map { it.uid })
+        if (old.isNotEmpty()) Text(w.oldVersionNote, color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
         LazyColumn(Modifier.fillMaxSize()) {
-            items(friends, key = { it.uid }) { f -> PersonRow(f, null) { controller.startSecretChat(f) } }
+            items(friends, key = { it.uid }) { f -> PersonRow(f, null, if (f.uid in old) w.oldVersion else null) { controller.startSecretChat(f) } }
         }
     }
 }
@@ -1043,11 +1180,14 @@ internal fun EncryptionPage(controller: ChatController) {
     val needsRestore by E2e.api.needsRestore.collectAsState()
     val hasPin by E2e.api.hasPin.collectAsState()
     var settingPin by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    var linkResult by remember { mutableStateOf<LinkResult?>(null) }
+    val linker = rememberQrScanner { text -> scope.launch { linkResult = E2e.api.sendLink(text) } }
     Column(Modifier.fillMaxSize().background(BgRoot)) {
         when {
             needsRestore -> {
                 TopBar(w.e2eTitle, { controller.pop() })
-                RestoreKey(w) {}
+                BringKey(w) {}
             }
             settingPin -> {
                 TopBar(w.backupPin, { settingPin = false })
@@ -1066,6 +1206,22 @@ internal fun EncryptionPage(controller: ChatController) {
                     var auto by remember { mutableStateOf(SecretSpace.encryptNewChats) }
                     SettingSwitch(w.encryptNew, w.encryptNewNote, auto) { on -> auto = on; SecretSpace.encryptNewChats = on }
                     SettingRow(if (hasPin) w.changePin else w.makeBackup, if (hasPin) w.backupOn else w.backupOff) { settingPin = true }
+                    if (linker != null) SettingRow(w.linkDevice, w.linkDeviceNote) { linker() }
+                    linkResult?.let { r ->
+                        Text(
+                            when (r) {
+                                LinkResult.Ok -> w.linkSent
+                                LinkResult.NotALink -> w.linkNotALink
+                                LinkResult.OtherAccount -> w.linkOtherAccount
+                                LinkResult.NoKey -> w.linkNoKey
+                                LinkResult.Failed -> w.failed
+                            },
+                            color = if (r == LinkResult.Ok) Color(0xFF1DAA61) else Color(0xFFE57373),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                        )
+                    }
                     Spacer(Modifier.height(12.dp))
                     Text(w.limitsTitle, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp))
                     Text(w.limits, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))

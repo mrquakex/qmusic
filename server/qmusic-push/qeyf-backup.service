@@ -9,4 +9,5 @@ ExecStart=/usr/local/bin/node /opt/qmusic-push/backup.js
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/var/backups/qeyf
+ReadOnlyPaths=/var/lib/qeyf-vault
 PrivateTmp=true

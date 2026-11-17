@@ -38,6 +38,17 @@ class QMusicApplication : Application() {
         com.qmusic.ui.chat.SecretChats.restore(secretPrefs.getStringSet("ids", emptySet()).orEmpty().toSet())
         com.qmusic.ui.chat.SecretChats.showCallerName = secretPrefs.getBoolean("showCaller", true)
         com.qmusic.ui.chat.SecretChats.onChanged = { ids -> secretPrefs.edit().putStringSet("ids", ids).apply() }
+        // Messages to go later (held Send): kept and sent by the phone at their time.
+        ScheduledSend.init(app)
+        // Unsent text of each conversation (drafts), on this phone only.
+        val draftPrefs = getSharedPreferences("nuvelo_drafts", MODE_PRIVATE)
+        com.qmusic.ui.chat.ChatDrafts.restore(
+            runCatching {
+                val o = org.json.JSONObject(draftPrefs.getString("all", "{}") ?: "{}")
+                o.keys().asSequence().associateWith { o.getString(it) }
+            }.getOrDefault(emptyMap()),
+        )
+        com.qmusic.ui.chat.ChatDrafts.onChanged = { all -> draftPrefs.edit().putString("all", org.json.JSONObject(all).toString()).apply() }
         com.qmusic.ui.chat.CallHooks.onGroupJoined = { groupId -> GroupCallNotifications.inCall(app, groupId) }
         com.qmusic.ui.chat.CallHooks.onActive = { active, peer, video ->
             val service = android.content.Intent(app, CallKeepAliveService::class.java)

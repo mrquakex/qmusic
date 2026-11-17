@@ -67,8 +67,13 @@ object UpdatePush {
         FirebaseMessaging.getInstance().subscribeToTopic(TOPIC)
     }
 
+    /** What is new in [version], as the release push gave it (null: not known). */
+    fun notes(context: Context, version: String): String? =
+        context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("update_notes_$version", null)
+
     fun notify(context: Context, version: String, summary: String? = null) {
         val prefs = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE)
+        if (!summary.isNullOrBlank()) prefs.edit().putString("update_notes_$version", summary).apply()
         if (!prefs.getBoolean("update_notifications", true)) return
         if (!isNewer(version, installedVersion(context))) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -90,9 +95,10 @@ object UpdatePush {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val tr = prefs.getString("language", "tr") != "en"
-        val bodyText = summary?.takeIf { it.isNotBlank() }
-            ?: if (tr) "Şimdi güncellemek için dokun. Dokunmazsan uygulamayı kullanmadığın bir anda kendiliğinden kurulur."
+        val hint = if (tr) "Şimdi güncellemek için dokun. Dokunmazsan uygulamayı kullanmadığın bir anda kendiliğinden kurulur."
             else "Tap to update now. Otherwise it installs by itself while you are not using the app."
+        // What is new, line by line, in the panel; the hint after it.
+        val bodyText = summary?.takeIf { it.isNotBlank() }?.let { "$it\n\n$hint" } ?: hint
         manager.notify(
             NOTIFICATION_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)

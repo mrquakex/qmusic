@@ -229,9 +229,13 @@ data class GroupInfo(
     val shareHistory: Boolean = false,
     /** A group that deletes itself then (with everything in it); 0: never. */
     val endsAt: Long = 0L,
-)
+) {
+    /** Those in it: everyone but who is still invited (a secret group's invitation not yet taken). */
+    val joined: List<GroupMember> get() = members.filter { !it.invited }
+}
 
-data class GroupMember(val user: ChatUser, val admin: Boolean)
+/** [invited]: asked into a secret group and not yet said yes: shown apart, told nothing until then. */
+data class GroupMember(val user: ChatUser, val admin: Boolean, val invited: Boolean = false)
 
 /** Groups have ids of their own ("grp" and 20 letters/digits), never two ids joined by "_". */
 const val GROUP_PREFIX = "grp"
@@ -259,7 +263,8 @@ data class TogetherState(
 )
 
 /** A photo picked to send: already shrunk and compressed on the phone. */
-class PickedImage(val jpeg: ByteArray, val width: Int, val height: Int, val thumb: String)
+/** A photo ready to send; [hd]: the same photo at full quality (made when asked: "HD"), null when it is no bigger. */
+class PickedImage(val jpeg: ByteArray, val width: Int, val height: Int, val thumb: String, val hd: (suspend () -> PickedImage)? = null)
 
 /** The uid of the owner's Claude (see server/qmusic-push/claude-bot.js). */
 const val CLAUDE_BOT_UID = "claudebot"
@@ -455,6 +460,22 @@ interface ChatBackend {
     /** The people this person blocked: their messages do not reach them. */
     fun blocked(): Flow<Set<String>>
     suspend fun setBlocked(uid: String, blocked: Boolean): Result<Unit>
+
+    /**
+     * Reports [target] (a person or a group) to Nuvelo, with the [reason] and the last messages of the conversation
+     * as this phone reads them ([recent]: who and what, so an encrypted chat can be looked at too).
+     */
+    suspend fun report(chatId: String, target: String, reason: String, recent: List<Pair<String, String>>): Result<Unit> =
+        Result.failure(UnsupportedOperationException())
+
+    /** A voice message as text (done on Nuvelo's server by EVREN; an encrypted one is opened on the phone first). */
+    suspend fun transcribe(voice: ChatAttachment): Result<String> = Result.failure(UnsupportedOperationException())
+
+    /** Reads [text] aloud (EVREN's voice "kaan"); a second call while it reads stops it. Done: when it finished. */
+    suspend fun speak(text: String): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    /** [text] in the language [to] ("tr", "en", ...). */
+    suspend fun translate(text: String, to: String): Result<String> = Result.failure(UnsupportedOperationException())
 
     /** Removes the person's profile, @username and every message they sent. */
     suspend fun deleteAccount(): Result<Unit>

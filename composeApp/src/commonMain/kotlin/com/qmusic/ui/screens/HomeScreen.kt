@@ -28,6 +28,8 @@ import com.qmusic.engine.models.SectionStyle
 import kotlinx.coroutines.flow.Flow
 import com.qmusic.ui.theme.QMusicIcons
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import com.qmusic.ui.components.warmOnPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
@@ -92,6 +94,8 @@ fun HomeScreen(
     downloads: List<SongItem>,
     onOpenDownloads: () -> Unit,
     speedDial: List<SongItem>,
+    speedDialPins: Set<String> = emptySet(),
+    onTogglePin: (SongItem) -> Unit = {},
     onRandomSong: () -> Unit,
     chips: List<HomeChip>,
     selectedChip: String?,
@@ -354,6 +358,8 @@ fun HomeScreen(
                         desktop = desktop,
                         onSongClick = onSongClick,
                         onRandomSong = onRandomSong,
+                        pins = speedDialPins,
+                        onTogglePin = onTogglePin,
                     )
                 }
             }
@@ -446,6 +452,8 @@ private fun SpeedDialSection(
     desktop: Boolean,
     onSongClick: (SongItem, List<SongItem>) -> Unit,
     onRandomSong: () -> Unit,
+    pins: Set<String> = emptySet(),
+    onTogglePin: (SongItem) -> Unit = {},
 ) {
     val s = LocalStrings.current
     val scope = rememberCoroutineScope()
@@ -478,7 +486,7 @@ private fun SpeedDialSection(
                         if (song == null) {
                             DiceTile(s.randomSong, onRandomSong)
                         } else {
-                            SpeedDialTile(song, framed = idx == 0) {
+                            SpeedDialTile(song, pinned = song.id in pins, onLongClick = { onTogglePin(song) }) {
                                 onSongClick(song, songs)
                             }
                         }
@@ -493,7 +501,7 @@ private fun SpeedDialSection(
                 onPlayAll = {},
             )
             Spacer(modifier = Modifier.height(12.dp))
-            SpeedDial(songs, onSongClick, onRandomSong)
+            SpeedDial(songs, onSongClick, onRandomSong, pins, onTogglePin)
         }
     }
 }
@@ -507,6 +515,8 @@ private fun SpeedDial(
     songs: List<SongItem>,
     onSongClick: (SongItem, List<SongItem>) -> Unit,
     onRandomSong: () -> Unit,
+    pins: Set<String>,
+    onTogglePin: (SongItem) -> Unit,
 ) {
     val s = LocalStrings.current
     // Eight songs, then the dice as the ninth tile of the first page; further songs fill the next pages.
@@ -532,7 +542,7 @@ private fun SpeedDial(
                                 if (song == null) {
                                     DiceTile(s.randomSong, onRandomSong)
                                 } else {
-                                    SpeedDialTile(song, framed = index == 0 && rowIndex == 0 && column == 0) {
+                                    SpeedDialTile(song, pinned = song.id in pins, onLongClick = { onTogglePin(song) }) {
                                         onSongClick(song, songs)
                                     }
                                 }
@@ -565,10 +575,11 @@ private fun SpeedDial(
 
 /**
  * A speed dial tile: the cover, softly rounded with a hairline edge and a little depth, the title and the artist on a
- * dark fade at the bottom. The song heard last wears a small "now" badge instead of a heavy frame.
+ * dark fade at the bottom. A pinned song wears a small pin; a long press pins it, or takes the pin off.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun SpeedDialTile(song: SongItem, framed: Boolean, onClick: () -> Unit) {
+private fun SpeedDialTile(song: SongItem, pinned: Boolean, onLongClick: () -> Unit, onClick: () -> Unit) {
     val shape = RoundedCornerShape(14.dp)
     Box(
         modifier = Modifier
@@ -577,7 +588,8 @@ private fun SpeedDialTile(song: SongItem, framed: Boolean, onClick: () -> Unit) 
             .clip(shape)
             .background(DarkSurfaceVariant)
             .border(0.5.dp, Ink.copy(alpha = 0.08f), shape)
-            .clickable(onClick = onClick),
+            .warmOnPress(song)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         AsyncImage(
             model = song.thumbnail ?: song.thumbnails.firstOrNull()?.url,
@@ -611,7 +623,7 @@ private fun SpeedDialTile(song: SongItem, framed: Boolean, onClick: () -> Unit) 
                 )
             }
         }
-        if (framed) {
+        if (pinned) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -621,7 +633,7 @@ private fun SpeedDialTile(song: SongItem, framed: Boolean, onClick: () -> Unit) 
                     .background(Color.Black.copy(alpha = 0.55f)),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(QMusicIcons.History, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                Icon(QMusicIcons.Pin, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
             }
         }
     }
@@ -809,7 +821,7 @@ fun HomeShelf(
                         subtitle = song.artists.joinToString { it.name }.ifEmpty { LocalStrings.current.unknownArtist },
                         thumbnail = song.thumbnail ?: song.thumbnails.firstOrNull()?.url,
                         onClick = { onSongClick(song, section.songs) },
-                        modifier = if (desktop) Modifier.width(180.dp) else Modifier,
+                        modifier = (if (desktop) Modifier.width(180.dp) else Modifier).warmOnPress(song),
                     )
                 }
                 items(section.collections) { collection ->
@@ -1028,6 +1040,7 @@ private fun SongColumns(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
+                            .warmOnPress(song)
                             .clickable { onSongClick(song, section.songs) }
                             .padding(vertical = 6.dp, horizontal = if (desktop) 6.dp else 0.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1128,6 +1141,7 @@ fun SongListItem(
     Card(
         modifier = modifier
             .fillMaxWidth()
+            .warmOnPress(song)
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = if (flat) androidx.compose.ui.graphics.Color.Transparent else DarkSurface),

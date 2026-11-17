@@ -128,8 +128,8 @@ async function handleGroup(n) {
     Object.assign(data, {
       name: "Nuvelo",
       photo: "",
-      body: n.invite ? "Gizli bir sohbete davet edildin" : "Yeni mesaj",
-      text: n.invite ? "Gizli bir sohbete davet edildin" : "Yeni mesaj",
+      body: "Yeni mesaj",
+      text: "Yeni mesaj",
       author: n.chatId,
       authorName: "",
       authorPhoto: "",
@@ -145,14 +145,17 @@ async function handleGroup(n) {
     data.body = group.secret === true ? "Nuvelo araması" : `${senderName || "Biri"} grup araması başlattı`;
     if (group.secret === true) data.starter = "Nuvelo";
   }
-  const targets = Object.keys(group.members).filter((uid) => uid !== n.from);
+  // Who is only invited (a secret group's invitation not yet taken) hears of the invitation and nothing else.
+  const invited = (uid) => group.members[uid] && group.members[uid].invited === true;
+  const targets = Object.keys(group.members).filter((uid) => uid !== n.from && (!invited(uid) || (n.invite && !call)));
+  const inviteData = { ...data, body: "Gizli bir sohbete davet edildin", text: "Gizli bir sohbete davet edildin" };
   // People named with @ in the message hear it even when the group is muted.
   const mentioned = n.mentions && typeof n.mentions === "object" ? n.mentions : {};
   await Promise.all(
     targets.map(async (uid) => {
       // A muted group neither notifies nor rings.
       if (!(mentioned[uid] === true && !call) && (await isMuted(uid, n.chatId))) return;
-      await deliver(uid, data, call ? 60 * 1000 : 24 * 3600 * 1000);
+      await deliver(uid, invited(uid) ? inviteData : data, call ? 60 * 1000 : 24 * 3600 * 1000);
     }).map((p) => p.catch((e) => log("group push failed:", e.message))),
   );
 }
@@ -301,6 +304,42 @@ db.ref("notify").on("child_added", async (snap) => {
   }
 });
 
+// ------------------------------------------------------------------ reports
+
+/** A report (someone or a group, with the last messages): the founder hears of it in their Claude chat. */
+const FOUNDER = "2hxOw0dRcwUwsW7N6ogH4fRcqXo1";
+db.ref("reports").orderByChild("at").startAt(Date.now()).on("child_added", async (snap) => {
+  try {
+    const r = snap.val() || {};
+    if (r.notified) return;
+    const name = async (uid) => {
+      if (/^grp/.test(String(uid))) return "grup: " + String(((await db.ref(`groups/${uid}/name`).get()).val()) || uid);
+      return String(((await db.ref(`users/${uid}/name`).get()).val()) || uid);
+    };
+    const lines = [];
+    for (const m of Array.isArray(r.recent) ? r.recent : Object.values(r.recent || {})) {
+      lines.push(`  ${await name(m.from)}: ${String(m.text || "").slice(0, 200)}`);
+    }
+    const text = `Yeni şikayet (${r.reason}). Şikayet eden: ${await name(r.by)}. Şikayet edilen: ${await name(r.target)}.` +
+      (lines.length ? `\nSon mesajlar:\n${lines.join("\n")}` : "") + `\nKayıt: reports/${snap.key}`;
+    const chat = [FOUNDER, "claudebot"].sort().join("_");
+    const id = db.ref("x").push().key;
+    const TS = admin.database.ServerValue.TIMESTAMP;
+    await db.ref().update({
+      [`chats/${chat}/messages/${id}`]: { from: "claudebot", text, at: TS },
+      [`userChats/${FOUNDER}/${chat}/lastText`]: text.slice(0, 120),
+      [`userChats/${FOUNDER}/${chat}/lastAt`]: TS,
+      [`userChats/${FOUNDER}/${chat}/lastFrom`]: "claudebot",
+      [`userChats/${FOUNDER}/${chat}/unread`]: admin.database.ServerValue.increment(1),
+      [`notify/${db.ref("notify").push().key}`]: { from: "claudebot", to: FOUNDER, chatId: chat, type: "chat", body: "Yeni şikayet: " + r.reason, at: TS },
+      [`reports/${snap.key}/notified`]: true,
+    });
+    log("a report came in");
+  } catch (e) {
+    log("report failed:", e.message);
+  }
+});
+
 // ------------------------------------------------------------------ disappearing messages
 
 /** Self-deleting groups (made in the secret space with an end): the group and all in it go at that time. */
@@ -363,4 +402,10 @@ publishTurn();
 setInterval(publishTurn, TURN_EVERY_MS);
 sweepExpired();
 setInterval(sweepExpired, 5 * 60 * 1000);
+
+// Once a day: the media files no message points at any more go (see media-gc.js).
+const { sweepMedia } = require("./media-gc");
+const sweepMediaSafely = () => sweepMedia(db, { log }).catch((e) => log("media sweep failed:", e.message));
+setTimeout(sweepMediaSafely, 10 * 60 * 1000);
+setInterval(sweepMediaSafely, 24 * 3600 * 1000);
 log("qmusic-push started");

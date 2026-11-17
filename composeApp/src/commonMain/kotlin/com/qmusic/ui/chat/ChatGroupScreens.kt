@@ -133,7 +133,10 @@ internal fun AddMembersPage(controller: ChatController, s: ChatStrings, group: C
     val people by controller.groupCandidates.collectAsState()
     val info by remember(group.uid) { controller.group(group) }.collectAsState(initial = null)
     val inGroup = info?.members.orEmpty().map { it.user.uid }.toSet()
-    val available = people.filter { it.uid !in inGroup }
+    val candidates = people.filter { it.uid !in inGroup }
+    // A secret group: who is on an older version would see it as an ordinary group; added once they update.
+    val old = if (info?.secret == true) rememberOldVersions(candidates.map { it.uid }) else emptySet()
+    val available = candidates.filter { it.uid !in old }
     var picked by remember { mutableStateOf(setOf<String>()) }
     Column(Modifier.fillMaxSize()) {
         TopBar(s.addMembers, { controller.pop() })
@@ -142,6 +145,15 @@ internal fun AddMembersPage(controller: ChatController, s: ChatStrings, group: C
             Spacer(Modifier.weight(1f))
         } else {
             PickList(available, picked, { u -> picked = if (u.uid in picked) picked - u.uid else picked + u.uid }, Modifier.weight(1f))
+        }
+        if (old.isNotEmpty()) {
+            val w = remember(ChatMusic.english) { E2eWords(ChatMusic.english) }
+            Text(
+                w.oldVersionNames(candidates.filter { it.uid in old }.joinToString(", ") { it.name.substringBefore(' ') }),
+                color = TextMuted,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+            )
         }
         Box(Modifier.navigationBarsPadding().padding(16.dp)) {
             WhiteButton(s.add + if (picked.isNotEmpty()) " (${picked.size})" else "", enabled = picked.isNotEmpty()) {
@@ -179,7 +191,7 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
                 }
                 Text(s.changePhoto, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { pickPhoto() }.padding(8.dp))
                 Text(g?.name ?: group.name, color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                Text("${g?.members?.size ?: 0} ${s.membersCount}", color = TextSecondary, fontSize = 14.sp)
+                Text("${g?.joined?.size ?: 0} ${s.membersCount}", color = TextSecondary, fontSize = 14.sp)
                 val ends = g?.endsAt ?: 0L
                 if (ends > 0L) {
                     val day = kotlinx.datetime.Instant.fromEpochMilliseconds(ends).toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault())
@@ -231,11 +243,21 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
             }
         }
         item { SectionTitle(s.members) }
-        items(g?.members.orEmpty(), key = { it.user.uid }) { m ->
+        items(g?.joined.orEmpty(), key = { it.user.uid }) { m ->
             PersonRow(m.user, onClick = { if (m.user.uid != me.uid) memberMenu = m.user }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     UserBadge(m.user.uid, modifier = Modifier.padding(end = if (m.admin && hasBadge(m.user.uid)) 8.dp else 0.dp))
                     if (m.admin) Text(s.admin, color = ClaudeCoral, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+        // A secret group's invitations not yet taken: apart, and only the admins may take them back.
+        val waiting = g?.members.orEmpty().filter { it.invited }
+        if (waiting.isNotEmpty()) {
+            item { SectionTitle(e2eWords.invitedSection) }
+            items(waiting, key = { "inv_" + it.user.uid }) { m ->
+                PersonRow(m.user, onClick = { if (m.user.uid != me.uid) memberMenu = m.user }) {
+                    Text(e2eWords.invitePending, color = TextSecondary, fontSize = 12.sp)
                 }
             }
         }

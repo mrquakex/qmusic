@@ -212,22 +212,24 @@ internal fun VotersDialog(poll: ChatPoll, votes: Map<String, List<Int>>, nameOf:
 // ------------------------------------------------------------------ places
 
 /**
- * A place in a message: a little map (OpenStreetMap data drawn by CARTO) with a pin in the middle; a tap opens it in
+ * A place in a message: a little map (OpenStreetMap) with a pin in the middle; a tap opens it in
  * the phone's maps app.
  */
 @Composable
 internal fun LocationCard(location: ChatLocation, mine: Boolean, s: ChatStrings) {
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     val zoom = 15
+    // The tiles one zoom out, each drawn 256 dp wide (the same ground as zoom 15 at half size, the writing readable).
+    val tileZoom = zoom - 1
     val worldPx = 256.0 * (1 shl zoom)
     val px = (location.lng + 180.0) / 360.0 * worldPx
     val latRad = location.lat * PI / 180.0
     val py = (1.0 - ln(tan(latRad) + 1.0 / cos(latRad)) / PI) / 2.0 * worldPx
-    val tileX = floor(px / 256.0).toInt()
-    val tileY = floor(py / 256.0).toInt()
+    val tileX = floor(px / 512.0).toInt()
+    val tileY = floor(py / 512.0).toInt()
     val boxW = 260f
     val boxH = 150f
-    // A 256-pixel tile is drawn 128 dp wide (the @2x tiles stay sharp).
+    // Two zoom-15 pixels to a dp.
     val scale = 0.5f
     Column(
         Modifier.padding(4.dp).width(boxW.dp).clip(RoundedCornerShape(12.dp))
@@ -237,14 +239,14 @@ internal fun LocationCard(location: ChatLocation, mine: Boolean, s: ChatStrings)
             for (dx in -1..1) for (dy in -1..1) {
                 val tx = tileX + dx
                 val ty = tileY + dy
-                val left = boxW / 2 + ((tx * 256.0 - px) * scale).toFloat()
-                val top = boxH / 2 + ((ty * 256.0 - py) * scale).toFloat()
-                val n = 1 shl zoom
+                val left = boxW / 2 + ((tx * 512.0 - px) * scale).toFloat()
+                val top = boxH / 2 + ((ty * 512.0 - py) * scale).toFloat()
+                val n = 1 shl tileZoom
                 AsyncImage(
-                    model = "https://a.basemaps.cartocdn.com/rastertiles/voyager/$zoom/${((tx % n) + n) % n}/$ty@2x.png",
+                    model = mapTile(tileZoom, ((tx % n) + n) % n, ty),
                     contentDescription = null,
                     contentScale = ContentScale.FillBounds,
-                    modifier = Modifier.offset(left.dp, top.dp).size((256 * scale).dp),
+                    modifier = Modifier.offset(left.dp, top.dp).size((512 * scale).dp),
                 )
             }
             // The pin: its point on the place.
@@ -262,7 +264,7 @@ internal fun LocationCard(location: ChatLocation, mine: Boolean, s: ChatStrings)
                 drawCircle(Color.White, radius = r * 0.4f, center = c)
             }
             Text(
-                "© OpenStreetMap © CARTO",
+                "© OpenStreetMap",
                 color = Color.Black.copy(alpha = 0.6f),
                 fontSize = 8.sp,
                 modifier = Modifier.align(Alignment.BottomEnd).background(Color.White.copy(alpha = 0.6f)).padding(horizontal = 3.dp),

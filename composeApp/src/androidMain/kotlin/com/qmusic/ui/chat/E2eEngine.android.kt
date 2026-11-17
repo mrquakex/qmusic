@@ -209,6 +209,8 @@ internal class E2eEngine(private val app: Context, private val root: DatabaseRef
 
     override val ready = MutableStateFlow(false)
     override val needsRestore = MutableStateFlow(false)
+    override val hasBackup = MutableStateFlow(false)
+    override val hasOwnKey = MutableStateFlow(false)
     override val hasPin = MutableStateFlow(false)
     override val changes = MutableStateFlow(0)
     override val keyChanged = MutableStateFlow<Set<String>>(emptySet())
@@ -245,6 +247,10 @@ internal class E2eEngine(private val app: Context, private val root: DatabaseRef
         uid = newUid
         ready.value = false
         needsRestore.value = false
+        hasBackup.value = false
+        hasOwnKey.value = false
+        publishedWatch?.let { (ref, l) -> ref.removeEventListener(l) }
+        publishedWatch = null
         hasPin.value = false
         keyChanged.value = emptySet()
         if (newUid == null) return
@@ -253,36 +259,177 @@ internal class E2eEngine(private val app: Context, private val root: DatabaseRef
         scope.launch { loadIdentity(newUid) }
     }
 
-    private suspend fun loadIdentity(u: String) {
-        val local = prefs.getString("id_$u", null)?.let { DeviceLock.open(it) }
-        val pub = prefs.getString("pub_$u", null)
-        if (local != null && pub != null) {
-            pair = runCatching { KeyPair(E2eCrypto.publicFrom(E2eCrypto.unb64(pub)), E2eCrypto.privateFrom(local)) }.getOrNull()
+    /** This device's stored key pair, if it has one. */
+    private fun stored(u: String): KeyPair? {
+        val local = prefs.getString("id_$u", null)?.let { DeviceLock.open(it) } ?: return null
+        val pub = prefs.getString("pub_$u", null) ?: return null
+        return runCatching { KeyPair(E2eCrypto.publicFrom(E2eCrypto.unb64(pub)), E2eCrypto.privateFrom(local)) }.getOrNull()
+    }
+
+    /** The account's published key (null: none); failing (no connection) it is asked again, never guessed. */
+    private suspend fun publishedKey(u: String): String? {
+        var wait = 2_000L
+        while (uid == u) {
+            val r = runCatching { root.child("publicKeys").child(u).child("k").get().await() }
+            r.getOrNull()?.let { return it.getValue(String::class.java) }
+            kotlinx.coroutines.delay(wait)
+            wait = (wait * 2).coerceAtMost(60_000L)
         }
-        if (pair != null) {
+        error("signed out")
+    }
+
+    private suspend fun loadIdentity(u: String) {
+        val mine = stored(u)
+        val published = runCatching { publishedKey(u) }.getOrElse { return }
+        if (uid != u) return
+        // The account's key is this device's (or there is none yet): used, and published when there is none.
+        if (mine != null && (published == null || published == E2eCrypto.b64(mine.public.encoded))) {
+            pair = mine
             ready.value = true
-            publish(u)
+            if (published == null) publish(u)
             syncPinFlag(u)
+            followPublished(u)
             bump()
             return
         }
-        // Not on this phone: a backup brings the old key back with the PIN; without one a new key is made.
-        val backup = runCatching { root.child("keyBackup").child(u).get().await() }.getOrNull()
-        if (backup?.exists() == true) {
+        // The account has a key and it is not here: one device holds it for all of them. It comes over from that
+        // device (a QR) or from the backup (the PIN); a key of this device's own would push the others' out.
+        if (published != null) {
+            val backup = runCatching { root.child("keyBackup").child(u).get().await() }.getOrNull()
+            val publishedFp = runCatching { E2eCrypto.fingerprint(E2eCrypto.unb64(published)) }.getOrNull()
+            hasBackup.value = backup?.exists() == true && backup.child("fp").getValue(String::class.java) == publishedFp
+            if (hasBackup.value) hasPin.value = true
+            hasOwnKey.value = mine != null
             needsRestore.value = true
-            hasPin.value = true
             return
         }
         makeNew(u)
     }
 
-    private suspend fun makeNew(u: String) {
+    private var publishedWatch: Pair<DatabaseReference, ValueEventListener>? = null
+
+    /** Another device made the account's key another one (started over): this one steps back and asks to be linked. */
+    private fun followPublished(u: String) {
+        if (publishedWatch != null) return
+        val ref = root.child("publicKeys").child(u).child("k")
+        val l = object : ValueEventListener {
+            override fun onDataChange(s: DataSnapshot) {
+                val k = s.getValue(String::class.java) ?: return
+                val p = pair ?: return
+                if (uid != u || k == E2eCrypto.b64(p.public.encoded)) return
+                Log.i(TAG, "the account's key changed on another device")
+                pair = null
+                keys.clear()
+                ready.value = false
+                ref.removeEventListener(this)
+                publishedWatch = null
+                scope.launch { loadIdentity(u) }
+            }
+
+            override fun onCancelled(error: DatabaseError) {}
+        }
+        publishedWatch = ref to l
+        ref.addValueEventListener(l)
+    }
+
+    private suspend fun makeNew(u: String, force: Boolean = false) {
         val p = E2eCrypto.newPair()
         keep(u, p)
         pair = p
         needsRestore.value = false
+        hasOwnKey.value = false
         ready.value = true
-        publish(u)
+        publish(u, force)
+        followPublished(u)
+        bump()
+    }
+
+    /** The key [p] is the account's on this device now (it came from the backup or the other device). */
+    private fun adopt(u: String, p: KeyPair) {
+        keep(u, p)
+        pair = p
+        prefs.edit().remove("fails_$u").remove("waitUntil_$u").apply()
+        needsRestore.value = false
+        hasOwnKey.value = false
+        ready.value = true
+        keys.clear()
+        versions.keys.toList().forEach { chatId -> versions[chatId]?.takeIf { it > 0 }?.let { v -> scope.launch { loadKey(chatId, v) } } }
+        followPublished(u)
+        scope.launch { syncPinFlag(u) }
+        bump()
+    }
+
+    // ------------------------------------------------------------------ linking another device of the account
+
+    override suspend fun awaitLink(onCode: (String) -> Unit): Boolean = withContext(Dispatchers.IO) {
+        val u = uid ?: return@withContext false
+        val eph = E2eCrypto.newPair()
+        val code = E2eCrypto.hex(E2eCrypto.bytes(8))
+        val ref = root.child("keyLink").child(u).child(code)
+        withContext(Dispatchers.Main) { onCode("nuvelo-link:1:$u:$code:" + E2eCrypto.b64(eph.public.encoded)) }
+        try {
+            val until = System.currentTimeMillis() + 10 * 60_000L
+            while (System.currentTimeMillis() < until && uid == u) {
+                val s = runCatching { ref.get().await() }.getOrNull()
+                val epk = s?.child("epk")?.getValue(String::class.java)
+                val c = s?.child("c")?.getValue(String::class.java)
+                if (epk != null && c != null) {
+                    val private = E2eCrypto.privateFrom(E2eCrypto.unwrap(eph, epk, c, "link/$u/$code"))
+                    // The key that came is the account's published one: its public half, and a lock opened with it.
+                    val published = publishedKey(u) ?: error("no published key")
+                    val public = E2eCrypto.publicFrom(E2eCrypto.unb64(published))
+                    val p = KeyPair(public, private)
+                    val probe = E2eCrypto.bytes(16)
+                    val w = E2eCrypto.wrap(public, probe, "probe")
+                    check(E2eCrypto.unwrap(p, w.getString("epk"), w.getString("c"), "probe").contentEquals(probe)) { "not the account's key" }
+                    adopt(u, p)
+                    return@withContext true
+                }
+                kotlinx.coroutines.delay(1_500)
+            }
+            false
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "link: ${e.message}")
+            false
+        } finally {
+            withContext(kotlinx.coroutines.NonCancellable) { runCatching { ref.removeValue().await() } }
+        }
+    }
+
+    override suspend fun sendLink(scanned: String): LinkResult = withContext(Dispatchers.IO) {
+        val parts = scanned.trim().split(":")
+        if (parts.size != 5 || parts[0] != "nuvelo-link" || parts[1] != "1") return@withContext LinkResult.NotALink
+        val u = uid ?: return@withContext LinkResult.Failed
+        if (parts[2] != u) return@withContext LinkResult.OtherAccount
+        val p = pair ?: return@withContext LinkResult.NoKey
+        val code = parts[3]
+        if (code.length != 16 || !code.all { it in '0'..'9' || it in 'a'..'f' }) return@withContext LinkResult.NotALink
+        // Only the account's key goes (this device must hold the published one).
+        val published = runCatching { root.child("publicKeys").child(u).child("k").get().await().getValue(String::class.java) }.getOrNull()
+        if (published != E2eCrypto.b64(p.public.encoded)) return@withContext LinkResult.NoKey
+        runCatching {
+            val w = E2eCrypto.wrap(E2eCrypto.publicFrom(E2eCrypto.unb64(parts[4])), p.private.encoded, "link/$u/$code")
+            root.child("keyLink").child(u).child(code).setValue(
+                mapOf("epk" to w.getString("epk"), "c" to w.getString("c"), "at" to ServerValue.TIMESTAMP),
+            ).await()
+            LinkResult.Ok
+        }.getOrElse {
+            Log.w(TAG, "send link: ${it.message}")
+            LinkResult.Failed
+        }
+    }
+
+    override suspend fun useThisDevice(): Result<Unit> = runCatching {
+        val u = uid ?: error("not signed in")
+        val p = stored(u) ?: error("no key here")
+        pair = p
+        needsRestore.value = false
+        hasOwnKey.value = false
+        ready.value = true
+        publish(u, force = true)
+        followPublished(u)
         bump()
     }
 
@@ -293,11 +440,12 @@ internal class E2eEngine(private val app: Context, private val root: DatabaseRef
             .apply()
     }
 
-    private suspend fun publish(u: String) {
+    private suspend fun publish(u: String, force: Boolean = false) {
         val p = pair ?: return
         val k = E2eCrypto.b64(p.public.encoded)
         val now = runCatching { root.child("publicKeys").child(u).child("k").get().await().getValue(String::class.java) }.getOrNull()
-        if (now != k) {
+        // Never over another device's key unless asked (starting over, or this device's key chosen).
+        if (now != k && (now == null || force)) {
             runCatching {
                 root.child("publicKeys").child(u).setValue(
                     mapOf("k" to k, "fp" to E2eCrypto.fingerprint(p.public.encoded), "at" to ServerValue.TIMESTAMP),
@@ -683,17 +831,9 @@ internal class E2eEngine(private val app: Context, private val root: DatabaseRef
             val public = published?.let { E2eCrypto.publicFrom(E2eCrypto.unb64(it)) }
                 ?.takeIf { E2eCrypto.fingerprint(it.encoded) == backup.child("fp").getValue(String::class.java) }
                 ?: error("public")
-            val p = KeyPair(public, private)
-            keep(u, p)
-            pair = p
             keepLocalPin(u, pin)
-            prefs.edit().remove("fails_$u").remove("waitUntil_$u").apply()
-            needsRestore.value = false
             hasPin.value = true
-            ready.value = true
-            keys.clear()
-            versions.keys.toList().forEach { chatId -> versions[chatId]?.takeIf { it > 0 }?.let { v -> scope.launch { loadKey(chatId, v) } } }
-            bump()
+            adopt(u, KeyPair(public, private))
             PinResult.Ok
         }.getOrElse { PinResult.Failed(it.message ?: "failed") }
     }
@@ -705,7 +845,8 @@ internal class E2eEngine(private val app: Context, private val root: DatabaseRef
         prefs.edit().remove("pin_$u").remove("decoy_$u").remove("fails_$u").remove("waitUntil_$u").apply()
         hasPin.value = false
         keys.clear()
-        makeNew(u)
+        // Chosen: the new key is the account's (its other devices are linked again).
+        makeNew(u, force = true)
     }
 
     override suspend fun clearPin(): Result<Unit> = runCatching {

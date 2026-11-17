@@ -30,6 +30,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <!-- Asking once to leave Qeyf out of battery limits, so calls and messages reach a sleeping phone. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Scheduled messages go at their minute (Android 13+ grants it; before, the one below). -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <!-- Android TV: Qeyf runs there too (a phone plays on it with the TV's code). -->
@@ -189,6 +193,15 @@
         <receiver
             android:name=".ChatReplyReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".ScheduledSendReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <receiver
             android:name=".InstallResultReceiver"

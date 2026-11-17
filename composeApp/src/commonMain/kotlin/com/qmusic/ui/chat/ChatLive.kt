@@ -162,6 +162,9 @@ class MapMarker(val lat: Double, val lng: Double, val user: ChatUser?, val live:
 
 private const val TILE = 256.0
 
+/** One OpenStreetMap tile, through Nuvelo's server (which keeps them, and can change where they come from). */
+internal fun mapTile(zoom: Int, x: Int, y: Int) = "https://qeyf.159.195.147.140.sslip.io/tiles/$zoom/$x/$y.png"
+
 private fun worldX(lng: Double, zoom: Int) = (lng + 180.0) / 360.0 * TILE * (1 shl zoom)
 private fun worldY(lat: Double, zoom: Int): Double {
     val r = lat.coerceIn(-85.0, 85.0) * PI / 180.0
@@ -174,7 +177,7 @@ private fun latOf(y: Double, zoom: Int): Double {
 private fun lngOf(x: Double, zoom: Int) = x / (TILE * (1 shl zoom)) * 360.0 - 180.0
 
 /**
- * A map (OpenStreetMap data drawn by CARTO) centred on [lat], [lng], with [markers] on it; [draggable]: moved by a
+ * A map (OpenStreetMap) centred on [lat], [lng], with [markers] on it; [draggable]: moved by a
  * finger ([onMoved] gets the new centre).
  */
 @Composable
@@ -187,7 +190,7 @@ fun OsmMap(
     draggable: Boolean = false,
     onMoved: (Double, Double) -> Unit = { _, _ -> },
 ) {
-    // A 256-pixel tile is drawn 128 dp wide (the @2x tiles stay sharp): two world pixels to a dp.
+    // Two world pixels (at [zoom]) to a dp.
     val perDp = 2.0
     val density = LocalDensity.current
     BoxWithConstraints(
@@ -210,19 +213,22 @@ fun OsmMap(
         val h = maxHeight.value.toDouble()
         val cx = worldX(lng, zoom)
         val cy = worldY(lat, zoom)
-        val n = 1 shl zoom
-        val firstX = floor((cx - w / 2 * perDp) / TILE).toInt()
-        val lastX = floor((cx + w / 2 * perDp) / TILE).toInt()
-        val firstY = floor((cy - h / 2 * perDp) / TILE).toInt().coerceAtLeast(0)
-        val lastY = floor((cy + h / 2 * perDp) / TILE).toInt().coerceAtMost(n - 1)
+        // The tiles one zoom out, each drawn 256 dp wide: the same ground, with the map's writing at its own size.
+        val tileZoom = (zoom - 1).coerceAtLeast(0)
+        val span = TILE * (1 shl (zoom - tileZoom))
+        val n = 1 shl tileZoom
+        val firstX = floor((cx - w / 2 * perDp) / span).toInt()
+        val lastX = floor((cx + w / 2 * perDp) / span).toInt()
+        val firstY = floor((cy - h / 2 * perDp) / span).toInt().coerceAtLeast(0)
+        val lastY = floor((cy + h / 2 * perDp) / span).toInt().coerceAtMost(n - 1)
         for (tx in firstX..lastX) for (ty in firstY..lastY) {
-            val left = w / 2 + (tx * TILE - cx) / perDp
-            val top = h / 2 + (ty * TILE - cy) / perDp
+            val left = w / 2 + (tx * span - cx) / perDp
+            val top = h / 2 + (ty * span - cy) / perDp
             AsyncImage(
-                model = "https://a.basemaps.cartocdn.com/rastertiles/voyager/$zoom/${((tx % n) + n) % n}/$ty@2x.png",
+                model = mapTile(tileZoom, ((tx % n) + n) % n, ty),
                 contentDescription = null,
                 contentScale = ContentScale.FillBounds,
-                modifier = Modifier.offset(left.dp, top.dp).size((TILE / perDp).dp),
+                modifier = Modifier.offset(left.dp, top.dp).size((span / perDp).dp),
             )
         }
         markers.forEach { m ->
@@ -231,7 +237,7 @@ fun OsmMap(
             MapPin(m, Modifier.offset((x - 22).dp, (y - 22).dp))
         }
         Text(
-            "© OpenStreetMap © CARTO",
+            "© OpenStreetMap",
             color = Color.Black.copy(alpha = 0.6f),
             fontSize = 8.sp,
             modifier = Modifier.align(Alignment.BottomEnd).background(Color.White.copy(alpha = 0.6f)).padding(horizontal = 3.dp),

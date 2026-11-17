@@ -477,6 +477,22 @@
         ".validate": "!newData.exists() || (newData.child('c').isString() && newData.child('salt').isString() && newData.child('rounds').isNumber())"
       }
     },
+    "reports": {
+      ".indexOn": ["at"],
+      "$id": {
+        ".write": "auth != null && !data.exists() && newData.child('by').val() === auth.uid",
+        ".validate": "newData.child('target').isString() && newData.child('target').val().length <= 64 && newData.child('chatId').isString() && newData.child('chatId').val().length <= 80 && newData.child('reason').isString() && newData.child('reason').val().length <= 40"
+      }
+    },
+    "keyLink": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid",
+        "$code": {
+          ".validate": "$code.matches(/^[0-9a-f]{16}$/) && newData.child('epk').isString() && newData.child('epk').val().length < 300 && newData.child('c').isString() && newData.child('c').val().length < 1000"
+        }
+      }
+    },
     "secretSpace": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",

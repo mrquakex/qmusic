@@ -123,6 +123,14 @@ class MusicRepositoryImpl(
             .sortedByDescending { it.second }
     }
 
+    override suspend fun playTimes(withinDays: Int): List<Pair<SongItem, List<Long>>> {
+        val since = Clock.System.now().toEpochMilliseconds() - withinDays * 86_400_000L
+        val times = historyDao.historySince(since).groupBy({ it.songId }, { it.playedAt })
+        if (times.isEmpty()) return emptyList()
+        val songs = times.keys.chunked(SQL_IN_LIMIT).flatMap { songDao.getSongsByIds(it) }.associateBy { it.id }
+        return times.mapNotNull { (id, at) -> songs[id]?.let { it.toSongItem() to at } }
+    }
+
     private fun SongEntity.toSongItem(): SongItem {
         val artistList = if (artists.isBlank()) {
             emptyList()

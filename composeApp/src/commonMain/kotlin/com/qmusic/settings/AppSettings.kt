@@ -82,6 +82,8 @@ interface AppSettings {
 
 /** Names of the choices kept through [AppSettings.bool] and [AppSettings.string]. */
 object SettingKeys {
+    /** The songs pinned to the speed dial (a JSON list of songs), first to last. */
+    const val SPEED_DIAL_PINS = "speed_dial_pins"
     /** Pure black instead of near-black, for OLED screens. */
     const val AMOLED = "amoled_theme"
 
