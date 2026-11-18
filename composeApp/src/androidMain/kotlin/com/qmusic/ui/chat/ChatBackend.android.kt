@@ -1853,6 +1853,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
      */
     @Volatile
     private var presenceConnected = false
+    private var presenceWasVisible = false
     private var presenceVisibility: kotlinx.coroutines.Job? = null
 
     private fun trackPresence(uid: String?) {
@@ -1873,8 +1874,20 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 ref.setValue(mapOf("hidden" to true))
                 return
             }
-            ref.onDisconnect().setValue(mapOf("online" to false, "lastSeen" to ServerValue.TIMESTAMP))
-            ref.setValue(mapOf("online" to CallHooks.appVisible, "lastSeen" to ServerValue.TIMESTAMP))
+            val visible = CallHooks.appVisible
+            if (visible) {
+                ref.onDisconnect().setValue(mapOf("online" to false, "lastSeen" to ServerValue.TIMESTAMP))
+                ref.setValue(mapOf("online" to true, "lastSeen" to ServerValue.TIMESTAMP))
+            } else if (presenceWasVisible) {
+                // Just left the screen: that moment is the "last seen".
+                ref.onDisconnect().updateChildren(mapOf("online" to false))
+                ref.setValue(mapOf("online" to false, "lastSeen" to ServerValue.TIMESTAMP))
+            } else {
+                // Woken in the background (a push, a call service): the person was not here, so the time stays.
+                ref.onDisconnect().updateChildren(mapOf("online" to false))
+                ref.updateChildren(mapOf("online" to false))
+            }
+            presenceWasVisible = visible
         }
         val listener = object : ValueEventListener {
             override fun onDataChange(snap: DataSnapshot) {

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -35,6 +36,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -142,6 +146,7 @@ private fun ShortItem(
     val buffering = playback?.buffering?.collectAsState()?.value ?: false
     val position = playback?.positionMs?.collectAsState()?.value ?: 0L
     val duration = playback?.durationMs?.collectAsState()?.value ?: 0L
+    var seekHeld by remember(item.id) { mutableStateOf<Float?>(null) }
 
     Box(
         modifier = Modifier
@@ -211,11 +216,25 @@ private fun ShortItem(
             ShortAction(VideoIcons.Comment, s.comments) { controller.openShortComments(item) }
             ShortAction(QMusicIcons.Share, s.share) { onShare("https://youtube.com/shorts/${item.id}") }
         }
-        if (active && duration > 0) {
-            val fraction = (position.toFloat() / duration).coerceIn(0f, 1f)
-            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(2.dp).background(Color.White.copy(alpha = 0.25f))) {
-                Box(Modifier.fillMaxHeight().fillMaxWidth(fraction).background(VideoColors.Red))
+        if (active && duration > 0 && playback != null) {
+            // Held: the picture darkens and the time shows big, as on YouTube.
+            seekHeld?.let { f ->
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.25f)))
+                Text(
+                    clock((f * duration).toLong()),
+                    color = Color.White,
+                    fontSize = 34.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 60.dp),
+                )
+                Text(
+                    clock(duration),
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 14.sp,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 36.dp),
+                )
             }
+            ShortSeekBar(position, duration, playback, seekHeld, { seekHeld = it }, Modifier.align(Alignment.BottomCenter))
         }
     }
 }
@@ -225,5 +244,58 @@ private fun ShortAction(icon: androidx.compose.ui.graphics.vector.ImageVector, l
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick).padding(6.dp)) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(30.dp))
         Text(label, color = Color.White, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+    }
+}
+
+/**
+ * The thin line along the foot of a clip, as on YouTube: it shows how far the clip is, and a finger on it (a tap or a
+ * drag sideways) winds it; the line grows and the time shows while it is held.
+ */
+@Composable
+private fun ShortSeekBar(position: Long, duration: Long, playback: VideoPlayback, held: Float?, onHeld: (Float?) -> Unit, modifier: Modifier) {
+    val fraction = held ?: (position.toFloat() / duration).coerceIn(0f, 1f)
+    // A tall touch area around the thin line (the line alone is too thin to hit).
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(28.dp)
+            .pointerInput(duration) {
+                detectTapGestures { at -> playback.seekTo((at.x / size.width * duration).toLong().coerceIn(0, duration)) }
+            }
+            .pointerInput(duration) {
+                detectHorizontalDragGestures(
+                    onDragStart = { at -> onHeld((at.x / size.width).coerceIn(0f, 1f)) },
+                    onHorizontalDrag = { change, _ ->
+                        change.consume()
+                        onHeld((change.position.x / size.width).coerceIn(0f, 1f))
+                    },
+                    onDragEnd = {
+                        held?.let { playback.seekTo((it * duration).toLong().coerceIn(0, duration)) }
+                        onHeld(null)
+                    },
+                    onDragCancel = { onHeld(null) },
+                )
+            },
+        contentAlignment = Alignment.BottomStart,
+    ) {
+        Box(Modifier.fillMaxWidth().height(if (held != null) 4.dp else 2.dp).background(Color.White.copy(alpha = 0.25f)))
+        Box(Modifier.fillMaxWidth(fraction).height(if (held != null) 4.dp else 2.dp).background(VideoColors.Red))
+        if (held != null) {
+            // The knob on the line, under the finger.
+            BoxWithKnob(fraction)
+        }
+    }
+}
+
+@Composable
+private fun BoxWithKnob(fraction: Float) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(28.dp), contentAlignment = Alignment.BottomStart) {
+        Box(
+            Modifier
+                .offset(x = (maxWidth * fraction) - 8.dp, y = 6.dp)
+                .size(16.dp)
+                .clip(CircleShape)
+                .background(VideoColors.Red),
+        )
     }
 }

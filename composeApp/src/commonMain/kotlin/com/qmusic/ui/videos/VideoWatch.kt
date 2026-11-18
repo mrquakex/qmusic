@@ -9,6 +9,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -92,23 +93,141 @@ fun WatchPage(
             if (playback != null) VideoPlaybackSurface(playback, Modifier.fillMaxSize())
         }
         fullscreen -> {
-            var total by remember { mutableStateOf(0f) }
+            // Leaving and more, as on YouTube. Down: the picture follows the finger and gets a little smaller, the
+            // black goes grey; let go far enough and it flies to where the page holds it, the page appearing (the
+            // full screen ends), else it springs back. Up (upright): the details of the page come up from the bottom
+            // as a sheet while the picture stays; let go far enough and the sheet stays, a tap outside closes it.
+            // Sideways full screen: a drag either way leaves it.
+            val drag = remember { Animatable(0f) }
+            val exit = remember { Animatable(0f) }
+            val sheet = remember { Animatable(0f) }
+            val raw = remember { floatArrayOf(0f, 0f) }
+            val dragScope = rememberCoroutineScope()
+            var screenHeight by remember { mutableStateOf(1f) }
+            var screenWidth by remember { mutableStateOf(1f) }
+            val upright by controller.fullscreenUpright.collectAsState()
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val statusTop = androidx.compose.foundation.layout.WindowInsets.statusBars.getTop(density).toFloat()
+            val exitAt = with(density) { 110.dp.toPx() }
+            val sheetPx = { screenHeight * 0.6f }
+            // 0 (full screen) to 1 (far enough to leave).
+            val dragged = { (kotlin.math.abs(drag.value) / (screenHeight * 0.3f)).coerceIn(0f, 1f) }
+            // Where the page holds the picture's centre, from the screen's centre (under the status bar).
+            val slotShift = { (statusTop + screenWidth * 9f / 16f / 2f) - screenHeight / 2f }
+            val ease = androidx.compose.animation.core.FastOutSlowInEasing
             Box(
                 modifier = modifier
                     .fillMaxSize()
-                    .background(Color.Black)
-                    .pointerInput(Unit) {
+                    .drawBehind {
+                        val grey = Color(0xFF151515)
+                        val base = if (upright) androidx.compose.ui.graphics.lerp(Color.Black, grey, dragged())
+                        else androidx.compose.ui.graphics.lerp(Color.Black, VideoColors.Background, dragged())
+                        drawRect(base.copy(alpha = 1f - exit.value))
+                    }
+                    .onSizeChanged {
+                        screenHeight = it.height.toFloat().coerceAtLeast(1f)
+                        screenWidth = it.width.toFloat().coerceAtLeast(1f)
+                    }
+                    .pointerInput(upright) {
                         detectVerticalDragGestures(
-                            onDragStart = { total = 0f },
+                            onDragStart = {
+                                dragScope.launch { drag.stop(); sheet.stop() }
+                                raw[0] = drag.value
+                                raw[1] = sheet.value
+                            },
                             onVerticalDrag = { change, dy ->
                                 change.consume()
-                                total += dy
+                                if (upright) {
+                                    if (dy < 0f) {
+                                        if (raw[0] > 0f) raw[0] = (raw[0] + dy).coerceAtLeast(0f)
+                                        else raw[1] = (raw[1] - dy / sheetPx()).coerceAtMost(1f)
+                                    } else {
+                                        if (raw[1] > 0f) raw[1] = (raw[1] - dy / sheetPx()).coerceAtLeast(0f)
+                                        else raw[0] += dy
+                                    }
+                                } else {
+                                    raw[0] += dy
+                                }
+                                val d = raw[0]
+                                val sh = raw[1]
+                                dragScope.launch { drag.snapTo(d); sheet.snapTo(sh) }
                             },
-                            onDragEnd = { if (total > SWIPE_PX) controller.setFullscreen(false) },
+                            onDragEnd = {
+                                dragScope.launch {
+                                    if (upright) {
+                                        when {
+                                            raw[0] > exitAt -> {
+                                                exit.animateTo(1f, tween(240, easing = ease))
+                                                controller.setFullscreen(false)
+                                            }
+                                            raw[1] > 0.3f -> sheet.animateTo(1f, tween(200, easing = ease))
+                                            else -> {
+                                                launch { sheet.animateTo(0f, tween(200, easing = ease)) }
+                                                drag.animateTo(0f, tween(220, easing = ease))
+                                            }
+                                        }
+                                    } else if (kotlin.math.abs(raw[0]) > exitAt) {
+                                        val way = if (raw[0] < 0f) -1f else 1f
+                                        drag.animateTo(way * screenHeight * 0.3f, tween(180, easing = ease))
+                                        controller.setFullscreen(false)
+                                    } else {
+                                        drag.animateTo(0f, tween(220, easing = ease))
+                                    }
+                                }
+                            },
+                            onDragCancel = {
+                                dragScope.launch {
+                                    launch { sheet.animateTo(if (sheet.value > 0.3f) 1f else 0f, tween(200)) }
+                                    drag.animateTo(0f, tween(220))
+                                }
+                            },
                         )
                     },
             ) {
-                PlayerBox(w, playback, s, controller, true, Modifier.fillMaxSize())
+                // The page the picture is flying to: appears as it lands.
+                if (upright && exit.value > 0f) {
+                    Column(Modifier.fillMaxSize().background(VideoColors.Background).graphicsLayer { alpha = exit.value }) {
+                        Spacer(Modifier.statusBarsPadding().fillMaxWidth().aspectRatio(16f / 9f))
+                        WatchDetails(controller, w, s, onShare, onSignIn, seek, showRelated = true)
+                    }
+                }
+                Box(
+                    Modifier.fillMaxSize().graphicsLayer {
+                        val p = dragged()
+                        if (upright) {
+                            val e = exit.value
+                            val scale = (1f - 0.05f * p) * (1f - e) + e
+                            val follow = drag.value - sheet.value * sheetPx() * 0.18f
+                            translationY = follow * (1f - e) + slotShift() * e
+                            scaleX = scale
+                            scaleY = scale
+                        } else {
+                            val scale = 1f - 0.22f * p
+                            translationY = drag.value
+                            scaleX = scale
+                            scaleY = scale
+                            alpha = 1f - 0.25f * p
+                        }
+                    },
+                ) {
+                    PlayerBox(w, playback, s, controller, true, Modifier.fillMaxSize(), plain = true)
+                }
+                // The details sheet (upright): over the picture, from the bottom.
+                if (upright && sheet.value > 0f) {
+                    Box(
+                        Modifier.fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.4f * sheet.value))
+                            .pointerInput(Unit) { detectTapGestures { dragScope.launch { sheet.animateTo(0f, tween(200, easing = ease)) } } },
+                    )
+                    Column(
+                        Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.6f)
+                            .graphicsLayer { translationY = (1f - sheet.value) * size.height }
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                            .background(VideoColors.Background),
+                    ) {
+                        WatchDetails(controller, w, s, onShare, onSignIn, seek, showRelated = false)
+                    }
+                }
             }
         }
         else -> BoxWithConstraints(modifier = modifier.fillMaxSize()) {
@@ -329,14 +448,14 @@ private fun AmbientGlow(picture: String?, modifier: Modifier) {
 }
 
 @Composable
-private fun PlayerBox(w: WatchState, playback: VideoPlayback?, s: VideoStrings, controller: VideosController, fullscreen: Boolean, modifier: Modifier) {
+private fun PlayerBox(w: WatchState, playback: VideoPlayback?, s: VideoStrings, controller: VideosController, fullscreen: Boolean, modifier: Modifier, plain: Boolean = false) {
     val fill by controller.fill.collectAsState()
     val (onTv, tvState) = castingHere(w)
     if (onTv) {
         Box(modifier = modifier.background(Color.Black)) { CastPanel(w, tvState, s, controller) }
         return
     }
-    Box(modifier = modifier.background(Color.Black)) {
+    Box(modifier = if (plain) modifier else modifier.background(Color.Black)) {
         val isPlaying = playback?.isPlaying?.collectAsState()?.value ?: false
         val buffering = playback?.buffering?.collectAsState()?.value ?: false
         val playError = playback?.error?.collectAsState()?.value
