@@ -1099,6 +1099,12 @@ class VideosController(
     /** The small pictures of the open video, shown over the seek bar while seeking. */
     val preview: StateFlow<com.qmusic.engine.models.PreviewFrames?> = _preview.asStateFlow()
 
+    private val shortPreviews = mutableMapOf<String, com.qmusic.engine.models.PreviewFrames>()
+
+    /** The small pictures of a Short (shown over its line while it is wound), fetched once. */
+    suspend fun shortPreview(id: String): com.qmusic.engine.models.PreviewFrames? =
+        shortPreviews[id] ?: service.previewFrames(id).getOrNull()?.also { shortPreviews[id] = it }
+
     private suspend fun loadPreview(id: String) {
         _preview.value = null
         val frames = service.previewFrames(id).getOrNull()

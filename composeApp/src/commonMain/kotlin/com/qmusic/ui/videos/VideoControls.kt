@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -184,6 +185,9 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
         }
     }
     val device = rememberDeviceControls()
+    // Upright full screen: the whole screen is for pulling the picture down (or the details up), so the sides do not
+    // change the brightness or the volume there (that is for the sideways full screen).
+    val upright by controller.fullscreenUpright.collectAsState()
     // The brightness or volume being changed, and how far: shown for a moment.
     var hud by remember { mutableStateOf<Pair<String, Float>?>(null) }
     LaunchedEffect(hud) {
@@ -274,8 +278,8 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
         modifier = Modifier
             .fillMaxSize()
             // Full screen only: drag up and down on the left third for brightness, on the right third for volume.
-            .pointerInput(fullscreen, device) {
-                if (!fullscreen || device == null) return@pointerInput
+            .pointerInput(fullscreen, device, upright) {
+                if (!fullscreen || device == null || upright) return@pointerInput
                 var area = 0
                 var value = 0f
                 detectVerticalDragGestures(
@@ -401,7 +405,9 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)))
 
             // Top: shrink (or leave full screen), the title in full screen, the lock, the settings.
-            Row(modifier = Modifier.align(Alignment.TopStart).fillMaxWidth().padding(horizontal = 4.dp, vertical = if (fullscreen) 6.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Upright full screen draws up to the very top: the camera hole is under it, so the row starts below it.
+            val topGap = if (fullscreen && upright) 30.dp else 0.dp
+            Row(modifier = Modifier.align(Alignment.TopStart).fillMaxWidth().displayCutoutPadding().padding(top = topGap).padding(horizontal = 4.dp, vertical = if (fullscreen) 6.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { if (fullscreen) controller.setFullscreen(false) else controller.pop() }) {
                     Icon(QMusicIcons.ChevronDown, null, tint = Color.White, modifier = Modifier.size(28.dp))
                 }
