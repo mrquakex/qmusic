@@ -38,6 +38,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 object UpdateReady {
     val version = MutableStateFlow<String?>(null)
     var install: (() -> Unit)? = null
+
+    /**
+     * The phone can update without a question: the update is fetched in the background and goes in when the app is not
+     * in use (true), instead of at once over the app being used. Null or false: the usual way.
+     */
+    var quiet: (() -> Boolean)? = null
 }
 
 /** Hidden for the rest of the time the app is open ("Later" was tapped). */

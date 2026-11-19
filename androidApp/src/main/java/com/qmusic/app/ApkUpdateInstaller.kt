@@ -78,9 +78,9 @@ class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
      * (when the app is not on screen); otherwise the system confirmation sheet appears, via [InstallResultReceiver].
      */
     private fun commit(file: File) {
-        // Xiaomi's system blocks the install sessions of other apps (it fails without a word): its own installer is
-        // opened instead, which shows the usual Update button.
-        if (isXiaomi()) {
+        // Xiaomi's system may block quiet installs (some fail without a word): the quiet way is tried first, and when no
+        // answer comes in time, or it failed before on this phone, its own installer opens (the usual Update button).
+        if (isXiaomi() && XiaomiInstall.needsSystemScreen(context)) {
             openSystemInstaller(context, file)
             return
         }
@@ -88,6 +88,10 @@ class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+            }
+            // Android 14+: Nuvelo owns its updates from now on, so the next ones stay quiet (no other installer takes over).
+            if (Build.VERSION.SDK_INT >= 34) {
+                runCatching { setRequestUpdateOwnership(true) }
             }
         }
         val sessionId = installer.createSession(params)
@@ -106,6 +110,7 @@ class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
             )
             session.commit(result.intentSender)
         }
+        if (isXiaomi()) XiaomiInstall.watch(context, file)
     }
 
     /**
@@ -179,5 +184,39 @@ class ApkUpdateInstaller(private val context: Context) : UpdateInstaller {
         config.setLocale(locale)
         val localizedContext = context.createConfigurationContext(config)
         return localizedContext.getString(resId, *formatArgs)
+    }
+}
+
+/**
+ * Xiaomi and the quiet install: tried first; any answer from Android counts as a way through. No answer within a while
+ * (the system swallowed it) or a refusal: the system's own install screen, and this phone uses it from then on.
+ */
+internal object XiaomiInstall {
+    private const val PREFS = "nuvelo_xiaomi_install"
+    private const val KEY_SYSTEM = "system_screen"
+    private const val KEY_ANSWER = "answer_at"
+    private const val WAIT_MS = 45_000L
+
+    fun needsSystemScreen(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_SYSTEM, false)
+
+    /** Android answered the session (installed, asks, or refused). */
+    fun answered(context: Context, ok: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putLong(KEY_ANSWER, System.currentTimeMillis())
+            .apply { if (!ok) putBoolean(KEY_SYSTEM, true) }
+            .apply()
+    }
+
+    fun watch(context: Context, file: File) {
+        val app = context.applicationContext
+        val started = System.currentTimeMillis()
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            if (prefs.getLong(KEY_ANSWER, 0L) < started) {
+                prefs.edit().putBoolean(KEY_SYSTEM, true).apply()
+                openSystemInstaller(app, file)
+            }
+        }, WAIT_MS)
     }
 }

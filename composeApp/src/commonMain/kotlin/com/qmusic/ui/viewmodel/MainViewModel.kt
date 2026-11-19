@@ -2433,7 +2433,7 @@ class MainViewModel(
     }
 
     /** [silent]: the automatic check at launch only says something when there is a new version. */
-    fun checkForUpdates(silent: Boolean = false) {
+    fun checkForUpdates(silent: Boolean = false, now: Boolean = false) {
         _isCheckingUpdate.value = true
         _updateMessage.value = null
         _updateInfo.value = null
@@ -2447,8 +2447,10 @@ class MainViewModel(
                     _updateMessage.value = strings.updateAvailable(info.versionName)
                     // Found when the app opened: install it straight away, or offer it, as the person chose.
                     if (silent) {
-                        // Updating is mandatory: a version found at launch goes in.
-                        installUpdate()
+                        // Updating is mandatory: a version found at launch goes in; where the phone can do it without a
+                        // question, quietly when the app is next out of use (not over the person using it).
+                        // (The person asked for it [now]: at once.)
+                        if (now || com.qmusic.ui.UpdateReady.quiet?.invoke() != true) installUpdate()
                     }
                 } else if (!silent) {
                     _updateMessage.value = strings.latestVersion

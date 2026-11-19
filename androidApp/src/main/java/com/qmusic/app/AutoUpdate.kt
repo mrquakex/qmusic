@@ -83,6 +83,14 @@ object AutoUpdate {
     fun hookBanner(context: Context) {
         val app = context.applicationContext
         com.qmusic.ui.UpdateReady.install = { installNow(app) }
+        com.qmusic.ui.UpdateReady.quiet = {
+            if (canBeSilent(app)) {
+                schedule(app)
+                true
+            } else {
+                false
+            }
+        }
         val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         com.qmusic.ui.UpdateReady.version.value = if (ready(app) != null) prefs.getString(KEY_VERSION, null) else null
     }

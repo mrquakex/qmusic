@@ -413,7 +413,7 @@ class MainActivity : AppCompatActivity() {
         if (AutoUpdate.installNow(this)) return
         viewModel?.apply {
             selectTab(ScreenTab.SETTINGS)
-            checkForUpdates(silent = true)
+            checkForUpdates(silent = true, now = true)
         }
     }
 

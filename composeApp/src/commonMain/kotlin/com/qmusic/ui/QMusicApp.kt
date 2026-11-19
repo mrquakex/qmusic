@@ -228,7 +228,7 @@ fun QMusicApp(
             val chatScope = rememberCoroutineScope()
             val chatController = remember(chatBackend) { chatBackend?.let { com.qmusic.ui.chat.ChatController(it, chatScope) } }
             // "Update" on the page an admin's least version puts up: the updater looks for the new version and puts it in.
-            LaunchedEffect(Unit) { com.qmusic.ui.chat.ForcedUpdate.requests.collect { viewModel.checkForUpdates(silent = true) } }
+            LaunchedEffect(Unit) { com.qmusic.ui.chat.ForcedUpdate.requests.collect { viewModel.checkForUpdates(silent = true, now = true) } }
             androidx.compose.runtime.SideEffect {
                 val home = com.qmusic.ui.chat.AppHome
                 home.messagesFirst.value = homeIsChat && chatController != null
