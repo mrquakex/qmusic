@@ -248,6 +248,7 @@ fun VideosApp(
                         target = below,
                         depth = routes.count { it !is VideoRoute.Watch },
                         contentKey = { r -> r?.let { if (it is VideoRoute.Watch) null else it } },
+                        background = VideoColors.Background,
                     ) { page ->
                         when (page) {
                             // (Shorts play in the same player: not drawn under a video.)

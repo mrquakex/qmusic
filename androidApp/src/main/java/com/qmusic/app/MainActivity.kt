@@ -115,6 +115,11 @@ class MainActivity : AppCompatActivity() {
         // Live location: sharings that were going on carry on.
         com.qmusic.ui.chat.LiveLocations.init(this)
         com.qmusic.ui.chat.ArrivalWatch.init(this)
+        signInForTestIfAsked(intent)
+        // The last crash (if any) goes to the admins' panel, once.
+        container.crashReports.lastReport.value?.let { report ->
+            com.qmusic.ui.chat.AdminCrashes.report(this, report)
+        }
         // The secret space: its settings kept, screenshots blocked while it shows, and it locks when the screen goes off.
         val secretPrefs = getSharedPreferences("nuvelo_secret_chats", MODE_PRIVATE)
         com.qmusic.ui.chat.SecretSpace.load = { key -> secretPrefs.getString("s_$key", null) ?: if (key == "showCaller") (if (secretPrefs.getBoolean("showCaller", true)) "1" else "0") else null }
@@ -286,6 +291,16 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+    /**
+     * Signs in with a Firebase custom token handed in by adb (the test account on an emulator, which has no Google
+     * account). Only a token made with the server's private Firebase key works, so this opens no account to anyone else.
+     */
+    private fun signInForTestIfAsked(intent: Intent?) {
+        val token = intent?.getStringExtra("nuvelo_test_token")?.takeIf { it.isNotBlank() } ?: return
+        intent.removeExtra("nuvelo_test_token")
+        com.qmusic.ui.chat.TestSignIn.withToken(token)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -296,6 +311,7 @@ class MainActivity : AppCompatActivity() {
         GroupCallNotifications.openIfAsked(this, intent)
         acceptCallIfAsked(intent)
         CallNotifications.callBackIfAsked(this, intent)
+        signInForTestIfAsked(intent)
         openLinkIfAny(intent)
         openShortcutIfAny(intent)
     }

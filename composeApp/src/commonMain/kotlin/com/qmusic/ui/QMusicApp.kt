@@ -1111,6 +1111,8 @@ fun QMusicApp(
                     target = topRoute,
                     depth = routes.size,
                     backProgress = musicBack,
+                    // No page: the tabs under it show.
+                    paintEmpty = false,
                 ) { route -> when (route) {
                     is Route.Collection -> CollectionScreen(
                         item = route.item,

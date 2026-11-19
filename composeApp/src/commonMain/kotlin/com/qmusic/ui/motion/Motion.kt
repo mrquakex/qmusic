@@ -1,5 +1,7 @@
 package com.qmusic.ui.motion
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.background
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
@@ -75,17 +77,22 @@ object Motion {
  * top is drawn above the other the whole way.
  */
 fun <S> AnimatedContentTransitionScope<S>.pageTransform(forward: Boolean): ContentTransform {
-    val slide = tween<IntOffset>(Motion.LONG, easing = Motion.Emphasized)
+    // As Android and WhatsApp do it: the page on top slides the whole width, solid (no see-through, so the two pages
+    // never show through one another and nothing flashes empty); the page under it drifts a quarter aside, dimming.
+    val slide = tween<IntOffset>(PAGE_MS, easing = Motion.Emphasized)
+    val dim = tween<Float>(PAGE_MS, easing = Motion.Emphasized)
     return if (forward) {
-        (slideInHorizontally(slide) { it / 4 } + fadeIn(Motion.enter(Motion.MEDIUM, 50)))
-            .togetherWith(slideOutHorizontally(slide) { -it / 12 } + fadeOut(Motion.exit(Motion.MEDIUM)))
+        slideInHorizontally(slide) { it }
+            .togetherWith(slideOutHorizontally(slide) { -it / 4 } + fadeOut(dim, targetAlpha = 0.4f))
             .apply { targetContentZIndex = 1f }
     } else {
-        (slideInHorizontally(slide) { -it / 12 } + fadeIn(Motion.enter(Motion.MEDIUM)))
-            .togetherWith(slideOutHorizontally(slide) { it / 4 } + fadeOut(Motion.exit(Motion.MEDIUM)))
+        (slideInHorizontally(slide) { -it / 4 } + fadeIn(dim, initialAlpha = 0.4f))
+            .togetherWith(slideOutHorizontally(slide) { it })
             .apply { targetContentZIndex = -1f }
     }.using(SizeTransform(clip = false))
 }
+
+private const val PAGE_MS = 350
 
 /** Between tabs (siblings, no direction): the old fades out quickly, the new fades in and grows a touch (fade-through). */
 fun <S> AnimatedContentTransitionScope<S>.fadeThrough(): ContentTransform =
@@ -105,6 +112,10 @@ fun <T> PageHost(
     modifier: Modifier = Modifier,
     contentKey: (T) -> Any? = { it },
     backProgress: Float = 0f,
+    /** Each page is painted with this, so the page on top hides the one under it while it slides. */
+    background: androidx.compose.ui.graphics.Color = com.qmusic.ui.theme.BgRoot,
+    /** False where "no page" ([target] null) means the screen under the host shows through. */
+    paintEmpty: Boolean = true,
     content: @Composable (T) -> Unit,
 ) {
     var lastDepth by remember { mutableIntStateOf(depth) }
@@ -120,7 +131,8 @@ fun <T> PageHost(
     ) { page ->
         val onTop = contentKey(page) == contentKey(target)
         Box(
-            if (onTop && backProgress > 0f) Modifier.predictiveBack(backProgress) else Modifier,
+            (if (onTop && backProgress > 0f) Modifier.predictiveBack(backProgress) else Modifier)
+                .then(if (page != null || paintEmpty) Modifier.fillMaxSize().background(background) else Modifier),
         ) { content(page) }
     }
 }

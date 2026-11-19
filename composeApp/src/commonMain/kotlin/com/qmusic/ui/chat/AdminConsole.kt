@@ -21,6 +21,15 @@ interface AdminConsole {
     /** The least version that may be used (older ones are asked to update before going on); null: any. */
     val minVersion: StateFlow<String?>
 
+    /** "Under maintenance": while on, the messages show a maintenance page to everyone but the admins. */
+    val maintenance: StateFlow<Maintenance>
+
+    /** The automatic spam guard (messages a minute above which someone is muted for an hour). */
+    val spam: StateFlow<SpamGuard>
+
+    /** Sends the last crash of this phone to the admins (once per crash; needs a signed-in account). */
+    fun reportCrash(text: String)
+
     /** The newest announcement this person has not seen yet (a week at most), or null. */
     val announcement: StateFlow<Announcement?>
     fun dismissAnnouncement(id: String)
@@ -33,6 +42,10 @@ interface AdminConsole {
     fun bannedNames(): Flow<List<String>>
     fun stats(): Flow<AdminStats?>
 
+    /** The last 30 days, oldest first. */
+    fun daily(): Flow<List<DayStat>>
+    fun crashes(): Flow<List<CrashEntry>>
+
     /** [kind]: "ban" (the app is closed to them) or "mute" (they can read, not write); [until]: [AdminBan.FOREVER] for good. */
     suspend fun ban(uid: String, kind: String, until: Long, reason: String): Result<Unit>
     suspend fun unban(uid: String): Result<Unit>
@@ -43,7 +56,28 @@ interface AdminConsole {
     suspend fun deleteReport(id: String): Result<Unit>
     suspend fun setMinVersion(version: String?): Result<Unit>
     suspend fun banName(name: String, banned: Boolean): Result<Unit>
+    suspend fun setMaintenance(on: Boolean, text: String): Result<Unit>
+    suspend fun setSpam(on: Boolean, limit: Int): Result<Unit>
+    suspend fun setBadge(uid: String, developer: Boolean): Result<Unit>
+    suspend fun setClaude(uid: String, allowed: Boolean): Result<Unit>
+    suspend fun deleteCrash(id: String): Result<Unit>
 }
+
+data class Maintenance(val on: Boolean = false, val text: String = "")
+
+data class SpamGuard(val on: Boolean = true, val limit: Int = 40)
+
+/** One day of [AdminConsole.daily]: who showed up, who joined, how many accounts there were, how many messages went. */
+data class DayStat(val day: String, val active: Int, val newUsers: Int, val total: Int, val messages: Int)
+
+/** A crash sent by a phone: who, which version, which phone, and the stack trace. */
+data class CrashEntry(val id: String, val uid: String, val version: String, val device: String, val at: Long, val trace: String) {
+    /** The line that says what went wrong (the first of the trace), for grouping the same crash together. */
+    val headline: String get() = trace.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(160).orEmpty()
+}
+
+/** A conversation's files on the server: how much they take (no file is opened to count them). */
+data class StorageEntry(val id: String, val bytes: Long, val files: Int)
 
 data class AdminBan(val kind: String, val until: Long, val reason: String, val at: Long) {
     val forever: Boolean get() = until >= FOREVER
@@ -72,6 +106,9 @@ data class AdminUser(
     val lastSignIn: Long,
     val chats: Int,
     val ban: AdminBan?,
+    /** The "developer" badge, and leave to talk to Claude. */
+    val developer: Boolean = false,
+    val claude: Boolean = false,
 ) {
     /** The latest sign of life there is. */
     val lastActive: Long get() = maxOf(lastSeen, lastOpen, lastSignIn)
@@ -113,7 +150,7 @@ data class AdminActionEntry(
     val error: String?,
 )
 
-data class AdminStats(val at: Long, val mediaBytes: Long, val diskFree: Long, val diskTotal: Long)
+data class AdminStats(val at: Long, val mediaBytes: Long, val diskFree: Long, val diskTotal: Long, val storage: List<StorageEntry> = emptyList())
 
 data class Announcement(val id: String, val text: String, val at: Long)
 

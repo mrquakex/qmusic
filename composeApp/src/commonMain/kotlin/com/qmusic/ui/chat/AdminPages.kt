@@ -93,6 +93,9 @@ private enum class AdminTab(val tr: String, val en: String) {
     PEOPLE("Kişiler", "People"),
     REPORTS("Şikâyetler", "Reports"),
     GROUPS("Gruplar", "Groups"),
+    CHARTS("Grafikler", "Charts"),
+    STORAGE("Depolama", "Storage"),
+    CRASHES("Çökmeler", "Crashes"),
     ANNOUNCE("Duyuru", "Announce"),
     SETTINGS("Ayarlar", "Settings"),
     LOG("Kayıt", "Log"),
@@ -158,6 +161,9 @@ internal fun AdminPage(controller: ChatController, me: ChatUser) {
                 AdminTab.PEOPLE -> AdminPeople(users) { openUser = it }
                 AdminTab.REPORTS -> AdminReports(controller, console, reports, names, onUser = { openUser = it }, onGroup = { openGroup = it })
                 AdminTab.GROUPS -> AdminGroups(groups, names) { openGroup = it }
+                AdminTab.CHARTS -> AdminCharts(console)
+                AdminTab.STORAGE -> AdminStorage(controller, console, users, groups)
+                AdminTab.CRASHES -> AdminCrashes(console, users)
                 AdminTab.ANNOUNCE -> AdminAnnounce(controller, console)
                 AdminTab.SETTINGS -> AdminSettings(controller, console)
                 AdminTab.LOG -> AdminLog(console, names)
@@ -172,7 +178,7 @@ internal fun AdminPage(controller: ChatController, me: ChatUser) {
 private fun AdminSummary(console: AdminConsole, users: List<AdminUser>, reports: List<AdminReport>, groups: List<AdminGroup>, go: (AdminTab) -> Unit) {
     val stats by remember(console) { console.stats() }.collectAsState(initial = null)
     val now = nowMs()
-    val people = users.filter { it.uid != CLAUDE_BOT_UID }
+    val people = users.filter { it.uid != CLAUDE_BOT_UID && it.uid != "nuvelo" }
     val day = people.count { it.online || now - it.lastActive < 24 * 3600_000L }
     val week = people.count { it.online || now - it.lastActive < 7 * 24 * 3600_000L }
     val newWeek = people.count { it.created > 0 && now - it.created < 7 * 24 * 3600_000L }
@@ -433,6 +439,7 @@ private fun AdminUserPage(
             }
             ActionRow(t("Kullanıcı adını değiştir", "Change the user name"), "@" + user.username) { renaming = true }
         }
+        item { AdminUserExtras(controller, console, user, onDeleted = onBack) }
     }
 
     banning?.let { kind ->
@@ -723,6 +730,7 @@ private fun AdminSettings(controller: ChatController, console: AdminConsole) {
     val scope = rememberCoroutineScope()
     val versionOk = version.isEmpty() || Regex("^[0-9]{1,3}(\\.[0-9]{1,3}){0,3}$").matches(version)
     LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { MaintenanceAndSpam(controller, console) }
         item { AdminSection(t("Zorunlu güncelleme", "Required update")) }
         item {
             Text(
@@ -796,6 +804,14 @@ private fun actionLabel(kind: String, value: String): String = when (kind) {
     }
     "announce" -> t("Duyuru: ", "Announced: ") + value
     "stats" -> t("Sayıları yeniledi", "Refreshed the counts")
+    "maintenance" -> if (value == "on") t("Bakım modunu açtı", "Turned maintenance on") else t("Bakım modunu kapattı", "Turned maintenance off")
+    "spam" -> if (value == "off") t("Spam korumasını kapattı", "Turned the spam guard off") else t("Spam sınırı: $value/dk", "Spam limit: $value/min")
+    "autoMute" -> t("Spam koruması susturdu ($value mesaj/dk)", "Spam guard muted ($value messages/min)")
+    "badge" -> if (value == "on") t("Geliştirici rozeti verdi", "Gave the developer badge") else t("Rozeti aldı", "Took the badge")
+    "claude" -> if (value == "on") t("Claude erişimi verdi", "Gave Claude access") else t("Claude erişimini aldı", "Took Claude access")
+    "message" -> t("Nuvelo adına yazdı: ", "Wrote as Nuvelo: ") + value
+    "deleteMedia" -> t("Sohbet dosyalarını sildi", "Deleted a chat's files")
+    "deleteAccount" -> t("Hesap sildi", "Deleted an account")
     "minVersion" -> if (value.isEmpty()) t("Zorunlu güncellemeyi kaldırdı", "Removed the required update") else t("En az sürüm: $value", "Least version: $value")
     "banName" -> t("Kullanıcı adı yasağı", "User name bar")
     "report" -> t("Şikâyeti çözdü", "Handled a report")
@@ -883,6 +899,8 @@ internal fun AdminGate(console: AdminConsole?, onExit: () -> Unit, content: @Com
     val ban by console.myBan.collectAsState()
     val least by console.minVersion.collectAsState()
     val news by console.announcement.collectAsState()
+    val maintenance by console.maintenance.collectAsState()
+    val isAdmin by console.isAdmin.collectAsState()
     // A ban that ends while the app is open: the page goes by itself at that moment.
     var now by remember { mutableStateOf(nowMs()) }
     LaunchedEffect(ban) {
@@ -896,6 +914,7 @@ internal fun AdminGate(console: AdminConsole?, onExit: () -> Unit, content: @Com
     val oldVersion = least?.let { versionOlder(com.qmusic.ui.AppVersion.NAME, it) } == true
     when {
         oldVersion -> UpdateRequiredPage(least.orEmpty())
+        maintenance.on && !isAdmin -> MaintenancePage(maintenance.text, onExit)
         active != null && active.isBan -> BannedPage(active, onExit)
         else -> content()
     }

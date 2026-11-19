@@ -9,6 +9,7 @@
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 const fs = require("fs");
+const path = require("path");
 
 const DATABASE_URL = "https://qmusic-2552b-default-rtdb.europe-west1.firebasedatabase.app";
 const TURN_HOST = "159.195.147.140";
@@ -298,6 +299,16 @@ db.ref("notify").on("child_added", async (snap) => {
   const n = snap.val();
   snap.ref.remove().catch(() => {});
   try {
+    if (n && n.type === "chat" && typeof n.from === "string") {
+      countMessage();
+      watchSpam(n.from).catch((e) => log("spam check failed:", e.message));
+      // Someone answered Nuvelo's account: the founder reads it in their Claude chat.
+      if (n.to === NUVELO) {
+        const name = String(((await db.ref(`users/${n.from}/name`).get()).val()) || n.from);
+        await tellFounder(`${name} Nuvelo hesabına yazdı: ${String(n.body || "").slice(0, 500)}`, `${name} Nuvelo'ya yazdı`);
+        return;
+      }
+    }
     await handle(n);
   } catch (e) {
     log("notify failed:", e.message);
@@ -448,7 +459,20 @@ async function renameUser(uid, name) {
 async function resetProfile(uid, what) {
   if (!(await db.ref(`users/${uid}/name`).get()).exists()) throw new Error("no such user");
   const change = {};
-  if (what === "photo") Object.assign(change, { [`users/${uid}/photo`]: null, [`privateProfile/${uid}/photo`]: null });
+  if (what === "photo") {
+    Object.assign(change, { [`users/${uid}/photo`]: null, [`privateProfile/${uid}/photo`]: null });
+    // Its copies too: in the others' chat lists, their friend cards and the groups it is in.
+    const chats = (await db.ref(`userChats/${uid}`).get()).val() || {};
+    for (const [chatId, c] of Object.entries(chats)) {
+      if (GROUP.test(chatId)) change[`groups/${chatId}/members/${uid}/photo`] = null;
+      else if (c && c.other) change[`userChats/${c.other}/${chatId}/photo`] = null;
+    }
+    const friends = (await db.ref(`friends/${uid}`).get()).val() || {};
+    for (const other of Object.keys(friends)) {
+      change[`friends/${other}/${uid}/photo`] = null;
+      change[`userChats/${other}/${[uid, other].sort().join("_")}/photo`] = null;
+    }
+  }
   else if (what === "name") change[`users/${uid}/name`] = "Nuvelo kullanıcısı";
   else if (what === "about") Object.assign(change, { [`users/${uid}/about`]: null, [`privateProfile/${uid}/about`]: null });
   else if (what === "status") Object.assign(change, { [`statuses/${uid}`]: null, [`statusViews/${uid}`]: null });
@@ -496,8 +520,200 @@ async function writeStats() {
     mediaBytes: await du("/var/lib/qeyf-media"),
     diskFree,
     diskTotal,
+    storage: await storageByChat(),
+  });
+  await writeDaily(users);
+}
+
+// ------------------------------------------------------------------ admin: storage
+
+const MEDIA_ROOT = "/var/lib/qeyf-media";
+const DM_ID = /^[A-Za-z0-9]+_[A-Za-z0-9]+$/;
+
+/** How much each conversation's files take on the server (sizes only: no file is opened), the largest first. */
+async function storageByChat() {
+  let dirs = [];
+  try {
+    dirs = fs.readdirSync(MEDIA_ROOT, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+  } catch (_) {
+    return [];
+  }
+  const out = [];
+  for (const name of dirs) {
+    let files = 0;
+    try {
+      files = fs.readdirSync(path.join(MEDIA_ROOT, name)).length;
+    } catch (_) {}
+    out.push({ id: name, bytes: await du(path.join(MEDIA_ROOT, name)), files });
+  }
+  return out.sort((a, b) => b.bytes - a.bytes).slice(0, 40);
+}
+
+/** Deletes a conversation's files (its messages stay, showing the file as gone). Profile folders are not touched. */
+async function deleteMedia(chatId) {
+  if (!(DM_ID.test(chatId) || GROUP.test(chatId))) throw new Error("not a conversation");
+  fs.rmSync(path.join(MEDIA_ROOT, chatId), { recursive: true, force: true });
+  await writeStats();
+}
+
+// ------------------------------------------------------------------ admin: the day's numbers
+
+/** The day ("2026-11-19") in Turkey's time. */
+const dayKey = (ms) => new Date(ms + 3 * 3600 * 1000).toISOString().slice(0, 10);
+const dayStart = (key) => Date.parse(key + "T00:00:00Z") - 3 * 3600 * 1000;
+
+/**
+ * adminDaily/{day} = {active, newUsers, total, messages}: who showed up that day, who joined, how many there were, how
+ * many messages went (counted as they go; never what they say). Today's is written again each time; the joins and the
+ * totals of the past 30 days are filled in once from the sign-up dates.
+ */
+async function writeDaily(users) {
+  const now = Date.now();
+  const today = dayKey(now);
+  const start = dayStart(today);
+  const [presence, info] = await Promise.all([db.ref("presence").get(), db.ref("appInfo").get()]);
+  const pres = presence.val() || {};
+  const inf = info.val() || {};
+  const created = Object.values(users).map((u) => u.created);
+  let active = 0;
+  for (const [uid, u] of Object.entries(users)) {
+    const p = pres[uid] || {};
+    const i = inf[uid] || {};
+    const last = Math.max(Number(p.lastSeen) || 0, Number(i.at) || 0, u.lastSignIn || 0);
+    if (p.online === true || last >= start) active++;
+  }
+  const change = {
+    [`adminDaily/${today}/active`]: active,
+    [`adminDaily/${today}/newUsers`]: created.filter((c) => c >= start).length,
+    [`adminDaily/${today}/total`]: created.length,
+  };
+  const past = (await db.ref("adminDaily").orderByKey().limitToLast(40).get()).val() || {};
+  for (let d = 1; d <= 30; d++) {
+    const key = dayKey(now - d * 86400000);
+    if (past[key] && past[key].total != null) continue;
+    const from = dayStart(key);
+    const to = from + 86400000;
+    change[`adminDaily/${key}/newUsers`] = created.filter((c) => c >= from && c < to).length;
+    change[`adminDaily/${key}/total`] = created.filter((c) => c < to).length;
+  }
+  await db.ref().update(change);
+}
+
+/** A message went: today's count goes up by one. */
+function countMessage() {
+  db.ref(`adminDaily/${dayKey(Date.now())}/messages`).set(admin.database.ServerValue.increment(1)).catch(() => {});
+}
+
+// ------------------------------------------------------------------ admin: Nuvelo's own account
+
+const NUVELO = "nuvelo";
+
+/** Nuvelo's account (the one that writes to people for the admins), made once. */
+async function ensureNuvelo() {
+  const ref = db.ref(`users/${NUVELO}`);
+  if ((await ref.child("name").get()).exists()) return;
+  const taken = (await db.ref(`usernames/${NUVELO}`).get()).val();
+  await ref.set({ name: "Nuvelo", username: taken && taken !== NUVELO ? "nuvelo.app" : NUVELO, about: "Nuvelo ekibi" });
+  if (!taken) await db.ref(`usernames/${NUVELO}`).set(NUVELO);
+}
+
+/** A message to someone from Nuvelo's account: it comes into their chats as from "Nuvelo", with a notification. */
+async function messageFromNuvelo(uid, text) {
+  const body = String(text || "").trim().slice(0, 2000);
+  if (!body) throw new Error("empty");
+  if (!(await db.ref(`users/${uid}/name`).get()).exists()) throw new Error("no such user");
+  await ensureNuvelo();
+  const chat = [uid, NUVELO].sort().join("_");
+  const id = db.ref("x").push().key;
+  const TS = admin.database.ServerValue.TIMESTAMP;
+  await db.ref().update({
+    [`chats/${chat}/messages/${id}`]: { from: NUVELO, text: body, at: TS },
+    [`userChats/${uid}/${chat}/other`]: NUVELO,
+    [`userChats/${uid}/${chat}/lastText`]: body.slice(0, 120),
+    [`userChats/${uid}/${chat}/lastAt`]: TS,
+    [`userChats/${uid}/${chat}/lastFrom`]: NUVELO,
+    [`userChats/${uid}/${chat}/unread`]: admin.database.ServerValue.increment(1),
+    [`userChats/${NUVELO}/${chat}/other`]: uid,
+    [`userChats/${NUVELO}/${chat}/lastText`]: body.slice(0, 120),
+    [`userChats/${NUVELO}/${chat}/lastAt`]: TS,
+    [`notify/${db.ref("notify").push().key}`]: { from: NUVELO, to: uid, chatId: chat, type: "chat", body: body.slice(0, 200), at: TS },
   });
 }
+
+/** Something for the founder, in their Claude chat (with a notification). */
+async function tellFounder(text, push) {
+  const chat = [FOUNDER, "claudebot"].sort().join("_");
+  const id = db.ref("x").push().key;
+  const TS = admin.database.ServerValue.TIMESTAMP;
+  await db.ref().update({
+    [`chats/${chat}/messages/${id}`]: { from: "claudebot", text, at: TS },
+    [`userChats/${FOUNDER}/${chat}/lastText`]: text.slice(0, 120),
+    [`userChats/${FOUNDER}/${chat}/lastAt`]: TS,
+    [`userChats/${FOUNDER}/${chat}/lastFrom`]: "claudebot",
+    [`userChats/${FOUNDER}/${chat}/unread`]: admin.database.ServerValue.increment(1),
+    [`notify/${db.ref("notify").push().key}`]: { from: "claudebot", to: FOUNDER, chatId: chat, type: "chat", body: push, at: TS },
+  });
+}
+
+// ------------------------------------------------------------------ admin: spam
+
+/** appConfig/spam = {on, limit}: messages a minute above which someone is muted for an hour by themselves. */
+let spamConfig = { on: true, limit: 40 };
+db.ref("appConfig/spam").on("value", (snap) => {
+  const v = snap.val() || {};
+  spamConfig = { on: v.on !== false, limit: Math.max(10, Math.min(500, Number(v.limit) || 40)) };
+}, () => {});
+const sentTimes = new Map();
+
+/** Each message counts against its sender for a minute; too many, and they are muted for an hour (the founder hears). */
+async function watchSpam(from) {
+  if (!spamConfig.on || from === "claudebot" || from === NUVELO) return;
+  const now = Date.now();
+  const times = (sentTimes.get(from) || []).filter((t) => now - t < 60000);
+  times.push(now);
+  sentTimes.set(from, times);
+  if (times.length <= spamConfig.limit) return;
+  sentTimes.delete(from);
+  if (await isAdmin(from)) return;
+  const current = (await db.ref(`bans/${from}/until`).get()).val();
+  if (typeof current === "number" && current > now) return;
+  const TS = admin.database.ServerValue.TIMESTAMP;
+  await db.ref(`bans/${from}`).set({ kind: "mute", until: now + 3600000, reason: "Çok hızlı mesaj gönderimi (otomatik)", by: "auto", at: TS });
+  await db.ref("adminActions").push({ kind: "autoMute", target: from, value: String(times.length), by: "auto", at: TS, done: true });
+  const name = String(((await db.ref(`users/${from}/name`).get()).val()) || from);
+  await tellFounder(`Spam koruması: ${name} bir dakikada ${times.length} mesaj gönderdi, 1 saat susturuldu. Yönetim panelinden kaldırabilirsin.`, "Spam koruması: " + name + " susturuldu");
+  log("auto-muted", from);
+}
+
+// ------------------------------------------------------------------ admin: deleting an account
+
+/** Removes an account and what is its own (profile, lists, keys, statuses, files); others keep their copies of chats. */
+async function deleteAccount(uid) {
+  if (uid === FOUNDER || uid === NUVELO || uid === "claudebot" || (await isAdmin(uid))) throw new Error("protected");
+  const user = (await db.ref(`users/${uid}`).get()).val();
+  if (!user) throw new Error("no such user");
+  const chats = (await db.ref(`userChats/${uid}`).get()).val() || {};
+  const friends = (await db.ref(`friends/${uid}`).get()).val() || {};
+  const gone = {};
+  // Their messages, chat by chat.
+  for (const chatId of Object.keys(chats)) {
+    const mine = (await db.ref(`chats/${chatId}/messages`).orderByChild("from").equalTo(uid).get()).val() || {};
+    for (const id of Object.keys(mine)) gone[`chats/${chatId}/messages/${id}`] = null;
+    if (GROUP.test(chatId)) gone[`groups/${chatId}/members/${uid}`] = null;
+  }
+  for (const other of Object.keys(friends)) gone[`friends/${other}/${uid}`] = null;
+  for (const node of ["users", "userChats", "friends", "friendRequests", "sentRequests", "presence", "pushTokens", "blocked",
+    "privateProfile", "statuses", "statusViews", "statusSeen", "statusPrivacy", "statusMuted", "statusLikes", "publicKeys",
+    "keyBackup", "keyLink", "secretSpace", "appInfo", "bans", "callLog", "chatPrefs", "starred", "hidden", "broadcasts",
+    "claudeSettings", "claudeState", "claudeAccess", "badges", "listening", "incomingCall"]) gone[`${node}/${uid}`] = null;
+  if (user.username) gone[`usernames/${user.username}`] = null;
+  await db.ref().update(gone);
+  fs.rmSync(path.join(MEDIA_ROOT, "u_" + uid), { recursive: true, force: true });
+  await admin.auth().deleteUser(uid).catch(() => {});
+}
+
+ensureNuvelo().catch((e) => log("nuvelo account:", e.message));
+setInterval(() => writeStats().catch((e) => log("stats failed:", e.message)), 3600 * 1000);
 
 db.ref("adminActions").on("child_added", async (snap) => {
   const a = snap.val() || {};
@@ -513,8 +729,12 @@ db.ref("adminActions").on("child_added", async (snap) => {
       case "reset": await resetProfile(target, value); break;
       case "announce": await announce(value, a.by); break;
       case "stats": await writeStats(); break;
+      case "message": await messageFromNuvelo(target, value); break;
+      case "deleteMedia": await deleteMedia(target); break;
+      case "deleteAccount": await deleteAccount(target); break;
       // Written by the app itself; kept here as the record.
-      case "ban": case "mute": case "unban": case "minVersion": case "banName": case "report": break;
+      case "ban": case "mute": case "unban": case "minVersion": case "banName": case "report":
+      case "maintenance": case "spam": case "badge": case "claude": case "crash": break;
       default: return finish("unknown");
     }
     log(`admin ${a.kind} ${target}`);
