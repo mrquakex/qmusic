@@ -161,6 +161,9 @@ internal object VideoParser {
             duration = r["lengthText"].text()?.takeIf { !live },
             thumbnail = r.path("thumbnail", "thumbnails").lastImage(),
             isLive = live,
+            watchedPercent = r["thumbnailOverlays"].arr().orEmpty().firstNotNullOfOrNull {
+                it.path("thumbnailOverlayResumePlaybackRenderer", "percentDurationWatched").str()?.toIntOrNull()
+            }?.takeIf { it > 0 },
         )
     }
 
@@ -211,6 +214,10 @@ internal object VideoParser {
                 duration = badge?.get("text").str()?.takeIf { !liveBadge },
                 thumbnail = l.path("contentImage").firstSources(),
                 isLive = liveBadge,
+                // The red line under the picture: how far the account got in it.
+                watchedPercent = l.path("contentImage").all("thumbnailOverlayProgressBarViewModel").firstNotNullOfOrNull {
+                    it["startPercent"].str()?.toIntOrNull()
+                }?.takeIf { it > 0 },
             ),
         )
     }
@@ -224,6 +231,18 @@ internal object VideoParser {
     /** The sharpest picture under a card's image (thumbnail view models, or a playlist's stacked covers). */
     private fun JsonElement?.firstSources(): String? =
         this.all("image").firstNotNullOfOrNull { it["sources"].lastImage() }
+
+    /** reel/reel_watch_sequence: the clips that come next on the Shorts tab, and the token for more. */
+    fun shortsSequence(root: JsonElement?): ShortsSequence {
+        val items = root.path("entries").arr().orEmpty().mapNotNull { entry ->
+            val endpoint = entry.path("command", "reelWatchEndpoint")
+            val id = endpoint.path("videoId").str() ?: return@mapNotNull null
+            // Only the clip and its first frame come: the title and the channel are looked up as it nears the screen.
+            VideoItem(id = id, title = "", thumbnail = endpoint.path("thumbnail", "thumbnails").lastImage(), isShort = true)
+        }
+        val next = root.path("continuationEndpoint").all("continuationCommand").firstOrNull()?.get("token").str()
+        return ShortsSequence(items.distinctBy { it.id }, next)
+    }
 
     private fun shortsLockup(s: JsonObject?): VideoItem? {
         s ?: return null
@@ -309,21 +328,40 @@ internal object VideoParser {
         return token
     }
 
+    /**
+     * The row of filter chips: the home page's, a channel's sort ("Latest", "Popular", "Oldest") and a search's ("All",
+     * "Shorts", "Unwatched", "Watched", "Recently uploaded"...). The chip already chosen may have no token ("" = the list
+     * as first given).
+     */
     fun chips(root: JsonElement?): List<VideoChip> {
-        val bar = root.all("feedFilterChipBarRenderer").firstOrNull() ?: return emptyList()
+        val bar = root.all("feedFilterChipBarRenderer").firstOrNull()
+            ?: root.all("chipBarViewModel").firstOrNull()
+            ?: root.all("searchHeaderRenderer").firstOrNull()
+            ?: return emptyList()
+        fun endpointOf(command: JsonElement?) =
+            if (command.path("commandMetadata", "webCommandMetadata", "apiUrl").str()?.contains("search") == true) "search" else "browse"
         val chips = bar.all("chipCloudChipRenderer").mapNotNull { chip ->
+            val selected = chip["isSelected"].let { (it as? JsonPrimitive)?.booleanOrNull } == true
+            val token = chip.path("navigationEndpoint", "continuationCommand", "token").str()
+            if (token == null && !selected) return@mapNotNull null
             VideoChip(
                 text = chip["text"].text() ?: return@mapNotNull null,
-                token = chip.path("navigationEndpoint", "continuationCommand", "token").str() ?: return@mapNotNull null,
-                selected = chip["isSelected"].let { (it as? JsonPrimitive)?.booleanOrNull } == true,
+                token = token.orEmpty(),
+                selected = selected,
+                endpoint = endpointOf(chip["navigationEndpoint"]),
             )
         }
         if (chips.isNotEmpty()) return chips
         return bar.all("chipViewModel").mapNotNull { chip ->
+            val selected = chip["selectionState"].str()?.contains("SELECTED") == true ||
+                (chip["selected"] as? JsonPrimitive)?.booleanOrNull == true
+            val token = chip.firstString("token")
+            if (token == null && !selected) return@mapNotNull null
             VideoChip(
                 text = chip["text"].str() ?: return@mapNotNull null,
-                token = chip.firstString("token") ?: return@mapNotNull null,
-                selected = chip["selectionState"].str()?.contains("SELECTED") == true,
+                token = token.orEmpty(),
+                selected = selected,
+                endpoint = endpointOf(chip.path("tapCommand", "innertubeCommand")),
             )
         }
     }

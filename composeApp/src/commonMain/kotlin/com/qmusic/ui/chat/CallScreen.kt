@@ -352,7 +352,7 @@ private fun CallBackdrop(photo: String?) {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (photo != null) {
             coil3.compose.AsyncImage(
-                model = photo.replace("=s96-c", "=s512-c"),
+                model = sizedPhoto(photo, 512),
                 contentDescription = null,
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                 alpha = 0.55f,

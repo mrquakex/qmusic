@@ -1,5 +1,7 @@
 package com.qmusic.ui
 
+import com.qmusic.ui.motion.fadeThrough
+import com.qmusic.ui.motion.sectionEnter
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.sp
@@ -225,6 +227,8 @@ fun QMusicApp(
             val chatBackend = com.qmusic.ui.chat.rememberChatBackend()
             val chatScope = rememberCoroutineScope()
             val chatController = remember(chatBackend) { chatBackend?.let { com.qmusic.ui.chat.ChatController(it, chatScope) } }
+            // "Update" on the page an admin's least version puts up: the updater looks for the new version and puts it in.
+            LaunchedEffect(Unit) { com.qmusic.ui.chat.ForcedUpdate.requests.collect { viewModel.checkForUpdates(silent = true) } }
             androidx.compose.runtime.SideEffect {
                 val home = com.qmusic.ui.chat.AppHome
                 home.messagesFirst.value = homeIsChat && chatController != null
@@ -596,6 +600,8 @@ fun QMusicApp(
                 )
                 return@CompositionLocalProvider
             }
+            // Moving between the messages, the videos and the music: the section coming in fades in and settles.
+            val sectionModifier = modifier.sectionEnter(if (chatOpen && chatController != null) 0 else if (videosOpen) 1 else 2)
             if (chatOpen && chatController != null) {
                 val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
                 com.qmusic.ui.chat.ChatApp(
@@ -654,7 +660,7 @@ fun QMusicApp(
                         }
                     },
                     onExit = { chatOpen = false },
-                    modifier = modifier,
+                    modifier = sectionModifier,
                 )
                 return@CompositionLocalProvider
             }
@@ -669,7 +675,7 @@ fun QMusicApp(
                     videosController.warmUp()
                 }
                 val shareVideo = rememberShare()
-                Box(modifier = modifier.fillMaxSize()) {
+                Box(modifier = sectionModifier.fillMaxSize()) {
                     val videoStrings = if (language == "en") com.qmusic.ui.videos.VideoStrings.English else com.qmusic.ui.videos.VideoStrings.Turkish
                     com.qmusic.ui.videos.VideosApp(
                         controller = videosController,
@@ -849,9 +855,10 @@ fun QMusicApp(
         PlatformBackHandler(enabled = homeIsChat && chatAvailable) { chatOpen = true }
         // System Back: close the player first, then the topmost page.
         PlatformBackHandler(enabled = isPlayerExpanded) { viewModel.setPlayerExpanded(false) }
-        PlatformBackHandler(enabled = !isPlayerExpanded && topRoute != null) { viewModel.popRoute() }
+        // The page on top goes, following the back gesture as it is drawn.
+        val musicBack = com.qmusic.ui.motion.rememberPredictiveBack(enabled = !isPlayerExpanded && topRoute != null) { viewModel.popRoute() }
 
-        BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        BoxWithConstraints(modifier = sectionModifier.fillMaxSize()) {
             val sheetHeightPx = constraints.maxHeight.toFloat()
             val scope = rememberCoroutineScope()
             // 0 = only the mini player, 1 = the full player. Dragging the mini player (or the full player's
@@ -915,7 +922,12 @@ fun QMusicApp(
             }
 
             val screenBody: @Composable () -> Unit = {
-                when (currentTab) {
+                // Tabs fade through one another.
+                androidx.compose.animation.AnimatedContent(
+                    targetState = currentTab,
+                    transitionSpec = { fadeThrough() },
+                    label = "musicTab",
+                ) { currentTab -> when (currentTab) {
                     ScreenTab.HOME -> HomeScreen(
                         sections = homeSections,
                         isOnline = isOnline,
@@ -1036,6 +1048,7 @@ fun QMusicApp(
                         ytArtists = ytArtists,
                         onOpenCollection = { viewModel.openCollection(it) },
                         onOpenStats = { viewModel.openStats() },
+                        onOpenLiked = { viewModel.openLiked() },
                     )
 
                     ScreenTab.SETTINGS -> SettingsScreen(
@@ -1091,10 +1104,14 @@ fun QMusicApp(
                         onChangeAccount = { viewModel.changeAccount() },
                         onOpenRingtones = if (viewModel.ringtones.available) ({ viewModel.openRingtones() }) else null,
                     )
-                }
+                } }
 
                 // Full-screen pages stacked above the tabs: the last one is on screen
-                when (val route = topRoute) {
+                com.qmusic.ui.motion.PageHost(
+                    target = topRoute,
+                    depth = routes.size,
+                    backProgress = musicBack,
+                ) { route -> when (route) {
                     is Route.Collection -> CollectionScreen(
                         item = route.item,
                         page = collectionPage,
@@ -1142,6 +1159,26 @@ fun QMusicApp(
                         studio = viewModel.ringtones,
                         onBack = { viewModel.popRoute() },
                         onOpenList = { viewModel.openRingtones() },
+                    )
+
+                    Route.Liked -> com.qmusic.ui.screens.LikedSongsScreen(
+                        songs = favorites,
+                        downloadedIds = downloadedIds,
+                        downloadProgress = downloadProgress,
+                        autoDownload = autoDownload,
+                        wifiOnly = wifiOnly,
+                        isFavoritePredicate = { it in favoriteIds },
+                        onBack = { viewModel.popRoute() },
+                        onPlayAll = { viewModel.playAll(it) },
+                        onShuffle = { viewModel.shuffleAll(it) },
+                        onAddToQueue = { list -> list.forEach { viewModel.addToQueue(it) } },
+                        onSongClick = { song, context -> viewModel.play(song, context) },
+                        onSongMore = { viewModel.showSongMenu(it) },
+                        onToggleFavorite = { viewModel.toggleFavorite(it) },
+                        onDownloadAll = { viewModel.downloadAll(it) },
+                        onCancelDownloads = { viewModel.cancelDownloads() },
+                        onAutoDownloadChange = { viewModel.setAutoDownloadLiked(it) },
+                        onWifiOnlyChange = { viewModel.setWifiOnly(it) },
                     )
 
                     Route.Ringtones -> com.qmusic.ui.screens.RingtonesScreen(
@@ -1194,7 +1231,7 @@ fun QMusicApp(
                     }
 
                     null -> Unit
-                }
+                } }
             }
 
             if (wide) {

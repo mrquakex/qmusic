@@ -221,6 +221,14 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
             MenuRow(if (ChatMusic.english) "Live locations" else "Canlı konumlar", if (ChatMusic.english) "Everyone sharing with you, on one map" else "Seninle konum paylaşan herkes tek haritada") { controller.push(ChatRoute.LivePeople) }
             MenuRow(s.broadcastsTitle, null) { controller.push(ChatRoute.Broadcasts) }
             MenuRow(s.statusPrivacyTitle, s.statusPrivacyNote) { controller.push(ChatRoute.StatusPrivacyPage) }
+            // Only for admins (the server refuses anyone else whatever the app shows).
+            val isAdmin by (controller.admin?.isAdmin ?: remember { kotlinx.coroutines.flow.MutableStateFlow(false) }).collectAsState()
+            if (isAdmin) {
+                MenuRow(
+                    if (ChatMusic.english) "Admin panel" else "Yönetim paneli",
+                    if (ChatMusic.english) "People, bans, reports, groups, announcements" else "Kişiler, ban, şikâyetler, gruplar, duyurular",
+                ) { controller.push(ChatRoute.Admin) }
+            }
         }
         item { SectionTitle(s.soundsTitle) }
         item { SoundSettings(s) }

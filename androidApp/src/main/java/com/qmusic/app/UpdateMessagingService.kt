@@ -38,6 +38,10 @@ class UpdateMessagingService : FirebaseMessagingService() {
             ChatPush.notify(applicationContext, message.data)
             return
         }
+        if (message.data["type"] == "announce") {
+            message.data["body"]?.takeIf { it.isNotBlank() }?.let { Announce.notify(applicationContext, it) }
+            return
+        }
         if (message.data["type"] != "update") return
         val version = message.data["version"] ?: return
         val summary = message.data["body"] ?: message.notification?.body
@@ -50,6 +54,42 @@ class UpdateMessagingService : FirebaseMessagingService() {
     /** The phone's push address changed: the messages account keeps the new one. */
     override fun onNewToken(token: String) {
         com.qmusic.ui.chat.FirebaseChatPushTokens.refresh()
+    }
+}
+
+/** A word from the admins to everyone (the admin panel's announcement): a notification; the app also shows it once. */
+object Announce {
+    private const val CHANNEL_ID = "nuvelo_news"
+    private const val NOTIFICATION_ID = 1004
+
+    fun notify(context: Context, text: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+        val tr = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, if (tr) "Duyurular" else "Announcements", NotificationManager.IMPORTANCE_DEFAULT),
+            )
+        }
+        val open = PendingIntent.getActivity(
+            context,
+            4,
+            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        manager.notify(
+            NOTIFICATION_ID,
+            NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
+                .setContentTitle("Nuvelo")
+                .setContentText(text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .setAutoCancel(true)
+                .setContentIntent(open)
+                .build(),
+        )
     }
 }
 

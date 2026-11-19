@@ -298,7 +298,7 @@ fun ZoomablePhoto(url: String, title: String, onDismiss: () -> Unit) {
         ) {
             AsyncImage(
                 // Google's pictures come small by default: the large one is asked for.
-                model = url.replace("=s96-c", "=s1600-c"),
+                model = sizedPhoto(url, 1600),
                 contentDescription = null,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize().graphicsLayer {

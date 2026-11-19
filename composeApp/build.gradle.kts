@@ -125,6 +125,9 @@ kotlin {
                 implementation(libs.kotlinx.coroutines.play.services)
                 implementation("androidx.mediarouter:mediarouter:1.7.0")
                 implementation("com.google.android.gms:play-services-cast-framework:21.5.0")
+                // Live location: a real map (vector, pinch to zoom, turn) and the phone's fused location.
+                implementation("org.maplibre.gl:android-sdk:13.6.1")
+                implementation("com.google.android.gms:play-services-location:21.3.0")
                 implementation(libs.koin.android)
             }
         }

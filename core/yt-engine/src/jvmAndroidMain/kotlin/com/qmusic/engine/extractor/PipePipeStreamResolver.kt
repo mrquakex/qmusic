@@ -160,11 +160,7 @@ private fun qualitiesOf(info: StreamInfo): List<VideoQuality> {
     if (!live.isNullOrBlank() && info.streamType.name.contains("LIVE")) {
         return listOf(VideoQuality(height = 0, fps = 0, videoUrl = live, audioUrl = null, isLive = true))
     }
-    val audio = info.audioStreams.originalSound()
-        .filter { it.isUrl }
-        .sortedWith(compareByDescending<dev.maxrave.pipepipe.extractor.stream.AudioStream> { it.format?.mimeType == "audio/mp4" }
-            .thenByDescending { it.averageBitrate })
-        .firstOrNull()
+    val audio = bestSound(info)
     val pictures = info.videoOnlyStreams.filter { it.isUrl && it.height > 0 }
     val separate = if (audio == null) emptyList() else pictures
         .groupBy { it.height }
@@ -184,6 +180,20 @@ private fun qualitiesOf(info: StreamInfo): List<VideoQuality> {
     return (separate + withSound.filter { it.height !in heights }).sortedByDescending { it.height }
 }
 
+/** On Android the player plays every format: the sound is simply the richest one (Opus, about 160 kbps, over AAC 128). */
+private val anyAudioFormat = System.getProperty("java.vm.vendor").orEmpty().contains("Android", ignoreCase = true)
+
+/**
+ * The sound to play a video with: the richest stream there is. The desktop player (JavaFX) plays only AAC in MP4, so
+ * there that comes first.
+ */
+private fun bestSound(info: StreamInfo): dev.maxrave.pipepipe.extractor.stream.AudioStream? =
+    info.audioStreams.originalSound()
+        .filter { it.isUrl }
+        .sortedWith(compareByDescending<dev.maxrave.pipepipe.extractor.stream.AudioStream> { anyAudioFormat || it.format?.mimeType == "audio/mp4" }
+            .thenByDescending { it.averageBitrate })
+        .firstOrNull()
+
 private fun pickVideoSource(info: StreamInfo, maxHeight: Int): VideoSource? {
     // Picture and sound come separately above 360p: H.264 plays on every phone's hardware decoder, so prefer it.
     val pictureOnly = info.videoOnlyStreams
@@ -193,11 +203,7 @@ private fun pickVideoSource(info: StreamInfo, maxHeight: Int): VideoSource? {
             .thenByDescending { it.bitrate })
         .firstOrNull()
     if (pictureOnly != null) {
-        val audio = info.audioStreams.originalSound()
-            .filter { it.isUrl }
-            .sortedWith(compareByDescending<dev.maxrave.pipepipe.extractor.stream.AudioStream> { it.format?.mimeType == "audio/mp4" }
-                .thenByDescending { it.averageBitrate })
-            .firstOrNull()
+        val audio = bestSound(info)
         if (audio != null) return VideoSource(pictureOnly.content, audio.content, pictureOnly.height)
     }
     val withSound = info.videoStreams

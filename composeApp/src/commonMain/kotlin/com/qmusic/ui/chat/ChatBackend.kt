@@ -538,6 +538,9 @@ interface ChatBackend {
     /** Voice and video calls, where this platform has them. */
     val calls: CallService? get() = null
 
+    /** Bans, announcements, the least version, and for admins the panel (null where there is no server). */
+    val admin: AdminConsole? get() = null
+
     // ------------------------------------------------------------------ files, voice, video
 
     /** Sends a voice message, a video or a file (it goes to the media server first). */

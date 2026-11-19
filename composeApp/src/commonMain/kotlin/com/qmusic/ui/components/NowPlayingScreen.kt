@@ -1,5 +1,6 @@
 package com.qmusic.ui.components
 
+import kotlin.math.roundToInt
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -195,6 +196,13 @@ fun NowPlayingScreen(
     var showSleepDialog by remember { mutableStateOf(false) }
     val artwork = track.thumbnail ?: track.thumbnails.lastOrNull()?.url
     val showVideo = track.hasVideo && videoMode
+    // 0 = the cover, 1 = the clip: the picture's box grows from the square cover to the full-width clip (and back),
+    // its corners straightening, the colours behind it going to black, as on YouTube Music.
+    val videoness by animateFloatAsState(
+        targetValue = if (showVideo) 1f else 0f,
+        animationSpec = androidx.compose.animation.core.tween(380, easing = com.qmusic.ui.motion.Motion.Emphasized),
+        label = "videoness",
+    )
 
     LaunchedEffect(pagerState.currentPage, track.id) {
         if (pagerState.currentPage == 1) onLoadLyrics()
@@ -233,6 +241,8 @@ fun NowPlayingScreen(
                     ),
                 ),
         )
+        // With the clip: plain black behind it, as on YouTube Music.
+        if (videoness > 0f) Box(Modifier.fillMaxSize().graphicsLayer { alpha = videoness }.background(Color.Black))
         }
 
         val topBar: @Composable () -> Unit = {
@@ -267,6 +277,8 @@ fun NowPlayingScreen(
                         title = track.title,
                         isPlaying = isPlaying,
                         showVideo = showVideo,
+                        videoness = { videoness },
+                        bleed = if (landscape) 0.dp else 22.dp,
                         coverAlpha = coverAlpha,
                         onCoverPositioned = onCoverPositioned,
                         modifier = Modifier.draggable(dragState, Orientation.Vertical, onDragStopped = { onSheetDragStopped(it) }),
@@ -522,6 +534,10 @@ private fun MediaPage(
     coverAlpha: () -> Float,
     onCoverPositioned: (Rect) -> Unit,
     modifier: Modifier = Modifier,
+    /** 0 = the cover, 1 = the clip (animated between). */
+    videoness: () -> Float = { if (showVideo) 1f else 0f },
+    /** How far the clip reaches past the page's side margins, to the screen's edges. */
+    bleed: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     // The cover breathes: it eases down while paused and springs back when the music starts.
     val scale by animateFloatAsState(
@@ -537,14 +553,25 @@ private fun MediaPage(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(if (showVideo) 16f / 9f else 1f)
+                // The clip runs edge to edge: the box widens past the side margins as it becomes the clip, and its
+                // height follows from the shape between a square and 16:9.
+                .layout { measurable, constraints ->
+                    val v = videoness()
+                    val extra = (bleed.toPx() * 2 * v).roundToInt()
+                    val width = constraints.maxWidth + extra
+                    val ratio = 1f + (16f / 9f - 1f) * v
+                    val height = (width / ratio).roundToInt()
+                    val placeable = measurable.measure(androidx.compose.ui.unit.Constraints.fixed(width, height))
+                    layout(constraints.maxWidth, height) { placeable.place(-extra / 2, 0) }
+                }
                 .onGloballyPositioned { onCoverPositioned(it.boundsInRoot()) }
                 .graphicsLayer {
+                    val v = videoness()
                     alpha = coverAlpha()
                     scaleX = scale
                     scaleY = scale
-                    shadowElevation = 48f
-                    shape = RoundedCornerShape(if (showVideo) 12.dp else 24.dp)
+                    shadowElevation = 48f * (1f - v)
+                    shape = RoundedCornerShape(24.dp * (1f - v))
                     clip = true
                 }
                 .background(DarkSurfaceVariant),

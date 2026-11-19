@@ -45,6 +45,8 @@ data class FeedState(
 class FeedLoader(
     private val scope: CoroutineScope,
     private val service: VideoService,
+    /** Where the next parts of this list are asked for: "browse", or "search" for search results. */
+    private val endpoint: String = "browse",
     private val first: suspend () -> Result<VideoFeed>,
 ) {
     private val _state = MutableStateFlow(FeedState())
@@ -66,7 +68,8 @@ class FeedLoader(
     fun selectChip(chip: VideoChip) {
         if (chip.selected) return
         _state.update { s -> s.copy(chips = s.chips.map { it.copy(selected = it.token == chip.token) }) }
-        run(chip)
+        // The chip of the list as it came first ("All") has no token of its own: the first list again.
+        run(chip.takeIf { it.token.isNotEmpty() })
     }
 
     private fun run(chip: VideoChip?) {
@@ -74,7 +77,7 @@ class FeedLoader(
         _state.update { it.copy(loading = true, error = false, signInNeeded = false, entries = if (chip != null) emptyList() else it.entries) }
         val keptChips = _state.value.chips
         job = scope.launch {
-            val result = if (chip != null) service.more(chip.token) else first()
+            val result = if (chip != null) service.more(chip.token, chip.endpoint) else first()
             result.fold(
                 onSuccess = { feed ->
                     if (chip == null || _state.value.entries.isEmpty()) VideoWarm.list(feed.entries)
@@ -101,7 +104,7 @@ class FeedLoader(
         if (s.loading || s.loadingMore) return
         _state.update { it.copy(loadingMore = true) }
         scope.launch {
-            service.more(token).fold(
+            service.more(token, endpoint).fold(
                 onSuccess = { feed ->
                     _state.update { cur ->
                         val seen = cur.entries.flatMap { it.ids() }.toHashSet()
@@ -442,7 +445,16 @@ class VideosController(
         return true
     }
 
-    fun open(item: VideoItem) = push(VideoRoute.Watch(item))
+    fun open(item: VideoItem) {
+        // Watched part of it on YouTube (the red line): it goes on from there, as YouTube would, unless this app
+        // has its own place for it.
+        val percent = item.watchedPercent
+        val length = durationMs(item.duration)
+        if (percent != null && percent in 1..94 && length != null && resume[item.id] == null) {
+            resume[item.id] = length * percent / 100
+        }
+        push(VideoRoute.Watch(item))
+    }
 
     /** How far the open video is being pulled down into the small player (0-1): the page under it shows meanwhile. */
     val watchDrag = MutableStateFlow(0f)
@@ -520,7 +532,7 @@ class VideosController(
         (_routes.value.lastOrNull() as? VideoRoute.Search)?.let { search(it.query) }
     }
 
-    private fun newResults(q: String) = FeedLoader(scope, service) { service.search(q, _filter.value) }
+    private fun newResults(q: String) = FeedLoader(scope, service, endpoint = "search") { service.search(q, _filter.value) }
 
     private fun search(q: String) {
         _query.value = q
@@ -788,6 +800,7 @@ class VideosController(
                         tabParams = params,
                         feed = FeedState(
                             entries = page.videos.entries,
+                            chips = page.videos.chips,
                             continuation = page.videos.continuation,
                             loaded = true,
                         ),
@@ -805,6 +818,36 @@ class VideosController(
     fun openChannelTab(params: String) {
         val id = _channel.value?.id ?: return
         loadChannel(id, params)
+    }
+
+    /** A sort chip of the channel's videos ("Latest", "Popular", "Oldest"): its list in place of the shown one. */
+    fun selectChannelChip(chip: VideoChip) {
+        val c = _channel.value ?: return
+        if (chip.selected) return
+        if (chip.token.isEmpty()) {
+            loadChannel(c.id, c.tabParams)
+            return
+        }
+        channelJob?.cancel()
+        channelMore?.cancel()
+        _channel.update { cur ->
+            cur?.copy(feed = cur.feed.copy(entries = emptyList(), loading = true, continuation = null, chips = cur.feed.chips.map { it.copy(selected = it.token == chip.token) }))
+        }
+        channelJob = scope.launch {
+            service.more(chip.token, chip.endpoint).fold(
+                onSuccess = { feed ->
+                    _channel.update { cur ->
+                        if (cur?.id != c.id) cur else cur.copy(
+                            feed = cur.feed.copy(entries = feed.entries, continuation = feed.continuation, loading = false, loaded = true, error = false),
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    if (e is CancellationException) throw e
+                    _channel.update { it?.copy(feed = it.feed.copy(loading = false, loaded = true, error = true)) }
+                },
+            )
+        }
     }
 
     fun loadMoreChannel() {
@@ -881,6 +924,9 @@ class VideosController(
     private val _shorts = MutableStateFlow(ShortsState())
     val shorts: StateFlow<ShortsState> = _shorts.asStateFlow()
     private var shortsContinuation: String? = null
+
+    /** The token for the next Shorts of YouTube's own Shorts line (null: that line is not in use or is over). */
+    private var shortsSequenceToken: String? = null
     private var shortsMore: Job? = null
     private val _liked = MutableStateFlow<Set<String>>(emptySet())
 
@@ -920,6 +966,20 @@ class VideosController(
         scope.launch {
             // With an account, the Shorts YouTube put on the home page come first: they are the account's own.
             val personal = if (service.isSignedIn) service.home().getOrNull()?.shortItems().orEmpty() else emptyList()
+            // As YouTube's Shorts tab: one clip, then the line YouTube itself plays after it (for the account).
+            shortsSequenceToken = null
+            val seed = personal.firstOrNull()
+                ?: discoverFeed(listOf(SHORTS_QUERY), 1, VideoSearchFilter.SHORTS).getOrNull()?.shortItems()?.firstOrNull()
+            val line = seed?.let { service.shortsSequence(it.id).getOrNull() }
+            if (seed != null && line != null && line.items.isNotEmpty()) {
+                shortsSequenceToken = line.continuation
+                val items = (listOf(seed) + line.items).distinctBy { it.id }
+                markSeenIds(items.map { it.id })
+                _shorts.value = ShortsState(items)
+                prepareShorts(0)
+                return@launch
+            }
+            // YouTube did not give its line: Shorts searches, as before.
             discoverFeed(listOf(SHORTS_QUERY) + SHORTS_TOPICS, 3, VideoSearchFilter.SHORTS).fold(
                 onSuccess = { feed ->
                     shortsContinuation = feed.continuation
@@ -967,6 +1027,9 @@ class VideosController(
                     cur.copy(
                         items = cur.items.map {
                             if (it.id != id) it else it.copy(
+                                // YouTube's Shorts line names only the clip: the title comes from here.
+                                title = it.title.ifBlank { d.title },
+                                views = it.views ?: d.views,
                                 channelId = d.channelId ?: it.channelId,
                                 channelName = d.channelName ?: it.channelName,
                                 channelAvatar = d.channelAvatar ?: it.channelAvatar,
@@ -1002,6 +1065,26 @@ class VideosController(
                 return added
             }
             var added = 0
+            // YouTube's own line first, as long as it goes on.
+            shortsSequenceToken?.let { token ->
+                service.shortsSequence(null, token).onSuccess { line ->
+                    shortsSequenceToken = line.continuation
+                    added += add(line.items)
+                }.onFailure { shortsSequenceToken = null }
+            }
+            // Its line can come one clip at a time: started again from the last clip, it goes on.
+            if (added < SHORTS_MORE_MIN) {
+                _shorts.value.items.lastOrNull()?.let { last ->
+                    service.shortsSequence(last.id).onSuccess { line ->
+                        if (line.continuation != null) shortsSequenceToken = line.continuation
+                        added += add(line.items)
+                    }
+                }
+            }
+            if (added >= SHORTS_MORE_MIN) {
+                gotAny = true
+                return@launch
+            }
             for (attempt in 0 until SHORTS_MORE_ATTEMPTS) {
                 val last = _shorts.value.items.lastOrNull() ?: return@launch
                 added += add(service.watch(last.id).getOrNull()?.related?.shortItems().orEmpty())
@@ -1214,6 +1297,10 @@ class VideosController(
         }
     }
 
+    init {
+        VideoResume.positions.value = resume.toMap()
+    }
+
     /** Where this video was left (0 when it was not, or was nearly over). */
     fun resumeFor(id: String): Long = resume[id] ?: 0L
 
@@ -1223,11 +1310,20 @@ class VideosController(
         if (positionMs > RESUME_MIN_POSITION_MS && positionMs < durationMs - RESUME_END_MARGIN_MS) resume[id] = positionMs
         while (resume.size > RESUME_KEPT) resume.remove(resume.keys.first())
         settings.setString(KEY_RESUME, resume.entries.joinToString(",") { "${it.key}:${it.value}" })
+        VideoResume.positions.value = resume.toMap()
     }
 
     /** Tells YouTube this video was watched, so it is in the account's history and the suggestions learn from it. */
     fun reportWatch(id: String) {
         scope.launch { service.reportWatch(id) }
+    }
+
+    /** As [reportWatch], waited for: the watch time can be told after it. */
+    suspend fun startWatch(id: String) = service.reportWatch(id)
+
+    /** How much of [id] was watched (see VideoService.reportProgress); sent even when the page that asked has gone. */
+    fun watchProgress(id: String, fromSec: Double, toSec: Double, lengthSec: Double, ended: Boolean) {
+        scope.launch { service.reportProgress(id, fromSec, toSec, lengthSec, ended) }
     }
 
     // ------------------------------------------------------------------ subtitles

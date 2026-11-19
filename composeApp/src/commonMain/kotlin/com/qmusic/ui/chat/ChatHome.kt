@@ -315,7 +315,7 @@ private fun FilterChip(text: String, selected: Boolean, onClick: () -> Unit) {
         text,
         color = if (selected) InkInverse else TextPrimary,
         fontSize = 14.sp,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Medium,
         modifier = Modifier
             .clip(RoundedCornerShape(50))
             .background(if (selected) Ink else DarkSurfaceVariant)
@@ -527,6 +527,8 @@ private fun ChatsTab(
                     )
                 }
                 else -> items(list, key = { it.id }) { t ->
+                    // Comes in fading, and slides to its new place when the list changes.
+                    androidx.compose.foundation.layout.Box(Modifier.animateItem(fadeInSpec = androidx.compose.animation.core.tween(220, easing = com.qmusic.ui.motion.Motion.EmphasizedDecelerate), placementSpec = androidx.compose.animation.core.spring(stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow), fadeOutSpec = androidx.compose.animation.core.tween(150))) {
                     val hasStatus = !t.isGroup && t.other.uid in withStatus
                     ThreadRow(
                         t, me, s,
@@ -538,6 +540,7 @@ private fun ChatsTab(
                         onListening = { listeningNow[t.other.uid]?.let { controller.openShare(it) } },
                         tick = rememberListTick(controller, t, me),
                     ) { controller.openConversation(t.other) }
+                    }
                 }
             }
         }
@@ -662,6 +665,8 @@ private fun GroupsTab(controller: ChatController, s: ChatStrings, me: ChatUser, 
             if (groups.isNotEmpty()) item(key = "head") { SectionTitle(s.yourGroups) }
             if (all != null && groups.isEmpty()) item(key = "empty") { EmptyNote(if (search.isNotBlank()) s.noResults else s.noGroups) }
             items(groups, key = { it.id }) { t ->
+                // Comes in fading, and slides to its new place when the list changes.
+                androidx.compose.foundation.layout.Box(Modifier.animateItem(fadeInSpec = androidx.compose.animation.core.tween(220, easing = com.qmusic.ui.motion.Motion.EmphasizedDecelerate), placementSpec = androidx.compose.animation.core.spring(stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow), fadeOutSpec = androidx.compose.animation.core.tween(150))) {
                 ThreadRow(
                     t, me, s,
                     onAvatar = { peek = t.other },
@@ -669,6 +674,7 @@ private fun GroupsTab(controller: ChatController, s: ChatStrings, me: ChatUser, 
                     now = now,
                     tick = rememberListTick(controller, t, me),
                 ) { controller.openConversation(t.other) }
+                }
             }
         }
         HomeFab(QMusicIcons.Group, s.newGroup, Modifier.align(Alignment.BottomEnd)) { controller.openNewGroup() }
@@ -1032,7 +1038,7 @@ private fun AvatarPeek(
             ) {
                 if (user.photo != null) {
                     coil3.compose.AsyncImage(
-                        model = user.photo,
+                        model = sizedPhoto(user.photo, 1024),
                         contentDescription = null,
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),

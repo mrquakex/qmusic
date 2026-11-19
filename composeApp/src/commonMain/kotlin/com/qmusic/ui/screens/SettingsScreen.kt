@@ -98,7 +98,7 @@ fun SettingsScreen(
     autoUpdate: Boolean = true,
     audioQualityWifi: String = "HIGH",
     onAudioQualityWifiChange: (String) -> Unit = {},
-    audioQualityMobile: String = "NORMAL",
+    audioQualityMobile: String = "HIGH",
     onAudioQualityMobileChange: (String) -> Unit = {},
     normalizeVolume: Boolean = true,
     onNormalizeVolumeChange: (Boolean) -> Unit = {},

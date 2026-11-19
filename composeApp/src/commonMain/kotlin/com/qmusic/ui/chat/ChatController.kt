@@ -65,6 +65,8 @@ sealed interface ChatRoute {
     data object Encryption : ChatRoute
     /** Everyone sharing their live location with this person, on one map. */
     data object LivePeople : ChatRoute
+    /** The admin panel (only for admins; the server checks every step again). */
+    data object Admin : ChatRoute
 }
 
 /** The routes that belong to the secret space (closed when it locks). */
@@ -85,6 +87,9 @@ class ChatController(
 
     /** Voice and video calls (null where the platform has none). */
     val calls: CallService? = backend.calls
+
+    /** Bans, announcements, the least version; the admin panel for admins. */
+    val admin: AdminConsole? = backend.admin
 
     fun reportError(message: String) {
         _error.value = message

@@ -41,3 +41,8 @@ actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
         onDispose { DesktopBackDispatcher.unregister(entry) }
     }
 }
+
+@Composable
+actual fun PlatformPredictiveBackHandler(enabled: Boolean, onProgress: (Float) -> Unit, onCancel: () -> Unit, onBack: () -> Unit) {
+    PlatformBackHandler(enabled, onBack)
+}

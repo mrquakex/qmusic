@@ -58,6 +58,9 @@ async function upload(req, res, url) {
     return reply(res, 401, { error: "sign in" });
   }
   if (!(await isMember(chatId, uid))) return reply(res, 403, { error: "not a member" });
+  // Banned or muted by an admin: nothing goes up until it ends.
+  const ban = (await db.ref(`bans/${uid}/until`).get()).val();
+  if (typeof ban === "number" && ban > Date.now()) return reply(res, 403, { error: "banned" });
   const length = Number(req.headers["content-length"] || 0);
   if (length > MAX_BYTES) return reply(res, 413, { error: "too large" });
 

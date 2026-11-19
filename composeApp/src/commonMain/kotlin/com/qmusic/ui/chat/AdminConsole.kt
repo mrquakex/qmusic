@@ -1,0 +1,135 @@
+package com.qmusic.ui.chat
+
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.StateFlow
+
+/**
+ * Running the app: bans and mutes, reports, closing groups, setting profiles right, announcements, the least version
+ * that may be used, barred user names, and counts. Everyone has the part about themselves (their ban, the least
+ * version, the latest announcement); the rest works only for admins (admins/{uid} = true, set on the server, never from
+ * a phone) and the database rules and the server check every step again. Nobody's messages are read: only what someone
+ * chose to send in a report.
+ */
+interface AdminConsole {
+    /** This account may use the panel. */
+    val isAdmin: StateFlow<Boolean>
+
+    /** This account's ban or mute, while one is set (it may have ended already: see [AdminBan.activeAt]). */
+    val myBan: StateFlow<AdminBan?>
+
+    /** The least version that may be used (older ones are asked to update before going on); null: any. */
+    val minVersion: StateFlow<String?>
+
+    /** The newest announcement this person has not seen yet (a week at most), or null. */
+    val announcement: StateFlow<Announcement?>
+    fun dismissAnnouncement(id: String)
+
+    fun users(): Flow<List<AdminUser>>
+    fun reports(): Flow<List<AdminReport>>
+    fun groups(): Flow<List<AdminGroup>>
+    fun actions(): Flow<List<AdminActionEntry>>
+    fun announcements(): Flow<List<Announcement>>
+    fun bannedNames(): Flow<List<String>>
+    fun stats(): Flow<AdminStats?>
+
+    /** [kind]: "ban" (the app is closed to them) or "mute" (they can read, not write); [until]: [AdminBan.FOREVER] for good. */
+    suspend fun ban(uid: String, kind: String, until: Long, reason: String): Result<Unit>
+    suspend fun unban(uid: String): Result<Unit>
+
+    /** What the server does: "closeGroup", "rename" (value: the new name), "reset" (value: photo/name/about/status), "announce", "stats". */
+    suspend fun request(kind: String, target: String = "", value: String = ""): Result<Unit>
+    suspend fun markReport(id: String, handled: String?): Result<Unit>
+    suspend fun deleteReport(id: String): Result<Unit>
+    suspend fun setMinVersion(version: String?): Result<Unit>
+    suspend fun banName(name: String, banned: Boolean): Result<Unit>
+}
+
+data class AdminBan(val kind: String, val until: Long, val reason: String, val at: Long) {
+    val forever: Boolean get() = until >= FOREVER
+    val isBan: Boolean get() = kind == "ban"
+    fun activeAt(now: Long): Boolean = until > now
+
+    companion object {
+        /** "For good": 1 January 2100. */
+        const val FOREVER = 4_102_444_800_000L
+    }
+}
+
+data class AdminUser(
+    val uid: String,
+    val name: String,
+    val username: String,
+    val photo: String?,
+    val online: Boolean,
+    val hidden: Boolean,
+    val lastSeen: Long,
+    /** The version of the app they opened last, and when (0: not known; it is written from 2.13.8 on). */
+    val version: String?,
+    val lastOpen: Long,
+    /** From the server's counts (0 until they were made once). */
+    val created: Long,
+    val lastSignIn: Long,
+    val chats: Int,
+    val ban: AdminBan?,
+) {
+    /** The latest sign of life there is. */
+    val lastActive: Long get() = maxOf(lastSeen, lastOpen, lastSignIn)
+}
+
+data class AdminReport(
+    val id: String,
+    val by: String,
+    val target: String,
+    val chatId: String,
+    val reason: String,
+    val at: Long,
+    /** The messages the person who reported chose to send with it: (writer uid, text). */
+    val recent: List<Pair<String, String>>,
+    /** null: open; else what was done ("ok", "banned", ...). */
+    val handled: String?,
+)
+
+data class AdminGroup(
+    val id: String,
+    val name: String,
+    val photo: String?,
+    /** (uid, name) of each member. */
+    val members: List<Pair<String, String>>,
+    val admins: Set<String>,
+    val createdAt: Long,
+    val createdBy: String,
+    val secret: Boolean,
+)
+
+data class AdminActionEntry(
+    val id: String,
+    val kind: String,
+    val target: String,
+    val value: String,
+    val by: String,
+    val at: Long,
+    val done: Boolean,
+    val error: String?,
+)
+
+data class AdminStats(val at: Long, val mediaBytes: Long, val diskFree: Long, val diskTotal: Long)
+
+data class Announcement(val id: String, val text: String, val at: Long)
+
+/** A tap on "update" on the page that asks for a newer version: the app (which has the updater) listens. */
+object ForcedUpdate {
+    val requests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+}
+
+/** True when [version] ("2.13.7") is older than [least] ("2.13.8"), number by number. */
+internal fun versionOlder(version: String, least: String): Boolean {
+    val a = version.split('.').map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+    val b = least.split('.').map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+    for (i in 0 until maxOf(a.size, b.size)) {
+        val x = a.getOrElse(i) { 0 }
+        val y = b.getOrElse(i) { 0 }
+        if (x != y) return x < y
+    }
+    return false
+}

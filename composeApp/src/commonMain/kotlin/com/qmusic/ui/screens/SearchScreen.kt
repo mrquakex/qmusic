@@ -236,6 +236,7 @@ fun SearchScreen(
                 onToggleFavorite = onToggleFavorite,
                 isFavoritePredicate = isFavoritePredicate,
                 onLoadMore = onLoadMoreResults,
+                onShowAll = { onFilterChange(it); onSearch() },
             )
         } else if (query.isBlank()) {
             SearchHistory(
@@ -318,6 +319,7 @@ private fun SearchResults(
     onToggleFavorite: (SongItem) -> Unit,
     isFavoritePredicate: (String) -> Boolean,
     onLoadMore: () -> Unit = {},
+    onShowAll: (SearchFilter) -> Unit = {},
 ) {
     val s = LocalStrings.current
     when {
@@ -362,24 +364,63 @@ private fun SearchResults(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 contentPadding = PaddingValues(bottom = 120.dp),
             ) {
+                // YouTube Music set the spelling right: say what was searched instead.
+                page.correctedQuery?.let { corrected ->
+                    item {
+                        Text(
+                            text = s.showingResultsFor(corrected),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+                        )
+                    }
+                }
                 if (!single) {
-                    page.top?.let { top ->
-                        item { SectionTitle(s.sectionTopResult) }
-                        item {
-                            ResultRow(
-                                title = top.name,
-                                subtitle = top.subtitle,
-                                thumbnail = top.thumbnail,
-                                round = true,
-                                onClick = { onArtistClick(top) },
-                            )
+                    val topSong = page.topSong
+                    val topCollection = page.topCollection
+                    val top = page.top
+                    when {
+                        // The top result as YouTube Music has it: a song or clip plays straight away, then its songs.
+                        topSong != null -> {
+                            item { SectionTitle(s.sectionTopResult) }
+                            item {
+                                SongListItem(
+                                    song = topSong,
+                                    isFavorite = isFavoritePredicate(topSong.id),
+                                    onClick = { onSongClick(topSong, listOf(topSong) + page.songs) },
+                                    onToggleFavorite = { onToggleFavorite(topSong) },
+                                    onMore = { onSongMore(topSong) },
+                                    isDownloaded = topSong.id in downloadedIds,
+                                    flat = true,
+                                )
+                            }
+                        }
+                        top != null -> {
+                            item { SectionTitle(s.sectionTopResult) }
+                            item {
+                                ResultRow(
+                                    title = top.name,
+                                    subtitle = top.subtitle,
+                                    thumbnail = top.thumbnail,
+                                    round = true,
+                                    onClick = { onArtistClick(top) },
+                                )
+                            }
+                        }
+                        topCollection != null -> {
+                            item { SectionTitle(s.sectionTopResult) }
+                            item {
+                                ResultRow(topCollection.title, topCollection.subtitle, topCollection.thumbnail, round = false, onClick = { onCollectionClick(topCollection) })
+                            }
                         }
                     }
                 }
 
                 if (page.songs.isNotEmpty()) {
+                    // "All" shows the first originals, the Songs chip all of them.
+                    val shown = if (single) page.songs else page.songs.take(ALL_SONGS)
                     if (!single) item { SectionTitle(s.sectionSongs) }
-                    items(page.songs) { song ->
+                    items(shown) { song ->
                         SongListItem(
                             song = song,
                             isFavorite = isFavoritePredicate(song.id),
@@ -390,6 +431,23 @@ private fun SearchResults(
                             flat = true,
                         )
                     }
+                    if (!single && page.songs.size > ALL_SONGS) item { SeeAllRow(s.seeAll) { onShowAll(SearchFilter.SONGS) } }
+                }
+
+                if (!single && page.videos.isNotEmpty()) {
+                    item { SectionTitle(s.filterVideos) }
+                    items(page.videos.take(ALL_VIDEOS)) { video ->
+                        SongListItem(
+                            song = video,
+                            isFavorite = isFavoritePredicate(video.id),
+                            onClick = { onSongClick(video, page.videos) },
+                            onToggleFavorite = { onToggleFavorite(video) },
+                            onMore = { onSongMore(video) },
+                            isDownloaded = video.id in downloadedIds,
+                            flat = true,
+                        )
+                    }
+                    item { SeeAllRow(s.seeAll) { onShowAll(SearchFilter.VIDEOS) } }
                 }
 
                 if (page.albums.isNotEmpty()) {
@@ -438,6 +496,25 @@ private fun SearchResults(
             }
         }
     }
+}
+
+private const val ALL_SONGS = 8
+private const val ALL_VIDEOS = 4
+
+/** "See all" under a group of "All": opens that group alone (its filter chip). */
+@Composable
+private fun SeeAllRow(label: String, onClick: () -> Unit) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier
+            .padding(top = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(DarkSurfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    )
 }
 
 @Composable

@@ -95,7 +95,7 @@ fun RowScope.QeyfBarItem(
             label,
             color = if (selected) TextPrimary else TextSecondary,
             fontSize = 12.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

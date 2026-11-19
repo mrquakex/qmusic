@@ -123,9 +123,18 @@ data class SearchResultsPage(
     val playlists: List<CollectionItem> = emptyList(),
     /** More results of a filtered search, fetched as the list is scrolled to its end. */
     val continuation: String? = null,
+    /** The top result when it is a song or a video (YouTube Music's big card), apart from [songs]. */
+    val topSong: SongItem? = null,
+    /** The top result when it is an album or a playlist. */
+    val topCollection: CollectionItem? = null,
+    /** Clips and uploads, official ones first ("All" only; [songs] are then the originals, the album tracks). */
+    val videos: List<SongItem> = emptyList(),
+    /** What YouTube Music searched instead ("Showing results for ..."), when it set the spelling right. */
+    val correctedQuery: String? = null,
 ) {
     val isEmpty: Boolean
-        get() = top == null && songs.isEmpty() && albums.isEmpty() && artists.isEmpty() && playlists.isEmpty()
+        get() = top == null && topSong == null && topCollection == null && songs.isEmpty() && videos.isEmpty() &&
+            albums.isEmpty() && artists.isEmpty() && playlists.isEmpty()
 }
 
 @Serializable

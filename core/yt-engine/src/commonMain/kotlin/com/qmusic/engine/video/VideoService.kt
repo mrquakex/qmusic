@@ -78,4 +78,21 @@ interface VideoService {
 
     /** Tells YouTube the account watched [videoId], so it shows in the history and the suggestions learn from it. */
     suspend fun reportWatch(videoId: String)
+
+    /**
+     * How much of [videoId] was watched, as the website tells it while a video plays: the stretch from [fromSec] to
+     * [toSec] of a [lengthSec] long video ([ended]: the last one, when the video is left or over). This is what the
+     * suggestions learn from most; [reportWatch] must have been called first.
+     */
+    /** The next part of a list, or a chip's list, asked from [endpoint] ("browse" or "search"). */
+    suspend fun more(continuation: String, endpoint: String): Result<VideoFeed> = more(continuation)
+
+    suspend fun reportProgress(videoId: String, fromSec: Double, toSec: Double, lengthSec: Double, ended: Boolean) {}
+
+    /**
+     * The Shorts YouTube's own Shorts tab plays after [seedId] (for the account, when one is signed in), or the next
+     * ones with [continuation] from the previous answer.
+     */
+    suspend fun shortsSequence(seedId: String?, continuation: String? = null): Result<ShortsSequence> =
+        Result.failure(UnsupportedOperationException("no Shorts sequence"))
 }

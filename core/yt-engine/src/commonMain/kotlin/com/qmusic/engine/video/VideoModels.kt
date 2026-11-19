@@ -16,7 +16,12 @@ data class VideoItem(
     val thumbnail: String? = null,
     val isLive: Boolean = false,
     val isShort: Boolean = false,
+    /** How much of it the account has watched, 0-100 (YouTube's red line under the picture); null: not watched. */
+    val watchedPercent: Int? = null,
 )
+
+/** Shorts as YouTube's Shorts tab lines them up after one: the clips, and the token for the ones after them. */
+data class ShortsSequence(val items: List<VideoItem>, val continuation: String?)
 
 data class VideoChannel(
     val id: String,
@@ -46,7 +51,8 @@ sealed interface VideoEntry {
 }
 
 /** A filter at the top of a feed ("Tümü", "Müzik", ...); [token] is what asks YouTube for the filtered feed. */
-data class VideoChip(val text: String, val token: String, val selected: Boolean = false)
+/** A filter chip; [token] asks for its list from [endpoint] ("browse", or "search" for a search's chips); "" = the plain list. */
+data class VideoChip(val text: String, val token: String, val selected: Boolean = false, val endpoint: String = "browse")
 
 /** One page of a feed; [continuation] asks for the next one. */
 data class VideoFeed(

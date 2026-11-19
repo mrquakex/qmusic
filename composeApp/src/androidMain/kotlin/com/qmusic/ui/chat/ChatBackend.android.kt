@@ -100,6 +100,9 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     /** The screen Google's account picker opens over. */
     var activity: WeakReference<Activity>? = null
 
+    /** Bans, announcements, the least version, and the admin panel. */
+    override val admin: AdminConsole by lazy { FirebaseAdminConsole(app, root) }
+
     private val _account = MutableStateFlow<ChatAccount>(ChatAccount.Loading)
     override val account: StateFlow<ChatAccount> = _account.asStateFlow()
     private var profileRef: DatabaseReference? = null
@@ -145,6 +148,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             return
         }
         if (_account.value !is ChatAccount.Ready) _account.value = ChatAccount.Loading
+        // Which version this account opened last, and when (for the admin panel; only admins can read it).
+        root.child("appInfo").child(user.uid).setValue(mapOf("v" to com.qmusic.ui.AppVersion.NAME, "at" to ServerValue.TIMESTAMP))
         val ref = root.child("users").child(user.uid)
         val listener = object : ValueEventListener {
             override fun onDataChange(snap: DataSnapshot) {
@@ -306,6 +311,12 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         require(isValidUsername(username)) { "username" }
         require(name.isNotBlank() && name.length <= 40) { "name" }
         val uid = me()
+        // A name an admin barred cannot be taken (the rules refuse it too).
+        val barred = runCatching {
+            root.child("bannedNames").child(username).get().await().exists() &&
+                root.child("usernames").child(username).get().await().getValue(String::class.java) != uid
+        }.getOrDefault(false)
+        if (barred) throw UsernameTaken()
         val photo = auth.currentUser?.photoUrl?.toString()
         // The name is claimed with a transaction: whoever writes it first has it.
         val claimed = suspendCancellableCoroutine { cont ->

@@ -127,7 +127,9 @@ object QMusicIcons {
 
     val Settings: ImageVector = stroked(
         "Settings",
-        "M4 7H14M18 7H20M4 17H6M10 17H20M16 4V10M8 14V20",
+        // A gear: eight teeth around a ring, a hole in the middle.
+        "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z",
+        "M15 12a3 3 0 1 1-6 0a3 3 0 0 1 6 0z",
     )
 
     val Account: ImageVector = stroked(
@@ -298,6 +300,21 @@ object QMusicIcons {
         "M11 5L6 9H2v6h4l5 4V5z",
         "M22 9l-6 6M16 9l6 6",
     )
+
+    /** A thumb up, filled: "Liked music". */
+    val ThumbUpFilled: ImageVector = filled(
+        "ThumbUpFilled",
+        "M2 10h4v11H2zM8 21h9.6a2 2 0 0 0 1.96-1.6l1.4-7A2 2 0 0 0 19 10h-5.2l.9-4.4a1.6 1.6 0 0 0-2.8-1.4L8 9.6z",
+    )
+
+    /** Four squares: show as a grid. */
+    val Grid: ImageVector = stroked("Grid", "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z")
+
+    /** Lines: show as a list. */
+    val ListView: ImageVector = stroked("ListView", "M4 6h16M4 12h16M4 18h16")
+
+    /** Two arrows: put next / add to the queue. */
+    val PlayNext: ImageVector = stroked("PlayNext", "M4 6l7 6-7 6zM13 6l7 6-7 6z")
 
     val Pin: ImageVector = stroked("Pin", "M15 4l5 5-3 1-4 4 1 4-2 2-4-4-4 4M9 11l4-4 1-3")
 

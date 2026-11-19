@@ -26,6 +26,7 @@ import com.qmusic.engine.models.VideoSource
 import com.qmusic.engine.models.Thumbnail
 import com.qmusic.engine.models.YouTubeClient
 import io.ktor.client.statement.bodyAsText
+import kotlinx.coroutines.async
 import io.ktor.http.encodeURLParameter
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -205,9 +206,31 @@ class YouTube(
     suspend fun searchPage(query: String, filter: SearchFilter? = null): Result<SearchResultsPage> =
         runCatching {
             if (ytmusic.auth?.isLoggedIn != true) ytmusic.ensureVisitorData()
-            val response = ytmusic.search(query = query, params = filter?.value?.takeIf { it.isNotEmpty() })
-            BrowseParser.searchPage(json.parseToJsonElement(response.bodyAsText()).jsonObject)
+            suspend fun page(params: String?) =
+                BrowseParser.searchPage(json.parseToJsonElement(ytmusic.search(query = query, params = params).bodyAsText()).jsonObject)
+            val params = filter?.value?.takeIf { it.isNotEmpty() }
+            if (params != null) return@runCatching page(params)
+            // "All", as YouTube Music lays it out: the top result, then the originals (album tracks: YouTube Music's own
+            // Songs list, asked for at the same time so there are a good many), then the clips (official ones first),
+            // then artists, albums, playlists. Reactions, podcasts and episodes are left out of the songs.
+            kotlinx.coroutines.coroutineScope {
+                val songsOnly = async { runCatching { page(SearchFilter.SONGS.value) }.getOrNull() }
+                val all = page(null)
+                val more = songsOnly.await()
+                val topId = all.topSong?.id
+                val originals = (all.songs.filter { it.isOriginal() } + more?.songs.orEmpty().filter { it.videoType == null || it.isOriginal() })
+                    .distinctBy { it.id }
+                    .filter { it.id != topId }
+                val clips = all.songs.filter { it.hasVideo }
+                    .sortedBy { if (it.videoType == "MUSIC_VIDEO_TYPE_OMV" || it.videoType == "MUSIC_VIDEO_TYPE_OFFICIAL_SOURCE_MUSIC") 0 else 1 }
+                    .filter { it.id != topId }
+                all.copy(songs = originals, videos = clips, continuation = null)
+            }
         }
+
+    /** An album track (or a row YouTube Music did not mark): not a clip, an upload, a podcast or an episode. */
+    private fun SongItem.isOriginal(): Boolean =
+        videoType == null || videoType == "MUSIC_VIDEO_TYPE_ATV" || videoType == "MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK"
 
     suspend fun artist(browseId: String): Result<ArtistPage> =
         runCatching {

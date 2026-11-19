@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -503,6 +504,25 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                 modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = if (fullscreen) 72.dp else 56.dp),
             )
         }
+
+        // Over and not going on by itself (autoplay off, or its card dismissed): watch it again, or one of the videos
+        // that come after it.
+        val goesOn = next != null && autoplay != "0" && cancelled != w.video.id && sleep.mode != SleepMode.VIDEO_END
+        if (ended && !live && !goesOn && swipeTarget == null) {
+            val after = remember(w.video.id, w.related, w.queue) {
+                (listOfNotNull(next) + w.related.mapNotNull { (it as? com.qmusic.engine.video.VideoEntry.Video)?.item }).distinctBy { it.id }.filter { it.id != w.video.id }.take(4)
+            }
+            EndScreen(
+                videos = after,
+                replay = x.replay,
+                onReplay = {
+                    playback.seekTo(0)
+                    if (!playback.isPlaying.value) playback.togglePlay()
+                },
+                onOpen = { controller.open(it) },
+                compact = !fullscreen,
+            )
+        }
     }
 
     if (sheet) {
@@ -582,6 +602,60 @@ private fun androidx.compose.foundation.layout.BoxScope.SeekRipple(side: Int, la
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(if (left) "◀◀" else "▶▶", color = Color.White.copy(alpha = 0.6f + 0.4f * flash.value), fontSize = 18.sp)
             Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+        }
+    }
+}
+
+/** When the video is over: "watch again" and up to four videos to go on with, in a grid over the picture. */
+@Composable
+private fun EndScreen(
+    videos: List<com.qmusic.engine.video.VideoItem>,
+    replay: String,
+    onReplay: () -> Unit,
+    onOpen: (com.qmusic.engine.video.VideoItem) -> Unit,
+    compact: Boolean,
+) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.82f)).clickable(enabled = false) {}, contentAlignment = Alignment.Center) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = if (compact) 12.dp else 48.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 12.dp),
+        ) {
+            Row(
+                modifier = Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.16f)).clickable(onClick = onReplay)
+                    .padding(horizontal = 16.dp, vertical = if (compact) 6.dp else 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(QMusicIcons.Refresh, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(replay, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+            // Two in a row; the small player shows one row, full screen two.
+            videos.take(if (compact) 2 else 4).chunked(2).forEach { pair ->
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    pair.forEach { item ->
+                        Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { onOpen(item) }) {
+                            Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp)).background(VideoColors.Surface)) {
+                                if (item.thumbnail != null) {
+                                    coil3.compose.AsyncImage(model = item.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                }
+                                item.duration?.let {
+                                    Text(
+                                        it, color = Color.White, fontSize = 11.sp,
+                                        modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp).clip(RoundedCornerShape(4.dp))
+                                            .background(Color.Black.copy(alpha = 0.78f)).padding(horizontal = 4.dp, vertical = 1.dp),
+                                    )
+                                }
+                            }
+                            Text(
+                                item.title, color = Color.White, fontSize = if (compact) 11.sp else 13.sp, maxLines = 2,
+                                overflow = TextOverflow.Ellipsis, lineHeight = if (compact) 14.sp else 17.sp, modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                    }
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
         }
     }
 }

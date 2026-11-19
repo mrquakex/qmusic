@@ -153,6 +153,8 @@ private fun ShortItem(
     // The clip's small pictures, for winding it.
     var preview by remember(item.id) { mutableStateOf<com.qmusic.engine.models.PreviewFrames?>(null) }
     if (active) LaunchedEffect(item.id) { preview = controller.shortPreview(item.id) }
+    // Watching a Short counts too (history, how long): YouTube's suggestions learn from Shorts as well.
+    if (active) ReportWatching(controller, item.id, playback)
 
     Box(
         modifier = Modifier

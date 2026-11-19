@@ -96,6 +96,8 @@ sealed interface Route {
     data object Stats : Route
     data class RingtoneEditor(val song: SongItem) : Route
     data object Ringtones : Route
+    /** "Liked music": the favourites as their own page, as on YouTube Music. */
+    data object Liked : Route
 }
 
 /** The backup file: what lives only on this device. */
@@ -1757,7 +1759,7 @@ class MainViewModel(
             val result = if (isSpotify) runCatching { spotify.search(trimmed, filter) } else youTube.searchPage(query = trimmed, filter = filter)
             result.onSuccess { page ->
                 _searchPage.value = page
-                playerController.warmUp(page.songs.take(WARM_SEARCH))
+                playerController.warmUp((listOfNotNull(page.topSong) + page.songs).take(WARM_SEARCH))
                 _searchResults.value = page.songs
                 _isSearching.value = false
             }.onFailure { throwable ->
@@ -1880,7 +1882,7 @@ class MainViewModel(
             is Route.Stats -> loadStats(_statsPeriod.value)
             is Route.RingtoneEditor -> ringtones.open(route.song)
             Route.Ringtones -> ringtones.refreshList()
-            is Route.LocalPlaylist, null -> Unit
+            is Route.LocalPlaylist, Route.Liked, null -> Unit
         }
     }
 
@@ -2105,6 +2107,8 @@ class MainViewModel(
     val stats: StateFlow<ListeningStats?> = _stats.asStateFlow()
 
     fun openStats() = push(Route.Stats)
+
+    fun openLiked() = push(Route.Liked)
 
     fun loadStats(period: StatsPeriod) {
         _statsPeriod.value = period

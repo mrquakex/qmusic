@@ -58,6 +58,9 @@ class YouTubeVideos(
     /** A chip's feed of the home page, or the next page of any feed. */
     override suspend fun more(continuation: String): Result<VideoFeed> = call("browse", continuation = continuation, parse = VideoParser::feed)
 
+    override suspend fun more(continuation: String, endpoint: String): Result<VideoFeed> =
+        call(if (endpoint == "search") "search" else "browse", continuation = continuation, parse = VideoParser::feed)
+
     override suspend fun subscriptions(): Result<VideoFeed> = feed("browse", "FEsubscriptions")
 
     override suspend fun history(): Result<VideoFeed> = feed("browse", "FEhistory")
@@ -186,15 +189,60 @@ class YouTubeVideos(
                 put("contentCheckOk", true)
                 put("racyCheckOk", true)
             }).bodyAsText()
-            val base = Json.parseToJsonElement(answer).jsonObject["playbackTracking"]?.jsonObject
-                ?.get("videostatsPlaybackUrl")?.jsonObject?.get("baseUrl")?.jsonPrimitive?.contentOrNull ?: return
+            val tracking = Json.parseToJsonElement(answer).jsonObject["playbackTracking"]?.jsonObject ?: return
+            fun url(key: String) = tracking[key]?.jsonObject?.get("baseUrl")?.jsonPrimitive?.contentOrNull
+            val base = url("videostatsPlaybackUrl") ?: return
             val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
             val cpn = (1..16).map { chars[kotlin.random.Random.nextInt(chars.length)] }.joinToString("")
-            http.get("$base&ver=2&cpn=$cpn&cmt=0&el=detailpage&c=WEB&cver=$CLIENT_VERSION") {
-                userAgent(YouTubeClient.USER_AGENT_WEB)
-                header("Referer", "$ORIGIN/")
-                auth?.takeIf { it.isLoggedIn }?.rawCookies?.let { header("Cookie", it) }
-            }
+            // The watch time goes to its own address, with the same playback id, as the video plays (reportProgress).
+            url("videostatsWatchtimeUrl")?.let { watching[videoId] = WatchSession(cpn, it) }
+            ping("$base&ver=2&cpn=$cpn&cmt=0&el=detailpage&c=WEB&cver=$CLIENT_VERSION")
+        }
+    }
+
+    @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
+    override suspend fun shortsSequence(seedId: String?, continuation: String?): Result<ShortsSequence> =
+        runCatching {
+            ensureVisitorData()
+            // What the website sends when a Short opens: the clip's id, and "the Shorts tab" (field 5: {3: 12}).
+            val params = continuation ?: seedId?.let { id ->
+                val bytes = byteArrayOf(0x0a, id.length.toByte()) + id.encodeToByteArray() + byteArrayOf(0x2a, 0x02, 0x18, 0x0c)
+                kotlin.io.encoding.Base64.Default.encode(bytes)
+            } ?: error("nothing to start from")
+            val answer = post("reel/reel_watch_sequence", buildJsonObject {
+                put("context", context())
+                put("sequenceParams", params)
+            })
+            check(answer.status.value in 200..299) { "YouTube answered ${answer.status.value}" }
+            VideoParser.shortsSequence(Json.parseToJsonElement(answer.bodyAsText()))
+        }
+
+    /** A video being watched: its playback id and where its watch time goes. */
+    private class WatchSession(val cpn: String, val watchtimeUrl: String)
+
+    // Touched from the app's main thread only (the watch page and the Shorts report from there).
+    private val watching = mutableMapOf<String, WatchSession>()
+
+    override suspend fun reportProgress(videoId: String, fromSec: Double, toSec: Double, lengthSec: Double, ended: Boolean) {
+        if (!isSignedIn) return
+        val session = watching[videoId] ?: return
+        if (ended) watching.remove(videoId)
+        if (toSec <= fromSec) return
+        fun sec(v: Double) = ((v * 1000).toLong() / 1000.0).toString()
+        runCatching {
+            ping(
+                session.watchtimeUrl + "&ver=2&cpn=${session.cpn}&cmt=${sec(toSec)}&st=${sec(fromSec)}&et=${sec(toSec)}" +
+                    "&len=${sec(lengthSec)}&state=${if (ended) "paused" else "playing"}${if (ended) "&final=1" else ""}" +
+                    "&volume=100&muted=0&el=detailpage&c=WEB&cver=$CLIENT_VERSION",
+            )
+        }
+    }
+
+    private suspend fun ping(address: String) {
+        http.get(address) {
+            userAgent(YouTubeClient.USER_AGENT_WEB)
+            header("Referer", "$ORIGIN/")
+            auth?.takeIf { it.isLoggedIn }?.rawCookies?.let { header("Cookie", it) }
         }
     }
 

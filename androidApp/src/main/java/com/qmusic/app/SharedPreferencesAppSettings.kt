@@ -66,10 +66,17 @@ class SharedPreferencesAppSettings(context: Context) : AppSettings {
         prefs.edit().putString(KEY_SESSION, json).apply()
     }
 
+    // Sound at its best everywhere (2.13.8): once, whatever was chosen before is lifted to the best; a later choice stays.
+    init {
+        if (!prefs.getBoolean(KEY_QUALITY_TOP, false)) {
+            prefs.edit().putString(KEY_QUALITY_WIFI, "HIGH").putString(KEY_QUALITY_MOBILE, "HIGH").putBoolean(KEY_QUALITY_TOP, true).apply()
+        }
+    }
+
     private val _qualityWifi = MutableStateFlow(prefs.getString(KEY_QUALITY_WIFI, null) ?: "HIGH")
     override val audioQualityWifi: StateFlow<String> = _qualityWifi.asStateFlow()
 
-    private val _qualityMobile = MutableStateFlow(prefs.getString(KEY_QUALITY_MOBILE, null) ?: "NORMAL")
+    private val _qualityMobile = MutableStateFlow(prefs.getString(KEY_QUALITY_MOBILE, null) ?: "HIGH")
     override val audioQualityMobile: StateFlow<String> = _qualityMobile.asStateFlow()
 
     private val _normalize = MutableStateFlow(prefs.getBoolean(KEY_NORMALIZE, true))
@@ -147,6 +154,7 @@ class SharedPreferencesAppSettings(context: Context) : AppSettings {
         const val KEY_EQ_PRESET = "equalizer_preset"
         const val KEY_SESSION = "last_session"
         const val KEY_QUALITY_MOBILE = "audio_quality_mobile"
+        const val KEY_QUALITY_TOP = "audio_quality_top"
         const val KEY_NORMALIZE = "normalize_volume"
         const val KEY_VIDEO = "video_by_default"
         const val KEY_CHECK_UPDATES = "check_updates_on_launch"

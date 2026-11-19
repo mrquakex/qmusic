@@ -1,5 +1,6 @@
 package com.qmusic.ui.videos
 
+import com.qmusic.ui.motion.fadeThrough
 import com.qmusic.ui.components.QeyfBarItem
 import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
@@ -144,14 +145,9 @@ fun VideosApp(
             controller.savePosition(id, p.positionMs.value, p.durationMs.value)
         }
     }
-    // A few seconds of playing count as watched: YouTube puts it in the account's history.
-    LaunchedEffect(watch?.video?.id, playback) {
-        val id = watch?.video?.id ?: return@LaunchedEffect
-        val p = playback ?: return@LaunchedEffect
-        p.isPlaying.first { it }
-        delay(3_000)
-        controller.reportWatch(id)
-    }
+    // A few seconds of playing count as watched (the account's history), then how long it is watched (what the
+    // suggestions learn from), as on YouTube.
+    ReportWatching(controller, watch?.video?.id, playback)
     // Playback that keeps stalling steps down a quality by itself.
     // Only real stalls count: the wait after opening or seeking is not one.
     val rebuffers by (playback?.rebuffers ?: NoStalls).collectAsState()
@@ -247,19 +243,41 @@ fun VideosApp(
                 val watching = top is VideoRoute.Watch
                 val below = if (watching) routes.dropLast(1).lastOrNull() else top
                 if (!watching || drag > 0f) {
-                    when (below) {
-                        // (Shorts play in the same player: not drawn under a video.)
-                        null -> if (!watching || tab != VideoTab.SHORTS) {
-                            TabContent(controller, tab, s, signedIn, onSignIn, playback, onPauseMusic, onShare, onAccount = { accountDialog = true }, barsVisible = bars.value || !feedPage)
+                    // Pages slide over one another as they open and close; the tabs fade through.
+                    com.qmusic.ui.motion.PageHost(
+                        target = below,
+                        depth = routes.count { it !is VideoRoute.Watch },
+                        contentKey = { r -> r?.let { if (it is VideoRoute.Watch) null else it } },
+                    ) { page ->
+                        when (page) {
+                            // (Shorts play in the same player: not drawn under a video.)
+                            null -> if (!watching || tab != VideoTab.SHORTS) {
+                                androidx.compose.animation.AnimatedContent(
+                                    targetState = tab,
+                                    transitionSpec = { fadeThrough() },
+                                    label = "videoTab",
+                                ) { shownTab ->
+                                    TabContent(controller, shownTab, s, signedIn, onSignIn, playback, onPauseMusic, onShare, onAccount = { accountDialog = true }, barsVisible = bars.value || !feedPage)
+                                }
+                            }
+                            is VideoRoute.Search -> SearchResultsPage(controller, s, onSignIn)
+                            is VideoRoute.Watch -> Unit
+                            is VideoRoute.Channel -> ChannelPage(controller, s, onSignIn)
+                            is VideoRoute.Playlist -> PlaylistPage(controller, page.title, s, onSignIn)
+                            is VideoRoute.Shorts -> if (!watching) ShortsPage(controller, playback, s, true, onPauseMusic, onShare, onSignIn)
                         }
-                        is VideoRoute.Search -> SearchResultsPage(controller, s, onSignIn)
-                        is VideoRoute.Watch -> Unit
-                        is VideoRoute.Channel -> ChannelPage(controller, s, onSignIn)
-                        is VideoRoute.Playlist -> PlaylistPage(controller, below.title, s, onSignIn)
-                        is VideoRoute.Shorts -> if (!watching) ShortsPage(controller, playback, s, true, onPauseMusic, onShare, onSignIn)
                     }
                 }
-                if (watching) WatchPage(controller, playback, s, onShare, onSignIn)
+                // A video opens rising from below (as on YouTube); it leaves by being pulled down into the small player.
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = watching,
+                    modifier = Modifier,
+                    enter = androidx.compose.animation.slideInVertically(com.qmusic.ui.motion.Motion.enter(com.qmusic.ui.motion.Motion.LONG)) { it / 3 } +
+                        androidx.compose.animation.fadeIn(com.qmusic.ui.motion.Motion.enter(com.qmusic.ui.motion.Motion.MEDIUM)),
+                    exit = androidx.compose.animation.ExitTransition.None,
+                ) {
+                    WatchPage(controller, playback, s, onShare, onSignIn)
+                }
                 // The video that was pulled down floats in a corner over the page, as on YouTube.
                 val w = watch
                 if (w != null && miniShown) {
@@ -692,12 +710,20 @@ private fun SearchResultsPage(controller: VideosController, s: VideoStrings, onS
         PageBar(title = query, onBack = { controller.pop() }, onTitleClick = { controller.openSearchBox(query) }, trailing = {
             IconButton(onClick = { controller.openSearchBox(query) }) { Icon(QMusicIcons.Search, s.searchHint, tint = VideoColors.Text) }
         })
-        LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(VideosController.FILTERS) { (params, key) ->
-                LabelChip(s.filter(key), filter == params) { controller.setFilter(params) }
+        val current = loader
+        val searchState = current?.state?.collectAsState()?.value
+        // The search's own chips when it has them ("All", "Shorts", "Unwatched", "Watched", "Recently uploaded"...),
+        // else the fixed filters.
+        val searchChips = searchState?.chips.orEmpty()
+        if (searchChips.isNotEmpty() && filter == null) {
+            ChipRow(searchChips) { current?.selectChip(it) }
+        } else {
+            LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(VideosController.FILTERS) { (params, key) ->
+                    LabelChip(s.filter(key), filter == params) { controller.setFilter(params) }
+                }
             }
         }
-        val current = loader
         if (current != null) {
             val state by current.state.collectAsState()
             FeedColumn(
@@ -769,6 +795,8 @@ private fun ChannelPage(controller: VideosController, s: VideoStrings, onSignIn:
                                     }
                                 }
                             }
+                            // The order of the videos: latest, popular, oldest.
+                            if (c.feed.chips.isNotEmpty()) ChipRow(c.feed.chips) { controller.selectChannelChip(it) }
                         }
                     }
                 }
@@ -929,3 +957,38 @@ private fun SheetRow(icon: ImageVector, label: String, active: Boolean = false, 
         Text(label, color = VideoColors.Text, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
+
+/**
+ * Tells YouTube what the account watches, as its website does: "started" after a few seconds of playing, then the
+ * stretch watched every [WATCHTIME_EVERY_MS] while it plays, and the last stretch when the video is left. Jumps (a seek)
+ * start a new stretch instead of counting as watched.
+ */
+@Composable
+internal fun ReportWatching(controller: VideosController, id: String?, playback: VideoPlayback?) {
+    LaunchedEffect(id, playback) {
+        if (id == null || playback == null) return@LaunchedEffect
+        playback.isPlaying.first { it }
+        delay(3_000)
+        controller.startWatch(id)
+        var from = playback.positionMs.value / 1000.0
+        fun length() = playback.durationMs.value.coerceAtLeast(0L) / 1000.0
+        try {
+            while (true) {
+                delay(WATCHTIME_EVERY_MS)
+                val to = playback.positionMs.value / 1000.0
+                val stretch = to - from
+                // Played on (not paused, not jumped): that much was watched.
+                if (playback.isPlaying.value && stretch > 0.5 && stretch < WATCHTIME_EVERY_MS / 1000.0 * 2.5) {
+                    controller.watchProgress(id, from, to, length(), ended = false)
+                }
+                from = to
+            }
+        } finally {
+            val to = playback.positionMs.value / 1000.0
+            val stretch = to - from
+            controller.watchProgress(id, from, if (stretch > 0 && stretch < WATCHTIME_EVERY_MS / 1000.0 * 2.5) to else from, length(), ended = true)
+        }
+    }
+}
+
+private const val WATCHTIME_EVERY_MS = 10_000L

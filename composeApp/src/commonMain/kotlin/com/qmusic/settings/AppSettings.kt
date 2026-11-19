@@ -263,7 +263,7 @@ class InMemoryAppSettings(
     private val _qualityWifi = MutableStateFlow("HIGH")
     override val audioQualityWifi: StateFlow<String> = _qualityWifi.asStateFlow()
 
-    private val _qualityMobile = MutableStateFlow("NORMAL")
+    private val _qualityMobile = MutableStateFlow("HIGH")
     override val audioQualityMobile: StateFlow<String> = _qualityMobile.asStateFlow()
 
     private val _normalize = MutableStateFlow(true)

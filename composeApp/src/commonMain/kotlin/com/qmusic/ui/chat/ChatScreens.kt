@@ -1,5 +1,6 @@
 package com.qmusic.ui.chat
 
+import com.qmusic.ui.motion.pressScale
 import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import kotlin.math.roundToInt
@@ -142,7 +143,10 @@ private fun ChatAppContent(
     val error by controller.error.collectAsState()
     // Messages as home: Back on the list leaves the app (as any home screen), instead of going to the music.
     val home by AppHome.messagesFirst.collectAsState()
-    PlatformBackHandler(enabled = routes.isNotEmpty() || !home || account !is ChatAccount.Ready) { if (!controller.pop()) onExit() }
+    // Back: the page on top goes (following the back gesture as it is drawn), else the section.
+    val backProgress = com.qmusic.ui.motion.rememberPredictiveBack(enabled = routes.isNotEmpty() || !home || account !is ChatAccount.Ready) {
+        if (!controller.pop()) onExit()
+    }
     val askPermissions = rememberCallPermissions()
     val voicePlayer = rememberVoicePlayer()
     val lock = rememberAppLock()
@@ -170,7 +174,13 @@ private fun ChatAppContent(
             is ChatAccount.Unavailable -> MessagePage(s, onExit, if (a.reason == "setup") s.setupNeeded else s.unavailable)
             ChatAccount.SignedOut -> SignInPage(controller, s, onExit)
             is ChatAccount.NeedsProfile -> ProfilePage(controller, s, a, onExit)
-            is ChatAccount.Ready -> if (lock != null && lockOn && !unlocked && lock.available) LockedPage(lock, s, onExit) else when (val top = routes.lastOrNull()) {
+            // A ban, a version too old, an announcement: over everything else of the messages.
+            is ChatAccount.Ready -> AdminGate(controller.admin, onExit) { if (lock != null && lockOn && !unlocked && lock.available) LockedPage(lock, s, onExit) else com.qmusic.ui.motion.PageHost(
+                target = routes.lastOrNull(),
+                depth = routes.size,
+                contentKey = { it.motionKey() },
+                backProgress = if (routes.isNotEmpty()) backProgress else 0f,
+            ) { top -> when (top) {
                 // A secret conversation opened from elsewhere (a search, a link): the secret space's PIN first.
                 is ChatRoute.Conversation -> if (!secretOpen && secretList.any { it.other.uid == top.other.uid }) {
                     SecretPage(controller, s, a.me)
@@ -204,10 +214,11 @@ private fun ChatAppContent(
                 is ChatRoute.SafetyCode -> SafetyCodePage(controller, top.user)
                 ChatRoute.Encryption -> EncryptionPage(controller)
                 ChatRoute.LivePeople -> LivePeoplePage(controller, a.me)
+                ChatRoute.Admin -> AdminPage(controller, a.me)
                 ChatRoute.Friends -> FriendsPage(controller, s)
                 is ChatRoute.Profile -> ProfilePage(controller, s, a.me, top.user, onCall)
                 null -> ChatHome(controller, s, a.me, onExit, onCall, onGroupCall)
-            }
+            } } }
         }
         val info by controller.info.collectAsState()
         if (info != null && error == null) {
@@ -250,6 +261,18 @@ private fun ChatAppContent(
 }
 
 // ------------------------------------------------------------------ pieces
+
+/** What counts as another page for the page animation (a page whose person is updated is still the same page). */
+private fun ChatRoute?.motionKey(): Any? = when (this) {
+    null -> null
+    is ChatRoute.Conversation -> "c:" + other.uid
+    is ChatRoute.Profile -> "p:" + user.uid
+    is ChatRoute.GroupInfo -> "g:" + group.uid
+    is ChatRoute.AddMembers -> "a:" + group.uid
+    is ChatRoute.CallDetails -> "d:" + peer.uid
+    is ChatRoute.SafetyCode -> "s:" + user.uid
+    else -> this
+}
 
 @Composable
 internal fun Centered(content: @Composable () -> Unit) {
@@ -310,6 +333,14 @@ fun ClaudeAvatar(size: androidx.compose.ui.unit.Dp) {
     }
 }
 
+/**
+ * Google's account pictures come 96 px by default ("…=s96-c"), blurry anywhere bigger than a small dot: the size the
+ * place needs is asked for instead. Other pictures are left as they are.
+ */
+internal fun sizedPhoto(url: String, px: Int): String =
+    if (!url.contains("googleusercontent.com")) url
+    else Regex("=s\\d+(-c)?$").replace(url, "=s$px-c").let { if (it == url && !url.contains("=s")) "$url=s$px-c" else it }
+
 @Composable
 fun ChatAvatar(name: String, photo: String?, size: androidx.compose.ui.unit.Dp) {
     Box(Modifier.size(size).clip(CircleShape).background(DarkSurfaceVariant), contentAlignment = Alignment.Center) {
@@ -319,7 +350,8 @@ fun ChatAvatar(name: String, photo: String?, size: androidx.compose.ui.unit.Dp) 
             fontSize = (size.value * 0.42f).sp,
             fontWeight = FontWeight.SemiBold,
         )
-        if (photo != null) AsyncImage(model = photo, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        val px = with(androidx.compose.ui.platform.LocalDensity.current) { size.roundToPx() }.coerceIn(96, 1024)
+        if (photo != null) AsyncImage(model = sizedPhoto(photo, px), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
     }
 }
 
@@ -328,6 +360,7 @@ internal fun WhiteButton(text: String, enabled: Boolean = true, busy: Boolean = 
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .pressScale(0.97f)
             .height(52.dp)
             .clip(RoundedCornerShape(26.dp))
             .background(if (enabled) Ink else Ink.copy(alpha = 0.3f))
@@ -617,7 +650,7 @@ internal fun ThreadRow(
                         t.other.name,
                         color = TextPrimary,
                         fontSize = 16.sp,
-                        fontWeight = if (t.unread) FontWeight.Bold else FontWeight.SemiBold,
+                        fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
@@ -685,7 +718,7 @@ internal fun ThreadRow(
                         if (parts.kind != null) parts.text else prefix + parts.text,
                         color = lineColour,
                         fontSize = 14.sp,
-                        fontWeight = if (t.unread) FontWeight.SemiBold else FontWeight.Normal,
+                        fontWeight = FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -1191,7 +1224,7 @@ private fun ConversationPage(
                     Spacer(Modifier.width(10.dp))
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                            Text(title, color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                             if (encrypted) Icon(QMusicIcons.Lock, contentDescription = e2eWords.encrypted, tint = TextSecondary, modifier = Modifier.padding(start = 5.dp).size(13.dp))
                             if (!isGroup) UserBadge(other.uid, compact = true, modifier = Modifier.padding(start = 5.dp))
                         }
@@ -1489,6 +1522,8 @@ private fun ConversationPage(
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
                     itemsIndexed(shown, key = { _, it -> it.key }) { index, row ->
+                        // Comes in fading, and slides to its new place when the list changes.
+                        androidx.compose.foundation.layout.Box(Modifier.animateItem(fadeInSpec = androidx.compose.animation.core.tween(220, easing = com.qmusic.ui.motion.Motion.EmphasizedDecelerate), placementSpec = androidx.compose.animation.core.spring(stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow), fadeOutSpec = androidx.compose.animation.core.tween(150))) {
                         when (row) {
                             is ListRow.Day -> Text(
                                 dayLabel(row.at, s),
@@ -1587,6 +1622,7 @@ private fun ConversationPage(
                                     highlight = current?.id == row.m.id || flash == row.m.id,
                                 )
                             }
+                        }
                         }
                     }
                 }
@@ -2375,6 +2411,7 @@ internal fun PersonRow(user: ChatUser, onClick: () -> Unit, trailing: @Composabl
 internal fun Pill(text: String, primary: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
+            .pressScale(0.94f)
             .clip(RoundedCornerShape(18.dp))
             .background(if (primary) Ink else DarkSurfaceVariant)
             .clickable(onClick = onClick)
@@ -2863,7 +2900,7 @@ private fun Bubble(
                     senderName,
                     color = if (m.from == CLAUDE_BOT_UID) ClaudeCoral else memberColor(m.from),
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(start = 10.dp, end = 12.dp, top = if (m.share != null || m.images.isNotEmpty() || m.attachment != null) 4.dp else 8.dp),
                 )
             }
@@ -2891,7 +2928,7 @@ private fun Bubble(
                             if (quoted.from == myUid) s.you else names[quoted.from] ?: nameOf(quoted.from, myUid, otherName, s),
                             color = if (mine) InkInverse else TextPrimary,
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Medium,
                         )
                         Text(
                             emojiFitted(ChatPreview.plain(quoted.text, s.english)),
@@ -3284,7 +3321,7 @@ internal fun MessageTick(state: TickState, soft: Color) {
     androidx.compose.foundation.Canvas(Modifier.size(width = 18.dp, height = 12.dp)) {
         val w = size.width
         val h = size.height
-        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = h * 0.13f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = h * 0.09f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
         fun tick(dx: Float) {
             val path = androidx.compose.ui.graphics.Path().apply {
                 moveTo(dx + w * 0.04f, h * 0.55f)

@@ -296,6 +296,36 @@ class BrowseParserTest {
     }
 
     @Test
+    fun searchPageKeepsASongTopResultAndTheCorrectedSpelling() {
+        val json = """
+        {"contents":{"tabbedSearchResultsRenderer":{"tabs":[{"tabRenderer":{"content":{"sectionListRenderer":{"contents":[
+          {"itemSectionRenderer":{"contents":[{"showingResultsForRenderer":{"correctedQuery":{"runs":[{"text":"tarkan"},{"text":" simarik"}]}}}]}},
+          {"musicCardShelfRenderer":{
+            "title":{"runs":[{"text":"Şımarık","navigationEndpoint":{"watchEndpoint":{"videoId":"topVideo01","watchEndpointMusicSupportedConfigs":{"watchEndpointMusicConfig":{"musicVideoType":"MUSIC_VIDEO_TYPE_OMV"}}}}}]},
+            "subtitle":{"runs":[{"text":"Video"},{"text":" • "},{"text":"Tarkan","navigationEndpoint":{"browseEndpoint":{"browseId":"UCtarkan"}}},{"text":" • "},{"text":"3:12"}]},
+            "thumbnail":{"musicThumbnailRenderer":{"thumbnail":{"thumbnails":[{"url":"https://img/top.jpg"}]}}}}},
+          {"itemSectionRenderer":{"contents":[
+            {"musicResponsiveListItemRenderer":{
+              "playlistItemData":{"videoId":"topVideo01"},
+              "flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Şımarık","navigationEndpoint":{"watchEndpoint":{"videoId":"topVideo01"}}}]}}}]}},
+            {"musicResponsiveListItemRenderer":{
+              "playlistItemData":{"videoId":"song2"},
+              "flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Hüp","navigationEndpoint":{"watchEndpoint":{"videoId":"song2"}}}]}}}]}}]}}
+        ]}}}}]}}}
+        """
+        val page = BrowseParser.searchPage(parse(json))
+        assertEquals("topVideo01", page.topSong?.id)
+        assertEquals("Şımarık", page.topSong?.title)
+        assertEquals("Tarkan", page.topSong?.artists?.single()?.name)
+        assertEquals(192, page.topSong?.duration)
+        assertEquals("MUSIC_VIDEO_TYPE_OMV", page.topSong?.videoType)
+        // Not listed twice.
+        assertEquals(listOf("song2"), page.songs.map { it.id })
+        assertEquals("tarkan simarik", page.correctedQuery)
+        assertNull(page.top)
+    }
+
+    @Test
     fun artistPageReadsTopSongsAndShelves() {
         val json = """
         {"header":{"musicImmersiveHeaderRenderer":{

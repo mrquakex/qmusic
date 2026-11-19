@@ -74,7 +74,24 @@ import kotlin.math.sqrt
 import kotlin.math.tan
 
 /** Where someone sharing their live location is (liveLocations/{chatId}/{uid}); [until]: when the sharing ends. */
-data class LiveLocation(val uid: String, val lat: Double, val lng: Double, val at: Long, val until: Long, val ended: Boolean = false) {
+data class LiveLocation(
+    val uid: String,
+    val lat: Double,
+    val lng: Double,
+    val at: Long,
+    val until: Long,
+    val ended: Boolean = false,
+    /** How sure the phone is of the place, in metres (the halo around the pin). */
+    val accuracy: Double? = null,
+    /** The way they move, in degrees from north (null while still). */
+    val bearing: Float? = null,
+    /** Metres per second. */
+    val speed: Float? = null,
+    /** Their phone's battery, %. */
+    val battery: Int? = null,
+    /** The way they came since the sharing began. */
+    val trail: List<Pair<Double, Double>> = emptyList(),
+) {
     fun active(now: Long) = !ended && until > now
 }
 
@@ -103,6 +120,9 @@ object LiveShare {
     var arriveAt: (chatId: String, lat: Double, lng: Double, label: String) -> Unit = { _, _, _, _ -> }
     var cancelArrival: (chatId: String) -> Unit = {}
     var home: () -> Pair<Double, Double>? = { null }
+
+    /** Directions to a place, in the phone's maps app. */
+    var directions: (lat: Double, lng: Double, label: String) -> Unit = { _, _, _ -> }
     var saveHome: (Double, Double) -> Unit = { _, _ -> }
 
     val durations = listOf(15 * 60_000L, 60 * 60_000L, 8 * 60 * 60_000L)
@@ -317,7 +337,11 @@ internal fun LiveLocationCard(
     val fg = if (mine) InkInverse else TextPrimary
     val soft = if (mine) InkInverse.copy(alpha = 0.6f) else TextSecondary
     Column(Modifier.padding(4.dp).width(260.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onOpen)) {
-        OsmMap(lat, lng, 15, listOf(MapMarker(lat, lng, sender, active)), Modifier.width(260.dp).height(150.dp))
+        // A sharp picture of the map there, the person on it (pulsing while live).
+        Box(Modifier.width(260.dp).height(150.dp), contentAlignment = Alignment.Center) {
+            MapPreview(lat, lng, 15.0, Modifier.matchParentSize())
+            LivePinView(LiveMapPin(sender.uid, lat, lng, sender, active, me = mine), 0f)
+        }
         Row(
             Modifier.fillMaxWidth().background(if (mine) Color.Black.copy(alpha = 0.06f) else Color.White.copy(alpha = 0.06f)).padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -353,139 +377,6 @@ internal fun LiveLocationCard(
             }
         }
     }
-}
-
-/**
- * Everyone sharing in a conversation, full screen on a map: the one tapped in the middle, moved with a finger, zoomed
- * with the buttons; a list under it with how long each goes on and how far they are from this person.
- */
-@Composable
-internal fun LiveMapScreen(
-    chatId: String?,
-    focus: Pair<Double, Double>,
-    people: List<Pair<ChatUser, LiveLocation>>,
-    myUid: String,
-    onStop: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val english = ChatMusic.english
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-        DialogEdgeToEdge()
-        var center by remember { mutableStateOf(focus) }
-        var zoom by remember { mutableStateOf(15) }
-        val clock = now()
-        Box(Modifier.fillMaxSize().background(Color(0xFFE5E3DF))) {
-            OsmMap(
-                center.first, center.second, zoom,
-                people.map { (u, l) -> MapMarker(l.lat, l.lng, u, l.active(clock)) },
-                Modifier.fillMaxSize(),
-                draggable = true,
-                onMoved = { la, ln -> center = la to ln },
-            )
-            Row(Modifier.statusBarsPadding().padding(8.dp)) {
-                MapButton({ Icon(QMusicIcons.Back, contentDescription = null, tint = Color.Black) }, onDismiss)
-            }
-            Column(Modifier.align(Alignment.CenterEnd).padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                MapButton({ Text("+", color = Color.Black, fontSize = 22.sp, fontWeight = FontWeight.Bold) }) { zoom = (zoom + 1).coerceAtMost(19) }
-                MapButton({ Text("−", color = Color.Black, fontSize = 22.sp, fontWeight = FontWeight.Bold) }) { zoom = (zoom - 1).coerceAtLeast(3) }
-            }
-            // The middle of the map, as a place to arrive at.
-            Box(Modifier.align(Alignment.Center).size(14.dp).clip(CircleShape).border(2.dp, Color.Black.copy(alpha = 0.55f), CircleShape))
-            // Who shares, under the map.
-            val mine = people.firstOrNull { it.first.uid == myUid }?.second
-            Column(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                    .background(DarkSurfaceVariant).navigationBarsPadding().padding(vertical = 8.dp),
-            ) {
-                people.forEach { (user, l) ->
-                    Row(
-                        Modifier.fillMaxWidth().clickable { center = l.lat to l.lng }.padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        ChatAvatar(user, 40.dp)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(if (user.uid == myUid) (if (english) "You" else "Sen") else user.name, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            val distance = if (mine != null && user.uid != myUid) distanceLabel(distanceMeters(mine.lat, mine.lng, l.lat, l.lng), english) else null
-                            Text(
-                                listOfNotNull(
-                                    if (l.active(clock)) leftLabel(l.until - clock, english) else (if (english) "ended" else "sona erdi"),
-                                    agoLabel(clock - l.at, english),
-                                    distance,
-                                ).joinToString(" · "),
-                                color = TextSecondary,
-                                fontSize = 12.sp,
-                            )
-                        }
-                        if (user.uid == myUid && l.active(clock)) {
-                            Text(
-                                if (english) "Stop" else "Durdur",
-                                color = Color(0xFFE53935),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onStop).padding(8.dp),
-                            )
-                        }
-                    }
-                }
-                // Sharing here: "let them know when I arrive" (home, or the middle of the map), and keeping a home.
-                if (chatId != null && mine != null && mine.active(clock)) {
-                    val arrivals by LiveShare.arrivals.collectAsState()
-                    var homeTick by remember { mutableStateOf(0) }
-                    val home = remember(homeTick) { LiveShare.home() }
-                    val target = arrivals[chatId]
-                    androidx.compose.foundation.lazy.LazyRow(
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        if (target != null) {
-                            item {
-                                MapChip((if (english) "Will tell when you arrive" else "Varınca haber verilecek") + if (target.isNotBlank()) ": $target" else "", strong = true) {}
-                            }
-                            item { MapChip(if (english) "Cancel" else "İptal") { LiveShare.cancelArrival(chatId) } }
-                        } else {
-                            if (home != null) item {
-                                MapChip(if (english) "Tell them when I'm home" else "Eve varınca haber ver") {
-                                    LiveShare.arriveAt(chatId, home.first, home.second, if (english) "home" else "eve")
-                                }
-                            }
-                            item {
-                                MapChip(if (english) "Tell them when I reach the map's middle" else "Haritanın ortasına varınca haber ver") {
-                                    LiveShare.arriveAt(chatId, center.first, center.second, "")
-                                }
-                            }
-                        }
-                        item {
-                            MapChip(if (english) "Save where I am as home" else "Bulunduğum yeri ev olarak kaydet") {
-                                LiveShare.saveHome(mine.lat, mine.lng)
-                                homeTick++
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MapChip(text: String, strong: Boolean = false, onClick: () -> Unit) {
-    Text(
-        text,
-        color = if (strong) InkInverse else TextPrimary,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (strong) Ink else DarkSurfaceVariant.copy(alpha = 0.6f))
-            .border(1.dp, TextSecondary.copy(alpha = 0.3f), RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp),
-    )
-}
-
-@Composable
-private fun MapButton(content: @Composable () -> Unit, onClick: () -> Unit) {
-    Box(
-        Modifier.size(44.dp).clip(CircleShape).background(Color.White).border(1.dp, Color.Black.copy(alpha = 0.08f), CircleShape).clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) { content() }
 }
 
 /** Choosing how long to share the live location. */
@@ -531,98 +422,6 @@ private fun LocationChoice(icon: androidx.compose.ui.graphics.vector.ImageVector
         Column {
             Text(label, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             if (note != null) Text(note, color = TextSecondary, fontSize = 12.sp)
-        }
-    }
-}
-
-/**
- * Everyone sharing their live location with this person now, from every conversation, on one map (a family's,
- * friends'): who, from which chat, how far; a tap centres on them.
- */
-@Composable
-internal fun LivePeoplePage(controller: ChatController, me: ChatUser) {
-    val english = ChatMusic.english
-    val open by SecretSpace.unlocked.collectAsState()
-    val people by remember(open) { controller.livePeople(open) }.collectAsState(initial = emptyList())
-    val clock = now()
-    val active = people.filter { it.second.active(clock) }
-    val mine = active.firstOrNull { it.second.uid == me.uid }?.second
-    val others = active.filter { it.second.uid != me.uid }.distinctBy { it.second.uid }
-    var center by remember { mutableStateOf<Pair<Double, Double>?>(null) }
-    // The map shows them all: centred between them, zoomed to how far apart they are.
-    val all = others.map { it.second } + listOfNotNull(mine)
-    val fit = remember(all.map { it.uid }) {
-        if (all.isEmpty()) null else {
-            val lat = all.sumOf { it.lat } / all.size
-            val lng = all.sumOf { it.lng } / all.size
-            val far = all.maxOf { distanceMeters(lat, lng, it.lat, it.lng) }.coerceAtLeast(300.0)
-            val zoom = (16 - kotlin.math.ln(far / 400.0) / kotlin.math.ln(2.0)).toInt().coerceIn(3, 16)
-            Triple(lat, lng, zoom)
-        }
-    }
-    var zoom by remember(fit) { mutableStateOf(fit?.third ?: 12) }
-    Column(Modifier.fillMaxSize().background(com.qmusic.ui.theme.BgRoot)) {
-        TopBar(if (english) "Live locations" else "Canlı konumlar", { controller.pop() })
-        if (fit == null) {
-            Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Icon(QMusicIcons.Location, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(40.dp))
-                Spacer(Modifier.height(12.dp))
-                Text(if (english) "No one is sharing their location with you now" else "Şu an kimse seninle konum paylaşmıyor", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    if (english) "When someone shares their live location in a chat, they show here." else "Biri bir sohbette canlı konumunu paylaşınca burada görünür.",
-                    color = TextSecondary,
-                    fontSize = 14.sp,
-                )
-            }
-            return@Column
-        }
-        val c = center ?: (fit.first to fit.second)
-        Box(Modifier.fillMaxWidth().weight(1f)) {
-            OsmMap(
-                c.first, c.second, zoom,
-                all.map { l ->
-                    val user = if (l.uid == me.uid) me else others.firstOrNull { it.second.uid == l.uid }?.first?.let { t -> if (t.isGroup) ChatUser(l.uid, t.other.name, "", null) else t.other }
-                    MapMarker(l.lat, l.lng, user, true)
-                },
-                Modifier.fillMaxSize(),
-                draggable = true,
-                onMoved = { la, ln -> center = la to ln },
-            )
-            Column(Modifier.align(Alignment.CenterEnd).padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                MapButton({ Text("+", color = Color.Black, fontSize = 22.sp, fontWeight = FontWeight.Bold) }) { zoom = (zoom + 1).coerceAtMost(19) }
-                MapButton({ Text("−", color = Color.Black, fontSize = 22.sp, fontWeight = FontWeight.Bold) }) { zoom = (zoom - 1).coerceAtLeast(3) }
-            }
-        }
-        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(vertical = 6.dp)) {
-            others.forEach { (t, l) ->
-                Row(
-                    Modifier.fillMaxWidth().clickable { center = l.lat to l.lng; zoom = 16 }.padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    ChatAvatar(t.other, 40.dp)
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(t.other.name, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            listOfNotNull(
-                                leftLabel(l.until - clock, english),
-                                agoLabel(clock - l.at, english),
-                                mine?.let { m -> distanceLabel(distanceMeters(m.lat, m.lng, l.lat, l.lng), english) },
-                            ).joinToString(" · "),
-                            color = TextSecondary,
-                            fontSize = 12.sp,
-                        )
-                    }
-                    Text(
-                        if (english) "Chat" else "Sohbet",
-                        color = TextPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(DarkSurfaceVariant).clickable { controller.openConversation(t.other) }.padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                }
-            }
         }
     }
 }

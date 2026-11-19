@@ -39,7 +39,9 @@ import kotlinx.coroutines.launch
  * The phone's part of [LiveShare]: the sharings kept (so they survive the app being closed), the service that sends
  * the place while any goes on, and everyone's live places read.
  *
- *   liveLocations/{chatId}/{uid} = {lat, lng, acc, at, until}   (members read, each writes their own; until <= 8 h)
+ *   liveLocations/{chatId}/{uid} = {lat, lng, acc, brg, spd, bat, trail, at, until}   (members read, each writes their
+ *   own; until <= 8 h). brg: the way it moves (degrees), spd: m/s, bat: the battery %, trail: "lat,lng;lat,lng;..." the
+ *   way come since the sharing began (thinned). Sealed (an encrypted chat): e = "lat,lng,acc,brg,spd,bat|trail".
  */
 object LiveLocations {
     private const val PREFS = "qeyf_live_location"
@@ -54,8 +56,18 @@ object LiveLocations {
         app = c
         LiveShare.sharing.value = load(c)
         LiveShare.start = { chatId, until ->
+            Trail.clear(c, chatId)
             save(c, load(c) + (chatId to until))
             LiveLocationService.start(c)
+        }
+        // Directions to someone: the phone's maps app, driving there (or just the place, when it cannot route).
+        LiveShare.directions = { lat, lng, label ->
+            val route = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("google.navigation:q=$lat,$lng")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val place = Intent(
+                Intent.ACTION_VIEW,
+                android.net.Uri.parse("geo:$lat,$lng?q=$lat,$lng(" + android.net.Uri.encode(label) + ")"),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { c.startActivity(route) }.onFailure { runCatching { c.startActivity(place) } }
         }
         LiveShare.stop = { chatId -> stop(c, chatId) }
         LiveShare.watch = { chatId -> watch(c, chatId) }
@@ -81,12 +93,16 @@ object LiveLocations {
     /** Ends the sharing in [chatId]: the last place stays, marked over (its time is now). */
     fun stop(context: Context, chatId: String) {
         save(context, load(context) - chatId)
+        Trail.clear(context, chatId)
         mine(context, chatId)?.child("ended")?.setValue(true)
         if (load(context).isEmpty()) context.stopService(Intent(context, LiveLocationService::class.java))
     }
 
     fun stopAll(context: Context) {
-        load(context).keys.forEach { chatId -> mine(context, chatId)?.child("ended")?.setValue(true) }
+        load(context).keys.forEach { chatId ->
+            mine(context, chatId)?.child("ended")?.setValue(true)
+            Trail.clear(context, chatId)
+        }
         save(context, emptyMap())
         context.stopService(Intent(context, LiveLocationService::class.java))
     }
@@ -105,21 +121,34 @@ object LiveLocations {
     /** Writes this phone's place to every sharing going on. */
     fun send(context: Context, location: Location) {
         val now = System.currentTimeMillis() + (FirebaseChatBackend.peek()?.serverOffset?.value ?: 0L)
+        val battery = runCatching {
+            (context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager)
+                .getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it in 0..100 }
+        }.getOrNull()
+        val bearing = if (location.hasBearing() && location.hasSpeed() && location.speed > 0.7f) location.bearing.toDouble() else null
+        val speed = if (location.hasSpeed()) location.speed.toDouble() else null
         load(context).forEach { (chatId, until) ->
             if (until <= now) return@forEach
+            val trail = Trail.add(context, chatId, location.latitude, location.longitude)
             work.launch {
                 // An encrypted conversation: the place goes sealed with its key (the server cannot see it).
                 val engine = E2eEngine.instance
                 val version = engine?.versionNow(chatId)
                 val place: Map<String, Any?> = if (version != null) {
                     engine.loadKey(chatId, version) ?: return@launch
-                    val sealed = engine.sealText(chatId, version, "${location.latitude},${location.longitude},${location.accuracy}") ?: return@launch
+                    val plain = listOf(location.latitude, location.longitude, location.accuracy.toDouble(), bearing ?: "", speed ?: "", battery ?: "")
+                        .joinToString(",") + "|" + trail
+                    val sealed = engine.sealText(chatId, version, plain) ?: return@launch
                     mapOf("e" to sealed, "at" to ServerValue.TIMESTAMP, "until" to until)
                 } else {
                     mapOf(
                         "lat" to location.latitude,
                         "lng" to location.longitude,
                         "acc" to location.accuracy.toDouble(),
+                        "brg" to bearing,
+                        "spd" to speed,
+                        "bat" to battery,
+                        "trail" to trail.ifEmpty { null },
                         "at" to ServerValue.TIMESTAMP,
                         "until" to until,
                     )
@@ -144,11 +173,15 @@ object LiveLocations {
                 trySend(
                     snap.children.mapNotNull { c ->
                         val uid = c.key ?: return@mapNotNull null
-                        val opened = c.child("e").getValue(String::class.java)?.let { sealed ->
-                            E2eEngine.instance?.openText(chatId, sealed)?.takeIf { it != E2e.UNREADABLE }?.split(',')
+                        val openedText = c.child("e").getValue(String::class.java)?.let { sealed ->
+                            E2eEngine.instance?.openText(chatId, sealed)?.takeIf { it != E2e.UNREADABLE }
                         }
-                        val lat = opened?.getOrNull(0)?.toDoubleOrNull() ?: c.child("lat").getValue(Double::class.java) ?: return@mapNotNull null
-                        val lng = opened?.getOrNull(1)?.toDoubleOrNull() ?: c.child("lng").getValue(Double::class.java) ?: return@mapNotNull null
+                        val opened = openedText?.substringBefore('|')?.split(',')
+                        fun num(index: Int, key: String): Double? =
+                            opened?.getOrNull(index)?.toDoubleOrNull() ?: runCatching { c.child(key).getValue(Double::class.java) }.getOrNull()
+                        val lat = num(0, "lat") ?: return@mapNotNull null
+                        val lng = num(1, "lng") ?: return@mapNotNull null
+                        val trailText = if (openedText != null) openedText.substringAfter('|', "") else c.child("trail").getValue(String::class.java).orEmpty()
                         uid to LiveLocation(
                             uid,
                             lat,
@@ -156,6 +189,11 @@ object LiveLocations {
                             c.child("at").getValue(Long::class.java) ?: 0L,
                             c.child("until").getValue(Long::class.java) ?: 0L,
                             ended = c.child("ended").getValue(Boolean::class.java) == true,
+                            accuracy = num(2, "acc"),
+                            bearing = num(3, "brg")?.toFloat(),
+                            speed = num(4, "spd")?.toFloat(),
+                            battery = num(5, "bat")?.toInt(),
+                            trail = Trail.parse(trailText),
                         )
                     }.toMap(),
                 )
@@ -179,10 +217,25 @@ object LiveLocations {
 class LiveLocationService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private var manager: LocationManager? = null
+    private var fused: com.google.android.gms.location.FusedLocationProviderClient? = null
+    private val fusedCallback = object : com.google.android.gms.location.LocationCallback() {
+        override fun onLocationResult(result: com.google.android.gms.location.LocationResult) {
+            result.lastLocation?.let { onPlace(it) }
+        }
+    }
+    private var lastSent = 0L
+
+    /** A new place: sent (a few seconds apart at most, so a quick run of them does not flood the database). */
+    private fun onPlace(location: Location) {
+        val now = System.currentTimeMillis()
+        if (now - lastSent < MIN_GAP_MS) return
+        lastSent = now
+        LiveLocations.send(this, location)
+        refresh()
+    }
     private val listener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
-            LiveLocations.send(this@LiveLocationService, location)
-            refresh()
+            onPlace(location)
         }
 
         @Deprecated("old API")
@@ -231,6 +284,26 @@ class LiveLocationService : Service() {
             stopSelf()
             return
         }
+        // The phone's fused location (GPS, Wi-Fi and the cell towers together): every few seconds while moving, and
+        // little while still (it waits for a few metres of movement), so the pin glides instead of jumping.
+        val play = runCatching {
+            com.google.android.gms.common.GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(this) ==
+                com.google.android.gms.common.ConnectionResult.SUCCESS
+        }.getOrDefault(false)
+        if (play) {
+            val client = fused ?: com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(this).also { fused = it }
+            val request = com.google.android.gms.location.LocationRequest.Builder(com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY, 5_000L)
+                .setMinUpdateIntervalMillis(MIN_GAP_MS)
+                .setMinUpdateDistanceMeters(4f)
+                .setWaitForAccurateLocation(false)
+                .build()
+            val started = runCatching {
+                client.removeLocationUpdates(fusedCallback)
+                client.requestLocationUpdates(request, fusedCallback, Looper.getMainLooper())
+                client.lastLocation.addOnSuccessListener { it?.let { l -> onPlace(l) } }
+            }.isSuccess
+            if (started) return
+        }
         val m = manager ?: (getSystemService(Context.LOCATION_SERVICE) as LocationManager).also { manager = it }
         runCatching { m.removeUpdates(listener) }
         val providers = buildList {
@@ -240,7 +313,7 @@ class LiveLocationService : Service() {
         }
         // The best one on, and the network one beside GPS (indoors GPS may give nothing).
         providers.take(2).forEach { p ->
-            runCatching { m.requestLocationUpdates(p, 30_000L, 25f, listener, Looper.getMainLooper()) }
+            runCatching { m.requestLocationUpdates(p, 5_000L, 5f, listener, Looper.getMainLooper()) }
         }
         providers.mapNotNull { p -> runCatching { m.getLastKnownLocation(p) }.getOrNull() }.maxByOrNull { it.time }
             ?.let { LiveLocations.send(this, it) }
@@ -260,6 +333,7 @@ class LiveLocationService : Service() {
     override fun onDestroy() {
         main.removeCallbacks(tick)
         runCatching { manager?.removeUpdates(listener) }
+        runCatching { fused?.removeLocationUpdates(fusedCallback) }
         super.onDestroy()
     }
 
@@ -304,11 +378,48 @@ class LiveLocationService : Service() {
         private const val CHANNEL = "qeyf_live_location"
         private const val NOTIFICATION_ID = 4101
         private const val ACTION_STOP = "com.qmusic.live.STOP"
+        private const val MIN_GAP_MS = 3_000L
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, LiveLocationService::class.java))
         }
     }
+}
+
+/**
+ * The way this phone came while sharing in a conversation: a point each 15 metres or so, the last [MAX] kept, as
+ * "lat,lng;lat,lng;...". It starts again with each new sharing and goes when the sharing stops.
+ */
+object Trail {
+    private const val PREFS = "nuvelo_live_trail"
+    private const val MAX = 80
+    private const val STEP_M = 15.0
+
+    fun add(context: Context, chatId: String, lat: Double, lng: Double): String {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val points = parse(prefs.getString(chatId, null).orEmpty()).toMutableList()
+        val last = points.lastOrNull()
+        if (last == null || distanceMeters(last.first, last.second, lat, lng) >= STEP_M) points += lat to lng
+        val kept = points.takeLast(MAX)
+        val text = kept.joinToString(";") { (a, b) -> "${round(a)},${round(b)}" }
+        prefs.edit().putString(chatId, text).apply()
+        return text
+    }
+
+    fun clear(context: Context, chatId: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(chatId).apply()
+    }
+
+    fun parse(text: String): List<Pair<Double, Double>> =
+        text.split(';').mapNotNull { p ->
+            val parts = p.split(',')
+            val a = parts.getOrNull(0)?.toDoubleOrNull()
+            val b = parts.getOrNull(1)?.toDoubleOrNull()
+            if (a != null && b != null) a to b else null
+        }
+
+    /** Five decimals: about a metre, and short. */
+    private fun round(v: Double) = kotlin.math.round(v * 100_000) / 100_000
 }
 
 /**

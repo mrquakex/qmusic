@@ -4,6 +4,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import com.qmusic.ui.viewmodel.EqualizerPreset
 
 interface AppStrings {
+    /** The English strings (for the few places that word things themselves). */
+    val english: Boolean get() = false
     // Navigation
     val tabHome: String
     val tabForYou: String
@@ -59,6 +61,8 @@ interface AppStrings {
     val moreYouMayLike: String
     val tabAlbums: String
     val seeAll: String
+    /** "Showing results for: X" (YouTube Music set the spelling right). */
+    fun showingResultsFor(query: String): String
     val makeRingtone: String
     val ringtoneFetching: String
     val ringtoneAnalyzing: String
@@ -468,6 +472,7 @@ object TurkishStrings : AppStrings {
     override val moreYouMayLike: String = "Beğenebileceğiniz diğer içerikler"
     override val tabAlbums: String = "Albümler"
     override val seeAll: String = "Tümü"
+    override fun showingResultsFor(query: String): String = "Şunun sonuçları gösteriliyor: $query"
     override val makeRingtone: String = "Zil sesi yap"
     override val ringtoneFetching: String = "Şarkı hazırlanıyor…"
     override val ringtoneAnalyzing: String = "Ses inceleniyor…"
@@ -842,6 +847,7 @@ object TurkishStrings : AppStrings {
 }
 
 object EnglishStrings : AppStrings {
+    override val english: Boolean get() = true
     override val tabHome: String = "Home"
     override val tabForYou: String = "For you"
     override val playFullSong: String = "Play full song"
@@ -895,6 +901,7 @@ object EnglishStrings : AppStrings {
     override val moreYouMayLike: String = "More you may like"
     override val tabAlbums: String = "Albums"
     override val seeAll: String = "See all"
+    override fun showingResultsFor(query: String): String = "Showing results for: $query"
     override val makeRingtone: String = "Make a ringtone"
     override val ringtoneFetching: String = "Getting the song ready…"
     override val ringtoneAnalyzing: String = "Reading the sound…"

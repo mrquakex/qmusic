@@ -118,7 +118,7 @@ class DesktopAppSettings(
     private val _qualityWifi = MutableStateFlow(getStringProp(KEY_QUALITY_WIFI, "HIGH"))
     override val audioQualityWifi: StateFlow<String> = _qualityWifi.asStateFlow()
 
-    private val _qualityMobile = MutableStateFlow(getStringProp(KEY_QUALITY_MOBILE, "NORMAL"))
+    private val _qualityMobile = MutableStateFlow(getStringProp(KEY_QUALITY_MOBILE, "HIGH"))
     override val audioQualityMobile: StateFlow<String> = _qualityMobile.asStateFlow()
 
     private val _normalize = MutableStateFlow(getBoolProp(KEY_NORMALIZE, true))

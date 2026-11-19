@@ -444,6 +444,8 @@ internal object BrowseParser {
             .path("tabRenderer", "content", "sectionListRenderer", "contents").arr().orEmpty()
 
         var top: ArtistItem? = null
+        var topSong: SongItem? = null
+        var topCollection: CollectionItem? = null
         val songs = LinkedHashMap<String, SongItem>()
         val albums = LinkedHashMap<String, CollectionItem>()
         val artists = LinkedHashMap<String, ArtistItem>()
@@ -487,13 +489,40 @@ internal object BrowseParser {
                 val endpoint = card["title"].runs().firstOrNull().path("navigationEndpoint", "browseEndpoint")
                 val id = endpoint.path("browseId").str()
                 val type = endpoint.path("browseEndpointContextSupportedConfigs", "browseEndpointContextMusicConfig", "pageType").str()
+                val cardThumbs = thumbnails(card.path("thumbnail", "musicThumbnailRenderer", "thumbnail", "thumbnails"))
+                val cardSubtitle = card["subtitle"].text().takeIf { it.isNotBlank() }
                 if (id != null && type == "MUSIC_PAGE_TYPE_ARTIST") {
                     top = ArtistItem(
                         browseId = id,
                         name = card["title"].text(),
-                        subtitle = card["subtitle"].text().takeIf { it.isNotBlank() },
-                        thumbnail = thumbnails(card.path("thumbnail", "musicThumbnailRenderer", "thumbnail", "thumbnails")).lastOrNull()?.url,
+                        subtitle = cardSubtitle,
+                        thumbnail = cardThumbs.lastOrNull()?.url,
                     ).also { artists.putIfAbsent(it.browseId, it) }
+                } else if (id != null && (type == "MUSIC_PAGE_TYPE_ALBUM" || type == "MUSIC_PAGE_TYPE_PLAYLIST")) {
+                    topCollection = CollectionItem(
+                        id, card["title"].text(), cardSubtitle, cardThumbs.lastOrNull()?.url,
+                        if (type == "MUSIC_PAGE_TYPE_ALBUM") CollectionKind.ALBUM else CollectionKind.PLAYLIST,
+                    )
+                } else {
+                    // A song or a video as the top result (the card's title plays it): it was lost before.
+                    val titleRun = card["title"].runs().firstOrNull()
+                    val videoId = titleRun.path("navigationEndpoint", "watchEndpoint", "videoId").str()
+                    if (videoId != null) {
+                        val subtitleRuns = card["subtitle"].runs()
+                        val cardArtistsFound = subtitleRuns.mapNotNull { run ->
+                            val aid = run.path("navigationEndpoint", "browseEndpoint", "browseId").str()
+                            if (aid?.startsWith("UC") == true) Artist(run["text"].str().orEmpty(), aid) else null
+                        }.ifEmpty { plainArtist(subtitleRuns) }
+                        topSong = SongItem(
+                            id = videoId,
+                            title = card["title"].text(),
+                            artists = cardArtistsFound,
+                            duration = subtitleRuns.firstNotNullOfOrNull { run -> run["text"].str()?.trim()?.takeIf(DURATION::matches)?.let(::parseDuration) },
+                            thumbnail = cardThumbs.lastOrNull()?.url,
+                            thumbnails = cardThumbs,
+                            videoType = videoTypeOf(titleRun),
+                        )
+                    }
                 }
                 cardArtists = top?.let { listOf(Artist(it.name, it.browseId)) }
                 visit(card["contents"])
@@ -503,10 +532,25 @@ internal object BrowseParser {
             }
         }
 
-        // The top artist is shown on its own card, so it is not repeated in the Artists list.
+        // The top artist is shown on its own card, so it is not repeated in the Artists list; nor the top song or album.
         top?.let { artists.remove(it.browseId) }
+        topSong?.let { songs.remove(it.id) }
+        topCollection?.let { albums.remove(it.browseId); playlists.remove(it.browseId) }
         val continuation = sections.firstNotNullOfOrNull { continuationToken(it.path("musicShelfRenderer")) }
-        return SearchResultsPage(top, songs.values.toList(), albums.values.toList(), artists.values.toList(), playlists.values.toList(), continuation)
+        // "Showing results for ...": YouTube Music set the spelling right.
+        val corrected = findKey(root["contents"], "showingResultsForRenderer")
+            ?.path("correctedQuery")?.text()?.takeIf { it.isNotBlank() }
+        return SearchResultsPage(
+            top, songs.values.toList(), albums.values.toList(), artists.values.toList(), playlists.values.toList(), continuation,
+            topSong = topSong, topCollection = topCollection, correctedQuery = corrected,
+        )
+    }
+
+    /** The first object under [key] anywhere in [element]. */
+    private fun findKey(element: JsonElement?, key: String): JsonElement? = when (element) {
+        is JsonObject -> element[key] ?: element.values.firstNotNullOfOrNull { findKey(it, key) }
+        is JsonArray -> element.firstNotNullOfOrNull { findKey(it, key) }
+        else -> null
     }
 
     /** The next part of a filtered search's list. */

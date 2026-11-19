@@ -398,6 +398,133 @@ async function sweepExpired() {
   }
 }
 
+// ------------------------------------------------------------------ the admin panel
+
+// What an admin asks for in the app (adminActions/{id}: kind, target, value, by, at) that the rules cannot let a
+// phone do: done here, then marked done (or with the error). Bans and mutes are written by the app itself (bans/{uid});
+// their entries here only keep the record. No one's messages are read for any of this.
+const ADMIN_NAME_RE = /^[a-z0-9._]{3,20}$/;
+const execFile = require("child_process").execFile;
+const du = (dir) => new Promise((ok) => execFile("du", ["-sb", dir], (e, out) => ok(e ? 0 : Number(String(out).split(/\s/)[0]) || 0)));
+
+async function isAdmin(uid) {
+  return (await db.ref(`admins/${uid}`).get()).val() === true;
+}
+
+/** Closes a group: it, its messages and its place in every member's list go. */
+async function closeGroup(id) {
+  if (!GROUP.test(id)) throw new Error("not a group");
+  const members = (await db.ref(`groups/${id}/members`).get()).val() || {};
+  const gone = {
+    [`groups/${id}`]: null,
+    [`chats/${id}`]: null,
+    [`groupCalls/${id}`]: null,
+    [`typing/${id}`]: null,
+    [`together/${id}`]: null,
+    [`chatKeys/${id}`]: null,
+    [`liveLocations/${id}`]: null,
+    [`chatLists/${id}`]: null,
+    [`reacts/${id}`]: null,
+    [`ttlChats/${id}`]: null,
+  };
+  for (const uid of Object.keys(members)) gone[`userChats/${uid}/${id}`] = null;
+  await db.ref().update(gone);
+  fs.rm(`/var/lib/qeyf-media/${id}`, { recursive: true, force: true }, () => {});
+}
+
+/** Gives someone another user name (the old one is let go). */
+async function renameUser(uid, name) {
+  if (!ADMIN_NAME_RE.test(name)) throw new Error("bad name");
+  const owner = (await db.ref(`usernames/${name}`).get()).val();
+  if (owner && owner !== uid) throw new Error("taken");
+  const old = (await db.ref(`users/${uid}/username`).get()).val();
+  if (!old) throw new Error("no such user");
+  const change = { [`usernames/${name}`]: uid, [`users/${uid}/username`]: name };
+  if (old !== name) change[`usernames/${old}`] = null;
+  await db.ref().update(change);
+}
+
+/** Takes a picture, a name, an about line or the statuses off someone's profile. */
+async function resetProfile(uid, what) {
+  if (!(await db.ref(`users/${uid}/name`).get()).exists()) throw new Error("no such user");
+  const change = {};
+  if (what === "photo") Object.assign(change, { [`users/${uid}/photo`]: null, [`privateProfile/${uid}/photo`]: null });
+  else if (what === "name") change[`users/${uid}/name`] = "Nuvelo kullanıcısı";
+  else if (what === "about") Object.assign(change, { [`users/${uid}/about`]: null, [`privateProfile/${uid}/about`]: null });
+  else if (what === "status") Object.assign(change, { [`statuses/${uid}`]: null, [`statusViews/${uid}`]: null });
+  else throw new Error("unknown part");
+  await db.ref().update(change);
+}
+
+/** A word to everyone: kept (the app shows it once) and pushed to every phone that has the app. */
+async function announce(text, by) {
+  const body = String(text || "").trim().slice(0, 1000);
+  if (!body) throw new Error("empty");
+  await db.ref("announcements").push({ text: body, at: admin.database.ServerValue.TIMESTAMP, by });
+  await admin.messaging().send({ topic: "releases", data: { type: "announce", body }, android: { priority: "high", ttl: 3 * 24 * 3600 * 1000 } });
+}
+
+/** Counts for the panel: each account's sign-up and last sign-in, how many conversations it has, the server's disk. */
+async function writeStats() {
+  const users = {};
+  let page;
+  do {
+    const list = await admin.auth().listUsers(1000, page);
+    for (const u of list.users) {
+      users[u.uid] = {
+        created: Date.parse(u.metadata.creationTime) || 0,
+        lastSignIn: Date.parse(u.metadata.lastRefreshTime || u.metadata.lastSignInTime) || 0,
+        chats: 0,
+      };
+    }
+    page = list.pageToken;
+  } while (page);
+  // Only how many: the conversations themselves are not looked at.
+  const lists = (await db.ref("userChats").get()).val() || {};
+  for (const [uid, chats] of Object.entries(lists)) {
+    if (users[uid]) users[uid].chats = Object.keys(chats || {}).length;
+  }
+  let diskFree = 0, diskTotal = 0;
+  try {
+    const s = fs.statfsSync("/var/lib/qeyf-media");
+    diskFree = s.bavail * s.bsize;
+    diskTotal = s.blocks * s.bsize;
+  } catch (_) {}
+  await db.ref("adminStats").set({
+    at: admin.database.ServerValue.TIMESTAMP,
+    users,
+    mediaBytes: await du("/var/lib/qeyf-media"),
+    diskFree,
+    diskTotal,
+  });
+}
+
+db.ref("adminActions").on("child_added", async (snap) => {
+  const a = snap.val() || {};
+  if (a.done || a.error) return;
+  const finish = (error) => snap.ref.update(error ? { error: String(error).slice(0, 200) } : { done: true }).catch(() => {});
+  try {
+    if (!(await isAdmin(String(a.by || "")))) return finish("not an admin");
+    const target = String(a.target || "");
+    const value = String(a.value || "");
+    switch (a.kind) {
+      case "closeGroup": await closeGroup(target); break;
+      case "rename": await renameUser(target, value); break;
+      case "reset": await resetProfile(target, value); break;
+      case "announce": await announce(value, a.by); break;
+      case "stats": await writeStats(); break;
+      // Written by the app itself; kept here as the record.
+      case "ban": case "mute": case "unban": case "minVersion": case "banName": case "report": break;
+      default: return finish("unknown");
+    }
+    log(`admin ${a.kind} ${target}`);
+    await finish(null);
+  } catch (e) {
+    log("admin action failed:", a.kind, e.message);
+    await finish(e.message);
+  }
+});
+
 publishTurn();
 setInterval(publishTurn, TURN_EVERY_MS);
 sweepExpired();

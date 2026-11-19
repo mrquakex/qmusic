@@ -1,5 +1,6 @@
 package com.qmusic.ui.videos
 
+import com.qmusic.ui.motion.pressScale
 import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -103,6 +105,16 @@ fun VideoThumbnail(item: VideoItem, s: VideoStrings, modifier: Modifier = Modifi
         if (item.thumbnail != null && !(preview && showing)) {
             AsyncImage(model = item.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
+        // How far it was watched, as on YouTube: a red line along the foot of the picture. YouTube's own figure (from
+        // the account, wherever it was watched), else where it was left in this app.
+        val local by VideoResume.positions.collectAsState()
+        val watched = item.watchedPercent?.let { it / 100f }
+            ?: local[item.id]?.let { at -> durationMs(item.duration)?.let { len -> at.toFloat() / len } }
+        if (watched != null && watched > 0f && !item.isLive) {
+            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Color.White.copy(alpha = 0.35f))) {
+                Box(Modifier.fillMaxHeight().fillMaxWidth(watched.coerceIn(0.02f, 1f)).background(VideoColors.Red))
+            }
+        }
         val badge = if (item.isLive) s.live else item.duration
         if (badge != null) {
             Text(
@@ -120,6 +132,18 @@ fun VideoThumbnail(item: VideoItem, s: VideoStrings, modifier: Modifier = Modifi
             )
         }
     }
+}
+
+/** Where videos were left in this app (id to milliseconds), for the red line on their pictures. */
+object VideoResume {
+    val positions = kotlinx.coroutines.flow.MutableStateFlow<Map<String, Long>>(emptyMap())
+}
+
+/** "3:54" or "1:02:03" in milliseconds; null when it is not a length. */
+internal fun durationMs(text: String?): Long? {
+    val parts = text?.split(':')?.map { it.trim().toLongOrNull() ?: return null } ?: return null
+    if (parts.isEmpty() || parts.size > 3) return null
+    return parts.fold(0L) { acc, n -> acc * 60 + n } * 1000
 }
 
 /** "Channel · 86 M views · 1 year ago", leaving out what a card does not have. */
@@ -187,7 +211,7 @@ fun MoreButton(onClick: () -> Unit) {
 /** The small card of "up next" and channel lists: picture on the left, text on the right. */
 @Composable
 fun VideoRowCard(item: VideoItem, s: VideoStrings, onClick: () -> Unit, modifier: Modifier = Modifier, onMore: (() -> Unit)? = null) {
-    Row(modifier = modifier.fillMaxWidth().warmVideoOnPress(item).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp)) {
+    Row(modifier = modifier.fillMaxWidth().pressScale(0.98f).warmVideoOnPress(item).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp)) {
         VideoThumbnail(item, s, Modifier.width(168.dp).clip(RoundedCornerShape(8.dp)))
         Spacer(Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -264,7 +288,7 @@ fun PlaylistResultRow(playlist: VideoPlaylist, s: VideoStrings, onClick: () -> U
 @Composable
 fun ChipRow(chips: List<VideoChip>, onClick: (VideoChip) -> Unit) {
     LazyRow(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(chips, key = { it.token }) { chip ->
+        items(chips, key = { it.text + "|" + it.token }) { chip ->
             LabelChip(chip.text, chip.selected) { onClick(chip) }
         }
     }
@@ -279,6 +303,7 @@ fun LabelChip(text: String, selected: Boolean, onClick: () -> Unit) {
         fontWeight = FontWeight.Medium,
         maxLines = 1,
         modifier = Modifier
+            .pressScale(0.94f)
             .clip(RoundedCornerShape(8.dp))
             .background(if (selected) VideoColors.ChipSelected else VideoColors.Chip)
             .clickable(onClick = onClick)
