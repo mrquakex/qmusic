@@ -184,7 +184,7 @@ class MainActivity : AppCompatActivity() {
 
         setContent {
             androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
-                QMusicApp(viewModel = viewModel)
+                com.qmusic.ui.components.LaunchSplash { QMusicApp(viewModel = viewModel) }
                 val language by container.settings.language.collectAsState()
                 com.qmusic.ui.tv.TvOverlay(english = language == "en")
                 // A call shrunk into its bubble floats over everything.
