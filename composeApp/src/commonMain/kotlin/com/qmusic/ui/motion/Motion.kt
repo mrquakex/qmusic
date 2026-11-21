@@ -16,6 +16,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -76,7 +78,31 @@ object Motion {
  * side as it fades in, while the one under it drifts back a little and fades; back is the same in reverse. The page on
  * top is drawn above the other the whole way.
  */
+/** How pages move: as on a phone (sliding the whole width), or as on the web (set by the web page: see [webPageTransform]). */
+object PageMotion {
+    var web: Boolean = false
+}
+
+/**
+ * The web's page change, as a desktop app does it: the new page rises a few points and fades in quickly over the old,
+ * which fades out (nothing slides the whole width of a wide screen).
+ */
+fun <S> AnimatedContentTransitionScope<S>.webPageTransform(forward: Boolean): ContentTransform {
+    val ms = 200
+    val shift = tween<IntOffset>(ms, easing = Motion.EmphasizedDecelerate)
+    return if (forward) {
+        (fadeIn(tween(ms, easing = Motion.EmphasizedDecelerate)) + slideInVertically(shift) { it / 40 } + scaleIn(tween(ms, easing = Motion.EmphasizedDecelerate), initialScale = 0.985f))
+            .togetherWith(fadeOut(tween(120, easing = Motion.EmphasizedAccelerate)))
+            .apply { targetContentZIndex = 1f }
+    } else {
+        fadeIn(tween(ms, easing = Motion.EmphasizedDecelerate))
+            .togetherWith(fadeOut(tween(140, easing = Motion.EmphasizedAccelerate)) + scaleOut(tween(140, easing = Motion.EmphasizedAccelerate), targetScale = 0.985f))
+            .apply { targetContentZIndex = -1f }
+    }.using(SizeTransform(clip = false))
+}
+
 fun <S> AnimatedContentTransitionScope<S>.pageTransform(forward: Boolean): ContentTransform {
+    if (PageMotion.web) return webPageTransform(forward)
     // As Android and WhatsApp do it: the page on top slides the whole width, solid (no see-through, so the two pages
     // never show through one another and nothing flashes empty); the page under it drifts a quarter aside, dimming.
     val slide = tween<IntOffset>(PAGE_MS, easing = Motion.Emphasized)

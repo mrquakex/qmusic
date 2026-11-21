@@ -1107,6 +1107,11 @@ class ChatController(
 
     /** Reports [other] (a person or a group) with the last messages of the conversation; blocks (or leaves) too when asked. */
     fun report(other: ChatUser, reason: String, recent: List<ChatMessage>, alsoBlock: Boolean, s: ChatStrings) {
+        // Nuvelo's own account cannot be reported or blocked (the server refuses it too): said plainly.
+        if (other.uid == CLAUDE_OWNER_UID) {
+            _info.value = if (s.english) "This is Nuvelo's account: it cannot be reported or blocked" else "Bu Nuvelo'nun hesabı: şikayet edilemez, engellenemez"
+            return
+        }
         val chatId = chatIdWith(other) ?: other.uid
         val lines = recent.filter { !it.system && !it.deleted }.takeLast(5).map { m ->
             m.from to (m.text.ifBlank { if (m.images.isNotEmpty()) "[foto]" else if (m.attachment != null) "[dosya]" else "[mesaj]" })
@@ -1125,6 +1130,10 @@ class ChatController(
     fun serverNow(): Long = Clock.System.now().toEpochMilliseconds() + backend.serverOffset.value
 
     fun setBlocked(other: ChatUser, block: Boolean) {
+        if (block && other.uid == CLAUDE_OWNER_UID) {
+            _info.value = if (ChatMusic.english) "This is Nuvelo's account: it cannot be blocked" else "Bu Nuvelo'nun hesabı: engellenemez"
+            return
+        }
         scope.launch { backend.setBlocked(other.uid, block).onFailure { _error.value = it.message } }
         if (block) _routes.update { list -> list.filterNot { it is ChatRoute.Conversation && it.other.uid == other.uid } }
     }

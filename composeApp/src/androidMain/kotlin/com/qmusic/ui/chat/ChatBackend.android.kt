@@ -2373,6 +2373,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             chatId.split("_").takeIf { it.size == 2 } ?: return false
         }
         if (CLAUDE_BOT_UID in members) return false
+        if (E2ePolicy.exempt(members)) return false
         if (!e2e.allHaveKeys(members.filter { it != uid })) return false
         return e2e.enable(chatId, members).isSuccess
     }
@@ -2419,7 +2420,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val group = ChatUser(id, clean, "", null)
         groupInfo(id, fresh = true)
         // Encrypted from the first line: those who have no key yet get it once they update (the group asks then).
-        runCatching { e2e.enable(id, (people.map { it.uid } + me.uid).filter { e2e.allHaveKeys(listOf(it)) }) }
+        if (!E2ePolicy.exempt(people.map { it.uid } + me.uid)) runCatching { e2e.enable(id, (people.map { it.uid } + me.uid).filter { e2e.allHaveKeys(listOf(it)) }) }
         systemMessage(group, "created")
         group
     }
@@ -2451,6 +2452,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     private suspend fun rekey(groupId: String, newcomers: List<String> = emptyList()) {
         if (e2e.versionNow(groupId) == null) return
         val info = groupInfo(groupId, fresh = true) ?: return
+        if (E2ePolicy.exempt(info.members.map { it.user.uid })) return
         val members = info.members.map { it.user.uid }.filter { e2e.allHaveKeys(listOf(it)) }
         e2e.enable(groupId, members, if (info.shareHistory) newcomers else emptyList())
     }

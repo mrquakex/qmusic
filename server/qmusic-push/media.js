@@ -418,8 +418,125 @@ async function vault(req, res, action) {
   }
 }
 
+// ------------------------------------------------------------------ link cards for the web
+//
+//   GET /media/preview?url=<link>   Authorization: Bearer <Firebase ID token>
+//     → 200 {"title", "description", "image", "site"}, or {} when the page has no card
+//
+// The phones read a page's card themselves; a browser may not read other sites, so the web asks here. Only public
+// addresses are fetched (never this server's own network), at most 512 KB, for 8 seconds, through 4 redirects.
+const dns = require("dns").promises;
+const net = require("net");
+const previewCache = new Map();
+
+function privateAddress(ip) {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split(".").map(Number);
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
+  }
+  const v = ip.toLowerCase();
+  if (v.startsWith("::ffff:")) return privateAddress(v.slice(7));
+  return v === "::" || v === "::1" || v.startsWith("fc") || v.startsWith("fd") || v.startsWith("fe8") || v.startsWith("fe9") ||
+    v.startsWith("fea") || v.startsWith("feb") || v.startsWith("ff");
+}
+
+async function publicUrl(link) {
+  let u;
+  try {
+    u = new URL(link);
+  } catch (_) {
+    return null;
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  if (u.port && u.port !== "80" && u.port !== "443") return null;
+  const host = u.hostname.replace(/^\[|\]$/g, "");
+  const addresses = net.isIP(host) ? [{ address: host }] : await dns.lookup(host, { all: true }).catch(() => []);
+  if (addresses.length === 0 || addresses.some((a) => privateAddress(a.address))) return null;
+  return u;
+}
+
+const unescapeHtml = (s) => s.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x27;/g, "'")
+  .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ");
+
+async function readCard(link) {
+  let u = await publicUrl(link);
+  for (let hop = 0; u && hop < 5; hop++) {
+    const r = await fetch(u, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(8000),
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; QeyfLinkPreview/1.0)", Accept: "text/html,application/xhtml+xml" },
+    });
+    if (r.status >= 300 && r.status < 400 && r.headers.get("location")) {
+      u = await publicUrl(new URL(r.headers.get("location"), u).toString());
+      continue;
+    }
+    if (!r.ok) return null;
+    const type = r.headers.get("content-type") || "";
+    const site = u.hostname.replace(/^www\./, "");
+    if (type.startsWith("image/")) return { title: u.pathname.split("/").pop() || site, description: "", image: u.toString(), site };
+    if (!type.includes("html")) return null;
+    // At most 512 KB of the page.
+    const reader = r.body.getReader();
+    const parts = [];
+    let size = 0;
+    while (size < 512 * 1024) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parts.push(value);
+      size += value.length;
+    }
+    reader.cancel().catch(() => {});
+    const html = Buffer.concat(parts).toString("utf8");
+    const head = html.split(/<\/head>/i)[0];
+    const meta = (...names) => {
+      for (const name of names) {
+        const a = new RegExp(`<meta[^>]+(?:property|name)\\s*=\\s*["']${name}["'][^>]*content\\s*=\\s*["']([^"']*)["']`, "i").exec(head);
+        const b = new RegExp(`<meta[^>]+content\\s*=\\s*["']([^"']*)["'][^>]*(?:property|name)\\s*=\\s*["']${name}["']`, "i").exec(head);
+        const v = (a || b) && unescapeHtml((a || b)[1]).trim();
+        if (v) return v;
+      }
+      return null;
+    };
+    const titleTag = /<title[^>]*>([^<]*)<\/title>/i.exec(head);
+    const title = meta("og:title", "twitter:title") || (titleTag && unescapeHtml(titleTag[1]).trim());
+    if (!title) return null;
+    const img = meta("og:image:secure_url", "og:image", "twitter:image", "twitter:image:src");
+    let image = null;
+    try {
+      image = img ? new URL(img, u).toString() : null;
+    } catch (_) {}
+    return { title: title.slice(0, 160), description: (meta("og:description", "twitter:description", "description") || "").slice(0, 240), image, site: meta("og:site_name") || site };
+  }
+  return null;
+}
+
+async function preview(req, res, url) {
+  const token = (req.headers.authorization || "").replace(/^Bearer /, "");
+  try {
+    await admin.auth().verifyIdToken(token);
+  } catch (_) {
+    return reply(res, 401, { error: "sign in" });
+  }
+  const link = (url.searchParams.get("url") || "").slice(0, 2000);
+  if (previewCache.has(link)) {
+    const hit = previewCache.get(link);
+    return reply(res, 200, hit || {});
+  }
+  const card = await readCard(link).catch(() => null);
+  previewCache.set(link, card);
+  if (previewCache.size > 500) previewCache.delete(previewCache.keys().next().value);
+  return reply(res, 200, card || {});
+}
+
 http
   .createServer((req, res) => {
+    if (req.method === "GET" && req.url.startsWith("/media/preview")) {
+      preview(req, res, new URL(req.url, "http://localhost")).catch(() => {
+        if (!res.headersSent) reply(res, 500, { error: "failed" });
+      });
+      return;
+    }
     if (req.method === "GET" && req.url.startsWith("/media/gifs")) {
       gifs(req, res, new URL(req.url, "http://localhost")).catch(() => {
         if (!res.headersSent) reply(res, 500, { error: "failed" });

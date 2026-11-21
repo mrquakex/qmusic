@@ -372,6 +372,47 @@ actual fun rememberAttachmentOpener(): (ChatAttachment) -> Unit {
     }
 }
 
+@Composable
+actual fun rememberImageSaver(): (bytes: ByteArray, name: String) -> Unit {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    return { bytes, name ->
+        val tr = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) { saveToPictures(context, bytes, name) }
+            android.widget.Toast.makeText(
+                context,
+                if (ok) (if (tr) "Galeriye kaydedildi" else "Saved to gallery") else (if (tr) "Kaydedilemedi" else "Could not save"),
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+}
+
+/** Puts a photo in Pictures/Nuvelo, where the gallery shows it (MediaStore from Android 10, the folder itself before). */
+private fun saveToPictures(context: Context, bytes: ByteArray, name: String): Boolean = runCatching {
+    val png = bytes.size > 8 && bytes[0] == 0x89.toByte() && bytes[1] == 'P'.code.toByte()
+    val webp = bytes.size > 12 && bytes[8] == 'W'.code.toByte() && bytes[9] == 'E'.code.toByte()
+    val (ext, mime) = when { png -> "png" to "image/png"; webp -> "webp" to "image/webp"; else -> "jpg" to "image/jpeg" }
+    val file = "$name.$ext"
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, file)
+            put(android.provider.MediaStore.Images.Media.MIME_TYPE, mime)
+            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/Nuvelo")
+        }
+        val uri = context.contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: error("insert")
+        context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("open")
+    } else {
+        @Suppress("DEPRECATION")
+        val dir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES), "Nuvelo").apply { mkdirs() }
+        val out = File(dir, file)
+        out.writeBytes(bytes)
+        android.media.MediaScannerConnection.scanFile(context, arrayOf(out.absolutePath), arrayOf(mime), null)
+    }
+    true
+}.getOrDefault(false)
+
 /** Puts [file] in Downloads/Nuvelo (MediaStore from Android 10, the folder itself before). */
 private fun saveToDownloads(context: Context, file: File, name: String, mime: String): Boolean = runCatching {
     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {

@@ -609,6 +609,10 @@ fun QMusicApp(
             val sectionModifier = modifier.sectionEnter(if (chatOpen && chatController != null) 0 else if (videosOpen) 1 else 2)
             if (chatOpen && chatController != null) {
                 val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
+                // A tablet (or a phone turned sideways with a big screen): the list beside the open conversation, as on
+                // the web.
+                BoxWithConstraints(Modifier.fillMaxSize()) {
+                androidx.compose.runtime.CompositionLocalProvider(com.qmusic.ui.chat.LocalWideLayout provides (maxWidth >= 840.dp)) {
                 com.qmusic.ui.chat.ChatApp(
                     controller = chatController,
                     s = chatStrings,
@@ -667,6 +671,8 @@ fun QMusicApp(
                     onExit = { chatOpen = false },
                     modifier = sectionModifier,
                 )
+                }
+                }
                 return@CompositionLocalProvider
             }
             val chatUnread by (chatController?.unreadCount ?: kotlinx.coroutines.flow.MutableStateFlow(0)).collectAsState()

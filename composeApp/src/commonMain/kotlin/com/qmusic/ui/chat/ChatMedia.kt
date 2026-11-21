@@ -58,6 +58,10 @@ expect fun rememberFilePicker(video: Boolean, onPicked: (PickedFile?) -> Unit): 
 @Composable
 expect fun rememberAttachmentOpener(): (ChatAttachment) -> Unit
 
+/** Saves a photo's bytes where the person keeps pictures (the gallery on a phone, a download in a browser). */
+@Composable
+expect fun rememberImageSaver(): (bytes: ByteArray, name: String) -> Unit
+
 /** A video message, full size, with the player's controls. */
 @Composable
 expect fun VideoMessagePlayer(url: String, modifier: Modifier)

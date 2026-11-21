@@ -112,6 +112,14 @@ sealed interface PinResult {
     data class Failed(val reason: String) : PinResult
 }
 
+/**
+ * Conversations that stay unencrypted: those of the founder and of the people they gave Claude to (Claude reads and
+ * answers in them). Everyone else's are encrypted as before.
+ */
+object E2ePolicy {
+    fun exempt(members: List<String>): Boolean = members.any { it == CLAUDE_OWNER_UID || it in ClaudeAccess.granted.value }
+}
+
 object E2e {
     var api: E2eApi = NoE2e
 

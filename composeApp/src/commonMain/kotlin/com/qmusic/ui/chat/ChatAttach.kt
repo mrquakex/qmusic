@@ -2,6 +2,7 @@ package com.qmusic.ui.chat
 
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.calculatePan
@@ -27,6 +28,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -112,7 +114,7 @@ internal fun AttachPanel(
     ExpandablePanel(collapsed = 380.dp, onDismiss = onDismiss, modifier = modifier) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(4),
-            modifier = Modifier.fillMaxSize(),
+            modifier = if (LocalWideLayout.current) Modifier.fillMaxWidth() else Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -211,6 +213,30 @@ internal fun ExpandablePanel(
     modifier: Modifier = Modifier,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
+    if (LocalWideLayout.current) {
+        // A computer: a small window over the writing box (nothing to pull), opening with a quick rise and fade.
+        val shown = remember { androidx.compose.animation.core.Animatable(0f) }
+        androidx.compose.runtime.LaunchedEffect(Unit) { shown.animateTo(1f, androidx.compose.animation.core.tween(170, easing = com.qmusic.ui.motion.Motion.EmphasizedDecelerate)) }
+        val shape = RoundedCornerShape(18.dp)
+        Column(
+            modifier
+                .padding(start = 12.dp, bottom = 6.dp)
+                .width(440.dp)
+                .heightIn(max = collapsed.coerceAtMost(420.dp))
+                .graphicsLayer {
+                    alpha = shown.value
+                    translationY = (1f - shown.value) * 12.dp.toPx()
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 1f)
+                    scaleX = 0.97f + 0.03f * shown.value
+                    scaleY = scaleX
+                }
+                .shadow(18.dp, shape)
+                .clip(shape)
+                .background(DarkSurface)
+                .padding(top = 10.dp),
+        ) { content() }
+        return
+    }
     val density = androidx.compose.ui.platform.LocalDensity.current
     val low = with(density) { collapsed.toPx() }
     // Pulled up: most of a phone's screen (the conversation's top stays in sight).

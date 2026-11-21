@@ -12,6 +12,10 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -101,6 +105,12 @@ import kotlinx.datetime.toLocalDateTime
 /** Loads a photo that the auto-download setting held back (it was tapped). */
 internal val LocalForceImage = androidx.compose.runtime.staticCompositionLocalOf<(ChatImage) -> Unit> { {} }
 
+/** A wide screen (a computer's browser): the list stays on the left and the open page shows on the right. */
+val LocalWideLayout = androidx.compose.runtime.staticCompositionLocalOf { false }
+
+/** Enter sends the message (Shift+Enter starts a new line), as on a computer's keyboard. */
+val LocalEnterSends = androidx.compose.runtime.staticCompositionLocalOf { false }
+
 /** The conversation open on screen right now (no notification is shown for it). */
 object ChatPresence {
     var openChatId: String? = null
@@ -175,12 +185,15 @@ private fun ChatAppContent(
             ChatAccount.SignedOut -> SignInPage(controller, s, onExit)
             is ChatAccount.NeedsProfile -> ProfilePage(controller, s, a, onExit)
             // A ban, a version too old, an announcement: over everything else of the messages.
-            is ChatAccount.Ready -> AdminGate(controller.admin, onExit) { if (lock != null && lockOn && !unlocked && lock.available) LockedPage(lock, s, onExit) else com.qmusic.ui.motion.PageHost(
+            is ChatAccount.Ready -> AdminGate(controller.admin, onExit) { if (lock != null && lockOn && !unlocked && lock.available) LockedPage(lock, s, onExit) else WidePanes(
+                wide = LocalWideLayout.current,
+                list = { ChatHome(controller, s, a.me, onExit, onCall, onGroupCall) },
+            ) { wide -> com.qmusic.ui.motion.PageHost(
                 target = routes.lastOrNull(),
                 depth = routes.size,
                 contentKey = { it.motionKey() },
                 backProgress = if (routes.isNotEmpty()) backProgress else 0f,
-            ) { top -> when (top) {
+            ) { top -> WideCentered(wide && top != null && top !is ChatRoute.Conversation && top !is ChatRoute.BroadcastChat) { when (top) {
                 // A secret conversation opened from elsewhere (a search, a link): the secret space's PIN first.
                 is ChatRoute.Conversation -> if (!secretOpen && secretList.any { it.other.uid == top.other.uid }) {
                     SecretPage(controller, s, a.me)
@@ -217,8 +230,8 @@ private fun ChatAppContent(
                 ChatRoute.Admin -> AdminPage(controller, a.me)
                 ChatRoute.Friends -> FriendsPage(controller, s)
                 is ChatRoute.Profile -> ProfilePage(controller, s, a.me, top.user, onCall)
-                null -> ChatHome(controller, s, a.me, onExit, onCall, onGroupCall)
-            } } }
+                null -> if (wide) WideWelcome(s) else ChatHome(controller, s, a.me, onExit, onCall, onGroupCall)
+            } } } } }
         }
         val info by controller.info.collectAsState()
         if (info != null && error == null) {
@@ -261,6 +274,52 @@ private fun ChatAppContent(
 }
 
 // ------------------------------------------------------------------ pieces
+
+/** On a wide screen the list on the left and [pages] beside it; else [pages] alone (the list is their first page). */
+@Composable
+private fun WidePanes(wide: Boolean, list: @Composable () -> Unit, pages: @Composable (Boolean) -> Unit) {
+    if (!wide) {
+        pages(false)
+        return
+    }
+    Row(Modifier.fillMaxSize()) {
+        Box(Modifier.width(400.dp).fillMaxSize()) { list() }
+        Box(Modifier.width(1.dp).fillMaxSize().background(TextSecondary.copy(alpha = 0.15f)))
+        Box(Modifier.weight(1f).fillMaxSize()) { pages(true) }
+    }
+}
+
+/** A page that is not a conversation, on a wide screen: as wide as reads well, in the middle. */
+@Composable
+private fun WideCentered(on: Boolean, content: @Composable () -> Unit) {
+    if (!on) {
+        content()
+        return
+    }
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        Box(Modifier.widthIn(max = 720.dp).fillMaxSize()) { content() }
+    }
+}
+
+/** The right side of a wide screen while no conversation is open. */
+@Composable
+private fun WideWelcome(s: ChatStrings) {
+    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        com.qmusic.ui.theme.NuveloWordmark(letterHeight = 34.dp)
+        Spacer(Modifier.height(18.dp))
+        Text(
+            if (s.english) "Pick a conversation on the left" else "Soldan bir sohbet seç",
+            color = TextSecondary,
+            fontSize = 16.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(QMusicIcons.Lock, contentDescription = null, tint = TextMuted, modifier = Modifier.size(13.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(if (s.english) "Messages also arrive on your phone" else "Mesajların telefonuna da gelir", color = TextMuted, fontSize = 13.sp)
+        }
+    }
+}
 
 /** What counts as another page for the page animation (a page whose person is updated is still the same page). */
 private fun ChatRoute?.motionKey(): Any? = when (this) {
@@ -316,7 +375,7 @@ fun ClaudeAvatar(size: androidx.compose.ui.unit.Dp) {
             val c = center
             val r = this.size.minDimension / 2
             for (i in 0 until 8) {
-                val angle = Math.toRadians(i * 45.0 + 22.5)
+                val angle = (i * 45.0 + 22.5) * kotlin.math.PI / 180.0
                 val long = if (i % 2 == 0) r else r * 0.72f
                 drawLine(
                     color = Color.White,
@@ -638,7 +697,7 @@ internal fun ThreadRow(
         actions.forEach { (label, run) -> DropdownMenuItem(text = { Text(label, color = TextPrimary) }, onClick = { menu = false; run() }) }
     }
     Row(
-        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = { if (actions.isNotEmpty()) menu = true }).padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().rightClick { if (actions.isNotEmpty()) menu = true }.hoverLight().combinedClickable(onClick = onClick, onLongClick = { if (actions.isNotEmpty()) menu = true }).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.clip(CircleShape).clickable(onClick = onAvatar)) { StatusRinged(ring) { ChatAvatar(t.other, if (ring != null) 46.dp else 52.dp) } }
@@ -1745,6 +1804,22 @@ private fun ConversationPage(
                     IconButton(onClick = { replyTo = null }) { Icon(QMusicIcons.Close, contentDescription = null, tint = TextSecondary) }
                 }
             }
+            val submit: () -> Unit = submit@{
+                if (text.isBlank()) return@submit
+                val e = editing
+                if (e != null) {
+                    if (text.trim() != e.text) controller.edit(other, e, text)
+                    editing = null
+                    text = ""
+                } else if (controller.send(other, text, replyTo = quoted(), mentions = mentionNames.filter { (_, name) -> text.contains("@$name") }.keys)) {
+                    text = ""
+                    unreadLineOn = false
+                    mentionNames = emptyMap()
+                    replyTo = null
+                    controller.stopTyping(other)
+                }
+            }
+            val enterSends = LocalEnterSends.current
             Row(
                 modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.Bottom,
@@ -1797,7 +1872,15 @@ private fun ConversationPage(
                             cursorBrush = SolidColor(Ink),
                             maxLines = 6,
                             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                            modifier = Modifier.fillMaxWidth().focusRequester(inputFocus).onFocusChanged { if (it.isFocused) { emojiOpen = false; attach = false } },
+                            modifier = Modifier.fillMaxWidth().focusRequester(inputFocus).onFocusChanged { if (it.isFocused) { emojiOpen = false; attach = false } }
+                                .onPreviewKeyEvent { k ->
+                                    if (enterSends && k.key == androidx.compose.ui.input.key.Key.Enter && k.type == androidx.compose.ui.input.key.KeyEventType.KeyDown && !k.isShiftPressed) {
+                                        submit()
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                },
                         )
                     }
                     }
@@ -1887,20 +1970,7 @@ private fun ConversationPage(
                                 enabled = canSend,
                                 // Held: sent later, at a chosen time (not an edit, not to Claude).
                                 onLongClick = if (editing == null && ScheduledMessages.supported && !isClaude) ({ scheduling = true }) else null,
-                            ) {
-                                val e = editing
-                                if (e != null) {
-                                    if (text.trim() != e.text) controller.edit(other, e, text)
-                                    editing = null
-                                    text = ""
-                                } else if (controller.send(other, text, replyTo = quoted(), mentions = mentionNames.filter { (_, name) -> text.contains("@$name") }.keys)) {
-                                    text = ""
-                                    unreadLineOn = false
-                                    mentionNames = emptyMap()
-                                    replyTo = null
-                                    controller.stopTyping(other)
-                                }
-                            },
+                            ) { submit() },
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(QMusicIcons.Send, contentDescription = null, tint = if (canSend) InkInverse else TextMuted, modifier = Modifier.size(20.dp))
@@ -2291,10 +2361,12 @@ internal fun nameOf(uid: String, myUid: String, otherName: String, s: ChatString
 internal fun PhotoViewer(images: List<ChatImage>, start: Int, load: suspend (ChatImage) -> ByteArray?, onClose: () -> Unit) {
     PlatformBackHandler(enabled = true) { onClose() }
     val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = start.coerceIn(0, images.lastIndex)) { images.size }
+    val loaded = remember { androidx.compose.runtime.mutableStateMapOf<String, ByteArray>() }
+    val save = rememberImageSaver()
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
             var bytes by remember(images[page].id) { mutableStateOf<ByteArray?>(null) }
-            LaunchedEffect(images[page].id) { bytes = load(images[page]) }
+            LaunchedEffect(images[page].id) { bytes = load(images[page])?.also { loaded[images[page].id] = it } }
             Box(Modifier.fillMaxSize().clickable(onClick = onClose), contentAlignment = Alignment.Center) {
                 val b = bytes
                 if (b != null) {
@@ -2312,6 +2384,17 @@ internal fun PhotoViewer(images: List<ChatImage>, start: Int, load: suspend (Cha
                 modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(12.dp)
                     .clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.5f)).padding(horizontal = 10.dp, vertical = 4.dp),
             )
+        }
+        val current = images.getOrNull(pager.currentPage)?.let { loaded[it.id] }
+        if (current != null) {
+            Box(
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(12.dp).size(44.dp)
+                    .clip(CircleShape).background(Color.Black.copy(alpha = 0.5f))
+                    .clickable { save(current, "Nuvelo_" + Clock.System.now().toEpochMilliseconds()) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(QMusicIcons.Download, contentDescription = if (ChatMusic.english) "Download" else "İndir", tint = Color.White, modifier = Modifier.size(22.dp))
+            }
         }
     }
 }
@@ -2873,6 +2956,7 @@ private fun Bubble(
                         Modifier
                     },
                 )
+                .rightClick { if (selecting) onToggleSelect() else onStartSelect() }
                 .combinedClickable(
                     onClick = {
                         when {
@@ -3265,7 +3349,7 @@ internal fun clock(ms: Long): String = local(ms).let { "${two(it.hour)}:${two(it
 
 private fun daysAgo(ms: Long): Int {
     val today = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date
-    return (today.toEpochDays() - local(ms).date.toEpochDays())
+    return (today.toEpochDays() - local(ms).date.toEpochDays()).toInt()
 }
 
 private fun dayLabel(ms: Long, s: ChatStrings): String = when (daysAgo(ms)) {
@@ -3435,7 +3519,7 @@ private fun fromClaudeId(uid: String) = uid == CLAUDE_BOT_UID
 
 /** "today 20:00", "tomorrow 09:00", or the date and the time. */
 private fun whenLabel(at: Long, s: ChatStrings): String {
-    val day = local(at).date.toEpochDays() - Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date.toEpochDays()
+    val day = (local(at).date.toEpochDays() - Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date.toEpochDays()).toInt()
     val d = when (day) {
         0 -> if (s.english) "today" else "bugün"
         1 -> if (s.english) "tomorrow" else "yarın"

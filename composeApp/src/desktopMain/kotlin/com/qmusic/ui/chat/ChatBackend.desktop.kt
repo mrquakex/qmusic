@@ -30,6 +30,9 @@ actual fun rememberFilePicker(video: Boolean, onPicked: (PickedFile?) -> Unit): 
 actual fun rememberAttachmentOpener(): (ChatAttachment) -> Unit = {}
 
 @androidx.compose.runtime.Composable
+actual fun rememberImageSaver(): (bytes: ByteArray, name: String) -> Unit = { _, _ -> }
+
+@androidx.compose.runtime.Composable
 actual fun VideoMessagePlayer(url: String, modifier: androidx.compose.ui.Modifier) = Unit
 
 @androidx.compose.runtime.Composable

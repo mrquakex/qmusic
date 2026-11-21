@@ -211,7 +211,8 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
                 }
             }
         }
-        item { MyProfileSong(controller, s, me) }
+        // A profile song is picked from the music, which the web does not have.
+        if (!ChatPlatform.web) item { MyProfileSong(controller, s, me) }
         item { SectionTitle(s.accountSection) }
         item {
             MenuRow(s.myQrTitle, s.myQrNote) { controller.push(ChatRoute.MyQr) }
@@ -230,8 +231,10 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
                 ) { controller.push(ChatRoute.Admin) }
             }
         }
-        item { SectionTitle(s.soundsTitle) }
-        item { SoundSettings(s) }
+        if (!ChatPlatform.web) {
+            item { SectionTitle(s.soundsTitle) }
+            item { SoundSettings(s) }
+        }
         item { SectionTitle(s.mediaTitle) }
         item {
             val mode by controller.autoDownload.collectAsState()
@@ -305,9 +308,11 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
             SettingSwitch(s.hideReadReceipts, s.hideReadReceiptsNote, privacy.hideReadReceipts) { controller.setPrivacy(privacy.copy(hideReadReceipts = it)) }
             val shareListening by ChatMusic.shareListening.collectAsState()
             val mw = ChatMusic.words()
-            SettingSwitch(mw.showListening, mw.showListeningNote, shareListening) { ChatMusic.setShareListening(it) }
             val home by AppHome.messagesFirst.collectAsState()
-            SettingSwitch(mw.messagesFirst, mw.messagesFirstNote, home) { AppHome.setMessagesFirst(it) }
+            if (!ChatPlatform.web) {
+                SettingSwitch(mw.showListening, mw.showListeningNote, shareListening) { ChatMusic.setShareListening(it) }
+                SettingSwitch(mw.messagesFirst, mw.messagesFirstNote, home) { AppHome.setMessagesFirst(it) }
+            }
             val all = listOf(Visibility.EVERYONE, Visibility.FRIENDS, Visibility.NOBODY)
             VisibilityRow(s.privacyPhoto, null, privacy.photo, all, s) { controller.setPrivacy(privacy.copy(photo = it)) }
             VisibilityRow(s.privacyAbout, null, privacy.about, all, s) { controller.setPrivacy(privacy.copy(about = it)) }
@@ -336,7 +341,7 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
 
 @Composable
 private fun MenuRow(title: String, note: String?, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().hoverLight().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, color = TextPrimary, fontSize = 15.sp)
             if (note != null) Text(note, color = TextSecondary, fontSize = 12.sp)
@@ -369,7 +374,7 @@ private val BorderLine: Color get() = com.qmusic.ui.theme.BorderHover
 
 @Composable
 internal fun SettingSwitch(title: String, note: String, on: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable { onChange(!on) }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().hoverLight().clickable { onChange(!on) }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, color = TextPrimary, fontSize = 15.sp)
             Text(note, color = TextSecondary, fontSize = 12.sp)
@@ -613,12 +618,15 @@ internal fun SendPhotosPage(
                             .clickable { hd = !hd }.padding(horizontal = 8.dp, vertical = 4.dp),
                     )
                 }
-                Text(
-                    s.editPhoto,
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    modifier = Modifier.clip(RoundedCornerShape(14.dp)).clickable { editing = pager.currentPage }.padding(horizontal = 14.dp, vertical = 8.dp),
-                )
+                // The web has no photo editor: the photo goes as it is.
+                if (!ChatPlatform.web) {
+                    Text(
+                        s.editPhoto,
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        modifier = Modifier.clip(RoundedCornerShape(14.dp)).clickable { editing = pager.currentPage }.padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
+                }
             }
             androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.weight(1f).fillMaxWidth()) { page ->
                 AsyncImage(model = list[page].jpeg, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())

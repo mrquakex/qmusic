@@ -1,0 +1,8 @@
+{
+  "name": "nuvelo-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.mjs",
+  "module": "index.mjs",
+  "type": "module"
+}

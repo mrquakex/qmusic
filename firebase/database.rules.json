@@ -95,14 +95,17 @@
         },
         "e2e": {
           ".write": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))",
-          ".validate": "newData.child('v').isNumber() && newData.child('v').val() >= 1 && (!data.exists() || newData.child('v').val() > data.child('v').val()) && newData.child('by').val() === auth.uid"
+          ".validate": "newData.child('v').isNumber() && newData.child('v').val() >= 1 && (!data.exists() || newData.child('v').val() > data.child('v').val()) && newData.child('by').val() === auth.uid && !$chatId.contains('2hxOw0dRcwUwsW7N6ogH4fRcqXo1') && !root.child('claudeAccess').child(auth.uid).exists() && ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) ? !root.child('groups').child($chatId).child('members').child('2hxOw0dRcwUwsW7N6ogH4fRcqXo1').exists() : !root.child('claudeAccess').child($chatId.replace(auth.uid, '').replace('_', '')).exists())"
         }
       }
     },
     "blocked": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null && auth.uid === $uid"
+        ".write": "auth != null && auth.uid === $uid",
+        "$other": {
+          ".validate": "!newData.exists() || root.child('admins').child($other).val() !== true"
+        }
       }
     },
     "pushTokens": {
@@ -484,7 +487,7 @@
       ],
       "$id": {
         ".write": "(auth != null && !data.exists() && newData.child('by').val() === auth.uid) || (auth != null && root.child('admins').child(auth.uid).val() === true)",
-        ".validate": "!newData.exists() || (newData.child('target').isString() && newData.child('target').val().length <= 64 && newData.child('chatId').isString() && newData.child('chatId').val().length <= 80 && newData.child('reason').isString() && newData.child('reason').val().length <= 40)"
+        ".validate": "!newData.exists() || (newData.child('target').isString() && newData.child('target').val().length <= 64 && root.child('admins').child(newData.child('target').val()).val() !== true &&newData.child('chatId').isString() && newData.child('chatId').val().length <= 80 && newData.child('reason').isString() && newData.child('reason').val().length <= 40)"
       },
       ".read": "auth != null && root.child('admins').child(auth.uid).val() === true"
     },

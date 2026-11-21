@@ -254,7 +254,7 @@ private fun StatusRow(g: StatusGroup, ring: Color, now: Long, s: ChatStrings, mu
         DropdownMenuItem(text = { Text(if (muted) s.statusUnmute else s.statusMute, color = TextPrimary) }, onClick = { menu = false; onToggleMute() })
     }
     Row(
-        Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = { menu = true }).padding(horizontal = 16.dp, vertical = 10.dp).then(if (muted) Modifier.graphicsLayerAlpha(0.55f) else Modifier),
+        Modifier.fillMaxWidth().rightClick { menu = true }.hoverLight().combinedClickable(onClick = onClick, onLongClick = { menu = true }).padding(horizontal = 16.dp, vertical = 10.dp).then(if (muted) Modifier.graphicsLayerAlpha(0.55f) else Modifier),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StatusRinged(ring) { StatusPreview(g.items.last(), g.owner, 50.dp) }
@@ -604,7 +604,7 @@ internal fun StatusMediaComposer(
                     )
                     IconButton(onClick = { picking = true }) { Icon(QMusicIcons.Headphones, contentDescription = s.statusAddSong, tint = Color.White) }
                     if (shown != null) {
-                        IconButton(onClick = { editing = true }) { Icon(QMusicIcons.Edit, contentDescription = s.statusEdit, tint = Color.White) }
+                        if (!ChatPlatform.web) IconButton(onClick = { editing = true }) { Icon(QMusicIcons.Edit, contentDescription = s.statusEdit, tint = Color.White) }
                     }
                 }
                 song?.let { g ->
