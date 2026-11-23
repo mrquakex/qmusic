@@ -94,7 +94,23 @@ internal class FirebaseGroupCallService(
     private val cams = HashMap<String, Boolean>()
     private val videos = HashMap<String, Boolean>()
 
-    private fun callRef(id: String) = root.child("groupCalls").child(id)
+    /** A group's call, or a call made by adding people to a call (its own place, open only to those let in). */
+    private fun callRef(id: String) = if (isCallRoom(id)) root.child("callRooms").child(id) else root.child("groupCalls").child(id)
+
+    override val canAddPeople: Boolean get() = groupId?.let { isCallRoom(it) } == true
+
+    override fun addPerson(user: ChatUser) {
+        val id = groupId ?: return
+        val mine = me() ?: return
+        if (!isCallRoom(id) || user.uid == mine.uid || people.containsKey(user.uid)) return
+        if (people.size + 1 >= MAX_GROUP_CALL) return
+        scope.launch {
+            runCatching {
+                callRef(id).child("people").child(user.uid).setValue(true).await()
+                calls.ringRoom(id, mine.uid, user.uid, _state.value?.video == true)
+            }
+        }
+    }
 
     override fun participants(groupId: String): Flow<List<ChatUser>> = callbackFlow {
         val ref = callRef(groupId).child("members")
@@ -122,6 +138,7 @@ internal class FirebaseGroupCallService(
         // A one-to-one call going on comes first.
         if (calls.state.value != null) return
         groupId = group.uid
+        CallHooks.groupActive = true
         joinedAt = System.currentTimeMillis()
         _state.value = GroupCallState(group = group, video = video, members = emptyList(), cameraOn = video)
         scope.launch {
@@ -141,8 +158,8 @@ internal class FirebaseGroupCallService(
             entry.onDisconnect().removeValue()
             ref.child("sig").child(mine.uid).onDisconnect().removeValue()
             entry.setValue(mapOf("name" to mine.name, "photo" to mine.photo, "video" to video, "cam" to video, "at" to ServerValue.TIMESTAMP))
-            // The first one rings the others.
-            if (others.isEmpty()) {
+            // The first one rings the others (a call made by adding people rang each one itself).
+            if (others.isEmpty() && !isCallRoom(group.uid)) {
                 root.child("notify").push().setValue(
                     mapOf("from" to mine.uid, "to" to group.uid, "chatId" to group.uid, "type" to "groupcall", "body" to "", "video" to video, "at" to ServerValue.TIMESTAMP),
                 )
@@ -382,6 +399,7 @@ internal class FirebaseGroupCallService(
     override fun leave() {
         val id = groupId ?: return
         groupId = null
+        CallHooks.groupActive = false
         val myUid = me()?.uid
         listeners.forEach { (ref, l) ->
             when (l) {

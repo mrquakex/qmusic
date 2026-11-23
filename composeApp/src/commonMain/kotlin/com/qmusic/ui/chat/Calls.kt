@@ -47,7 +47,29 @@ data class CallState(
     val remoteLevel: Float = 0f,
     /** The connection, 0 (bad) to 3 (good), from its delay and lost sound; -1 before it is known. */
     val quality: Int = -1,
+    /** The connection dropped (a tunnel, Wi-Fi to mobile): the call is finding its way back ("Reconnecting…"). */
+    val reconnecting: Boolean = false,
+    /** Our picture was stopped by itself because the line is too weak for it; it comes back when the line does. */
+    val videoPaused: Boolean = false,
+    /** Their picture stopped for their weak line (their photo shows, with a note). */
+    val remotePaused: Boolean = false,
+    /** The other side shows their screen, not their camera (shown whole, not cropped). */
+    val remoteScreen: Boolean = false,
+    /** We show our screen. */
+    val sharingScreen: Boolean = false,
+    /** Counts the times showing our screen did not start (the phone refused it): each new one is told on screen once. */
+    val shareFailures: Int = 0,
+    /** Our voice cleaned of the noise around (on by default). */
+    val noiseSuppression: Boolean = true,
+    /** The last emoji sent in the call (by either side); a new [CallReaction.id] floats up once. */
+    val reaction: CallReaction? = null,
 )
+
+/** An emoji sent during a call: it floats up over the call on both phones. */
+data class CallReaction(val id: Long, val emoji: String, val mine: Boolean)
+
+/** The emojis a call offers. */
+val CALL_REACTIONS = listOf("❤️", "😂", "😮", "😢", "👏", "👍")
 
 enum class AudioRouteKind { EARPIECE, SPEAKER, WIRED, BLUETOOTH }
 
@@ -69,7 +91,29 @@ interface CallService {
 
     /** Sends the call's sound to [id] (one of [CallState.routes]). */
     fun setAudioRoute(id: String) {}
+
+    /** Sends an emoji that floats up on both phones. */
+    fun react(emoji: String) {}
+
+    /** Turns the cleaning of the noise around our voice on or off. */
+    fun toggleNoiseSuppression() {}
+
+    /** Whether a third person can be added here (the call then becomes a group call). */
+    val canAddPeople: Boolean get() = false
+
+    /** Adds [user]: both phones move into a group call, and [user]'s phone rings. */
+    fun addPerson(user: ChatUser) {}
+
+    /** Stops showing our screen (the camera comes back if it was on). */
+    fun stopScreenShare() {}
 }
+
+/**
+ * The screen sharing of a call where the phone can do it: returns what starts it (asking the person first), or null
+ * where it cannot.
+ */
+@Composable
+expect fun rememberScreenShare(service: CallService): (() -> Unit)?
 
 /** The answer button of the ringing notification was tapped: the call screen answers as soon as it is up. */
 object CallLaunch {
@@ -86,9 +130,12 @@ object CallLaunch {
     val callBack = kotlinx.coroutines.flow.MutableStateFlow<Pair<ChatUser, Boolean>?>(null)
 }
 
-/** Draws the other person's picture ([remote]) or our own camera. */
+/**
+ * Draws the other person's picture ([remote]) or our own camera. [overlay]: drawn over another picture (the small one
+ * in the corner).
+ */
 @Composable
-expect fun CallVideo(service: CallService, remote: Boolean, modifier: Modifier)
+expect fun CallVideo(service: CallService, remote: Boolean, modifier: Modifier, overlay: Boolean = !remote)
 
 /**
  * Asks for the microphone (and the camera for a video call) when they are not granted yet, then runs the action

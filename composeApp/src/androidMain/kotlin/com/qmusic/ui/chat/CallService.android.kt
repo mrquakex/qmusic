@@ -37,6 +37,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -90,6 +91,20 @@ object CallHooks {
     /** A call is going on (keep the app alive with a foreground service), or it is over. */
     var onActive: ((active: Boolean, peer: ChatUser?, video: Boolean) -> Unit)? = null
 
+    /** A group call is going on here (the call's service stays up for it). */
+    @Volatile
+    var groupActive: Boolean = false
+
+    /** The screen is shown in the call now, or no longer: the foreground service says so to Android (needed first). */
+    var onScreenShare: ((sharing: Boolean) -> Unit)? = null
+
+    /**
+     * Waits for the foreground service to say "screen" to Android (Android 14 refuses to read the screen before):
+     * the service completes it with true once it is so, false when the phone did not take it.
+     */
+    @Volatile
+    var screenServiceReady: kotlinx.coroutines.CompletableDeferred<Boolean>? = null
+
     /** The call, for the activity (to show over the lock screen while one rings or goes on). */
     var state: StateFlow<CallState?>? = null
         internal set
@@ -110,6 +125,30 @@ object CallHooks {
         trace?.invoke(if (visible) "app on screen" else "app hidden")
     }
 
+    /** The phone's state that decides whether a ringtone is heard, in one line (for the call's trail). */
+    fun ringDiagnosis(context: Context): String {
+        val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val nm = context.getSystemService(android.app.NotificationManager::class.java)
+        val mode = when (audio.ringerMode) {
+            AudioManager.RINGER_MODE_SILENT -> "silent"
+            AudioManager.RINGER_MODE_VIBRATE -> "vibrate"
+            else -> "normal"
+        }
+        val dnd = when (nm?.currentInterruptionFilter) {
+            android.app.NotificationManager.INTERRUPTION_FILTER_ALL -> "off"
+            android.app.NotificationManager.INTERRUPTION_FILTER_PRIORITY -> "priority"
+            android.app.NotificationManager.INTERRUPTION_FILTER_ALARMS -> "alarms"
+            android.app.NotificationManager.INTERRUPTION_FILTER_NONE -> "none"
+            else -> "?"
+        }
+        val ring = audio.getStreamVolume(AudioManager.STREAM_RING)
+        val ringMax = audio.getStreamMaxVolume(AudioManager.STREAM_RING)
+        val notif = audio.getStreamVolume(AudioManager.STREAM_NOTIFICATION)
+        val inCall = runCatching { audio.mode }.getOrDefault(-1)
+        return "ringer $mode, dnd $dnd, ring vol $ring/$ringMax, notif vol $notif, audio mode $inCall, " +
+            "notifications ${if (nm?.areNotificationsEnabled() == true) "on" else "OFF"}"
+    }
+
     /** Notes something the app did into the call going on (its trail shows why a call ended). */
     @Volatile
     var trace: ((String) -> Unit)? = null
@@ -128,7 +167,10 @@ object ChatCallActions {
     }
 
     fun hangUp(context: Context) {
-        FirebaseChatBackend.get(context.applicationContext)?.calls?.hangUp()
+        val backend = FirebaseChatBackend.get(context.applicationContext) ?: return
+        backend.calls.hangUp()
+        // The notification is the same for a group call: leaving it is what "hang up" means there.
+        if (CallHooks.groupActive) backend.groupCalls.leave()
     }
 
     /** A call that rang here while the app was not running and the caller gave up: it goes in the list of calls. */
@@ -224,6 +266,23 @@ internal class FirebaseCallService(
         var videoSender: org.webrtc.RtpSender? = null
         /** A voice call where a camera came on. */
         var upgraded = false
+        var audioSource: org.webrtc.AudioSource? = null
+        var audioSender: org.webrtc.RtpSender? = null
+        /** The last "start the route again" the other side asked for (the caller does it). */
+        var lastRestartAsk = 0L
+        /** Our picture stopped by itself for a weak line, and since when the line has been bad or good. */
+        var autoPaused = false
+        var badSince = 0L
+        var goodSince = 0L
+        /** The other side's last emoji (its stamp). */
+        var lastReaction = -1L
+        /** Our screen, while it is shown. */
+        var screenCapturer: org.webrtc.ScreenCapturerAndroid? = null
+        var screenHelper: SurfaceTextureHelper? = null
+        var screenSource: VideoSource? = null
+        var screenTrack: VideoTrack? = null
+        /** The call went on as a group call (a third person was added): it ends here without "ended". */
+        var moved = false
         val callRef: DatabaseReference get() = root.child("calls").child(chatId)
 
         /** What happened in this call, in order (sent to callDebug when it ends, to find why a call failed). */
@@ -236,6 +295,9 @@ internal class FirebaseCallService(
     }
 
     private var session: Session? = null
+
+    /** A third person was added: the call goes on as this group call (set by the backend, which has the group calls). */
+    var onMoveToRoom: ((room: ChatUser, video: Boolean) -> Unit)? = null
 
     /** The phone's own call system (Core-Telecom), where the phone has one: see [CallTelecom]. */
     private val telecom = CallTelecom(app, scope).also { t ->
@@ -279,6 +341,7 @@ internal class FirebaseCallService(
                 // Opened from the ringing notification: the app rings now, the notification goes.
                 if (visible && _state.value?.phase == CallPhase.INCOMING) {
                     CallHooks.onIncomingGone?.invoke()
+                    // Removing the notification stopped the ringing: it goes on here.
                     startRinging()
                 }
             }
@@ -329,8 +392,8 @@ internal class FirebaseCallService(
             snap.ref.removeValue()
             return
         }
-        if (current != null) {
-            // Already in a call: the other one hears "busy", and this person is told who called.
+        if (current != null || CallHooks.groupActive) {
+            // Already in a call (a group's too): the other one hears "busy", and this person is told who called.
             root.child("calls").child(chatId).child("state").setValue("busy")
             snap.ref.removeValue()
             scope.launch {
@@ -357,6 +420,12 @@ internal class FirebaseCallService(
                     ?: runCatching { root.child("privateProfile").child(from).child("photo").get().await().getValue(String::class.java) }.getOrNull(),
             )
             if (session != null) return@launch
+            // Ringing from a clean start: no call of a moment ago left with the system or in the sound mode (it would
+            // keep this ringtone silent).
+            if (!CallHooks.groupActive) {
+                telecom.ensureIdle()
+                if (audioManager.mode != AudioManager.MODE_NORMAL) runCatching { audioManager.mode = AudioManager.MODE_NORMAL }
+            }
             val s = Session(id, chatId, peer, video, caller = false)
             s.at = at
             session = s
@@ -366,7 +435,9 @@ internal class FirebaseCallService(
             s.callRef.child("ringing").setValue(id)
             watchCall(s)
             MusicDuringCall.pause()
-            if (CallHooks.appVisible) startRinging() else CallHooks.onIncoming?.invoke(id, peer, video)
+            // It rings in any case (the app plays it, open or not); outside the app the call's notification shows too.
+            startRinging()
+            if (!CallHooks.appVisible) CallHooks.onIncoming?.invoke(id, peer, video)
             s.timeout = scope.launch {
                 delay(RING_MS)
                 if (_state.value?.phase == CallPhase.INCOMING) finish(CallEnd.NO_ANSWER, write = false)
@@ -386,7 +457,8 @@ internal class FirebaseCallService(
         _state.value = CallState(id = id, peer = peer, video = video, phase = CallPhase.CALLING, speaker = video)
         CallHooks.onActive?.invoke(true, peer, video)
         startAudio(video)
-        telecom.start(peer, video, incoming = false)
+        // The phone's own call system gets this call only once the other side has answered (see CONNECTED): a call
+        // dialled and hung up at once can then never be left "connecting" there, which blocks every next call.
         fetchPeerTone(id, peer)
         scope.launch {
             try {
@@ -417,6 +489,21 @@ internal class FirebaseCallService(
         }
     }
 
+    /**
+     * Answered (or they answered) but the two phones never get through: the call ended on the other side while this
+     * phone missed it (no connection at that moment), or the other side never sent its part. It does not stay on
+     * "Connecting…" for ever: after a while it ends as failed.
+     */
+    private fun connectWatchdog(s: Session) {
+        s.timeout = scope.launch {
+            delay(CONNECT_MS)
+            if (session === s && !s.ended && _state.value?.phase == CallPhase.CONNECTING) {
+                s.note("never connected in ${CONNECT_MS / 1000} s")
+                finish(CallEnd.FAILED, write = true)
+            }
+        }
+    }
+
     private fun notifyEntry(from: String, to: String, chatId: String, callId: String, video: Boolean, action: String) = mapOf(
         "from" to from,
         "to" to to,
@@ -437,13 +524,20 @@ internal class FirebaseCallService(
         CallHooks.onActive?.invoke(true, s.peer, s.video)
         s.timeout?.cancel()
         _state.update { it?.copy(phase = CallPhase.CONNECTING) }
+        connectWatchdog(s)
         startAudio(s.video)
         telecom.start(s.peer, s.video, incoming = true)
         scope.launch {
             try {
                 root.child("incomingCall").child(me()?.uid ?: return@launch).removeValue()
                 // The call may have ended a moment before the answer: then there is nothing to answer.
-                val now = s.callRef.get().await()
+                // Read from the server, at most a few seconds (without a connection it would wait for ever).
+                val now = withTimeoutOrNull(8_000L) { s.callRef.get().await() }
+                if (now == null) {
+                    s.note("answer: call not readable")
+                    finish(CallEnd.FAILED, write = false)
+                    return@launch
+                }
                 val nowId = now.child("id").getValue(String::class.java)
                 val nowState = now.child("state").getValue(String::class.java)
                 if (nowId != s.id || nowState == "ended" || nowState == "declined" || nowState == "busy") {
@@ -542,6 +636,35 @@ internal class FirebaseCallService(
                     _state.update { it?.copy(remoteVideo = theirCamera && remoteTrack.value != null, video = it.video || theirCamera) }
                     if (theirCamera) releaseProximity()
                 }
+                // A third person was added on either phone: both go on in the group call it made.
+                val moveTo = snap.child("moveTo").getValue(String::class.java)
+                if (moveTo != null && ROOM_ID.matches(moveTo) && s.connectedOnce && !s.moved) {
+                    moveToRoom(s, moveTo, _state.value?.video == true)
+                    return
+                }
+                // The other side lost the connection and asks for a new route: the caller starts it (ICE restart).
+                val restartAsk = snap.child("restartAsk").getValue(Long::class.java) ?: 0L
+                if (s.caller && restartAsk > s.lastRestartAsk) {
+                    s.lastRestartAsk = restartAsk
+                    if (s.remoteSet) {
+                        s.note("restart asked by the other side")
+                        runCatching { s.pc?.restartIce() }
+                    }
+                }
+                // Their picture stopped for a weak line, or their screen instead of their camera.
+                val theirPause = snap.child("paused").child(s.peer.uid).getValue(Boolean::class.java) == true
+                val theirScreen = snap.child("screen").child(s.peer.uid).getValue(Boolean::class.java) == true
+                if (_state.value?.remotePaused != theirPause || _state.value?.remoteScreen != theirScreen) {
+                    _state.update { it?.copy(remotePaused = theirPause, remoteScreen = theirScreen) }
+                }
+                // An emoji from them floats up.
+                val react = snap.child("react").child(s.peer.uid)
+                val reactAt = react.child("n").getValue(Long::class.java)
+                val emoji = react.child("e").getValue(String::class.java)
+                if (reactAt != null && emoji != null && reactAt != s.lastReaction && emoji in CALL_REACTIONS) {
+                    s.lastReaction = reactAt
+                    _state.update { it?.copy(reaction = CallReaction(reactAt * 2 + 1, emoji, mine = false)) }
+                }
                 // After a network change the caller sends a new offer (ICE restart); the other side answers it.
                 val reoffer = snap.child("reoffer").child("sdp").getValue(String::class.java)
                 if (!s.caller && reoffer != null && reoffer != s.lastReoffer && s.remoteSet) {
@@ -601,6 +724,7 @@ internal class FirebaseCallService(
                     stopRingback()
                     s.timeout?.cancel()
                     _state.update { it?.copy(phase = CallPhase.CONNECTING) }
+                    connectWatchdog(s)
                     scope.launch {
                         runCatching {
                             s.pc?.awaitSetRemote(SessionDescription(SessionDescription.Type.ANSWER, sdp))
@@ -671,18 +795,7 @@ internal class FirebaseCallService(
         val pc = factory.createPeerConnection(config, observer(s)) ?: error("no peer connection")
         s.pc = pc
 
-        val audioSource = factory.createAudioSource(
-            MediaConstraints().apply {
-                mandatory += MediaConstraints.KeyValuePair("googEchoCancellation", "true")
-                mandatory += MediaConstraints.KeyValuePair("googNoiseSuppression", "true")
-                mandatory += MediaConstraints.KeyValuePair("googAutoGainControl", "true")
-                mandatory += MediaConstraints.KeyValuePair("googHighpassFilter", "true")
-            },
-        )
-        val audio = factory.createAudioTrack("qm-audio", audioSource)
-        audio.setEnabled(_state.value?.muted != true)
-        s.audio = audio
-        pc.addTrack(audio, listOf("qm"))
+        s.audioSender = pc.addTrack(makeAudio(s, _state.value?.noiseSuppression != false), listOf("qm"))
 
         if (!s.video && s.caller) {
             // A voice call keeps a picture slot open (sending nothing), so a camera can come on without a new offer.
@@ -705,6 +818,24 @@ internal class FirebaseCallService(
             }
         }
         return pc
+    }
+
+    /** Our voice: echo cancelled and evened out always; the noise around cleaned away when [noise] is on. */
+    private fun makeAudio(s: Session, noise: Boolean): AudioTrack {
+        val source = factory.createAudioSource(
+            MediaConstraints().apply {
+                mandatory += MediaConstraints.KeyValuePair("googEchoCancellation", "true")
+                mandatory += MediaConstraints.KeyValuePair("googNoiseSuppression", noise.toString())
+                mandatory += MediaConstraints.KeyValuePair("googAutoGainControl", "true")
+                mandatory += MediaConstraints.KeyValuePair("googHighpassFilter", noise.toString())
+                mandatory += MediaConstraints.KeyValuePair("googTypingNoiseDetection", noise.toString())
+            },
+        )
+        val audio = factory.createAudioTrack("qm-audio-" + System.nanoTime(), source)
+        audio.setEnabled(_state.value?.muted != true)
+        s.audioSource = source
+        s.audio = audio
+        return audio
     }
 
     private fun startCamera(s: Session, front: Boolean) {
@@ -738,25 +869,25 @@ internal class FirebaseCallService(
                 when (newState) {
                     PeerConnection.PeerConnectionState.CONNECTED -> {
                         s.disconnectJob?.cancel()
-                        _state.update { it?.copy(phase = CallPhase.ACTIVE, startedAt = it.startedAt ?: System.currentTimeMillis(), weak = false) }
+                        s.disconnectJob = null
+                        _state.update { it?.copy(phase = CallPhase.ACTIVE, startedAt = it.startedAt ?: System.currentTimeMillis(), weak = false, reconnecting = false) }
                         // "Connected": once, the first time (not after a reconnect).
                         if (!s.connectedOnce) QeyfSounds.playSmall(app, SmallSound.CONNECTED, call = true)
+                        // Our call, answered: handed to the phone's call system now, as a call that is already on.
+                        if (!s.connectedOnce && s.caller) telecom.start(s.peer, _state.value?.video ?: s.video, incoming = false, active = true)
                         s.connectedOnce = true
                         telecom.setActive()
                         watchStats(s)
                     }
-                    PeerConnection.PeerConnectionState.DISCONNECTED -> {
-                        _state.update { it?.copy(weak = true) }
-                        // A tunnel or a switch from Wi-Fi to mobile: give it a moment, ask for a new route, then give up.
-                        s.disconnectJob?.cancel()
-                        s.disconnectJob = scope.launch {
-                            delay(3_000)
-                            if (s.caller) s.pc?.restartIce()
-                            delay(12_000)
-                            if (session === s) finish(CallEnd.FAILED, write = true)
+                    // A tunnel or a switch from Wi-Fi to mobile: "Reconnecting…", a new route asked for again and again,
+                    // and only after [RECONNECT_MS] without one the call ends. Before it ever connected, a failure ends it.
+                    PeerConnection.PeerConnectionState.DISCONNECTED, PeerConnection.PeerConnectionState.FAILED -> {
+                        if (!s.connectedOnce) {
+                            if (newState == PeerConnection.PeerConnectionState.FAILED) finish(CallEnd.FAILED, write = true)
+                        } else {
+                            reconnect(s, failed = newState == PeerConnection.PeerConnectionState.FAILED)
                         }
                     }
-                    PeerConnection.PeerConnectionState.FAILED -> finish(CallEnd.FAILED, write = true)
                     else -> Unit
                 }
             }
@@ -798,7 +929,251 @@ internal class FirebaseCallService(
         override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) {}
     }
 
+    // ------------------------------------------------------------------ keeping the call through a bad line
+
+    private fun reconnect(s: Session, failed: Boolean) {
+        _state.update { it?.copy(weak = true, reconnecting = true) }
+        if (s.disconnectJob?.isActive == true) {
+            // Failed for good meanwhile: ask again at once.
+            if (failed) askRestart(s)
+            return
+        }
+        s.disconnectJob = scope.launch {
+            delay(if (failed) 0L else 1_500L)
+            val until = System.currentTimeMillis() + RECONNECT_MS
+            while (session === s && !s.ended && System.currentTimeMillis() < until) {
+                askRestart(s)
+                delay(6_000)
+            }
+            if (session === s && !s.ended && _state.value?.reconnecting == true) finish(CallEnd.FAILED, write = true)
+        }
+    }
+
+    /** A new route for the call: the caller starts it; the other side asks the caller to. */
+    private fun askRestart(s: Session) {
+        if (!s.remoteSet) return
+        s.note("ice restart (${if (s.caller) "start" else "ask"})")
+        if (s.caller) runCatching { s.pc?.restartIce() } else s.callRef.child("restartAsk").setValue(ServerValue.TIMESTAMP)
+    }
+
+    /** The phone moved to another network (Wi-Fi to mobile): the call takes a new route straight away. */
+    private var lastNetwork: android.net.Network? = null
+    private val networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: android.net.Network) {
+            scope.launch {
+                val before = lastNetwork
+                lastNetwork = network
+                val s = session ?: return@launch
+                if (before != null && before != network && s.connectedOnce && !s.ended) askRestart(s)
+            }
+        }
+    }
+
+    private fun watchNetwork(on: Boolean) {
+        val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return
+        if (on) {
+            lastNetwork = null
+            runCatching { cm.registerDefaultNetworkCallback(networkCallback) }
+        } else {
+            runCatching { cm.unregisterNetworkCallback(networkCallback) }
+            lastNetwork = null
+        }
+    }
+
+    /** Our picture stops by itself while the line is too weak for it (the voice goes on), and comes back after. */
+    private fun pauseVideo(s: Session, pause: Boolean) {
+        s.autoPaused = pause
+        s.badSince = 0L
+        s.goodSince = 0L
+        s.note(if (pause) "picture paused: weak line" else "picture back")
+        s.videoSender?.let { sender ->
+            runCatching {
+                val p = sender.parameters
+                p.encodings.forEach { it.active = !pause }
+                sender.parameters = p
+            }
+        }
+        me()?.uid?.let { s.callRef.child("paused").child(it).setValue(pause) }
+        _state.update { it?.copy(videoPaused = pause) }
+    }
+
     // ------------------------------------------------------------------ the buttons
+
+    override fun react(emoji: String) {
+        val s = session ?: return
+        if (emoji !in CALL_REACTIONS || _state.value?.phase != CallPhase.ACTIVE) return
+        val stamp = System.currentTimeMillis()
+        me()?.uid?.let { s.callRef.child("react").child(it).setValue(mapOf("e" to emoji, "n" to stamp)) }
+        _state.update { it?.copy(reaction = CallReaction(stamp * 2, emoji, mine = true)) }
+    }
+
+    override fun toggleNoiseSuppression() {
+        val on = !(_state.value?.noiseSuppression ?: true)
+        _state.update { it?.copy(noiseSuppression = on) }
+        val s = session ?: return
+        val sender = s.audioSender ?: return
+        val oldSource = s.audioSource
+        // A new voice with the new setting takes the old one's place (the sender lets the old one go).
+        sender.setTrack(makeAudio(s, on), true)
+        runCatching { oldSource?.dispose() }
+    }
+
+    override val canAddPeople: Boolean get() = onMoveToRoom != null
+
+    override fun addPerson(user: ChatUser) {
+        val s = session ?: return
+        val mine = me() ?: return
+        if (_state.value?.phase != CallPhase.ACTIVE || user.uid == s.peer.uid || user.uid == mine.uid || s.moved) return
+        val room = "room" + (1..20).map { ROOM_CHARS.random() }.joinToString("")
+        val video = _state.value?.video == true
+        s.note("adding ${user.name}: group call $room")
+        scope.launch {
+            runCatching {
+                root.child("callRooms").child(room).setValue(
+                    mapOf(
+                        "by" to mine.uid,
+                        "at" to ServerValue.TIMESTAMP,
+                        "video" to video,
+                        "people" to mapOf(mine.uid to true, s.peer.uid to true, user.uid to true),
+                    ),
+                ).await()
+                // The other phone in this call follows into the group call; the new person's phone rings.
+                s.callRef.child("moveTo").setValue(room).await()
+                ringRoom(room, mine.uid, user.uid, video)
+                moveToRoom(s, room, video)
+            }.onFailure { s.note("adding failed: ${it.javaClass.simpleName}: ${it.message}") }
+        }
+    }
+
+    /** Rings [to] for the group call [room] (the push server checks they were let in). */
+    internal fun ringRoom(room: String, from: String, to: String, video: Boolean) {
+        root.child("notify").push().setValue(
+            mapOf("from" to from, "to" to to, "chatId" to room, "type" to "roomcall", "video" to video, "at" to ServerValue.TIMESTAMP),
+        )
+    }
+
+    /** This call ends quietly here and goes on as the group call [room]. */
+    private fun moveToRoom(s: Session, room: String, video: Boolean) {
+        if (s.moved) return
+        s.moved = true
+        s.note("moving to group call $room")
+        finish(CallEnd.HUNG_UP, write = false)
+        if (session === s) {
+            session = null
+            _state.value = null
+        }
+        val name = if (ChatMusic.english) "Group call" else "Grup araması"
+        onMoveToRoom?.invoke(ChatUser(room, name, "", null), video)
+    }
+
+    /** Shows our screen instead of the camera ([data]: what the person allowed in the system's question). */
+    fun startScreenShare(data: android.content.Intent) {
+        val s = session ?: return
+        if (s.screenTrack != null) return
+        if (_state.value?.phase != CallPhase.ACTIVE || s.videoSender == null) {
+            shareFailed()
+            return
+        }
+        scope.launch {
+            // Android wants the foreground service to say "screen" before the screen is read: wait until it has
+            // (a slow phone takes longer), at most a few seconds.
+            val ready = kotlinx.coroutines.CompletableDeferred<Boolean>()
+            CallHooks.screenServiceReady = ready
+            CallHooks.onScreenShare?.invoke(true)
+            val ok = kotlinx.coroutines.withTimeoutOrNull(5_000L) { ready.await() }
+            if (CallHooks.screenServiceReady === ready) CallHooks.screenServiceReady = null
+            if (session !== s || s.ended) return@launch
+            if (ok != true) {
+                s.note("screen share: service not ready ($ok)")
+                CallHooks.onScreenShare?.invoke(false)
+                shareFailed()
+                return@launch
+            }
+            runCatching {
+                val capturer = org.webrtc.ScreenCapturerAndroid(
+                    data,
+                    object : android.media.projection.MediaProjection.Callback() {
+                        // Stopped from the system (its own "stop sharing"): the call stops showing it too.
+                        override fun onStop() {
+                            scope.launch { if (session === s && s.screenTrack != null) stopScreenShare() }
+                        }
+                    },
+                )
+                val helper = SurfaceTextureHelper.create("qm-screen", egl.eglBaseContext)
+                val source = factory.createVideoSource(true)
+                capturer.initialize(helper, app, source.capturerObserver)
+                val dm = app.resources.displayMetrics
+                // Half the screen's size: text still reads, and a phone line carries it.
+                capturer.startCapture((dm.widthPixels / 2) and 1.inv(), (dm.heightPixels / 2) and 1.inv(), 15)
+                val track = factory.createVideoTrack("qm-screen", source)
+                s.screenCapturer = capturer
+                s.screenHelper = helper
+                s.screenSource = source
+                s.screenTrack = track
+                // The camera rests meanwhile.
+                runCatching { s.capturer?.stopCapture() }
+                if (s.autoPaused) pauseVideo(s, false)
+                s.videoSender?.let { sender ->
+                    sender.setTrack(track, false)
+                    runCatching {
+                        val p = sender.parameters
+                        p.encodings.forEach {
+                            it.active = true
+                            it.maxBitrateBps = 1_500_000
+                        }
+                        sender.parameters = p
+                    }
+                }
+                me()?.uid?.let { uid ->
+                    s.callRef.child("screen").child(uid).setValue(true)
+                    s.callRef.child("cam").child(uid).setValue(true)
+                }
+                releaseProximity()
+                _state.update { it?.copy(sharingScreen = true) }
+                // A voice call: the phone is looked at, not held to the ear, so the sound comes out of the speaker.
+                if (_state.value?.speaker != true) toggleSpeaker()
+                s.note("screen shared")
+            }.onFailure {
+                s.note("screen share failed: ${it.javaClass.simpleName}: ${it.message}")
+                releaseScreen(s)
+                CallHooks.onScreenShare?.invoke(false)
+                shareFailed()
+            }
+        }
+    }
+
+    /** Showing the screen did not start: the call screen says so. */
+    fun shareFailed() {
+        _state.update { it?.copy(shareFailures = it.shareFailures + 1) }
+    }
+
+    override fun stopScreenShare() {
+        val s = session ?: return
+        if (s.screenTrack == null) return
+        val cameraBack = s.videoTrack != null && _state.value?.cameraOn == true
+        s.videoSender?.setTrack(if (cameraBack) s.videoTrack else null, false)
+        if (cameraBack) runCatching { s.capturer?.startCapture(1280, 720, 30) }
+        releaseScreen(s)
+        me()?.uid?.let { uid ->
+            s.callRef.child("screen").child(uid).setValue(false)
+            s.callRef.child("cam").child(uid).setValue(cameraBack)
+        }
+        _state.update { it?.copy(sharingScreen = false) }
+        CallHooks.onScreenShare?.invoke(false)
+        s.note("screen share stopped")
+    }
+
+    private fun releaseScreen(s: Session) {
+        runCatching { s.screenCapturer?.stopCapture() }
+        runCatching { s.screenCapturer?.dispose() }
+        runCatching { s.screenTrack?.dispose() }
+        runCatching { s.screenSource?.dispose() }
+        runCatching { s.screenHelper?.dispose() }
+        s.screenCapturer = null
+        s.screenTrack = null
+        s.screenSource = null
+        s.screenHelper = null
+    }
 
     override fun toggleMute() {
         val muted = !(_state.value?.muted ?: false)
@@ -815,6 +1190,8 @@ internal class FirebaseCallService(
 
     override fun toggleCamera() {
         val s = session ?: return
+        if (s.screenTrack != null) return
+        if (s.autoPaused) pauseVideo(s, false)
         if (s.videoTrack == null) {
             // A voice call: the camera comes on and its picture goes through the slot kept for it.
             startCamera(s, front = true)
@@ -908,6 +1285,7 @@ internal class FirebaseCallService(
         if (s.ended) return
         s.ended = true
         s.statsJob?.cancel()
+        releaseScreen(s)
         s.note("finish $reason write=$write from " + Throwable().stackTrace.drop(1).take(3).joinToString(" < ") { "${it.methodName}:${it.lineNumber}" })
         // Who ended it, and how it got there: kept on the server for a while (callDebug/{uid}/{call}).
         runCatching {
@@ -995,18 +1373,34 @@ internal class FirebaseCallService(
         localTrack.value = null
         remoteTrack.value = null
         // "Ended", for a call that was on (still in the call's sound route, before it is let go).
-        if (s.connectedOnce) QeyfSounds.playSmall(app, SmallSound.ENDED, call = true)
+        if (s.connectedOnce && !s.moved) QeyfSounds.playSmall(app, SmallSound.ENDED, call = true)
         stopAudio()
-        MusicDuringCall.resume()
-        CallHooks.onActive?.invoke(false, null, false)
+        // Moving on into a group call: the music stays paused and the call's service stays up for it.
+        if (!s.moved) {
+            MusicDuringCall.resume()
+            CallHooks.onActive?.invoke(false, null, false)
+        }
         _state.update { it?.copy(phase = CallPhase.ENDED, endReason = reason) }
         scope.launch {
             delay(END_SHOWN_MS)
             if (session === s) {
                 session = null
                 _state.value = null
+                settle()
             }
         }
+    }
+
+    /**
+     * After a call, nothing of it may stay behind, however fast it was dialled and hung up: the phone's own call, the
+     * call's sound mode (both keep the phone "on a call", and then the next call rings without sound), and the service
+     * that keeps a call alive (started a moment late, it could outlive the call).
+     */
+    private fun settle() {
+        if (session != null || CallHooks.groupActive) return
+        telecom.ensureIdle()
+        if (audioManager.mode != AudioManager.MODE_NORMAL) runCatching { audioManager.mode = AudioManager.MODE_NORMAL }
+        CallHooks.onActive?.invoke(false, null, false)
     }
 
     // ------------------------------------------------------------------ sound
@@ -1062,6 +1456,28 @@ internal class FirebaseCallService(
                     else -> 3
                 }
                 _state.update { it?.copy(remoteLevel = level.coerceIn(0f, 1f), quality = quality) }
+                // A video call on a line too weak for pictures: ours stops after 6 bad seconds, and comes back after 8
+                // good ones (not while the screen is shown, nor when the person turned the camera off).
+                _state.value?.let { st ->
+                    if (st.video && s.videoTrack != null && s.screenTrack == null && (st.cameraOn || s.autoPaused) && quality >= 0) {
+                        val t = System.currentTimeMillis()
+                        if (quality == 0) {
+                            if (s.badSince == 0L) s.badSince = t
+                        } else {
+                            s.badSince = 0L
+                        }
+                        if (quality >= 2) {
+                            if (s.goodSince == 0L) s.goodSince = t
+                        } else {
+                            s.goodSince = 0L
+                        }
+                        if (!s.autoPaused && s.badSince > 0 && t - s.badSince > 6_000) {
+                            pauseVideo(s, true)
+                        } else if (s.autoPaused && s.goodSince > 0 && t - s.goodSince > 8_000) {
+                            pauseVideo(s, false)
+                        }
+                    }
+                }
                 // Nothing arriving from them (no bytes) for 6 seconds: noted once, with the connection's figures.
                 val now = System.currentTimeMillis()
                 if (bytes > lastBytes) {
@@ -1092,8 +1508,10 @@ internal class FirebaseCallService(
                 .also { audioManager.requestAudioFocus(it) }
         }
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        // Where the phone's call system has the call it sends the sound (see CallTelecom); otherwise the app does.
-        if (!telecom.available) routeAudio(video)
+        watchNetwork(true)
+        // Where the phone's call system has the call it sends the sound (see CallTelecom); until it has it (and where
+        // there is none), the app does.
+        if (!telecom.active) routeAudio(video)
         runCatching { audioManager.registerAudioDeviceCallback(deviceCallback, android.os.Handler(android.os.Looper.getMainLooper())) }
         scope.launch {
             // The system's list comes through CallTelecom; this is for when it does not have the call.
@@ -1131,6 +1549,7 @@ internal class FirebaseCallService(
     }
 
     private fun stopAudio() {
+        watchNetwork(false)
         runCatching { audioManager.unregisterAudioDeviceCallback(deviceCallback) }
         pickedDevice = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audioManager.clearCommunicationDevice()
@@ -1146,23 +1565,18 @@ internal class FirebaseCallService(
         proximity = null
     }
 
-    private var ringtone: android.media.MediaPlayer? = null
     private var ringback: android.media.MediaPlayer? = null
 
     private fun startRinging() {
-        // Qeyf's own ringtone (the one chosen in Profile and privacy → Sounds).
-        QeyfSounds.stop(ringtone)
-        ringtone = QeyfSounds.startRingtone(app, session?.peer?.uid)
-        val vibrator = app.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            runCatching { vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 800, 800), 0)) }
-        }
+        // Qeyf's own ringtone (the one chosen in Profile and privacy → Sounds), one ringing shared with the notification.
+        val s = session ?: return
+        IncomingRinger.start(app, s.id, s.peer.uid, RING_MS + 5_000L)
+        // For the call's trail: could it be heard (silent mode, Do not disturb, ring volume).
+        s.note("ring: ${CallHooks.ringDiagnosis(app)}")
     }
 
     private fun stopRinging() {
-        QeyfSounds.stop(ringtone)
-        ringtone = null
-        runCatching { (app.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)?.cancel() }
+        IncomingRinger.stop()
     }
 
     private fun startRingback() {
@@ -1195,9 +1609,19 @@ internal class FirebaseCallService(
         /** How long a call rings before it counts as not answered. */
         const val RING_MS = 45_000L
 
+        /** How long "Connecting…" may last after the answer before the call gives up. */
+        private const val CONNECT_MS = 30_000L
+
         /** The server could not reach the other phone: this long for it to show up anyway, then "Unavailable". */
         private const val UNREACHABLE_GRACE_MS = 8_000L
         private const val END_SHOWN_MS = 1_800L
+
+        /** How long a dropped call keeps trying to come back before it ends. */
+        private const val RECONNECT_MS = 30_000L
+
+        /** A group call made by adding someone to a call. */
+        internal val ROOM_ID = Regex("^room[A-Za-z0-9]{20}$")
+        private const val ROOM_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
     }
 }
 
@@ -1241,25 +1665,30 @@ internal suspend fun PeerConnection.awaitSetRemote(sdp: SessionDescription) = aw
 // ------------------------------------------------------------------ the screen
 
 @Composable
-actual fun CallVideo(service: CallService, remote: Boolean, modifier: Modifier) {
+actual fun CallVideo(service: CallService, remote: Boolean, modifier: Modifier, overlay: Boolean) {
     val calls = service as? FirebaseCallService ?: return
     val track by (if (remote) calls.remoteTrack else calls.localTrack).collectAsState()
     val state by calls.state.collectAsState()
     val mirror = !remote && state?.frontCamera != false
+    // A shared screen is shown whole (not cropped to fill), with bars where it does not fit.
+    val fit = remote && state?.remoteScreen == true
     var rendererView by remember { androidx.compose.runtime.mutableStateOf<SurfaceViewRenderer?>(null) }
     AndroidView(
         modifier = modifier,
         factory = { context ->
             SurfaceViewRenderer(context).apply {
                 init(calls.egl.eglBaseContext, null)
-                setScalingType(if (remote) RendererCommon.ScalingType.SCALE_ASPECT_FILL else RendererCommon.ScalingType.SCALE_ASPECT_FILL)
                 setEnableHardwareScaler(true)
-                if (!remote) setZOrderMediaOverlay(true)
+                // The small picture in the corner is drawn over the big one.
+                if (overlay) setZOrderMediaOverlay(true)
                 keepScreenOn = true
                 rendererView = this
             }
         },
-        update = { it.setMirror(mirror) },
+        update = {
+            it.setMirror(mirror)
+            it.setScalingType(if (fit) RendererCommon.ScalingType.SCALE_ASPECT_FIT else RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+        },
         onRelease = { view ->
             track?.let { t -> runCatching { t.removeSink(view) } }
             view.release()
@@ -1314,3 +1743,22 @@ actual fun CallPictureInPicture(armed: Boolean): Boolean {
 }
 
 actual val callBlurWorks: Boolean get() = android.os.Build.VERSION.SDK_INT >= 31
+
+@Composable
+actual fun rememberScreenShare(service: CallService): (() -> Unit)? {
+    val calls = service as? FirebaseCallService ?: return null
+    val context = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val data = result.data
+        if (result.resultCode == android.app.Activity.RESULT_OK && data != null) calls.startScreenShare(data)
+    }
+    return remember(context, calls) {
+        {
+            val projection = context.getSystemService(android.media.projection.MediaProjectionManager::class.java)
+            // Said no in the system's question: their choice, nothing to tell. The question not shown at all: told.
+            val asked = projection != null && runCatching { launcher.launch(projection.createScreenCaptureIntent()) }.isSuccess
+            if (!asked) calls.shareFailed()
+            Unit
+        }
+    }
+}

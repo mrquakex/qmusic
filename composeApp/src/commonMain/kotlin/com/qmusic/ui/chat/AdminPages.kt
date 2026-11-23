@@ -379,7 +379,7 @@ private fun AdminUserPage(
             Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 ChatAvatar(user.name, user.photo, 96.dp)
                 Spacer(Modifier.height(10.dp))
-                Text(user.name, color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(user.name, color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 Text("@" + user.username, color = TextSecondary, fontSize = 14.sp)
                 if (ban != null) {
                     Spacer(Modifier.height(8.dp))

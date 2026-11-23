@@ -23,6 +23,28 @@ internal object FeedPreviewPlayer {
     private val timeUp = Runnable { FeedPreview.stopAll() }
     private const val PREVIEW_MS = 30_000L
 
+    /** Twice a second while it plays: the line and the time left on the card. */
+    private val tick = object : Runnable {
+        override fun run() {
+            val p = player ?: return
+            val length = p.duration
+            if (length > 0) {
+                FeedPreview.progress.value = (p.currentPosition.toFloat() / length).coerceIn(0f, 1f)
+                FeedPreview.remainingMs.value = (length - p.currentPosition).coerceAtLeast(0)
+            }
+            if (FeedPreview.playing.value != null) handler.postDelayed(this, 500)
+        }
+    }
+
+    private val mediaAttributes = androidx.media3.common.AudioAttributes.Builder().setUsage(androidx.media3.common.C.USAGE_MEDIA)
+        .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE).build()
+
+    /** Silent: it takes nothing from the music. With sound: it takes the sound as a video does (the music pauses). */
+    private fun applyMuted(p: ExoPlayer, muted: Boolean) {
+        p.volume = if (muted) 0f else 1f
+        p.setAudioAttributes(mediaAttributes, /* handleAudioFocus = */ !muted)
+    }
+
     fun get(context: Context): ExoPlayer = player ?: ExoPlayer.Builder(context.applicationContext)
         .setAudioAttributes(
             androidx.media3.common.AudioAttributes.Builder().setUsage(androidx.media3.common.C.USAGE_MEDIA)
@@ -49,16 +71,35 @@ internal object FeedPreviewPlayer {
         FeedPreview.play = { quality ->
             val p = get(app)
             FeedPreview.showing.value = false
+            FeedPreview.progress.value = 0f
+            FeedPreview.remainingMs.value = 0L
             p.setMediaSource(ProgressiveMediaSource.Factory(VideoStreaming.cached(app)).createMediaSource(MediaItem.fromUri(quality.videoUrl)))
-            p.volume = 0f
+            applyMuted(p, FeedPreview.muted.value)
             p.prepare()
             p.playWhenReady = true
             handler.removeCallbacks(timeUp)
-            handler.postDelayed(timeUp, PREVIEW_MS)
+            handler.removeCallbacks(tick)
+            // With its sound on it is being watched: no 30-second stop.
+            if (FeedPreview.muted.value) handler.postDelayed(timeUp, PREVIEW_MS)
+            handler.post(tick)
         }
         FeedPreview.stop = {
             handler.removeCallbacks(timeUp)
-            player?.let { it.stop(); it.clearMediaItems() }
+            handler.removeCallbacks(tick)
+            player?.let {
+                it.stop()
+                it.clearMediaItems()
+                // Its sound let go: the music goes on.
+                applyMuted(it, true)
+            }
+        }
+        FeedPreview.position = { player?.currentPosition ?: 0L }
+        FeedPreview.applyMuted = { muted ->
+            player?.let { p ->
+                applyMuted(p, muted)
+                handler.removeCallbacks(timeUp)
+                if (muted && FeedPreview.playing.value != null) handler.postDelayed(timeUp, PREVIEW_MS)
+            }
         }
     }
 }

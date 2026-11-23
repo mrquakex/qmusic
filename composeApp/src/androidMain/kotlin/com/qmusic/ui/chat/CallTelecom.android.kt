@@ -32,6 +32,13 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
     private var control: CallControlScope? = null
     private var job: Job? = null
 
+    /**
+     * Every call handed to the system and not yet let go (normally one at most). All of them are let go at the end:
+     * a call left with the system makes the phone think it is still on a call (its ringtone then stays silent for the
+     * next one, and the "on a call" sign stays up).
+     */
+    private val open = java.util.Collections.synchronizedSet(LinkedHashSet<CallControlScope>())
+
     /** Which call is the live one: a call that was already over when the system finished taking it is let go at once. */
     @Volatile
     private var generation = 0
@@ -60,10 +67,11 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
     val available: Boolean get() = manager != null
 
     /**
-     * Hands a call to the system: an outgoing one as we dial, an incoming one at the moment it is answered (the ringing
-     * itself is Qeyf's own notification, which works on every phone).
+     * Hands a call to the system once it is answered: an outgoing one when the other side picks up ([active]), an
+     * incoming one at the moment we answer. The ringing and the dialling are Qeyf's own (they work on every phone), so a
+     * call given up before it was answered never sits in the system as "connecting", blocking the next one.
      */
-    fun start(peer: ChatUser, video: Boolean, incoming: Boolean) {
+    fun start(peer: ChatUser, video: Boolean, incoming: Boolean, active: Boolean = false) {
         val m = manager
         if (m == null) {
             onUnavailable?.invoke()
@@ -91,11 +99,12 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
                     // Ended while the system was still taking it: told at once, so no call is left behind in the
                     // phone (which would then think it is still on a call).
                     if (gen != generation) {
-                        launch { runCatching { disconnect(DisconnectCause(DisconnectCause.LOCAL)) } }
+                        launch { runCatching { kotlinx.coroutines.withTimeoutOrNull(3_000) { disconnect(DisconnectCause(DisconnectCause.LOCAL)) } } }
                         return@addCall
                     }
+                    open += this
                     control = this
-                    if (incoming) launch { answer(type) }
+                    if (incoming) launch { answer(type) } else if (active) launch { runCatching { setActive() } }
                     launch {
                         availableEndpoints.collect { list ->
                             endpoints = list
@@ -198,12 +207,23 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
         endpoints = emptyList()
         current = null
         picked = null
-        if (c == null && j == null) return
+        val all = synchronized(open) { open.toList().also { open.clear() } }
+        if (all.isEmpty() && j == null) return
         scope.launch {
-            if (c != null) runCatching { c.disconnect(DisconnectCause(cause)) }
+            // Each one told it is over (never waiting for ever on a system that does not answer).
+            for (x in all) {
+                runCatching {
+                    kotlinx.coroutines.withTimeoutOrNull(3_000) { x.disconnect(DisconnectCause(if (x === c) cause else DisconnectCause.LOCAL)) }
+                }
+            }
             // The call's own work stops only after the system was told; if it was still being added, the check in
             // [start] lets it go as soon as it is in.
-            if (c != null) j?.cancel()
+            if (all.isNotEmpty()) j?.cancel()
         }
+    }
+
+    /** No call should be with the system now (none going on in the app): whatever is left there is let go. */
+    fun ensureIdle() {
+        if (control != null || open.isNotEmpty()) end(DisconnectCause.LOCAL)
     }
 }

@@ -875,7 +875,7 @@ private fun InviteRow(t: ChatThread, w: E2eWords, onAccept: () -> Unit, onDeclin
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(w.invitation, color = TextSecondary, fontSize = 12.sp)
-                Text(t.other.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(t.other.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -918,7 +918,7 @@ private fun PersonRow(user: ChatUser, picked: Boolean?, note: String? = null, on
         ChatAvatar(user, 44.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(user.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(user.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             if (note != null) Text(note, color = TextSecondary, fontSize = 13.sp)
             else if (user.username.isNotEmpty()) Text("@" + user.username, color = TextSecondary, fontSize = 13.sp)
         }
@@ -1004,7 +1004,7 @@ internal fun SecretMovePage(controller: ChatController, s: ChatStrings, me: Chat
         AlertDialog(
             onDismissRequest = { asking = null },
             containerColor = DarkSurfaceVariant,
-            title = { Text(t.other.name, color = TextPrimary) },
+            title = { Text(t.other.name, color = TextPrimary, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
             text = { Text(w.moveConfirm, color = TextSecondary) },
             confirmButton = {
                 TextButton(onClick = {
@@ -1260,7 +1260,7 @@ internal fun SafetyCodePage(controller: ChatController, user: ChatUser) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     ChatAvatar(user, 40.dp)
                     Spacer(Modifier.width(10.dp))
-                    Text(user.name, color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Text(user.name, color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     if (c.verified) {
                         Spacer(Modifier.width(8.dp))
                         Text(w.verified, color = Color(0xFF1DAA61), fontSize = 13.sp, fontWeight = FontWeight.Bold)

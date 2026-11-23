@@ -38,7 +38,16 @@ interface GroupCallService {
     fun toggleSpeaker()
     fun toggleCamera()
     fun switchCamera()
+
+    /** Whether someone can be added to the call going on (a call made by adding people to a call). */
+    val canAddPeople: Boolean get() = false
+
+    /** Lets [user] into the call going on and rings their phone. */
+    fun addPerson(user: ChatUser) {}
 }
+
+/** A group call made by adding a person to a call (not a group's own call): it has no conversation of its own. */
+fun isCallRoom(id: String): Boolean = id.startsWith("room") && id.length == 24
 
 const val MAX_GROUP_CALL = 6
 

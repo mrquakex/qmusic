@@ -6,7 +6,10 @@ import androidx.compose.runtime.Composable
 actual fun rememberChatBackend(): ChatBackend? = null
 
 @Composable
-actual fun CallVideo(service: CallService, remote: Boolean, modifier: androidx.compose.ui.Modifier) = Unit
+actual fun CallVideo(service: CallService, remote: Boolean, modifier: androidx.compose.ui.Modifier, overlay: Boolean) = Unit
+
+@Composable
+actual fun rememberScreenShare(service: CallService): (() -> Unit)? = null
 
 @Composable
 actual fun rememberCallPermissions(): (video: Boolean, onResult: (Boolean) -> Unit) -> Unit = { _, onResult -> onResult(false) }

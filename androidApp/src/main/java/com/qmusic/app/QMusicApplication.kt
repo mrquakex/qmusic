@@ -22,9 +22,10 @@ class QMusicApplication : Application() {
     private fun hookCalls() {
         val app = this
         com.qmusic.ui.chat.CallHooks.onIncoming = { id, peer, video -> CallNotifications.showIncoming(app, peer, video, id) }
-        com.qmusic.ui.chat.CallHooks.onBusy = { peer, video -> CallNotifications.showMissed(app, peer, video, busy = true) }
+        // Off the main thread: the caller's photo is fetched for the notification (on it, only the initial could show).
+        com.qmusic.ui.chat.CallHooks.onBusy = { peer, video -> Thread { CallNotifications.showMissed(app, peer, video, busy = true) }.start() }
         com.qmusic.ui.chat.CallHooks.onIncomingGone = { CallNotifications.cancelIncoming(app) }
-        com.qmusic.ui.chat.CallHooks.onMissed = { peer, video -> CallNotifications.showMissed(app, peer, video) }
+        com.qmusic.ui.chat.CallHooks.onMissed = { peer, video -> Thread { CallNotifications.showMissed(app, peer, video) }.start() }
         com.qmusic.ui.chat.ChatPresence.onOpened = { chatId ->
             ChatPush.clear(app, chatId)
             com.qmusic.ui.chat.CallHooks.trace?.invoke("chat opened")
@@ -50,10 +51,49 @@ class QMusicApplication : Application() {
         )
         com.qmusic.ui.chat.ChatDrafts.onChanged = { all -> draftPrefs.edit().putString("all", org.json.JSONObject(all).toString()).apply() }
         com.qmusic.ui.chat.CallHooks.onGroupJoined = { groupId -> GroupCallNotifications.inCall(app, groupId) }
+        // How the message notifications behave (Settings → Notifications), kept on the phone.
+        val notifPrefs = getSharedPreferences("qmusic_settings", MODE_PRIVATE)
+        com.qmusic.ui.chat.NotificationPrefs.hideOnLock.value = notifPrefs.getBoolean("notif_hide_lock", false)
+        com.qmusic.ui.chat.NotificationPrefs.inAppBanner.value = notifPrefs.getBoolean("notif_banner", true)
+        com.qmusic.ui.chat.NotificationPrefs.onChanged = {
+            notifPrefs.edit()
+                .putBoolean("notif_hide_lock", com.qmusic.ui.chat.NotificationPrefs.hideOnLock.value)
+                .putBoolean("notif_banner", com.qmusic.ui.chat.NotificationPrefs.inAppBanner.value)
+                .apply()
+        }
+        com.qmusic.ui.chat.ChatPresence.onReadElsewhere = { chatId -> ChatPush.clear(app, chatId) }
+        // Unlocked: the messages kept short on the lock screen show in full.
+        runCatching {
+            androidx.core.content.ContextCompat.registerReceiver(
+                app,
+                object : android.content.BroadcastReceiver() {
+                    override fun onReceive(context: android.content.Context, intent: android.content.Intent) = ChatPush.unlocked(context)
+                },
+                android.content.IntentFilter(android.content.Intent.ACTION_USER_PRESENT),
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+        }
+        com.qmusic.ui.chat.CallHooks.onScreenShare = { sharing ->
+            // The call's service says "screen" to Android too while the screen is shown (Android 14 needs it first).
+            val service = android.content.Intent(app, CallKeepAliveService::class.java)
+                .putExtra(CallKeepAliveService.EXTRA_VIDEO, CallKeepAliveService.lastVideo)
+                .putExtra(CallKeepAliveService.EXTRA_NAME, CallKeepAliveService.lastName)
+                .putExtra(CallKeepAliveService.EXTRA_UID, CallKeepAliveService.lastUid)
+                .putExtra(CallKeepAliveService.EXTRA_PHOTO, CallKeepAliveService.lastPhoto)
+                .putExtra(CallKeepAliveService.EXTRA_SCREEN, sharing)
+            runCatching { androidx.core.content.ContextCompat.startForegroundService(app, service) }
+        }
         com.qmusic.ui.chat.CallHooks.onActive = { active, peer, video ->
             val service = android.content.Intent(app, CallKeepAliveService::class.java)
             if (active) {
-                service.putExtra(CallKeepAliveService.EXTRA_VIDEO, video).putExtra(CallKeepAliveService.EXTRA_NAME, peer?.name)
+                CallKeepAliveService.lastVideo = video
+                CallKeepAliveService.lastName = peer?.name
+                CallKeepAliveService.lastUid = peer?.uid
+                CallKeepAliveService.lastPhoto = peer?.photo
+                service.putExtra(CallKeepAliveService.EXTRA_VIDEO, video)
+                    .putExtra(CallKeepAliveService.EXTRA_NAME, peer?.name)
+                    .putExtra(CallKeepAliveService.EXTRA_UID, peer?.uid)
+                    .putExtra(CallKeepAliveService.EXTRA_PHOTO, peer?.photo)
                 runCatching { androidx.core.content.ContextCompat.startForegroundService(app, service) }
             } else {
                 app.stopService(service)

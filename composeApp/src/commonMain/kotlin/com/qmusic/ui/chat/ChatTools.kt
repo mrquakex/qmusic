@@ -298,7 +298,7 @@ internal fun BroadcastChatPage(controller: ChatController, s: ChatStrings, id: S
     Column(Modifier.fillMaxSize().background(BgRoot).imePadding()) {
         TopBar(list?.name?.ifBlank { null } ?: s.broadcastsTitle, { controller.pop() }, actions = {
             Box {
-                IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Ink) }
+                IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = com.qmusic.ui.A11y.more, tint = Ink) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
                     DropdownMenuItem(text = { Text(s.broadcastEdit, color = TextPrimary) }, onClick = { menu = false; controller.push(ChatRoute.BroadcastEdit(id)) })
                     DropdownMenuItem(text = { Text(s.broadcastDelete, color = TextPrimary) }, onClick = { menu = false; confirmDelete = true })

@@ -179,16 +179,30 @@ class YouTube(
      */
     suspend fun radio(videoId: String): Result<List<SongItem>> =
         runCatching {
-            if (ytmusic.auth?.isLoggedIn != true) ytmusic.ensureVisitorData()
-            val response = ytmusic.next(
-                videoId = videoId,
-                playlistId = "RDAMVM$videoId",
-                params = "wAEB",
-                client = YouTubeClient.WEB_REMIX,
-            )
-            val root = json.parseToJsonElement(response.bodyAsText()).jsonObject
-            BrowseParser.upNext(root).filter { it.id != videoId }
+            val first = radioOnce(videoId)
+            if (first.size < 6) return@runCatching first
+            // Without an account YouTube Music gives a song the same radio, in the same order, every time: the same
+            // songs after it day after day. So a second radio comes from one of the first's songs picked at random,
+            // and the two are mixed, each song moved a few places at random: still songs like it, never the same row.
+            val pivot = first.take(12).random()
+            val second = runCatching { radioOnce(pivot.id) }.getOrDefault(emptyList())
+            val ranked = first.mapIndexed { i, song -> song to i + kotlin.random.Random.nextDouble() * 10 } +
+                second.mapIndexed { i, song -> song to i * 1.3 + 4 + kotlin.random.Random.nextDouble() * 10 }
+            ranked.sortedBy { it.second }.map { it.first }.distinctBy { it.id }.filter { it.id != videoId }
         }
+
+    /** One radio of [videoId], as YouTube Music gives it (the seed left out). */
+    private suspend fun radioOnce(videoId: String): List<SongItem> {
+        if (ytmusic.auth?.isLoggedIn != true) ytmusic.ensureVisitorData()
+        val response = ytmusic.next(
+            videoId = videoId,
+            playlistId = "RDAMVM$videoId",
+            params = "wAEB",
+            client = YouTubeClient.WEB_REMIX,
+        )
+        val root = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        return BrowseParser.upNext(root).filter { it.id != videoId }
+    }
 
     /** The music video of [videoId] (picture, plus a separate sound track when needed), or null when none plays. */
     suspend fun resolveVideoSource(videoId: String, maxHeight: Int = 720): Result<VideoSource?> =

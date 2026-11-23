@@ -108,14 +108,38 @@ fun VideoThumbnail(item: VideoItem, s: VideoStrings, modifier: Modifier = Modifi
         // How far it was watched, as on YouTube: a red line along the foot of the picture. YouTube's own figure (from
         // the account, wherever it was watched), else where it was left in this app.
         val local by VideoResume.positions.collectAsState()
-        val watched = item.watchedPercent?.let { it / 100f }
+        // Playing in the list: the line follows the preview, the time counts down, and its sound can be turned on.
+        val live = preview && showing
+        val previewProgress by FeedPreview.progress.collectAsState()
+        val previewLeft by FeedPreview.remainingMs.collectAsState()
+        val muted by FeedPreview.muted.collectAsState()
+        val watched = if (live) previewProgress else item.watchedPercent?.let { it / 100f }
             ?: local[item.id]?.let { at -> durationMs(item.duration)?.let { len -> at.toFloat() / len } }
+        if (live) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .size(36.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .clickable { FeedPreview.setMuted(!muted) },
+                contentAlignment = Alignment.Center,
+            ) {
+                androidx.compose.material3.Icon(
+                    if (muted) QMusicIcons.VolumeMute else QMusicIcons.Volume,
+                    contentDescription = if (muted) s.extras().previewSoundOn else s.extras().previewSoundOff,
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
         if (watched != null && watched > 0f && !item.isLive) {
             Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Color.White.copy(alpha = 0.35f))) {
                 Box(Modifier.fillMaxHeight().fillMaxWidth(watched.coerceIn(0.02f, 1f)).background(VideoColors.Red))
             }
         }
-        val badge = if (item.isLive) s.live else item.duration
+        val badge = if (item.isLive) s.live else if (live && previewLeft > 0) clockOf(previewLeft) else item.duration
         if (badge != null) {
             Text(
                 text = badge,
@@ -137,6 +161,15 @@ fun VideoThumbnail(item: VideoItem, s: VideoStrings, modifier: Modifier = Modifi
 /** Where videos were left in this app (id to milliseconds), for the red line on their pictures. */
 object VideoResume {
     val positions = kotlinx.coroutines.flow.MutableStateFlow<Map<String, Long>>(emptyMap())
+}
+
+/** [ms] as "3:54" or "1:02:03" (what is left of a preview). */
+internal fun clockOf(ms: Long): String {
+    val total = (ms / 1000).coerceAtLeast(0)
+    val h = total / 3600
+    val m = (total % 3600) / 60
+    val sec = (total % 60).toString().padStart(2, '0')
+    return if (h > 0) "$h:${m.toString().padStart(2, '0')}:$sec" else "$m:$sec"
 }
 
 /** "3:54" or "1:02:03" in milliseconds; null when it is not a length. */

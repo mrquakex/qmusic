@@ -47,6 +47,7 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* best effort */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        com.qmusic.ui.videos.VideoPip.onChanged = { runOnUiThread { updatePip() } }
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         requestNotificationPermissionIfNeeded()
@@ -189,6 +190,8 @@ class MainActivity : AppCompatActivity() {
                 com.qmusic.ui.tv.TvOverlay(english = language == "en")
                 // A call shrunk into its bubble floats over everything.
                 com.qmusic.ui.chat.CallBubbleOverlay()
+                // A message from another conversation while the app is open: a strip at the top.
+                com.qmusic.ui.chat.ChatBannerOverlay()
             }
         }
     }
@@ -222,6 +225,22 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    /**
+     * Android 12 and later: the floating window opens by itself as the person leaves the app (swiping home too), for
+     * as long as something is armed (a video playing, a call going on or ringing out).
+     */
+    private fun updatePip() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        runCatching {
+            setPictureInPictureParams(
+                android.app.PictureInPictureParams.Builder()
+                    .setAspectRatio(if (com.qmusic.ui.videos.VideoPip.portrait) android.util.Rational(9, 16) else android.util.Rational(16, 9))
+                    .setAutoEnterEnabled(com.qmusic.ui.videos.VideoPip.armed)
+                    .build(),
+            )
+        }
     }
 
     /** A video that is playing shrinks into a floating window when the person leaves the app. */

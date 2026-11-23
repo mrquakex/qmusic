@@ -62,7 +62,14 @@ object GroupCallNotifications {
         CallNotifications.ensureChannels(context)
         val caller = Person.Builder().setName(group.name).setKey(groupId).setIcon(NotificationAvatars.icon(groupId, group.name, group.photo)).setImportant(true).build()
         val kind = if (video) (if (tr) "görüntülü" else "video") else (if (tr) "sesli" else "voice")
-        val text = if (tr) "$starter grup araması başlattı ($kind)" else "$starter started a $kind group call"
+        // Added to someone's call (not a group's own call): "X added you to a call".
+        val room = com.qmusic.ui.chat.isCallRoom(groupId)
+        val text = when {
+            room && tr -> "$starter seni bir $kind aramaya ekledi"
+            room -> "$starter added you to a $kind call"
+            tr -> "$starter grup araması başlattı ($kind)"
+            else -> "$starter started a $kind group call"
+        }
         val decline = PendingIntent.getBroadcast(
             context, 21, Intent(context, GroupCallActionReceiver::class.java).setAction(GroupCallActionReceiver.DECLINE),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -82,6 +89,8 @@ object GroupCallNotifications {
             .build()
         notification.flags = notification.flags or Notification.FLAG_INSISTENT
         runCatching { context.getSystemService(NotificationManager::class.java).notify(RING_ID, notification) }
+        // The app rings itself (the ringing channel is silent).
+        com.qmusic.ui.chat.IncomingRinger.start(context, callKey, null, RING_FOR_MS)
         // A little after the ringing stops: "missed", unless it was answered or declined meanwhile.
         val extras = PersistableBundle().apply {
             putString("key", callKey)
@@ -104,6 +113,7 @@ object GroupCallNotifications {
 
     /** Answered or declined: the ringing stops and it will not count as missed. */
     fun handled(context: Context) {
+        com.qmusic.ui.chat.IncomingRinger.stop()
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove("ringing").apply()
         context.getSystemService(NotificationManager::class.java).cancel(RING_ID)
         runCatching { context.getSystemService(JobScheduler::class.java).cancel(JOB_ID) }
@@ -125,11 +135,22 @@ object GroupCallNotifications {
                 ("gmissed" + group.uid).hashCode(),
                 NotificationCompat.Builder(context, CallNotifications.MISSED_CHANNEL_ID)
                     .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
+                    .setLargeIcon(NotificationAvatars.bitmap(group.uid, group.name, group.photo))
                     .setContentTitle(if (tr) "Cevapsız grup araması" else "Missed group call")
                     .setContentText(group.name + (if (starter.isNotBlank()) " · $starter" else "") + " · " + if (video) (if (tr) "Görüntülü" else "Video") else (if (tr) "Sesli" else "Voice"))
                     .setCategory(NotificationCompat.CATEGORY_MISSED_CALL)
                     .setAutoCancel(true)
-                    .setContentIntent(ChatPush.openChat(context, group))
+                    .setContentIntent(
+                        // A call made by adding people has no conversation to open: the app opens.
+                        if (com.qmusic.ui.chat.isCallRoom(group.uid)) {
+                            PendingIntent.getActivity(
+                                context, 25, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                            )
+                        } else {
+                            ChatPush.openChat(context, group)
+                        },
+                    )
                     .build(),
             )
         }
@@ -142,7 +163,12 @@ object GroupCallNotifications {
         val join = intent.getBooleanExtra(EXTRA_JOIN, false)
         val video = intent.getBooleanExtra(EXTRA_VIDEO, false)
         intent.removeExtra(EXTRA_GROUP)
-        if (join) handled(context) else context.getSystemService(NotificationManager::class.java).cancel(RING_ID)
+        if (join) {
+            handled(context)
+        } else {
+            com.qmusic.ui.chat.IncomingRinger.stop()
+            context.getSystemService(NotificationManager::class.java).cancel(RING_ID)
+        }
         com.qmusic.ui.chat.ChatCallActions.wake(context)
         GroupCallLaunch.request.value = GroupCallRequest(group, video, join)
     }
@@ -168,12 +194,11 @@ class GroupCallMissedJob : JobService() {
         val key = extras.getString("key")
         if (key != null && GroupCallNotifications.ringingKey(this) == key) {
             GroupCallNotifications.handled(this)
-            GroupCallNotifications.showMissed(
-                this,
-                ChatUser(extras.getString("group").orEmpty(), extras.getString("name").orEmpty(), "", extras.getString("photo")?.ifBlank { null }),
-                extras.getString("starter").orEmpty(),
-                extras.getInt("video") == 1,
-            )
+            val group = ChatUser(extras.getString("group").orEmpty(), extras.getString("name").orEmpty(), "", extras.getString("photo")?.ifBlank { null })
+            val starter = extras.getString("starter").orEmpty()
+            val video = extras.getInt("video") == 1
+            // Off the main thread, so that the group's photo can be fetched for it.
+            Thread { GroupCallNotifications.showMissed(this, group, starter, video) }.start()
         }
         return false
     }

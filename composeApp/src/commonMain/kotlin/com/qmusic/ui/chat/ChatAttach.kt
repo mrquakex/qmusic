@@ -340,7 +340,7 @@ fun ZoomablePhoto(url: String, title: String, onDismiss: () -> Unit) {
                     .statusBarsPadding().padding(horizontal = 4.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                androidx.compose.material3.IconButton(onClick = onDismiss) { Icon(QMusicIcons.Back, contentDescription = null, tint = Color.White) }
+                androidx.compose.material3.IconButton(onClick = onDismiss) { Icon(QMusicIcons.Back, contentDescription = com.qmusic.ui.A11y.back, tint = Color.White) }
                 Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }

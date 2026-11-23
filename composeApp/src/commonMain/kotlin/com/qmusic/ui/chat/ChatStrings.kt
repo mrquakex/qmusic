@@ -383,6 +383,37 @@ data class ChatStrings(
     val callLink: String get() = if (english) "Share call link" else "Arama bağlantısı paylaş"
     val callLinkText: String get() = if (english) "Call me on Nuvelo" else "Nuvelo'da beni ara"
 
+    val callReconnecting: String get() = if (english) "Reconnecting…" else "Yeniden bağlanıyor…"
+    val callVideoPaused: String get() = if (english) "Weak connection: your video is paused" else "Bağlantı zayıf: görüntün durduruldu"
+    val callRemotePaused: String get() = if (english) "Their video paused: weak connection" else "Bağlantısı zayıf: görüntüsü durdu"
+    val callSharingScreen: String get() = if (english) "You are sharing your screen" else "Ekranını paylaşıyorsun"
+    val callTheirScreen: String get() = if (english) "Sharing their screen" else "Ekranını paylaşıyor"
+    val callStopSharing: String get() = if (english) "Stop" else "Durdur"
+    val callShareScreen: String get() = if (english) "Share screen" else "Ekranı paylaş"
+    val callShareFailed: String get() = if (english) "Your screen could not be shared. Try again." else "Ekran paylaşılamadı. Tekrar dene."
+    val callAddPerson: String get() = if (english) "Add person" else "Kişi ekle"
+    val callAddTitle: String get() = if (english) "Add to the call" else "Aramaya ekle"
+    val callAddNote: String get() = if (english) "The call becomes a group call and their phone rings." else "Arama grup aramasına dönüşür ve onun telefonu çalar."
+    val callNoise: String get() = if (english) "Noise reduction" else "Gürültü engelleme"
+    val callMore: String get() = if (english) "More" else "Daha fazla"
+    val callReact: String get() = if (english) "React" else "Tepki"
+    val callSwipeAnswer: String get() = if (english) "Swipe up to answer" else "Açmak için yukarı kaydır"
+    val callSwipeDecline: String get() = if (english) "Swipe down to decline" else "Reddetmek için aşağı kaydır"
+    val callDeclineMessage: String get() = if (english) "Decline with message" else "Mesajla reddet"
+    val callQuickReplies: List<String> get() = if (english) {
+        listOf("I can't talk now.", "I'll call you back.", "I'm on my way.", "Can you text me?")
+    } else {
+        listOf("Şu an konuşamıyorum.", "Birazdan ararım.", "Yoldayım, geliyorum.", "Mesaj atar mısın?")
+    }
+    val notifTitle: String get() = if (english) "Notifications" else "Bildirimler"
+    val notifBanner: String get() = if (english) "In-app notifications" else "Uygulama içi bildirim"
+    val notifBannerNote: String get() = if (english) "While the app is open, a message from another chat shows as a strip at the top" else "Uygulama açıkken başka sohbetten gelen mesaj üstte kısa bir şerit olarak görünür"
+    val notifHideLock: String get() = if (english) "Hide on the lock screen" else "Kilit ekranında gizle"
+    val notifHideLockNote: String get() = if (english) "While the phone is locked, notifications show neither who wrote nor what" else "Telefon kilitliyken bildirimde kimin yazdığı ve ne yazdığı görünmez"
+    val callsAll: String get() = if (english) "All" else "Tümü"
+    val callsMissedOnly: String get() = if (english) "Missed" else "Cevapsız"
+    val callsDeleteEntry: String get() = if (english) "Delete from the list" else "Listeden sil"
+
     val pinMessage: String get() = if (english) "Pin" else "Sabitle"
     val unpinMessage: String get() = if (english) "Unpin" else "Sabitlemeyi kaldır"
     val pinnedMessages: String get() = if (english) "Pinned messages" else "Sabitlenen mesajlar"
@@ -473,8 +504,6 @@ data class ChatStrings(
     val setupHintAutostart: String get() = if (english) "Find Nuvelo and turn autostart on." else "Nuvelo'yu bul ve otomatik başlatmayı aç."
     val setupHintLockScreen: String get() = if (english) "Turn on Show on lock screen and Display pop-up windows." else "Kilit ekranında göster ve Açılır pencereleri göster'i aç."
 
-    val soundTyping: String get() = if (english) "Keyboard sound while typing" else "Yazarken klavye sesi"
-    val soundTypingNote: String get() = if (english) "A mechanical key's click for each letter in the message box (silent on silent mode)." else "Mesaj kutusunda her harfte mekanik tuş sesi (sessiz modda çalmaz)."
 
     val statusAddText: String get() = if (english) "Text" else "Yazı"
     val statusAddSong: String get() = if (english) "Song" else "Şarkı"

@@ -6,6 +6,7 @@ import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -365,10 +366,10 @@ private fun androidx.compose.foundation.layout.BoxScope.FloatingMiniPlayer(w: Wa
             ),
         )
         IconButton(onClick = { playback?.togglePlay() }, modifier = Modifier.align(Alignment.TopStart).size(40.dp)) {
-            Icon(if (playing) QMusicIcons.Pause else QMusicIcons.Play, null, tint = Ink, modifier = Modifier.size(22.dp))
+            Icon(if (playing) QMusicIcons.Pause else QMusicIcons.Play, contentDescription = if (playing) com.qmusic.ui.A11y.pause else com.qmusic.ui.A11y.play, tint = Ink, modifier = Modifier.size(22.dp))
         }
         IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).size(40.dp)) {
-            Icon(QMusicIcons.Close, null, tint = Ink, modifier = Modifier.size(20.dp))
+            Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = Ink, modifier = Modifier.size(20.dp))
         }
         val fraction = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
         Box(modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Ink.copy(alpha = 0.25f))) {
@@ -617,11 +618,17 @@ private fun DownloadsPage(controller: VideosController, s: VideoStrings, chips: 
 
 // ---------------------------------------------------------------------- search
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun SearchBox(controller: VideosController, s: VideoStrings) {
     val query by controller.query.collectAsState()
     val suggestions by controller.suggestions.collectAsState()
     val history by controller.searchHistory.collectAsState()
+    val pictures by controller.searchPictures.collectAsState()
+    val mayLike by controller.mayLike.collectAsState()
+    val x = s.extras()
+    var removing by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { controller.fillSearchPictures() }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     Column(modifier = Modifier.fillMaxSize().background(VideoColors.Background)) {
@@ -653,33 +660,67 @@ private fun SearchBox(controller: VideosController, s: VideoStrings) {
                 )
             }
             if (query.isNotEmpty()) {
-                IconButton(onClick = { controller.typeQuery("") }) { Icon(QMusicIcons.Close, null, tint = VideoColors.Text) }
+                IconButton(onClick = { controller.typeQuery("") }) { Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = VideoColors.Text) }
             } else {
                 Spacer(Modifier.width(8.dp))
             }
         }
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             if (query.isBlank() && history.isNotEmpty()) {
-                item(key = "history-header") {
-                    Row(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(s.recentSearches, color = VideoColors.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        Text(
-                            s.clearSearches, color = VideoColors.Red, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.clip(RoundedCornerShape(50)).clickable { controller.clearSearches() }.padding(horizontal = 10.dp, vertical = 8.dp),
-                        )
-                    }
-                }
+                // The past searches as YouTube has them: each with its first video's picture; held down, it can go.
                 items(history, key = { "h$it" }) { text ->
                     Row(
-                        modifier = Modifier.fillMaxWidth().clickable { controller.submitSearch(text) }.padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                        modifier = Modifier.fillMaxWidth()
+                            .combinedClickable(onClick = { controller.submitSearch(text) }, onLongClick = { removing = text })
+                            .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(QMusicIcons.History, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(16.dp))
+                        Icon(QMusicIcons.History, null, tint = VideoColors.Text, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(20.dp))
                         Text(text, color = VideoColors.Text, fontSize = 16.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        IconButton(onClick = { controller.typeQuery(text) }) { Icon(QMusicIcons.FillQuery, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp)) }
-                        IconButton(onClick = { controller.forgetSearch(text) }) { Icon(QMusicIcons.Close, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(18.dp)) }
+                        SearchPicture(pictures[text.lowercase()])
+                        IconButton(onClick = { controller.typeQuery(text) }, modifier = Modifier.size(44.dp)) {
+                            Icon(QMusicIcons.FillQuery, contentDescription = com.qmusic.ui.A11y.fillQuery, tint = VideoColors.Text, modifier = Modifier.size(20.dp))
+                        }
                     }
+                }
+            }
+            // "You may like": channels watched lately and not searched for yet.
+            if (query.isBlank() && mayLike.isNotEmpty()) {
+                item(key = "maylike-header") {
+                    Text(
+                        x.mayLike,
+                        color = VideoColors.Text,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 6.dp),
+                    )
+                }
+                items(mayLike, key = { "m" + it.first }) { (name, picture) ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { controller.submitSearch(name) }.padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(QMusicIcons.Search, null, tint = VideoColors.Text, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(20.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(name, color = VideoColors.Text, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(x.fromWatchedChannels, color = VideoColors.TextSecondary, fontSize = 13.sp, maxLines = 1)
+                        }
+                        SearchPicture(picture)
+                        IconButton(onClick = { controller.typeQuery(name) }, modifier = Modifier.size(44.dp)) {
+                            Icon(QMusicIcons.FillQuery, contentDescription = com.qmusic.ui.A11y.fillQuery, tint = VideoColors.Text, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+            }
+            // At the foot of the past searches: all of them away.
+            if (query.isBlank() && history.isNotEmpty()) {
+                item(key = "history-clear") {
+                    Text(
+                        s.clearSearches, color = VideoColors.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(16.dp).clip(RoundedCornerShape(50)).clickable { controller.clearSearches() }.padding(horizontal = 10.dp, vertical = 8.dp),
+                    )
                 }
             }
             items(if (query.isBlank()) emptyList() else suggestions) { text ->
@@ -692,10 +733,40 @@ private fun SearchBox(controller: VideosController, s: VideoStrings) {
                     Text(text, color = VideoColors.Text, fontSize = 16.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     // A roomy target for putting the words in the box (a small one was missed and searched instead).
                     IconButton(onClick = { controller.typeQuery(text) }, modifier = Modifier.size(40.dp)) {
-                        Icon(QMusicIcons.FillQuery, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp))
+                        Icon(QMusicIcons.FillQuery, contentDescription = com.qmusic.ui.A11y.fillQuery, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp))
                     }
                 }
             }
+        }
+    }
+    removing?.let { text ->
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            containerColor = VideoColors.Surface,
+            title = { Text(text, color = VideoColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            text = { Text(x.removeSearch, color = VideoColors.TextSecondary) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    controller.forgetSearch(text)
+                    removing = null
+                }) { Text(x.removeLabel, color = VideoColors.Red) }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { removing = null }) { Text(x.cancelLabel, color = VideoColors.Text) } },
+        )
+    }
+}
+
+/** A past search's picture: its first video's, small and rounded (nothing when it has none yet). */
+@Composable
+private fun SearchPicture(url: String?) {
+    Box(Modifier.padding(start = 12.dp).width(80.dp).height(45.dp)) {
+        if (url != null) {
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)).background(VideoColors.Surface),
+            )
         }
     }
 }
@@ -846,7 +917,13 @@ private fun SettingsBody(controller: VideosController, s: VideoStrings, signedIn
         SwitchRow(x.autoplay, null, autoplay != "0") { controller.setAutoplay(it) }
         SwitchRow(x.sponsorBlock, x.sponsorBlockHint, sponsor != "0") { controller.setSponsorBlock(it) }
         val feedPreview by controller.feedPreviewSetting.collectAsState()
-        SwitchRow(x.feedPreview, x.feedPreviewHint, feedPreview != "0") { controller.setFeedPreview(it) }
+        Text(x.feedPreview, color = VideoColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(x.feedPreviewHint, color = VideoColors.TextSecondary, fontSize = 13.sp)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(listOf("2" to x.previewAlways, "1" to x.previewWifi, "0" to x.previewOff)) { (mode, label) ->
+                LabelChip(label, feedPreview == mode) { controller.setFeedPreview(mode) }
+            }
+        }
         Text(s.qualityWifi, color = VideoColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(QUALITY_CHOICES) { h -> LabelChip("${h}p", wifi == h) { controller.setWifiQuality(h) } }

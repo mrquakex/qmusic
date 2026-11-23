@@ -22,6 +22,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
@@ -343,10 +345,16 @@ class VideosController(
     init {
         refreshAccount()
         VideoWarm.touch = { item -> warm(item, bytes = true, prepare = true) }
-        FeedPreview.allowed = { feedPreviewSetting.value != "0" && isUnmetered() && _watch.value == null }
-        // The lightest picture there is (360p at most): a preview is small and silent.
+        // "2" always (as YouTube does), "1" on Wi-Fi only, "0" never.
+        FeedPreview.allowed = {
+            val mode = feedPreviewSetting.value
+            mode != "0" && (mode == "2" || isUnmetered()) && _watch.value == null
+        }
+        // A light picture: 360p at most on Wi-Fi, 240p at most on mobile data (a preview is small).
         FeedPreview.resolve = { item ->
-            qualitiesOf(item.id).getOrNull()?.filter { !it.isLive && it.height in 1..360 }?.maxByOrNull { it.height }
+            val most = if (isUnmetered()) 360 else 240
+            val list = qualitiesOf(item.id).getOrNull()?.filter { !it.isLive && it.height > 0 }.orEmpty()
+            list.filter { it.height <= most }.maxByOrNull { it.height } ?: list.minByOrNull { it.height }
         }
         // The first videos of a list: their streams looked up (cheap); their first seconds only on Wi-Fi.
         VideoWarm.list = { entries ->
@@ -446,6 +454,13 @@ class VideosController(
     }
 
     fun open(item: VideoItem) {
+        rememberChannel(item)
+        // It was playing in the list: the video goes on from there, as on YouTube.
+        if (FeedPreview.playing.value == item.id) {
+            val at = FeedPreview.position()
+            if (at > 1_500) resume[item.id] = at
+            FeedPreview.stopAll()
+        }
         // Watched part of it on YouTube (the red line): it goes on from there, as YouTube would, unless this app
         // has its own place for it.
         val percent = item.watchedPercent
@@ -539,6 +554,12 @@ class VideosController(
         results = newResults(q)
         _results.value = results
         results.load(force = true)
+        // The search keeps the picture of its first video, shown beside it in the past searches (as on YouTube).
+        val loader = results
+        scope.launch {
+            val done = kotlinx.coroutines.withTimeoutOrNull(20_000) { loader.state.first { it.loaded } } ?: return@launch
+            done.entries.firstNotNullOfOrNull { (it as? VideoEntry.Video)?.item?.thumbnail }?.let { keepSearchPicture(q, it) }
+        }
     }
 
     // ------------------------------------------------------------------ watching
@@ -900,9 +921,67 @@ class VideosController(
 
     private fun rememberSearch(q: String) = saveSearches((listOf(q) + _searchHistory.value.filterNot { it.equals(q, ignoreCase = true) }).take(MAX_SEARCHES))
 
-    fun forgetSearch(q: String) = saveSearches(_searchHistory.value - q)
+    fun forgetSearch(q: String) {
+        saveSearches(_searchHistory.value - q)
+        keepSearchPictures(_searchPictures.value - q.lowercase())
+    }
 
-    fun clearSearches() = saveSearches(emptyList())
+    fun clearSearches() {
+        saveSearches(emptyList())
+        keepSearchPictures(emptyMap())
+    }
+
+    // The picture beside each past search: its first video's (kept as "query<TAB>address" lines).
+    private val searchPicturesSetting = settings.string(KEY_SEARCH_PICTURES, "")
+    private val _searchPictures = MutableStateFlow(
+        searchPicturesSetting.value.split('\n').mapNotNull { line -> line.split('\t').takeIf { it.size == 2 }?.let { it[0] to it[1] } }.toMap(),
+    )
+    val searchPictures: StateFlow<Map<String, String>> = _searchPictures.asStateFlow()
+
+    private fun keepSearchPictures(map: Map<String, String>) {
+        _searchPictures.value = map
+        settings.setString(KEY_SEARCH_PICTURES, map.entries.joinToString("\n") { "${it.key}\t${it.value}" })
+    }
+
+    private fun keepSearchPicture(q: String, url: String) {
+        val kept = _searchHistory.value.map { it.lowercase() }.toSet()
+        keepSearchPictures((_searchPictures.value + (q.lowercase().replace('\t', ' ') to url)).filterKeys { it in kept })
+    }
+
+    private val picturesAsked = HashSet<String>()
+
+    /** The past searches without a picture yet (made before pictures were kept): theirs looked up once, a few at a time. */
+    fun fillSearchPictures() {
+        val missing = _searchHistory.value.take(MAX_SEARCH_PICTURES_FILLED)
+            .filter { it.lowercase() !in _searchPictures.value && picturesAsked.add(it.lowercase()) }
+        if (missing.isEmpty()) return
+        scope.launch {
+            missing.chunked(4).forEach { group ->
+                group.map { q ->
+                    async { q to service.search(q, null).getOrNull()?.entries?.firstNotNullOfOrNull { (it as? VideoEntry.Video)?.item?.thumbnail } }
+                }.awaitAll().forEach { (q, url) -> if (url != null) keepSearchPicture(q, url) }
+            }
+        }
+    }
+
+    // "You may like": the channels of the videos watched lately, as searches to make (kept as "name<TAB>picture").
+    private val watchedChannelsSetting = settings.string(KEY_WATCHED_CHANNELS, "")
+    private val _watchedChannels = MutableStateFlow(
+        watchedChannelsSetting.value.split('\n').mapNotNull { line -> line.split('\t').takeIf { it.size == 2 && it[0].isNotBlank() }?.let { it[0] to it[1].ifBlank { null } } },
+    )
+
+    /** Channels watched lately that were not searched for yet, with a picture of theirs. */
+    val mayLike: StateFlow<List<Pair<String, String?>>> = kotlinx.coroutines.flow.combine(_watchedChannels, _searchHistory) { channels, history ->
+        val searched = history.map { it.lowercase() }.toSet()
+        channels.filter { it.first.lowercase() !in searched }.take(MAY_LIKE)
+    }.stateIn(scope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList<Pair<String, String?>>())
+
+    private fun rememberChannel(item: VideoItem) {
+        val name = item.channelName?.trim()?.replace('\t', ' ')?.takeIf { it.isNotEmpty() } ?: return
+        val next = (listOf(name to item.thumbnail) + _watchedChannels.value.filterNot { it.first.equals(name, ignoreCase = true) }).take(WATCHED_CHANNELS_KEPT)
+        _watchedChannels.value = next
+        settings.setString(KEY_WATCHED_CHANNELS, next.joinToString("\n") { "${it.first}\t${it.second.orEmpty()}" })
+    }
 
     private val _refresh = MutableStateFlow(0)
 
@@ -1266,12 +1345,12 @@ class VideosController(
     val mobileQuality = settings.string(KEY_Q_MOBILE, "480")
     private val captionsSetting = settings.string(KEY_CAPTIONS, "0")
 
-    /** The silent previews of the lists ("1" on, the default; only on Wi-Fi anyway). */
-    val feedPreviewSetting = settings.string(KEY_FEED_PREVIEW, "1")
+    /** The previews in the lists: "2" always (the default, as on YouTube), "1" on Wi-Fi only, "0" off. */
+    val feedPreviewSetting = settings.string(KEY_FEED_PREVIEW, "2")
 
-    fun setFeedPreview(on: Boolean) {
-        settings.setString(KEY_FEED_PREVIEW, if (on) "1" else "0")
-        if (!on) FeedPreview.stopAll()
+    fun setFeedPreview(mode: String) {
+        settings.setString(KEY_FEED_PREVIEW, mode)
+        if (mode == "0" || (mode == "1" && !isUnmetered())) FeedPreview.stopAll()
     }
 
     fun setWifiQuality(height: String) = settings.setString(KEY_Q_WIFI, height)
@@ -1546,7 +1625,12 @@ class VideosController(
         private const val RESUME_END_MARGIN_MS = 20_000L
         private const val RESUME_KEPT = 80
         private const val WATCH_LATER_TITLE = "Watch later"
-        private const val MAX_SEARCHES = 20
+        private const val MAX_SEARCHES = 50
+        private const val MAX_SEARCH_PICTURES_FILLED = 30
+        private const val MAY_LIKE = 5
+        private const val WATCHED_CHANNELS_KEPT = 30
+        private const val KEY_SEARCH_PICTURES = "video_search_pictures"
+        private const val KEY_WATCHED_CHANNELS = "video_watched_channels"
         private const val SHORTS_QUERY = "#shorts"
         private const val SHORTS_MORE_ATTEMPTS = 3
         private const val SHORTS_MORE_MIN = 6

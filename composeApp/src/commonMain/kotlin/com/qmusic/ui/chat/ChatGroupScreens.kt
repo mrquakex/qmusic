@@ -289,7 +289,7 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
         AlertDialog(
             onDismissRequest = { memberMenu = null },
             containerColor = DarkSurfaceVariant,
-            title = { Text(user.name, color = TextPrimary) },
+            title = { Text(user.name, color = TextPrimary, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
             text = {
                 Column {
                     Text(s.message, color = TextPrimary, fontSize = 16.sp, modifier = Modifier.fillMaxWidth().clickable { memberMenu = null; controller.openConversation(user) }.padding(vertical = 12.dp))
@@ -518,7 +518,7 @@ internal fun VideoViewer(url: String, onClose: () -> Unit) {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         VideoMessagePlayer(url, Modifier.fillMaxSize())
         IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(6.dp)) {
-            Icon(QMusicIcons.Close, contentDescription = null, tint = Color.White)
+            Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = Color.White)
         }
     }
 }

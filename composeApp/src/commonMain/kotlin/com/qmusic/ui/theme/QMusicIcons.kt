@@ -326,6 +326,20 @@ object QMusicIcons {
         "M16 4.2a3.5 3.5 0 0 1 0 6.6M18 14.5a6.5 6.5 0 0 1 3.5 5.5",
     )
 
+    /** A person with a plus: add someone (to a call). */
+    val PersonAdd: ImageVector = stroked(
+        "PersonAdd",
+        "M10 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3.5 20a6.5 6.5 0 0 1 13 0",
+        "M19 8v6M16 11h6",
+    )
+
+    /** A screen with an arrow going up out of it: share the screen. */
+    val ScreenShare: ImageVector = stroked(
+        "ScreenShare",
+        "M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM8 21h8M12 17v4",
+        "M12 14V8M9.5 10.5L12 8l2.5 2.5",
+    )
+
     val File: ImageVector = stroked("File", "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6")
 
     val Attach: ImageVector = stroked("Attach", "M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9")

@@ -520,6 +520,10 @@ class ChatController(
         scope.launch { runCatching { backend.clearCallLog() } }
     }
 
+    fun deleteCalls(ids: List<String>) {
+        scope.launch { runCatching { backend.deleteCalls(ids) } }
+    }
+
     fun openSettings() = _routes.update { list -> list.filter { it !is ChatRoute.Settings } + ChatRoute.Settings }
 
     /** The list entry of the conversation with [other] (its counts and marks), when there is one. */

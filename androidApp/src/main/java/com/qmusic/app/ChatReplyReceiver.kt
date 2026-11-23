@@ -31,6 +31,10 @@ class ChatReplyReceiver : BroadcastReceiver() {
                             ChatPush.clear(app, chatId)
                             com.qmusic.ui.chat.ChatNotificationActions.markRead(app, peer.uid)
                         }
+                        ChatPush.ACTION_MUTE -> {
+                            ChatPush.clear(app, chatId)
+                            com.qmusic.ui.chat.ChatNotificationActions.mute(app, chatId, System.currentTimeMillis() + 8 * 3600 * 1000L)
+                        }
                     }
                 }
             } finally {

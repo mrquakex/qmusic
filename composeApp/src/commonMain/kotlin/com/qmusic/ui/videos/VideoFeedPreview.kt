@@ -23,10 +23,28 @@ object FeedPreview {
     var play: (VideoQuality) -> Unit = {}
     var stop: () -> Unit = {}
 
+    /** How far the preview has played (0-1) and what is left of the video, for the line and the time on its picture. */
+    val progress = MutableStateFlow(0f)
+    val remainingMs = MutableStateFlow(0L)
+
+    /** Where the preview is now (opening the video goes on from there, as YouTube does). */
+    var position: () -> Long = { 0L }
+
+    /** Silent unless the person turns its sound on (kept while the app is open, as on YouTube). */
+    val muted = MutableStateFlow(true)
+    var applyMuted: (Boolean) -> Unit = {}
+
+    fun setMuted(on: Boolean) {
+        muted.value = on
+        applyMuted(on)
+    }
+
     fun stopAll() {
         if (playing.value == null) return
         playing.value = null
         showing.value = false
+        progress.value = 0f
+        remainingMs.value = 0L
         stop()
     }
 }

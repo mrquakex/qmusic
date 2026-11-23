@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -137,6 +138,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     private fun onUser(user: FirebaseUser?) {
         profileListener?.let { profileRef?.removeEventListener(it) }
         profileListener = null
+        forgetProfiles()
         runCatching { com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().setUserId(user?.uid.orEmpty()) }
         runCatching { watchStatusPrivacy(user?.uid) }
         runCatching { calls.listenFor(user?.uid) }
@@ -262,6 +264,9 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         root.child("users").child(uid).child("name").setValue(clean).await()
         val mine = (_account.value as? ChatAccount.Ready)?.me
         placeProfile(uid, mine?.photo, about.trim().take(140), _privacy.value)
+        if (mine != null) _account.value = ChatAccount.Ready(mine.copy(name = clean))
+        // The new name goes into the others' lists (their conversations, their friends, the groups).
+        refreshMyCopies()
     }
 
     override suspend fun setProfilePhoto(image: PickedImage): Result<Unit> = runCatching {
@@ -365,14 +370,25 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         awaitClose { ref.removeEventListener(listener) }
     }
 
+    /** The conversations with unread messages at the last look (see [threads]). */
+    private var wasUnread: Set<String> = emptySet()
+
     override fun threads(): Flow<List<ChatThread>> {
         val uid = me()
         val ref = root.child("userChats").child(uid)
         ref.keepSynced(true)
         return callbackFlow {
             val job = launch {
-                combine(listen(ref), e2e.changes) { snap, _ -> snap }.collect { snap ->
-                    trySend(snap.children.mapNotNull { it.toThread() }.sortedByDescending { it.lastAt })
+                combine(listen(ref), e2e.changes, liveProfiles) { snap, _, live -> snap to live }.collect { (snap, live) ->
+                    val list = snap.children.mapNotNull { it.toThread() }
+                    // Read on another device (the web, another phone): the notification here goes too.
+                    val nowUnread = list.filter { it.unread || it.unreadCount > 0 }.map { it.id }.toSet()
+                    (wasUnread - nowUnread).forEach { id -> ChatPresence.onReadElsewhere?.invoke(id) }
+                    wasUnread = nowUnread
+                    // The other person's name and photo as they are now, not as they were at the last message.
+                    watchProfiles(list.filter { !it.isGroup }.map { it.other.uid })
+                    healThreadCopies(uid, list, live)
+                    trySend(list.map { t -> if (t.isGroup) t else t.copy(other = t.other.fresh(live)) }.sortedByDescending { it.lastAt })
                 }
             }
             awaitClose { job.cancel() }
@@ -732,6 +748,9 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     override val groupCalls: FirebaseGroupCallService by lazy {
         FirebaseGroupCallService(app, root, { (_account.value as? ChatAccount.Ready)?.me }, calls) { id, group, video, seconds ->
             logCall(id, group, video, CallDirection.GROUP, if (seconds > 0) CallOutcome.ANSWERED else CallOutcome.NOT_ANSWERED, seconds)
+        }.also { groups ->
+            // Someone added to a call: the two phones go on together in a group call.
+            calls.onMoveToRoom = { room, video -> groups.join(room, video) }
         }
     }
 
@@ -1444,9 +1463,12 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 val chatId = c.key ?: return@forEach
                 if (isGroupId(chatId)) {
                     updates["groups/$chatId/members/${me.uid}/photo"] = me.publicPhoto()
+                    updates["groups/$chatId/members/${me.uid}/name"] = me.name
                 } else {
                     val other = c.child("other").getValue(String::class.java) ?: return@forEach
                     updates["userChats/$other/$chatId/photo"] = me.publicPhoto()
+                    updates["userChats/$other/$chatId/name"] = me.name
+                    updates["userChats/$other/$chatId/username"] = me.username
                 }
             }
         }
@@ -1455,8 +1477,11 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             root.child("friends").child(me.uid).get().await().children.forEach { f ->
                 val uid = f.key ?: return@forEach
                 updates["friends/$uid/${me.uid}/photo"] = me.friendPhoto()
+                updates["friends/$uid/${me.uid}/name"] = me.name
+                updates["friends/$uid/${me.uid}/username"] = me.username
                 // A friend's chat with the person shows the friend version too.
                 updates["userChats/$uid/${chatIdOf(me.uid, uid)}/photo"] = me.friendPhoto()
+                updates["userChats/$uid/${chatIdOf(me.uid, uid)}/name"] = me.name
             }
         }
         if (updates.isEmpty()) return
@@ -1634,6 +1659,78 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     //   sentRequests/{from}/{to}   = true                          (what {from} sees)
     //   friends/{uid}/{other}      = {name, username, photo, since}
 
+    // ------------------------------------------------------------------ people as they are now
+    //
+    // The lists keep copies of a person's name and photo made when something happened (a message, a call, a
+    // friendship). A name or photo changed since would show old there (and Nuvelo's own messages came without a name,
+    // as "?"). So the people in the lists are followed where they are now (users/{uid}; a photo shown to friends only,
+    // from privateProfile), the lists show that, and the person's own copies are put right.
+
+    private class LiveProfile(val name: String, val username: String, val photo: String?, val photoHidden: Boolean)
+
+    private val liveProfiles = MutableStateFlow<Map<String, LiveProfile>>(emptyMap())
+    private val profileWatch = HashMap<String, Pair<DatabaseReference, ValueEventListener>>()
+
+    private fun watchProfiles(uids: Collection<String>) {
+        synchronized(profileWatch) {
+            uids.forEach { uid ->
+                if (uid.isBlank() || uid in profileWatch || uid == CLAUDE_BOT_UID || isGroupId(uid) || isCallRoom(uid)) return@forEach
+                val ref = root.child("users").child(uid)
+                val listener = object : ValueEventListener {
+                    override fun onDataChange(snap: DataSnapshot) {
+                        // An account that is gone keeps what the lists have.
+                        val name = snap.child("name").getValue(String::class.java) ?: return
+                        val username = snap.child("username").getValue(String::class.java).orEmpty()
+                        val photo = snap.child("photo").getValue(String::class.java)
+                        val shownTo = snap.child("privacy").child("photo").getValue(String::class.java)
+                        fun publish(p: String?) = liveProfiles.update { it + (uid to LiveProfile(name, username, p, photoHidden = p == null && shownTo == "NOBODY")) }
+                        if (photo == null && shownTo == "FRIENDS") {
+                            // Friends only: readable when this person is one (the rules refuse otherwise).
+                            scope.launch { publish(runCatching { root.child("privateProfile").child(uid).child("photo").get().await().getValue(String::class.java) }.getOrNull()) }
+                        } else {
+                            publish(photo)
+                        }
+                    }
+
+                    override fun onCancelled(error: DatabaseError) {}
+                }
+                ref.addValueEventListener(listener)
+                profileWatch[uid] = ref to listener
+            }
+        }
+    }
+
+    private fun forgetProfiles() {
+        synchronized(profileWatch) {
+            profileWatch.values.forEach { (ref, listener) -> ref.removeEventListener(listener) }
+            profileWatch.clear()
+        }
+        liveProfiles.value = emptyMap()
+    }
+
+    /** This person as they are now: their own name and photo (a photo they hide shows none). */
+    private fun ChatUser.fresh(live: Map<String, LiveProfile>): ChatUser {
+        val now = live[uid] ?: return this
+        return copy(
+            name = now.name,
+            username = now.username.ifEmpty { username },
+            photo = now.photo ?: if (now.photoHidden) null else photo,
+        )
+    }
+
+    /** The person's own conversation list gets the names and photos right where they are old (or missing). */
+    private fun healThreadCopies(mine: String, threads: List<ChatThread>, live: Map<String, LiveProfile>) {
+        val fix = HashMap<String, Any?>()
+        threads.forEach { t ->
+            if (t.isGroup || live[t.other.uid] == null) return@forEach
+            val now = t.other.fresh(live)
+            if (now.name != t.other.name) fix["userChats/$mine/${t.id}/name"] = now.name
+            if (now.username != t.other.username) fix["userChats/$mine/${t.id}/username"] = now.username
+            if (now.photo != t.other.photo) fix["userChats/$mine/${t.id}/photo"] = now.photo
+        }
+        if (fix.isNotEmpty()) runCatching { root.updateChildren(fix) }
+    }
+
     private fun DataSnapshot.toPerson(): ChatUser? {
         val uid = key ?: return null
         return ChatUser(
@@ -1647,9 +1744,21 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     private fun ChatUser.card(time: String) = mapOf("name" to name, "username" to username, "photo" to photo, time to ServerValue.TIMESTAMP)
 
     override fun friends(): Flow<List<ChatUser>> = callbackFlow {
+        val mine = me()
         val job = launch {
-            listen(root.child("friends").child(me())).collect { snap ->
-                trySend(snap.children.mapNotNull { it.toPerson() }.sortedBy { it.name.lowercase() })
+            combine(listen(root.child("friends").child(mine)), liveProfiles) { snap, live -> snap to live }.collect { (snap, live) ->
+                val list = snap.children.mapNotNull { it.toPerson() }
+                watchProfiles(list.map { it.uid })
+                // The person's own card of each friend is put right when it shows an old name or photo.
+                val fix = HashMap<String, Any?>()
+                list.forEach { f ->
+                    val now = f.fresh(live)
+                    if (now.name != f.name) fix["friends/$mine/${f.uid}/name"] = now.name
+                    if (now.username != f.username) fix["friends/$mine/${f.uid}/username"] = now.username
+                    if (now.photo != f.photo) fix["friends/$mine/${f.uid}/photo"] = now.photo
+                }
+                if (fix.isNotEmpty()) runCatching { root.updateChildren(fix) }
+                trySend(list.map { it.fresh(live) }.sortedBy { it.name.lowercase() })
             }
         }
         awaitClose { job.cancel() }
@@ -1875,8 +1984,9 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         presenceVisibility = null
         if (uid == null) return
         val ref = root.child("presence").child(uid)
-        // "Online" only while the app is on screen: in the background (music playing, a call service) the connection
-        // stays, but the person is not there, so it says "last seen" from the moment they left.
+        // "Online" only while the messages are on screen: in the background (music playing, a call service), in the
+        // videos or the music, or with a call ringing over them, the person is not in their messages, so it says "last
+        // seen" from the moment they left them.
         fun write() {
             if (!presenceConnected) return
             if (_privacy.value.hideLastSeen) {
@@ -1885,7 +1995,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 ref.setValue(mapOf("hidden" to true))
                 return
             }
-            val visible = CallHooks.appVisible
+            val visible = CallHooks.appVisible && ChatPresence.inChats.value
             if (visible) {
                 ref.onDisconnect().setValue(mapOf("online" to false, "lastSeen" to ServerValue.TIMESTAMP))
                 ref.setValue(mapOf("online" to true, "lastSeen" to ServerValue.TIMESTAMP))
@@ -1910,7 +2020,11 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         }
         connected.addValueEventListener(listener)
         presenceListener = listener
-        presenceVisibility = scope.launch { CallHooks.onScreen.collect { write() } }
+        presenceVisibility = scope.launch {
+            combine(CallHooks.onScreen, ChatPresence.inChats) { shown, inChats -> shown && inChats }
+                .distinctUntilChanged()
+                .collect { write() }
+        }
         // Privacy changed while connected: written again at once.
         if (_privacy.value.hideLastSeen) ref.setValue(mapOf("hidden" to true))
     }
@@ -2074,13 +2188,16 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
 
     override fun callLog(): Flow<List<CallLogEntry>> = callbackFlow {
         val job = launch {
-            listen(root.child("callLog").child(me()).orderByChild("at").limitToLast(200)).collect { snap ->
+            combine(listen(root.child("callLog").child(me()).orderByChild("at").limitToLast(200)), liveProfiles) { snap, live -> snap to live }.collect { (snap, live) ->
+                // Each call kept the person's name and photo of its day: they show as they are now.
+                watchProfiles(snap.children.mapNotNull { c -> c.child("peer").getValue(String::class.java)?.takeIf { c.child("dir").getValue(String::class.java) != "group" } })
                 trySend(
                     snap.children.mapNotNull { c ->
                         val peer = c.child("peer").getValue(String::class.java) ?: return@mapNotNull null
                         CallLogEntry(
                             id = c.key ?: return@mapNotNull null,
-                            peer = ChatUser(peer, c.child("name").getValue(String::class.java).orEmpty(), c.child("username").getValue(String::class.java).orEmpty(), c.child("photo").getValue(String::class.java)),
+                            peer = ChatUser(peer, c.child("name").getValue(String::class.java).orEmpty(), c.child("username").getValue(String::class.java).orEmpty(), c.child("photo").getValue(String::class.java))
+                                .let { u -> if (c.child("dir").getValue(String::class.java) == "group") u else u.fresh(live) },
                             video = c.child("video").getValue(Boolean::class.java) == true,
                             direction = when (c.child("dir").getValue(String::class.java)) {
                                 "out" -> CallDirection.OUT
@@ -2096,6 +2213,12 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             }
         }
         awaitClose { job.cancel() }
+    }
+
+    override suspend fun deleteCalls(ids: List<String>) {
+        val uid = me()
+        if (ids.isEmpty()) return
+        root.child("callLog").child(uid).updateChildren(ids.associateWith { null })
     }
 
     override suspend fun clearCallLog() {

@@ -269,6 +269,9 @@ class PickedImage(val jpeg: ByteArray, val width: Int, val height: Int, val thum
 /** The uid of the owner's Claude (see server/qmusic-push/claude-bot.js). */
 const val CLAUDE_BOT_UID = "claudebot"
 
+/** Nuvelo's own account (its team's messages to people). */
+const val NUVELO_UID = "nuvelo"
+
 /** The one person whose Claude it is: only they can call it into a conversation. */
 const val CLAUDE_OWNER_UID = "2hxOw0dRcwUwsW7N6ogH4fRcqXo1"
 
@@ -648,6 +651,9 @@ interface ChatBackend {
     /** The person's calls, newest first. */
     fun callLog(): Flow<List<CallLogEntry>> = kotlinx.coroutines.flow.flowOf(emptyList())
     suspend fun clearCallLog() {}
+
+    /** Takes these calls out of the person's list. */
+    suspend fun deleteCalls(ids: List<String>) {}
 
     /** Until when the person looked at their calls (missed ones after it make the Calls tab's badge). */
     fun callsSeenAt(): Flow<Long> = kotlinx.coroutines.flow.flowOf(0L)

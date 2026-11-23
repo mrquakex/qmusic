@@ -60,7 +60,7 @@ internal fun CastPanel(w: WatchState, state: VideoCastState?, s: VideoStrings, c
             AsyncImage(model = it, contentDescription = null, contentScale = ContentScale.Crop, alpha = 0.35f, modifier = Modifier.fillMaxSize().blur(16.dp))
         }
         Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { controller.pop() }) { Icon(QMusicIcons.ChevronDown, null, tint = Color.White, modifier = Modifier.size(28.dp)) }
+            IconButton(onClick = { controller.pop() }) { Icon(QMusicIcons.ChevronDown, contentDescription = com.qmusic.ui.A11y.close, tint = Color.White, modifier = Modifier.size(28.dp)) }
             Box(Modifier.weight(1f))
             com.qmusic.ui.tv.TvButton(modifier = Modifier.size(44.dp))
         }

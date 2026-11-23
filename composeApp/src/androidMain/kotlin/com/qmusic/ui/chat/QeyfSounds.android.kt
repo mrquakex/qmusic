@@ -25,19 +25,42 @@ object QeyfSounds {
     private const val PREFS = "qmusic_settings"
     private const val KEY_IN_CHAT = "sound_in_chat"
     private const val KEY_SMALL = "sound_small"
-    private const val KEY_TYPING = "sound_typing"
-    private const val MESSAGE_PREFIX = "qeyf_msg_"
-    private const val RING_PREFIX = "qeyf_ring_"
+    // "2": the channels made before kept their sound as a resource NUMBER, which changes from one build to the next:
+    // after an update they pointed at nothing and rang silently. Android never lets an app change a channel's sound,
+    // so the channels are made anew (by name now) and the old ones are removed.
+    private const val MESSAGE_PREFIX = "qeyf_msg2_"
+    // "3": the ringing channel is silent now; the app rings itself ([IncomingRinger]), since some phones (a Samsung on
+    // Android 16) showed the call's notification without ever playing its sound.
+    private const val RING_PREFIX = "qeyf_ring3_"
+    private const val OLD_MESSAGE_PREFIX = "qeyf_msg_"
+    private const val OLD_RING_PREFIX = "qeyf_ring_"
+    private const val OLD_RING2_PREFIX = "qeyf_ring2_"
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private fun key(kind: SoundKind) = "sound_" + kind.name.lowercase()
     private fun tr(context: Context) = prefs(context).getString("language", "tr") != "en"
 
-    fun choice(context: Context, kind: SoundKind): String =
-        prefs(context).getString(key(kind), null)?.takeIf { id ->
+    fun choice(context: Context, kind: SoundKind): String {
+        migrate(context)
+        return prefs(context).getString(key(kind), null)?.takeIf { id ->
             // The ringtone may also be a song's (made in the music side).
             (kind == SoundKind.RING && CallTones.isSong(id)) || ChatSoundCatalog.options.getValue(kind).any { it.id == id }
         } ?: ChatSoundCatalog.defaults.getValue(kind)
+    }
+
+    /**
+     * Once: the old send and receive sounds (the keyboard, the old message sound) kept as a choice give way to the new
+     * recorded ones, so everyone hears the new sounds; one picked again later stays.
+     */
+    private fun migrate(context: Context) {
+        val p = prefs(context)
+        if (p.getBoolean("sounds_v2", false)) return
+        p.edit().apply {
+            if (p.getString(key(SoundKind.SEND), null) == "enter") remove(key(SoundKind.SEND))
+            if (p.getString(key(SoundKind.RECEIVE), null) == "yeni") remove(key(SoundKind.RECEIVE))
+            putBoolean("sounds_v2", true)
+        }.apply()
+    }
 
     /** Whether the phone still has the song ringtone [id] (it can be deleted in the music side or elsewhere). */
     private fun songExists(context: Context, id: String): Boolean = runCatching {
@@ -61,8 +84,6 @@ object QeyfSounds {
     fun small(context: Context) = prefs(context).getBoolean(KEY_SMALL, true)
     fun setInChat(context: Context, on: Boolean) = prefs(context).edit().putBoolean(KEY_IN_CHAT, on).apply()
     fun setSmall(context: Context, on: Boolean) = prefs(context).edit().putBoolean(KEY_SMALL, on).apply()
-    fun typing(context: Context) = prefs(context).getBoolean(KEY_TYPING, true)
-    fun setTyping(context: Context, on: Boolean) = prefs(context).edit().putBoolean(KEY_TYPING, on).apply()
 
     private fun resId(context: Context, file: String): Int = context.resources.getIdentifier(file, "raw", context.packageName)
     private fun fileOf(kind: SoundKind, id: String) = "snd_${kind.file}_$id"
@@ -72,7 +93,8 @@ object QeyfSounds {
         if (CallTones.isSong(id)) {
             Uri.parse(CallTones.uriOf(id))
         } else {
-            resId(context, fileOf(kind, id)).takeIf { it != 0 }?.let { Uri.parse("android.resource://${context.packageName}/$it") }
+            // By the file's name, not its number: the number changes from build to build, the name does not.
+            fileOf(kind, id).takeIf { resId(context, it) != 0 }?.let { Uri.parse("android.resource://${context.packageName}/raw/$it") }
         }
 
     // ------------------------------------------------------------------ the notification channels
@@ -92,7 +114,7 @@ object QeyfSounds {
                 },
             )
         }
-        manager.notificationChannels.filter { (it.id.startsWith(MESSAGE_PREFIX) && it.id != id) || it.id == "qmusic_messages" }
+        manager.notificationChannels.filter { (it.id.startsWith(MESSAGE_PREFIX) && it.id != id) || it.id.startsWith(OLD_MESSAGE_PREFIX) || it.id == "qmusic_messages" }
             .forEach { runCatching { manager.deleteNotificationChannel(it.id) } }
         return id
     }
@@ -110,15 +132,15 @@ object QeyfSounds {
             val tr = tr(context)
             manager.createNotificationChannel(
                 NotificationChannel(id, if (tr) "Gelen aramalar" else "Incoming calls", NotificationManager.IMPORTANCE_HIGH).apply {
-                    setSound(uri(context, SoundKind.RING, sound), AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
-                    enableVibration(true)
-                    vibrationPattern = longArrayOf(0, 800, 800)
+                    // No sound or vibration of its own: the app rings and vibrates itself (one ringing, not two).
+                    setSound(null, null)
+                    enableVibration(false)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 },
             )
         }
         val used = (CallTonesAndroid.allPersonal(context) + choice(context, SoundKind.RING)).map { RING_PREFIX + ringKey(it) }.toSet() + id
-        manager.notificationChannels.filter { (it.id.startsWith(RING_PREFIX) && it.id !in used) || it.id == "qmusic_calls_ring" }
+        manager.notificationChannels.filter { (it.id.startsWith(RING_PREFIX) && it.id !in used) || it.id.startsWith(OLD_RING_PREFIX) || it.id.startsWith(OLD_RING2_PREFIX) || it.id == "qmusic_calls_ring" }
             .forEach { runCatching { manager.deleteNotificationChannel(it.id) } }
         return id
     }
@@ -164,17 +186,7 @@ object QeyfSounds {
         if (synchronized(ready) { sample in ready }) p.play(sample, volume, volume, 1, 0, rate) else pendingPlay[sample] = true
     }
 
-    private var lastKeyAt = 0L
 
-    /** One of five recorded keys, a little louder or softer and higher or lower each time, so it sounds like typing. */
-    fun playKey(context: Context) {
-        if (!typing(context) || !ringerAllows(context)) return
-        val now = android.os.SystemClock.uptimeMillis()
-        if (now - lastKeyAt < 30) return
-        lastKeyAt = now
-        val r = kotlin.random.Random
-        playFile(context, "snd_type_" + (1 + r.nextInt(5)), call = false, volume = 0.35f + r.nextFloat() * 0.15f, rate = 0.94f + r.nextFloat() * 0.12f)
-    }
 
     /** Silent and vibrate mode keep the app's own little sounds quiet, as the phone's own do. */
     private fun ringerAllows(context: Context): Boolean =
@@ -280,19 +292,70 @@ private class AndroidChatSounds(private val context: Context) : ChatSounds {
     override fun play(kind: SoundKind) = QeyfSounds.playChat(context, kind)
     override fun playSmall(sound: SmallSound) = QeyfSounds.playSmall(context, sound)
 
-    private val _typing = MutableStateFlow(QeyfSounds.typing(context))
-    override val typing: StateFlow<Boolean> = _typing.asStateFlow()
-
-    override fun setTyping(on: Boolean) {
-        QeyfSounds.setTyping(context, on)
-        _typing.value = on
-    }
-
-    override fun playKey() = QeyfSounds.playKey(context)
 }
 
 @Composable
 actual fun rememberChatSounds(): ChatSounds? {
     val context = LocalContext.current.applicationContext
     return remember(context) { AndroidChatSounds(context) }
+}
+
+/**
+ * The ringing of an incoming call, one at a time, whoever starts it: the call service (the app open or not) or the
+ * call's notification (woken by the push). The app plays the ringtone itself, as WhatsApp does: some phones show a
+ * call's notification without ever playing the notification's sound. It keeps to the phone's mode: silent is silent,
+ * vibrate only vibrates, and Do not disturb keeps it quiet. It stops by itself after [forMs] at the latest.
+ */
+object IncomingRinger {
+    private var player: MediaPlayer? = null
+    private var key: String? = null
+    private var vibrating: android.os.Vibrator? = null
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private val autoStop = Runnable { stop() }
+
+    /** Rings for [key] (a call's id); the same call again goes on ringing as it was. */
+    @Synchronized
+    fun start(context: Context, key: String, uid: String?, forMs: Long = 50_000L) {
+        if (this.key == key) return
+        stopNow()
+        this.key = key
+        val app = context.applicationContext
+        val audio = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val nm = app.getSystemService(NotificationManager::class.java)
+        val quiet = nm != null && nm.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL &&
+            nm.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_UNKNOWN
+        val mode = audio.ringerMode
+        if (!quiet && mode == AudioManager.RINGER_MODE_NORMAL) player = QeyfSounds.startRingtone(app, uid)
+        if (!quiet && mode != AudioManager.RINGER_MODE_SILENT && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val v = app.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+            runCatching {
+                v?.vibrate(
+                    android.os.VibrationEffect.createWaveform(longArrayOf(0, 800, 800), 0),
+                    AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build(),
+                )
+            }
+            vibrating = v
+        }
+        main.removeCallbacks(autoStop)
+        main.postDelayed(autoStop, forMs)
+        CallHooks.trace?.invoke(
+            "ringer: ${if (player != null) "sound" else "NO sound"}, ${if (vibrating != null) "vibration" else "no vibration"}" +
+                (if (quiet) " (Do not disturb)" else ""),
+        )
+    }
+
+    /** The call was answered, declined, given up or taken over: the ringing stops. */
+    @Synchronized
+    fun stop() {
+        stopNow()
+    }
+
+    private fun stopNow() {
+        main.removeCallbacks(autoStop)
+        QeyfSounds.stop(player)
+        player = null
+        runCatching { vibrating?.cancel() }
+        vibrating = null
+        key = null
+    }
 }

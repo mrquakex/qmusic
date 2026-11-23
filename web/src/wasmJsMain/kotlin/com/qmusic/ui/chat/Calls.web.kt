@@ -521,9 +521,13 @@ internal class WebCallService(
     }
 }
 
+/** A browser does not share its screen in a call here. */
+@Composable
+actual fun rememberScreenShare(service: CallService): (() -> Unit)? = null
+
 /** The other person's picture ([remote]) or our own camera, laid over the page where [modifier] puts it. */
 @Composable
-actual fun CallVideo(service: CallService, remote: Boolean, modifier: Modifier) {
+actual fun CallVideo(service: CallService, remote: Boolean, modifier: Modifier, overlay: Boolean) {
     val web = service as? WebCallService ?: return
     val conn by web.rtc.collectAsState()
     val id = conn ?: return

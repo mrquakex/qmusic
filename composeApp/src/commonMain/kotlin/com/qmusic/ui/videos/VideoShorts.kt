@@ -110,7 +110,7 @@ fun ShortsPage(
         }
         if (showBack) {
             IconButton(onClick = { controller.pop() }, modifier = Modifier.statusBarsPadding().padding(4.dp)) {
-                Icon(QMusicIcons.Back, null, tint = Color.White)
+                Icon(QMusicIcons.Back, contentDescription = com.qmusic.ui.A11y.back, tint = Color.White)
             }
         }
     }

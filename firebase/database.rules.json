@@ -117,7 +117,7 @@
     "notify": {
       "$id": {
         ".write": "(auth != null && !data.exists() && newData.child('from').val() === auth.uid) && !(root.child('bans').child(auth.uid).child('until').isNumber() && root.child('bans').child(auth.uid).child('until').val() > now)",
-        ".validate": "newData.hasChildren(['from', 'to', 'chatId', 'type', 'at']) && newData.child('at').val() === now && newData.child('to').isString() && newData.child('chatId').isString() && (newData.child('type').val() === 'chat' || newData.child('type').val() === 'call' || newData.child('type').val() === 'friend' || newData.child('type').val() === 'groupcall' || newData.child('type').val() === 'reaction')"
+        ".validate": "newData.hasChildren(['from', 'to', 'chatId', 'type', 'at']) && newData.child('at').val() === now && newData.child('to').isString() && newData.child('chatId').isString() && (newData.child('type').val() === 'chat' || newData.child('type').val() === 'call' || newData.child('type').val() === 'friend' || newData.child('type').val() === 'groupcall' || newData.child('type').val() === 'roomcall' || newData.child('type').val() === 'reaction')"
       }
     },
     "turn": {
@@ -282,6 +282,15 @@
       "$chatId": {
         ".read": "auth != null && $chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()",
         ".write": "(auth != null && $chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()) && !(root.child('bans').child(auth.uid).child('kind').val() === 'ban' && root.child('bans').child(auth.uid).child('until').isNumber() && root.child('bans').child(auth.uid).child('until').val() > now)"
+      }
+    },
+    "callRooms": {
+      ".indexOn": [
+        "at"
+      ],
+      "$roomId": {
+        ".read": "auth != null && data.child('people').child(auth.uid).val() === true",
+        ".write": "(auth != null && $roomId.matches(/^room[A-Za-z0-9]{20}$/) && ((!data.exists() && newData.child('by').val() === auth.uid && newData.child('people').child(auth.uid).val() === true) || (data.child('people').child(auth.uid).val() === true && newData.exists() && newData.child('by').val() === data.child('by').val()))) && !(root.child('bans').child(auth.uid).child('kind').val() === 'ban' && root.child('bans').child(auth.uid).child('until').isNumber() && root.child('bans').child(auth.uid).child('until').val() > now)"
       }
     },
     "callLog": {

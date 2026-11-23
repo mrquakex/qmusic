@@ -1656,7 +1656,7 @@ class MainViewModel(
         suggestionJob = scope.launch {
             delay(SUGGESTION_DEBOUNCE_MS)
             youTube.searchSuggestions(trimmed).onSuccess { suggestions ->
-                if (_searchQuery.value.trim() == trimmed) _remoteSuggestions.value = if (isSpotify) suggestions.filterNot { it.isRich } else suggestions
+                if (_searchQuery.value.trim() == trimmed) _remoteSuggestions.value = suggestions
             }
         }
     }
@@ -1684,6 +1684,9 @@ class MainViewModel(
 
     private var loadingMoreResults = false
 
+    /** Whether the results on screen came from Spotify (YouTube Music could not answer): their next part does too. */
+    private var searchedOnSpotify = false
+
     /** Fetches the next part of a filtered search when its list is scrolled to the end. */
     fun loadMoreSearchResults() {
         val page = _searchPage.value ?: return
@@ -1691,7 +1694,7 @@ class MainViewModel(
         if (loadingMoreResults) return
         loadingMoreResults = true
         scope.launch {
-            val next = if (isSpotify) runCatching { spotify.searchMore(_searchQuery.value.trim(), token) ?: error("No more") } else youTube.searchMore(token)
+            val next = if (searchedOnSpotify) runCatching { spotify.searchMore(_searchQuery.value.trim(), token) ?: error("No more") } else youTube.searchMore(token)
             next.onSuccess { more ->
                 val current = _searchPage.value
                 if (current?.continuation == token) {
@@ -1756,7 +1759,19 @@ class MainViewModel(
 
         scope.launch {
             repository.recordSearch(trimmed)
-            val result = if (isSpotify) runCatching { spotify.search(trimmed, filter) } else youTube.searchPage(query = trimmed, filter = filter)
+            // YouTube Music's search, with a Spotify account too: it finds a song from a line of its lyrics or a misspelt
+            // name, where Spotify's lists unrelated hits. Its songs play straight away, and a like or a playlist on
+            // Spotify finds Spotify's own track for them. Spotify answers only when YouTube Music cannot.
+            var fromSpotify = false
+            val result = youTube.searchPage(query = trimmed, filter = filter).let { yt ->
+                if (yt.isSuccess || !isSpotify) {
+                    yt
+                } else {
+                    fromSpotify = true
+                    runCatching { spotify.search(trimmed, filter) }
+                }
+            }
+            searchedOnSpotify = fromSpotify
             result.onSuccess { page ->
                 _searchPage.value = page
                 playerController.warmUp((listOfNotNull(page.topSong) + page.songs).take(WARM_SEARCH))

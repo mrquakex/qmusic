@@ -122,6 +122,7 @@ object ChatPush {
     private const val KEY_REPLY = "chat_reply_text"
     const val ACTION_REPLY = "com.qmusic.app.CHAT_REPLY"
     const val ACTION_READ = "com.qmusic.app.CHAT_READ"
+    const val ACTION_MUTE = "com.qmusic.app.CHAT_MUTE"
     private const val HISTORY = 8
 
     /** One line of a conversation's notification: who wrote it (null: the person themself), what, and when. */
@@ -157,7 +158,11 @@ object ChatPush {
         if (data["type"] != "reaction") {
             background.launch { runCatching { com.qmusic.ui.chat.ChatNotificationActions.delivered(context.applicationContext, chatId) } }
         }
-        if (ChatPresence.openChatId == chatId) return
+        // The app is really on screen (not gone to the background, not shrunk to a floating window): the conversation
+        // open in it shows the message itself. Left in the background with a conversation open, that conversation's
+        // messages notified nothing until the app was opened again.
+        val inFront = com.qmusic.ui.chat.CallHooks.appVisible && !com.qmusic.ui.videos.VideoPip.active.value
+        if (inFront && ChatPresence.openChatId == chatId) return
         // A locked conversation, or one in the secret space: neither who nor what, and a tap opens the messages (the
         // lock, or the secret space's PIN, asks first).
         val secret = chatId in com.qmusic.ui.chat.SecretChats.ids || data["secret"] == "1"
@@ -203,7 +208,79 @@ object ChatPush {
             unread[chatId] = (unread[chatId] ?: 0) + 1
             list.toList() to unread.getValue(chatId)
         }
+        // The app is open (another conversation, the videos, the music): a strip at the top of the app with a short
+        // sound, not a notification over it.
+        if (inFront && com.qmusic.ui.chat.NotificationPrefs.inAppBanner.value) {
+            com.qmusic.ui.chat.ChatBanners.current.value = com.qmusic.ui.chat.ChatBanner(
+                id = System.currentTimeMillis(),
+                conversation = conversation,
+                author = if (group) authorName else "",
+                text = text,
+            )
+            com.qmusic.ui.chat.QeyfSounds.playChat(context, com.qmusic.ui.chat.SoundKind.RECEIVE)
+            return
+        }
         show(context, chatId, conversation, group, lines, count, alert = true)
+    }
+
+    /** Each conversation's last notification, to show again in full once the phone is unlocked. */
+    private val shown = HashMap<String, Pair<ChatUser, Boolean>>()
+
+    /** The phone was unlocked: the notifications kept short on the lock screen show in full, quietly. */
+    fun unlocked(context: Context) {
+        if (!com.qmusic.ui.chat.NotificationPrefs.hideOnLock.value) return
+        val all = synchronized(history) { history.mapValues { (id, lines) -> lines.toList() to (unread[id] ?: 0) } }
+        all.forEach { (chatId, pair) ->
+            val (conversation, group) = shown[chatId] ?: return@forEach
+            show(context, chatId, conversation, group, pair.first, pair.second, alert = false)
+        }
+    }
+
+    private const val GROUP_KEY = "nuvelo_messages"
+    private const val SUMMARY_ID = 1999
+
+    /** Two or more conversations with notifications: they go together under one ("3 conversations"), quietly. */
+    private fun updateSummary(context: Context) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val others = runCatching {
+            manager.activeNotifications.filter { it.notification.group == GROUP_KEY && it.id != SUMMARY_ID }
+        }.getOrDefault(emptyList())
+        if (others.size < 2) {
+            manager.cancel(SUMMARY_ID)
+            return
+        }
+        val tr = tr(context)
+        val inbox = NotificationCompat.InboxStyle()
+        others.take(6).forEach { n ->
+            val title = n.notification.extras.getCharSequence(android.app.Notification.EXTRA_CONVERSATION_TITLE)
+                ?: n.notification.extras.getCharSequence(android.app.Notification.EXTRA_TITLE)
+            if (title != null) inbox.addLine(title)
+        }
+        val summary = if (tr) "${others.size} sohbetten yeni mesaj" else "New messages in ${others.size} chats"
+        inbox.setSummaryText(summary)
+        runCatching {
+            manager.notify(
+                SUMMARY_ID,
+                NotificationCompat.Builder(context, com.qmusic.ui.chat.QeyfSounds.messageChannelId(context))
+                    .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
+                    .setContentTitle("Nuvelo")
+                    .setContentText(summary)
+                    .setStyle(inbox)
+                    .setGroup(GROUP_KEY)
+                    .setGroupSummary(true)
+                    // The conversations' own notifications make the sound; the summary never does.
+                    .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+                    .setSilent(true)
+                    .setAutoCancel(true)
+                    .setContentIntent(
+                        PendingIntent.getActivity(
+                            context, SUMMARY_ID, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                        ),
+                    )
+                    .build(),
+            )
+        }
     }
 
     /** After an answer from the notification: it stays, with the answer under their message, quietly. */
@@ -225,6 +302,7 @@ object ChatPush {
             unread.remove(chatId)
         }
         (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(chatId.hashCode())
+        updateSummary(context)
     }
 
     /**
@@ -251,6 +329,33 @@ object ChatPush {
         if (!allowed(context)) return
         val tr = tr(context)
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        synchronized(history) { shown[chatId] = conversation to group }
+        // Asked to keep messages off the locked screen, and it is locked: neither who nor what until it is unlocked
+        // (then [unlocked] shows it in full).
+        val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+        if (com.qmusic.ui.chat.NotificationPrefs.hideOnLock.value && keyguard.isKeyguardLocked) {
+            val said = if (count > 1) (if (tr) "$count yeni mesaj" else "$count new messages") else (if (tr) "Yeni mesaj" else "New message")
+            runCatching {
+                manager.notify(
+                    chatId.hashCode(),
+                    NotificationCompat.Builder(context, com.qmusic.ui.chat.QeyfSounds.messageChannelId(context))
+                        .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
+                        .setContentTitle("Nuvelo")
+                        .setContentText(said)
+                        .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                        .setPriority(NotificationCompat.PRIORITY_HIGH)
+                        .setNumber(count)
+                        .setGroup(GROUP_KEY)
+                        .setOnlyAlertOnce(!alert)
+                        .setSilent(!alert)
+                        .setAutoCancel(true)
+                        .setContentIntent(openChat(context, conversation))
+                        .build(),
+                )
+            }
+            updateSummary(context)
+            return
+        }
         // The messages channel plays the chosen Qeyf sound (see QeyfSounds).
         val channel = com.qmusic.ui.chat.QeyfSounds.messageChannelId(context)
         val conversationIcon = NotificationAvatars.icon(conversation.uid, conversation.name, conversation.photo)
@@ -301,9 +406,16 @@ object ChatPush {
             .addRemoteInput(androidx.core.app.RemoteInput.Builder(KEY_REPLY).setLabel(if (tr) "Mesaj yaz" else "Message").build())
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
             .setShowsUserInterface(false)
+            // The phone (and a watch) may offer ready answers that fit the message.
+            .setAllowGeneratedReplies(true)
             .build()
         val read = NotificationCompat.Action.Builder(android.R.drawable.ic_menu_view, if (tr) "Okundu" else "Mark read", actionIntent(ACTION_READ, 2))
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
+            .setShowsUserInterface(false)
+            .build()
+        // A busy conversation quieted for eight hours, right from the notification.
+        val mute = NotificationCompat.Action.Builder(android.R.drawable.ic_lock_silent_mode, if (tr) "8 saat sessize al" else "Mute 8 hours", actionIntent(ACTION_MUTE, 3))
+            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MUTE)
             .setShowsUserInterface(false)
             .build()
         runCatching {
@@ -323,11 +435,14 @@ object ChatPush {
                     .setSilent(!alert)
                     .setAutoCancel(true)
                     .setContentIntent(openChat(context, conversation))
+                    .setGroup(GROUP_KEY)
                     .addAction(reply)
                     .addAction(read)
+                    .addAction(mute)
                     .build(),
             )
         }
+        updateSummary(context)
     }
 
     /** The text typed into the notification's reply box. */

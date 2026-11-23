@@ -152,7 +152,7 @@ internal fun StatusTab(controller: ChatController, s: ChatStrings, me: ChatUser,
             stickyHeader(key = "title") {
                 HomeTitle(s.tabStatus, onExit) {
                     Box {
-                        IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Ink) }
+                        IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = com.qmusic.ui.A11y.more, tint = Ink) }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
                             DropdownMenuItem(text = { Text(s.statusPrivacyTitle, color = TextPrimary) }, onClick = { menu = false; controller.push(ChatRoute.StatusPrivacyPage) })
                         }
@@ -424,7 +424,7 @@ private fun ComposerSongChip(song: SharedItem, s: ChatStrings, modifier: Modifie
             modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.18f)).padding(horizontal = 6.dp, vertical = 2.dp),
         )
         Spacer(Modifier.width(6.dp))
-        Box(Modifier.size(24.dp).clip(CircleShape).clickable(onClick = onRemove), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onRemove), contentAlignment = Alignment.Center) {
             Icon(QMusicIcons.Close, contentDescription = s.statusSongRemove, tint = Color.White, modifier = Modifier.size(16.dp))
         }
     }) { choosing = true }
@@ -927,7 +927,7 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
                 }
                 if (mine) {
                     Box {
-                        IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Color.White) }
+                        IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = com.qmusic.ui.A11y.more, tint = Color.White) }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
                             DropdownMenuItem(text = { Text(s.statusDelete, color = TextPrimary) }, onClick = { menu = false; confirmDelete = item })
                             DropdownMenuItem(text = { Text(s.statusPrivacyTitle, color = TextPrimary) }, onClick = { menu = false; controller.push(ChatRoute.StatusPrivacyPage) })

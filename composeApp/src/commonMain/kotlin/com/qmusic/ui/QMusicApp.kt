@@ -484,7 +484,8 @@ fun QMusicApp(
                 com.qmusic.ui.chat.GroupCallLaunch.request.value = null
                 videosOpen = false
                 chatOpen = true
-                controller.openConversation(request.group)
+                // A call someone added this person to has no conversation of its own.
+                if (!com.qmusic.ui.chat.isCallRoom(request.group.uid)) controller.openConversation(request.group)
                 if (!request.join) return@LaunchedEffect
                 val service = controller.groupCalls ?: return@LaunchedEffect
                 kotlinx.coroutines.withTimeoutOrNull(15_000) {
@@ -556,6 +557,13 @@ fun QMusicApp(
                 com.qmusic.ui.chat.CallUi.strings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
             }
             val callShrunk = callMinimized && call?.phase != com.qmusic.ui.chat.CallPhase.INCOMING && call?.phase != com.qmusic.ui.chat.CallPhase.ENDED
+            // "Online" only with the messages in front: not in the videos or the music, and not while a call screen
+            // (a call ringing in, which opens the app even on the lock screen) covers them.
+            androidx.compose.runtime.SideEffect {
+                com.qmusic.ui.chat.ChatPresence.inChats.value = chatOpen && chatController != null &&
+                    !(callService != null && call != null && !callShrunk) &&
+                    chatController.groupCalls?.state?.value == null
+            }
             if (callService != null && call != null && !callShrunk) {
                 val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
                 val askPermissions = com.qmusic.ui.chat.rememberCallPermissions()
@@ -568,11 +576,14 @@ fun QMusicApp(
                     val fresh = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - acceptAskedAt < com.qmusic.ui.chat.CallLaunch.ACCEPT_WINDOW_MS
                     if (fresh) askPermissions(c.video) { granted -> if (granted) callService.accept() else callService.decline() }
                 }
+                val callFriends by (chatController?.friends ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsState()
                 com.qmusic.ui.chat.CallScreen(
                     service = callService,
                     s = chatStrings,
                     onAccept = { video -> askPermissions(video) { granted -> if (granted) callService.accept() else callService.decline() } },
                     modifier = modifier,
+                    people = callFriends.filter { it.uid != com.qmusic.ui.chat.CLAUDE_BOT_UID },
+                    onQuickReply = { peer, text -> chatController?.send(peer, text) },
                 )
                 return@CompositionLocalProvider
             }
@@ -597,11 +608,13 @@ fun QMusicApp(
             val groupCall by (groupCallService?.state ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
             if (groupCallService != null && groupCall != null) {
                 val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
+                val groupFriends by (chatController?.friends ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsState()
                 com.qmusic.ui.chat.GroupCallScreen(
                     service = groupCallService,
                     s = chatStrings,
                     me = (chatController.account.value as? com.qmusic.ui.chat.ChatAccount.Ready)?.me,
                     modifier = modifier,
+                    people = groupFriends.filter { it.uid != com.qmusic.ui.chat.CLAUDE_BOT_UID },
                 )
                 return@CompositionLocalProvider
             }

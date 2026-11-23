@@ -1080,7 +1080,7 @@ private fun SongColumns(
                         IconButton(onClick = { onSongMore(song) }) {
                             Icon(
                                 imageVector = QMusicIcons.More,
-                                contentDescription = null,
+                                contentDescription = com.qmusic.ui.A11y.more,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }

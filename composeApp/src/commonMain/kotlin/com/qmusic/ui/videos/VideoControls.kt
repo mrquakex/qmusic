@@ -4,6 +4,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -123,6 +125,46 @@ internal fun speedLabel(v: Float) = if (v == v.toInt().toFloat()) "${v.toInt()}x
 /** Qeyf's warm colours across [width]: the played part of the seek bar. */
 private fun qeyfBrush(width: Float) = Brush.horizontalGradient(listOf(VideoColors.QeyfOrange, VideoColors.QeyfPink), startX = 0f, endX = width.coerceAtLeast(1f))
 
+/** The video's own colour along its bars: from a little deeper to a little lighter, left to right. */
+private fun accentBrush(width: Float, accent: Color?): Brush =
+    if (accent == null) qeyfBrush(width)
+    else Brush.horizontalGradient(
+        listOf(androidx.compose.ui.graphics.lerp(accent, Color.Black, 0.12f), androidx.compose.ui.graphics.lerp(accent, Color.White, 0.18f)),
+        startX = 0f,
+        endX = width.coerceAtLeast(1f),
+    )
+
+/**
+ * The colour of this video for its bars: the main colour of its picture made clear and bright enough to read on black
+ * (a muddy or dark colour is lifted, a grey stays soft). It moves gently from one video's colour to the next.
+ */
+@Composable
+internal fun rememberVideoAccent(picture: String?): Color {
+    val found = com.qmusic.ui.rememberDominantColor(picture)
+    val target = remember(found) { found?.let(::readableAccent) ?: VideoColors.QeyfPink }
+    val shown by androidx.compose.animation.animateColorAsState(target, tween(600), label = "videoAccent")
+    return shown
+}
+
+private fun readableAccent(c: Color): Color {
+    val r = c.red
+    val g = c.green
+    val b = c.blue
+    val max = maxOf(r, g, b)
+    val min = minOf(r, g, b)
+    val delta = max - min
+    val hue = when {
+        delta == 0f -> 0f
+        max == r -> 60f * (((g - b) / delta) % 6f)
+        max == g -> 60f * (((b - r) / delta) + 2f)
+        else -> 60f * (((r - g) / delta) + 4f)
+    }.let { if (it < 0f) it + 360f else it }
+    val saturation = if (max == 0f) 0f else delta / max
+    // Nearly grey: a light, quiet grey. Otherwise: its hue, vivid and bright.
+    return if (saturation < 0.12f) Color(0xFFE0E0E0)
+    else Color.hsv(hue, (saturation * 1.35f).coerceIn(0.45f, 0.9f), maxOf(max, 0.9f))
+}
+
 /**
  * What lies over the picture. Its parts, as YouTube lays them out and some of its own:
  * - Top: shrink (or leave full screen), the title and the channel in full screen, a lock, the settings sheet.
@@ -186,6 +228,9 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
         }
     }
     val device = rememberDeviceControls()
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    // The bars take the video's own colour.
+    val accent = rememberVideoAccent(w.video.thumbnail)
     // Upright full screen: the whole screen is for pulling the picture down (or the details up), so the sides do not
     // change the brightness or the volume there (that is for the sideways full screen).
     val upright by controller.fullscreenUpright.collectAsState()
@@ -315,7 +360,13 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                         val total = playback.durationMs.value
                         if (total > 0) {
                             val span = minOf(total, SWIPE_SPAN_MS).toFloat()
-                            swipeTarget = ((swipeTarget ?: swipeFrom) + (dx / size.width * span).toLong()).coerceIn(0, total)
+                            val before = swipeTarget ?: swipeFrom
+                            val after = (before + (dx / size.width * span).toLong()).coerceIn(0, total)
+                            // Every ten seconds passed, a light tick under the finger (the start and the end too).
+                            if (before / SWIPE_TICK_MS != after / SWIPE_TICK_MS || (after != before && (after == 0L || after == total))) {
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                            }
+                            swipeTarget = after
                         }
                     },
                     onDragEnd = {
@@ -333,6 +384,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                             if (!live) {
                                 fast = true
                                 playback.setSpeed(2f)
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                             }
                         }
                         tryAwaitRelease()
@@ -386,20 +438,36 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
             },
     ) {
         if (seekSide != 0) SeekRipple(seekSide, "$seekTotal ${x.seconds}", seekTick)
-        swipeTarget?.let { target ->
-            val delta = target - swipeFrom
-            Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(clock(target), color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    (if (delta >= 0) "+" else "-") + clock(abs(delta)),
-                    color = Color.White.copy(alpha = 0.8f),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
+        // Seeking by a swipe (or by sliding after a hold): the picture of that moment, its time and how far it moves,
+        // and the whole length with where it started and where it will go.
+        var lastTarget by remember { mutableStateOf(0L) }
+        swipeTarget?.let { lastTarget = it }
+        androidx.compose.animation.AnimatedVisibility(
+            visible = swipeTarget != null,
+            enter = androidx.compose.animation.fadeIn(tween(140)),
+            exit = androidx.compose.animation.fadeOut(tween(220)),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            SwipeSeekOverlay(
+                target = lastTarget,
+                from = swipeFrom,
+                duration = duration,
+                preview = preview,
+                chapter = currentChapter(chapters, lastTarget)?.title,
+                fullscreen = fullscreen,
+                accent = accent,
+            )
         }
-        if (fast) Pill("2x  ▶▶", Modifier.align(Alignment.TopCenter).padding(top = 12.dp))
-        else (zoomNote ?: note)?.let { Pill(it, Modifier.align(Alignment.TopCenter).padding(top = 12.dp), small = true) }
+        // Held: twice as fast, with the way to seek instead written under it for a moment.
+        androidx.compose.animation.AnimatedVisibility(
+            visible = fast,
+            enter = androidx.compose.animation.fadeIn(tween(160)) + androidx.compose.animation.slideInVertically(tween(220)) { -it / 2 },
+            exit = androidx.compose.animation.fadeOut(tween(160)),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp),
+        ) {
+            FastPill(x.holdToSeekHint)
+        }
+        if (!fast) (zoomNote ?: note)?.let { Pill(it, Modifier.align(Alignment.TopCenter).padding(top = 12.dp), small = true) }
         hud?.let { (label, value) -> Pill("$label  ${(value * 100).toInt()}%", Modifier.align(Alignment.Center)) }
 
         if ((visible || ended) && swipeTarget == null) {
@@ -410,7 +478,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
             val topGap = if (fullscreen && upright) 30.dp else 0.dp
             Row(modifier = Modifier.align(Alignment.TopStart).fillMaxWidth().displayCutoutPadding().padding(top = topGap).padding(horizontal = 4.dp, vertical = if (fullscreen) 6.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { if (fullscreen) controller.setFullscreen(false) else controller.pop() }) {
-                    Icon(QMusicIcons.ChevronDown, null, tint = Color.White, modifier = Modifier.size(28.dp))
+                    Icon(QMusicIcons.ChevronDown, contentDescription = com.qmusic.ui.A11y.minimize, tint = Color.White, modifier = Modifier.size(28.dp))
                 }
                 if (fullscreen) {
                     Column(modifier = Modifier.weight(1f).padding(horizontal = 4.dp)) {
@@ -443,11 +511,11 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                     onClick = { playback.togglePlay() },
                     modifier = Modifier.size(64.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
                 ) {
-                    Icon(if (isPlaying) QMusicIcons.Pause else QMusicIcons.Play, null, tint = Color.White, modifier = Modifier.size(38.dp))
+                    Icon(if (isPlaying) QMusicIcons.Pause else QMusicIcons.Play, contentDescription = if (isPlaying) com.qmusic.ui.A11y.pause else com.qmusic.ui.A11y.play, tint = Color.White, modifier = Modifier.size(38.dp))
                 }
                 val hasNext = w.related.isNotEmpty() || w.queue.size > w.queueIndex + 1
                 IconButton(onClick = { controller.playNext() }, enabled = hasNext, modifier = Modifier.size(48.dp)) {
-                    Icon(QMusicIcons.Next, null, tint = Color.White.copy(alpha = if (hasNext) 1f else 0.35f), modifier = Modifier.size(30.dp))
+                    Icon(QMusicIcons.Next, contentDescription = com.qmusic.ui.A11y.next, tint = Color.White.copy(alpha = if (hasNext) 1f else 0.35f), modifier = Modifier.size(30.dp))
                 }
             }
 
@@ -464,7 +532,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                         modifier = Modifier.weight(1f),
                     )
                     IconButton(onClick = { controller.setFullscreen(!fullscreen) }, modifier = Modifier.size(40.dp)) {
-                        Icon(if (fullscreen) VideoIcons.FullscreenExit else VideoIcons.Fullscreen, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                        Icon(if (fullscreen) VideoIcons.FullscreenExit else VideoIcons.Fullscreen, contentDescription = if (fullscreen) com.qmusic.ui.A11y.exitFullscreen else com.qmusic.ui.A11y.fullscreen, tint = Color.White, modifier = Modifier.size(22.dp))
                     }
                 }
                 if (!live && !starting) {
@@ -478,15 +546,16 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                         segments = segments,
                         preview = preview,
                         modifier = Modifier.padding(horizontal = 12.dp),
+                        accent = accent,
                     )
                 }
             }
         } else if (!live && duration > 0 && !fullscreen && swipeTarget == null) {
-            // Hidden controls leave a hairline of progress, as YouTube does, in Qeyf's colours.
+            // Hidden controls leave a hairline of progress, as YouTube does, in the video's own colour.
             val fraction = (position.toFloat() / duration).coerceIn(0f, 1f)
             Canvas(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(2.dp)) {
-                drawRect(Color.White.copy(alpha = 0.25f))
-                drawRect(qeyfBrush(size.width), size = Size(size.width * fraction, size.height))
+                drawRect(Color.White.copy(alpha = 0.22f))
+                drawRect(accentBrush(size.width, accent), size = Size(size.width * fraction, size.height))
             }
         }
 
@@ -682,7 +751,7 @@ private fun UpNextCard(next: com.qmusic.engine.video.VideoItem, label: String, o
             Text(next.title, color = Color.White, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 17.sp)
         }
         IconButton(onClick = onCancel, modifier = Modifier.size(32.dp)) {
-            Icon(QMusicIcons.Close, null, tint = Color.White, modifier = Modifier.size(18.dp))
+            Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = Color.White, modifier = Modifier.size(18.dp))
         }
     }
 }
@@ -700,6 +769,138 @@ private fun Pill(text: String, modifier: Modifier, small: Boolean = false) {
 
 private val PREVIEW_WIDTH = 168.dp
 
+/** Every this much passed while seeking by a swipe, a light tick. */
+private const val SWIPE_TICK_MS = 10_000L
+
+/**
+ * One picture of the video, cut out of YouTube's sheet of small pictures and shown [width] wide (its height follows).
+ * The sheet comes once and is cut for every moment.
+ */
+@Composable
+private fun PreviewFrameImage(preview: PreviewFrames, frame: PreviewFrames.Frame, width: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
+    val density = LocalDensity.current
+    val widthPx = with(density) { width.toPx() }
+    val scale = widthPx / preview.frameWidth
+    val heightPx = preview.frameHeight * scale
+    Box(modifier.size(width, with(density) { heightPx.toDp() }).clip(RoundedCornerShape(10.dp)).background(Color.Black)) {
+        coil3.compose.AsyncImage(
+            model = coil3.request.ImageRequest.Builder(coil3.compose.LocalPlatformContext.current)
+                .data(frame.sheetUrl)
+                .size(coil3.size.Size.ORIGINAL)
+                .build(),
+            contentDescription = null,
+            contentScale = androidx.compose.ui.layout.FixedScale(scale),
+            alignment = Alignment.TopStart,
+            modifier = Modifier
+                .wrapContentSize(Alignment.TopStart, unbounded = true)
+                .offset { IntOffset((-frame.left * scale).toInt(), (-frame.top * scale).toInt()) }
+                .requiredSize(
+                    with(density) { (preview.frameWidth * preview.framesPerRow * scale).toDp() },
+                    with(density) { (preview.frameHeight * preview.framesPerColumn * scale).toDp() },
+                ),
+        )
+    }
+}
+
+/**
+ * Seeking by a swipe: the picture dims, the moment it will go to shows large in the middle (its picture when YouTube
+ * has them, its time, and how far that is from where it was, with the chapter), and along the foot the whole length
+ * with where it started (a faint mark) and where it is going.
+ */
+@Composable
+private fun SwipeSeekOverlay(target: Long, from: Long, duration: Long, preview: PreviewFrames?, chapter: String?, fullscreen: Boolean, accent: Color?) {
+    val delta = target - from
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))) {
+        Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+            val frame = preview?.frameAt(target)
+            if (preview != null && frame != null) {
+                PreviewFrameImage(
+                    preview,
+                    frame,
+                    if (fullscreen) 260.dp else 176.dp,
+                    Modifier.border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(10.dp)),
+                )
+                Spacer(Modifier.height(10.dp))
+            }
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(clock(target), color = Color.White, fontSize = if (fullscreen) 28.sp else 22.sp, fontWeight = FontWeight.Bold)
+                if (duration > 0) Text(" / " + clock(duration), color = Color.White.copy(alpha = 0.6f), fontSize = if (fullscreen) 16.sp else 13.sp, modifier = Modifier.padding(bottom = 3.dp))
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(
+                Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.14f)).padding(horizontal = 10.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(if (delta >= 0) QMusicIcons.Next else QMusicIcons.Previous, null, tint = Color.White, modifier = Modifier.size(12.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(clock(abs(delta)), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
+            if (chapter != null) {
+                Spacer(Modifier.height(4.dp))
+                Text(chapter, color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 260.dp))
+            }
+        }
+        if (duration > 0) {
+            Canvas(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 16.dp, vertical = if (fullscreen) 28.dp else 12.dp).height(10.dp)) {
+                val y = size.height / 2
+                val h = 4.dp.toPx()
+                val r = CornerRadius(h / 2)
+                val at = size.width * (target.toFloat() / duration).coerceIn(0f, 1f)
+                val start = size.width * (from.toFloat() / duration).coerceIn(0f, 1f)
+                drawRoundRect(Color.White.copy(alpha = 0.28f), Offset(0f, y - h / 2), Size(size.width, h), r)
+                drawRoundRect(accentBrush(size.width, accent), Offset(0f, y - h / 2), Size(at, h), r)
+                // Where it was: a faint mark.
+                drawRect(Color.White.copy(alpha = 0.7f), Offset(start - 1.dp.toPx(), y - h), Size(2.dp.toPx(), h * 2))
+                drawCircle(accentBrush(size.width, accent), radius = 7.dp.toPx(), center = Offset(at, y))
+                drawCircle(Color.White, radius = 3.dp.toPx(), center = Offset(at, y))
+            }
+        }
+    }
+}
+
+/** "2x" while the picture is held, its arrows running, and for a moment how to seek instead. */
+@Composable
+private fun FastPill(hint: String) {
+    val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "fast")
+    val run by t.animateFloat(
+        0f,
+        1f,
+        androidx.compose.animation.core.infiniteRepeatable(tween(900, easing = androidx.compose.animation.core.LinearEasing)),
+        label = "fastRun",
+    )
+    var hintShown by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        delay(2_200)
+        hintShown = false
+    }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(
+            Modifier.clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.6f)).padding(horizontal = 16.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("2x", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(8.dp))
+            // Three arrows lighting up one after another, left to right.
+            for (i in 0 until 3) {
+                val lit = ((run * 3f - i).let { if (it < 0f) it + 3f else it } % 3f).let { 1f - (it / 1.5f).coerceIn(0f, 1f) }
+                Icon(QMusicIcons.Play, null, tint = Color.White.copy(alpha = 0.35f + 0.65f * lit), modifier = Modifier.size(12.dp))
+            }
+        }
+        androidx.compose.animation.AnimatedVisibility(
+            visible = hintShown,
+            enter = androidx.compose.animation.fadeIn(tween(200)),
+            exit = androidx.compose.animation.fadeOut(tween(300)),
+        ) {
+            Text(
+                hint,
+                color = Color.White,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 6.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.5f)).padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
 /**
  * Qeyf's seek bar: the played part runs from orange to pink, chapters cut small gaps into it, the parts SponsorBlock
  * skips are marked, and it thickens under the finger. While seeking, the picture of that moment floats over the finger.
@@ -716,6 +917,8 @@ internal fun SeekBar(
     chapters: List<Long> = emptyList(),
     segments: List<SkipSegment> = emptyList(),
     preview: PreviewFrames? = null,
+    /** The video's own colour for the played part (null: Qeyf's orange to pink). */
+    accent: Color? = null,
 ) {
     val total = duration.coerceAtLeast(1L).toFloat()
     val fraction = ((scrubbing ?: position.toFloat()) / total).coerceIn(0f, 1f)
@@ -753,7 +956,7 @@ internal fun SeekBar(
             val r = CornerRadius(h / 2)
             val gap = 2.dp.toPx()
             val played = size.width * fraction
-            val brush = qeyfBrush(size.width)
+            val brush = accentBrush(size.width, accent)
             // The track in pieces, one per chapter, with a small gap between them.
             val cuts = chapters.filter { it in 1 until duration }.sorted().map { it / total * size.width }
             var start = 0f
@@ -800,22 +1003,7 @@ private fun SeekPreview(preview: PreviewFrames, frame: PreviewFrames.Frame, time
             .clip(RoundedCornerShape(8.dp))
             .background(Color.Black),
     ) {
-        coil3.compose.AsyncImage(
-            model = coil3.request.ImageRequest.Builder(coil3.compose.LocalPlatformContext.current)
-                .data(frame.sheetUrl)
-                .size(coil3.size.Size.ORIGINAL)
-                .build(),
-            contentDescription = null,
-            contentScale = androidx.compose.ui.layout.FixedScale(scale),
-            alignment = Alignment.TopStart,
-            modifier = Modifier
-                .wrapContentSize(Alignment.TopStart, unbounded = true)
-                .offset { IntOffset((-frame.left * scale).toInt(), (-frame.top * scale).toInt()) }
-                .requiredSize(
-                    with(density) { (preview.frameWidth * preview.framesPerRow * scale).toDp() },
-                    with(density) { (preview.frameHeight * preview.framesPerColumn * scale).toDp() },
-                ),
-        )
+        PreviewFrameImage(preview, frame, PREVIEW_WIDTH)
         Text(
             time,
             color = Color.White,

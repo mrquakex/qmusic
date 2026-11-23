@@ -236,6 +236,8 @@ internal object VideoParser {
     fun shortsSequence(root: JsonElement?): ShortsSequence {
         val items = root.path("entries").arr().orEmpty().mapNotNull { entry ->
             val endpoint = entry.path("command", "reelWatchEndpoint")
+            // An ad among the Shorts (YouTube marks it with its ad parameters, "isAd" in them): left out.
+            if (endpoint.path("adClientParams") != null) return@mapNotNull null
             val id = endpoint.path("videoId").str() ?: return@mapNotNull null
             // Only the clip and its first frame come: the title and the channel are looked up as it nears the screen.
             VideoItem(id = id, title = "", thumbnail = endpoint.path("thumbnail", "thumbnails").lastImage(), isShort = true)

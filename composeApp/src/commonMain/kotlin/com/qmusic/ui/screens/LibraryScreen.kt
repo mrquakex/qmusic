@@ -524,7 +524,7 @@ private fun OrderRow(
         Spacer(Modifier.weight(1f))
         if (grid != null) {
             IconButton(onClick = onGrid) {
-                Icon(if (grid) QMusicIcons.ListView else QMusicIcons.Grid, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(26.dp))
+                Icon(if (grid) QMusicIcons.ListView else QMusicIcons.Grid, contentDescription = if (grid) com.qmusic.ui.A11y.listView else com.qmusic.ui.A11y.gridView, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(26.dp))
             }
         }
     }

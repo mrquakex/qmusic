@@ -234,6 +234,15 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
         if (!ChatPlatform.web) {
             item { SectionTitle(s.soundsTitle) }
             item { SoundSettings(s) }
+            item { SectionTitle(s.notifTitle) }
+            item {
+                val banner by NotificationPrefs.inAppBanner.collectAsState()
+                val hide by NotificationPrefs.hideOnLock.collectAsState()
+                Column {
+                    SettingSwitch(s.notifBanner, s.notifBannerNote, banner) { NotificationPrefs.setInAppBanner(it) }
+                    SettingSwitch(s.notifHideLock, s.notifHideLockNote, hide) { NotificationPrefs.setHideOnLock(it) }
+                }
+            }
         }
         item { SectionTitle(s.mediaTitle) }
         item {
@@ -715,12 +724,24 @@ internal fun GroupCallBanner(people: List<ChatUser>, s: ChatStrings, onJoin: () 
 
 /** A group call on screen: everyone's picture (or face) in a grid, ours too, and the buttons. */
 @Composable
-fun GroupCallScreen(service: GroupCallService, s: ChatStrings, me: ChatUser?, modifier: Modifier = Modifier) {
+fun GroupCallScreen(
+    service: GroupCallService,
+    s: ChatStrings,
+    me: ChatUser?,
+    modifier: Modifier = Modifier,
+    /** Who can be added (friends), in a call made by adding people. */
+    people: List<ChatUser> = emptyList(),
+) {
     val state by service.state.collectAsState()
     val call = state ?: return
+    var addOpen by remember { mutableStateOf(false) }
+    val addable = remember(people, call.members, me) {
+        val inCall = call.members.map { it.user.uid }.toSet() + listOfNotNull(me?.uid)
+        people.filter { it.uid !in inCall }
+    }
     PlatformBackHandler(enabled = true) {}
     // Leaving the app: the call goes on in a floating window with the first picture there is.
-    val inWindow = CallPictureInPicture(armed = call.video && call.startedAt != null)
+    val inWindow = CallPictureInPicture(armed = true)
     if (inWindow) {
         Box(modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
             val shown = call.members.firstOrNull { it.connected && it.hasVideo && it.cameraOn }
@@ -782,10 +803,24 @@ fun GroupCallScreen(service: GroupCallService, s: ChatStrings, me: ChatUser?, mo
                 CallRoundButton(QMusicIcons.SwitchCamera, false) { service.switchCamera() }
             }
             CallRoundButton(QMusicIcons.Volume, call.speaker) { service.toggleSpeaker() }
+            if (service.canAddPeople && addable.isNotEmpty() && call.members.size + 1 < MAX_GROUP_CALL) {
+                CallRoundButton(QMusicIcons.PersonAdd, false) { addOpen = true }
+            }
             Box(Modifier.size(64.dp).clip(CircleShape).background(Color(0xFFFF3B30)).clickable { service.leave() }, contentAlignment = Alignment.Center) {
                 Icon(QMusicIcons.PhoneEnd, null, tint = Color.White, modifier = Modifier.size(28.dp))
             }
         }
+    }
+    if (addOpen) {
+        AddPersonSheet(
+            s = s,
+            people = addable,
+            onPick = { user ->
+                addOpen = false
+                service.addPerson(user)
+            },
+            onClose = { addOpen = false },
+        )
     }
 }
 
@@ -837,11 +872,6 @@ private fun SoundSettings(s: ChatStrings) {
         CallerToneSettings(s)
         SettingSwitch(s.soundInChat, s.soundInChatNote, inChat) { sounds.setInChat(it) }
         SettingSwitch(s.soundSmall, s.soundSmallNote, small) { sounds.setSmall(it) }
-        val typing by sounds.typing.collectAsState()
-        SettingSwitch(s.soundTyping, s.soundTypingNote, typing) { on ->
-            sounds.setTyping(on)
-            if (on) sounds.playKey()
-        }
     }
     if (picking == SoundKind.RING) {
         RingTonePicker(s, s.soundRing, ring.ifEmpty { choices[SoundKind.RING] }, allowDefault = false, onPick = { id -> id?.let { CallTones.setRing?.invoke(it) } }) { picking = null }

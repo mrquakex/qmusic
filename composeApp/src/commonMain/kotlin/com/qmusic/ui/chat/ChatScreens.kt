@@ -115,8 +115,17 @@ val LocalEnterSends = androidx.compose.runtime.staticCompositionLocalOf { false 
 object ChatPresence {
     var openChatId: String? = null
 
+    /**
+     * The messages section is what the person has in front of them (not the videos or the music, and no call screen
+     * over it): only then are they "online" for others.
+     */
+    val inChats = kotlinx.coroutines.flow.MutableStateFlow(false)
+
     /** A conversation was opened: its notification goes (set by the app). */
     var onOpened: ((chatId: String) -> Unit)? = null
+
+    /** A conversation was read somewhere else (the web, another phone): its notification here goes (set by the app). */
+    var onReadElsewhere: ((chatId: String) -> Unit)? = null
 }
 
 /**
@@ -344,7 +353,7 @@ internal fun TopBar(title: String, onBack: () -> Unit, actions: @Composable () -
         modifier = Modifier.fillMaxWidth().statusBarsPadding().height(56.dp).padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBack) { Icon(QMusicIcons.Back, contentDescription = null, tint = Ink) }
+        IconButton(onClick = onBack) { Icon(QMusicIcons.Back, contentDescription = com.qmusic.ui.A11y.back, tint = Ink) }
         if (leading != null) {
             leading()
         } else {
@@ -358,6 +367,10 @@ internal fun TopBar(title: String, onBack: () -> Unit, actions: @Composable () -
 fun ChatAvatar(user: ChatUser, size: androidx.compose.ui.unit.Dp) {
     when {
         user.uid == CLAUDE_BOT_UID -> ClaudeAvatar(size)
+        // Nuvelo's own account: the app's mark, not a letter.
+        user.uid == NUVELO_UID -> Box(Modifier.size(size).clip(CircleShape).background(Color(0xFF111114)), contentAlignment = Alignment.Center) {
+            com.qmusic.ui.theme.QMusicLogo(size = size * 0.62f, tint = Color.White)
+        }
         user.isGroup && user.photo == null -> Box(Modifier.size(size).clip(CircleShape).background(DarkSurfaceVariant), contentAlignment = Alignment.Center) {
             Icon(QMusicIcons.Group, contentDescription = null, tint = Ink, modifier = Modifier.size(size * 0.5f))
         }
@@ -845,8 +858,8 @@ private fun NewChatPage(controller: ChatController, s: ChatStrings) {
                 )
             }
             if (query.isNotEmpty()) {
-                Box(Modifier.size(28.dp).clip(CircleShape).clickable { controller.setQuery("") }, contentAlignment = Alignment.Center) {
-                    Icon(QMusicIcons.Close, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+                Box(Modifier.size(40.dp).clip(CircleShape).clickable { controller.setQuery("") }, contentAlignment = Alignment.Center) {
+                    Icon(QMusicIcons.Close, contentDescription = if (ChatMusic.english) "Clear" else "Temizle", tint = TextSecondary, modifier = Modifier.size(18.dp))
                 }
             }
         }
@@ -1244,7 +1257,7 @@ private fun ConversationPage(
     Column(Modifier.fillMaxSize().imePadding()) {
         if (selected.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().statusBarsPadding().height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { selected = emptySet() }) { Icon(QMusicIcons.Close, null, tint = Ink) }
+                IconButton(onClick = { selected = emptySet() }) { Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = Ink) }
                 Text("${selected.size}", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp).weight(1f))
                 val one = selectedMessages.singleOrNull()
                 if (one != null && !one.deleted) {
@@ -1486,7 +1499,7 @@ private fun ConversationPage(
                 Icon(QMusicIcons.Lock, contentDescription = null, tint = Color(0xFFFFB74D), modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(10.dp))
                 Text(e2eWords.keyChanged(title.substringBefore(' ')), color = TextPrimary, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                IconButton(onClick = { E2e.api.dismissKeyChange(other.uid) }) { Icon(QMusicIcons.Close, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp)) }
+                IconButton(onClick = { E2e.api.dismissKeyChange(other.uid) }) { Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = TextSecondary, modifier = Modifier.size(18.dp)) }
             }
         }
         if (pins.isNotEmpty() && !searching) {
@@ -1526,9 +1539,9 @@ private fun ConversationPage(
                     fontSize = 12.sp,
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
-                IconButton(enabled = matchIndex < matches.size - 1, onClick = { matchIndex++ }) { Icon(QMusicIcons.ChevronUp, null, tint = Ink) }
-                IconButton(enabled = matchIndex > 0, onClick = { matchIndex-- }) { Icon(QMusicIcons.ChevronDown, null, tint = Ink) }
-                IconButton(onClick = { searching = false; query = "" }) { Icon(QMusicIcons.Close, null, tint = TextSecondary) }
+                IconButton(enabled = matchIndex < matches.size - 1, onClick = { matchIndex++ }) { Icon(QMusicIcons.ChevronUp, contentDescription = com.qmusic.ui.A11y.previous, tint = Ink) }
+                IconButton(enabled = matchIndex > 0, onClick = { matchIndex-- }) { Icon(QMusicIcons.ChevronDown, contentDescription = com.qmusic.ui.A11y.next, tint = Ink) }
+                IconButton(onClick = { searching = false; query = "" }) { Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = TextSecondary) }
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(BorderSubtle))
@@ -1573,6 +1586,12 @@ private fun ConversationPage(
                     if (line > 3) listState.scrollToItem(line, -200)
                 }
                 val wallpaperIndex by controller.wallpaper.collectAsState()
+                // They are writing (or recording): a bubble at the very bottom, as on WhatsApp; seen at once when the
+                // person is at the bottom of the conversation.
+                val typingBubble = (typing || recordingThem) && other.uid != CLAUDE_BOT_UID
+                LaunchedEffect(typingBubble) {
+                    if (typingBubble && listState.firstVisibleItemIndex <= 1) listState.animateScrollToItem(0)
+                }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize().background(ChatWallpapers.getOrNull(wallpaperIndex) ?: Color.Transparent),
@@ -1580,6 +1599,16 @@ private fun ConversationPage(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
+                    if (typingBubble) {
+                        item(key = "typing") {
+                            androidx.compose.foundation.layout.Box(
+                                Modifier.animateItem(
+                                    fadeInSpec = androidx.compose.animation.core.tween(180),
+                                    fadeOutSpec = androidx.compose.animation.core.tween(150),
+                                ),
+                            ) { TypingBubble(recording = recordingThem) }
+                        }
+                    }
                     itemsIndexed(shown, key = { _, it -> it.key }) { index, row ->
                         // Comes in fading, and slides to its new place when the list changes.
                         androidx.compose.foundation.layout.Box(Modifier.animateItem(fadeInSpec = androidx.compose.animation.core.tween(220, easing = com.qmusic.ui.motion.Motion.EmphasizedDecelerate), placementSpec = androidx.compose.animation.core.spring(stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow), fadeOutSpec = androidx.compose.animation.core.tween(150))) {
@@ -1755,7 +1784,7 @@ private fun ConversationPage(
                         Text(s.editing, color = ClaudeCoral, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         Text(e.text, color = TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    IconButton(onClick = { editing = null; text = "" }) { Icon(QMusicIcons.Close, contentDescription = null, tint = TextSecondary) }
+                    IconButton(onClick = { editing = null; text = "" }) { Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = TextSecondary) }
                 }
             }
             if (isClaude && text.startsWith("/")) {
@@ -1801,7 +1830,7 @@ private fun ConversationPage(
                         Text(if (q.from == me.uid) s.you else memberNames[q.from] ?: nameOf(q.from, me.uid, title, s), color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         Text(ChatPreview.plain(quoteText(q), s.english), color = TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    IconButton(onClick = { replyTo = null }) { Icon(QMusicIcons.Close, contentDescription = null, tint = TextSecondary) }
+                    IconButton(onClick = { replyTo = null }) { Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = TextSecondary) }
                 }
             }
             val submit: () -> Unit = submit@{
@@ -1830,7 +1859,7 @@ private fun ConversationPage(
                             recorder?.cancel()
                             recordingSince = null
                             locked = false
-                        }) { Icon(QMusicIcons.Trash, contentDescription = null, tint = Color(0xFFFF6B6B)) }
+                        }) { Icon(QMusicIcons.Trash, contentDescription = com.qmusic.ui.A11y.delete, tint = Color(0xFFFF6B6B)) }
                     }
                     RecordingBar(elapsed, level, if (locked) s.voiceLocked else s.voiceSlideCancel + "   " + s.voiceSlideLock, cancelling, Modifier.weight(1f))
                 } else {
@@ -1863,8 +1892,6 @@ private fun ConversationPage(
                         BasicTextField(
                             value = text,
                             onValueChange = { v ->
-                                // A key's click for each letter typed or deleted (not when the text is set at once).
-                                if (kotlin.math.abs(v.length - text.length) in 1..2) sounds?.playKey()
                                 text = v.take(ChatController.MAX_LENGTH)
                                 if (v.isNotBlank()) controller.onTyping(other, Clock.System.now().toEpochMilliseconds()) else controller.stopTyping(other)
                             },
@@ -2586,7 +2613,7 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.clip(CircleShape).clickable(enabled = user.photo != null) { bigPhoto = true }) { ChatAvatar(user, 132.dp) }
                     Spacer(Modifier.height(16.dp))
-                    Text(user.name, color = TextPrimary, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                    Text(user.name, color = TextPrimary, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
                     UserBadge(user.uid, modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
                     if (user.username.isNotEmpty() && !isClaude) Text("@" + user.username, color = TextSecondary, fontSize = 15.sp)
                     if (fresh.about.isNotBlank()) {
@@ -2762,6 +2789,50 @@ private fun LinkedText(text: String, color: Color, linkColor: Color, modifier: M
         append(text.substring(at))
     }
     Text(text = annotated, color = color, fontSize = 16.sp, lineHeight = 21.sp, modifier = modifier)
+}
+
+/**
+ * "Writing…" as a bubble of theirs at the bottom of the conversation: three dots rising one after another, or a small
+ * microphone that breathes while they record a voice message.
+ */
+@Composable
+private fun TypingBubble(recording: Boolean) {
+    val t = rememberInfiniteTransition()
+    val phase by t.animateFloat(
+        0f,
+        1f,
+        androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(1_200, easing = androidx.compose.animation.core.LinearEasing),
+        ),
+    )
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp))
+                .background(DarkSurfaceVariant)
+                .padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            if (recording) {
+                val breathe = 0.55f + 0.45f * kotlin.math.abs(kotlin.math.sin(phase * kotlin.math.PI.toFloat() * 2f))
+                Icon(QMusicIcons.Mic, contentDescription = null, tint = Ink.copy(alpha = breathe), modifier = Modifier.size(16.dp))
+            } else {
+                for (i in 0 until 3) {
+                    // Each dot rises in its turn, a third of the way after the one before.
+                    val local = ((phase - i * 0.18f) % 1f + 1f) % 1f
+                    val lift = if (local < 0.4f) kotlin.math.sin(local / 0.4f * kotlin.math.PI.toFloat()) else 0f
+                    Box(
+                        Modifier
+                            .offset(y = (-4f * lift).dp)
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(Ink.copy(alpha = 0.45f + 0.5f * lift)),
+                    )
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)

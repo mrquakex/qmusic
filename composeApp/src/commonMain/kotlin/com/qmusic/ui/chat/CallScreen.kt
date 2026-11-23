@@ -1,52 +1,76 @@
 package com.qmusic.ui.chat
 
-import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.draw.shadow
-import kotlin.math.roundToInt
-import androidx.compose.foundation.layout.offset
-import androidx.compose.material3.IconButton
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateOffsetAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.qmusic.ui.PlatformBackHandler
@@ -55,7 +79,9 @@ import com.qmusic.ui.theme.NightSurfaceVariant as DarkSurfaceVariant
 import com.qmusic.ui.theme.QMusicIcons
 import com.qmusic.ui.theme.NightTextPrimary as TextPrimary
 import com.qmusic.ui.theme.NightTextSecondary as TextSecondary
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val EndRed = Color(0xFFE5484D)
 private val AnswerGreen = Color(0xFF2EB67D)
@@ -68,6 +94,10 @@ fun CallScreen(
     /** Answer: asks for the microphone (and camera) first. */
     onAccept: (video: Boolean) -> Unit = { service.accept() },
     modifier: Modifier = Modifier,
+    /** Who can be added to the call (the person's friends); empty: no "Add person". */
+    people: List<ChatUser> = emptyList(),
+    /** Declining with a short message: it goes to the caller's conversation. Null: not offered. */
+    onQuickReply: ((ChatUser, String) -> Unit)? = null,
 ) {
     val state by service.state.collectAsState()
     val call = state ?: return
@@ -76,49 +106,121 @@ fun CallScreen(
     PlatformBackHandler(enabled = true) { if (canShrink) CallUi.minimized.value = true }
     val showVideo = call.video && call.phase != CallPhase.ENDED
     val askCamera = rememberCallPermissions()
+    val shareScreen = rememberScreenShare(service)
     var routesOpen by remember { mutableStateOf(false) }
-    // Leaving the app during a video call: it goes on in a floating window, showing only the picture.
-    val inWindow = CallPictureInPicture(armed = showVideo && call.phase == CallPhase.ACTIVE)
+    var moreOpen by remember { mutableStateOf(false) }
+    var reactOpen by remember { mutableStateOf(false) }
+    var addOpen by remember { mutableStateOf(false) }
+    var repliesOpen by remember { mutableStateOf(false) }
+    // Their picture is on the screen (not stopped by a weak line), and ours.
+    val remoteShown = showVideo && call.remoteVideo && !call.remotePaused && (call.phase == CallPhase.ACTIVE || call.phase == CallPhase.CONNECTING)
+    val localShown = showVideo && call.cameraOn && !call.sharingScreen && call.phase != CallPhase.INCOMING
+    // Leaving the app during a call (ringing out too): it goes on in a floating window (their picture, or their photo
+    // and the time).
+    val inWindow = CallPictureInPicture(armed = canShrink)
     if (inWindow) {
-        Box(modifier.fillMaxSize().background(Color.Black)) {
-            if (call.remoteVideo) {
-                CallVideo(service, remote = true, modifier = Modifier.fillMaxSize())
-            } else {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { ChatAvatar(callerUser(call.peer), 72.dp) }
-            }
-        }
+        CallWindow(service, call, s, modifier)
         return
     }
 
+    val videoUp = remoteShown && call.phase == CallPhase.ACTIVE
+    // A video call on screen: the buttons step aside after a few seconds, and a tap brings them back.
+    var controlsShown by remember { mutableStateOf(true) }
+    var touchedAt by remember { mutableLongStateOf(0L) }
+    val menuOpen = routesOpen || moreOpen || reactOpen || addOpen
+    LaunchedEffect(videoUp, controlsShown, touchedAt, menuOpen) {
+        if (!videoUp) {
+            controlsShown = true
+        } else if (controlsShown && !menuOpen) {
+            delay(CONTROLS_SHOWN_MS)
+            controlsShown = false
+        }
+    }
+    val showControls = controlsShown || !videoUp
+    // Double tap on the small picture: theirs and ours change places.
+    var swapped by remember { mutableStateOf(false) }
+    val swap = swapped && videoUp && localShown
+
     Box(modifier.fillMaxSize().background(BgRoot)) {
         // No picture of them on screen: their photo fills the back, blurred, over a wash of its own colour.
-        val picture = showVideo && ((call.remoteVideo && (call.phase == CallPhase.ACTIVE || call.phase == CallPhase.CONNECTING)) || (call.cameraOn && call.phase != CallPhase.INCOMING))
-        if (!picture) CallBackdrop(call.peer.photo)
-        if (showVideo && call.remoteVideo && (call.phase == CallPhase.ACTIVE || call.phase == CallPhase.CONNECTING)) {
-            CallVideo(service, remote = true, modifier = Modifier.fillMaxSize())
-        } else if (showVideo && call.cameraOn && call.phase != CallPhase.INCOMING) {
-            // Before they answer, our own camera fills the screen (as in WhatsApp).
-            CallVideo(service, remote = false, modifier = Modifier.fillMaxSize())
+        if (!remoteShown && !localShown) CallBackdrop(call.peer.photo)
+        if (remoteShown && (call.phase == CallPhase.ACTIVE || call.phase == CallPhase.CONNECTING)) {
+            CallVideo(service, remote = !swap, modifier = Modifier.fillMaxSize(), overlay = false)
+        } else if (localShown) {
+            // Before they answer (or while their picture is off), our own camera fills the screen (as in WhatsApp).
+            CallVideo(service, remote = false, modifier = Modifier.fillMaxSize(), overlay = false)
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)))
+        } else if (showVideo && call.remotePaused) {
+            CallBackdrop(call.peer.photo)
+        }
+        // A tap anywhere on the picture shows or hides the buttons.
+        if (videoUp) {
+            Box(
+                Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                    controlsShown = !controlsShown
+                    touchedAt = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+                },
+            )
         }
 
-        if (canShrink) {
-            IconButton(
-                onClick = { CallUi.minimized.value = true },
-                modifier = Modifier.statusBarsPadding().padding(start = 8.dp, top = 8.dp).size(44.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.25f)),
-            ) { Icon(QMusicIcons.ChevronDown, contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp)) }
+        // Our picture small in a corner once theirs fills the screen: dragged to any corner, double tap to swap.
+        if (videoUp && localShown) {
+            SmallPicture(
+                service = service,
+                remote = swap,
+                bottomSpace = if (showControls) 250.dp else 24.dp,
+                onSwap = { swapped = !swapped },
+            )
         }
+
+        // The top: shrink the call (left), send an emoji (right).
+        AnimatedVisibility(showControls, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopStart)) {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (canShrink) {
+                    IconButton(
+                        onClick = { CallUi.minimized.value = true },
+                        modifier = Modifier.size(44.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.25f)),
+                    ) { Icon(QMusicIcons.ChevronDown, contentDescription = com.qmusic.ui.A11y.minimize, tint = Color.White, modifier = Modifier.size(26.dp)) }
+                }
+                Spacer(Modifier.weight(1f))
+                if (call.phase == CallPhase.ACTIVE) {
+                    if (reactOpen) {
+                        Row(
+                            Modifier.clip(RoundedCornerShape(24.dp)).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CALL_REACTIONS.forEach { e ->
+                                Text(
+                                    e,
+                                    fontSize = 26.sp,
+                                    modifier = Modifier.clip(CircleShape).clickable {
+                                        service.react(e)
+                                        reactOpen = false
+                                        touchedAt = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+                                    }.padding(horizontal = 6.dp, vertical = 6.dp),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    IconButton(
+                        onClick = { reactOpen = !reactOpen },
+                        modifier = Modifier.size(44.dp).clip(CircleShape).background(if (reactOpen) Color.White else Color.Black.copy(alpha = 0.25f)),
+                    ) { Icon(if (reactOpen) QMusicIcons.Close else QMusicIcons.Mood, contentDescription = s.callReact, tint = if (reactOpen) Color.Black else Color.White, modifier = Modifier.size(24.dp)) }
+                }
+            }
+        }
+
         Column(
             modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            val videoUp = showVideo && call.remoteVideo && call.phase == CallPhase.ACTIVE
-            Spacer(Modifier.height(if (videoUp) 16.dp else 72.dp))
+            Spacer(Modifier.height(if (videoUp) 64.dp else 72.dp))
             if (!videoUp) {
                 Pulse(active = call.phase == CallPhase.CALLING || call.phase == CallPhase.INCOMING) {
                     // While talking, a soft ring around them follows their voice.
                     val level by androidx.compose.animation.core.animateFloatAsState(
-                        if (call.phase == CallPhase.ACTIVE) call.remoteLevel else 0f,
+                        if (call.phase == CallPhase.ACTIVE && !call.reconnecting) call.remoteLevel else 0f,
                         animationSpec = tween(120),
                     )
                     Box(contentAlignment = Alignment.Center) {
@@ -133,110 +235,488 @@ fun CallScreen(
                 }
                 Spacer(Modifier.height(24.dp))
             }
-            Text(callerShown(call.peer), color = TextPrimary, fontSize = if (videoUp) 20.sp else 28.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(statusText(call, s), color = TextSecondary, fontSize = 15.sp)
-                if (call.phase == CallPhase.ACTIVE && call.quality >= 0) {
-                    Spacer(Modifier.width(10.dp))
-                    SignalBars(call.quality)
+            AnimatedVisibility(showControls, enter = fadeIn(), exit = fadeOut()) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(callerShown(call.peer), color = TextPrimary, fontSize = if (videoUp) 20.sp else 28.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (call.reconnecting) {
+                            Spinner()
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text(statusText(call, s), color = TextSecondary, fontSize = 15.sp)
+                        if (call.phase == CallPhase.ACTIVE && call.quality >= 0 && !call.reconnecting) {
+                            Spacer(Modifier.width(10.dp))
+                            SignalBars(call.quality)
+                        }
+                    }
+                    // What the line is doing to the pictures, in a word.
+                    val note = when {
+                        call.phase != CallPhase.ACTIVE -> null
+                        call.videoPaused -> s.callVideoPaused
+                        call.remotePaused -> s.callRemotePaused
+                        call.remoteScreen && videoUp -> s.callTheirScreen
+                        call.weak && !call.reconnecting -> s.callWeak
+                        else -> null
+                    }
+                    if (note != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(note, color = TextSecondary, fontSize = 13.sp)
+                    }
+                    // Calls go end to end encrypted (WebRTC's DTLS-SRTP: not even the relay server can listen).
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(QMusicIcons.Lock, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(12.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text(E2eWords(ChatMusic.english).encrypted, color = TextSecondary, fontSize = 12.sp)
+                    }
+                    // Our screen is on show: one tap stops it.
+                    if (call.sharingScreen) {
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            Modifier.clip(RoundedCornerShape(20.dp)).background(EndRed.copy(alpha = 0.9f)).clickable { service.stopScreenShare() }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(QMusicIcons.ScreenShare, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(s.callSharingScreen + " · " + s.callStopSharing, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
-            }
-            if (call.weak && call.phase == CallPhase.ACTIVE) {
-                Spacer(Modifier.height(6.dp))
-                Text(s.callWeak, color = TextSecondary, fontSize = 13.sp)
-            }
-            // Calls go end to end encrypted (WebRTC's DTLS-SRTP: not even the relay server can listen).
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(com.qmusic.ui.theme.QMusicIcons.Lock, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(12.dp))
-                Spacer(Modifier.width(5.dp))
-                Text(E2eWords(ChatMusic.english).encrypted, color = TextSecondary, fontSize = 12.sp)
             }
             Spacer(Modifier.weight(1f))
 
             when (call.phase) {
-                CallPhase.INCOMING -> Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 48.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    RoundButton(QMusicIcons.PhoneEnd, s.callDecline, EndRed, Color.White, big = true) { service.decline() }
-                    RoundButton(if (call.video) QMusicIcons.Camera else QMusicIcons.Phone, s.callAccept, AnswerGreen, Color.White, big = true) {
-                        onAccept(call.video)
+                CallPhase.INCOMING -> Column(Modifier.fillMaxWidth().padding(bottom = 28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (onQuickReply != null) {
+                        Row(
+                            Modifier.clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.3f)).clickable { repliesOpen = true }
+                                .padding(horizontal = 16.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(QMusicIcons.Chat, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(s.callDeclineMessage, color = Color.White, fontSize = 14.sp)
+                        }
+                        Spacer(Modifier.height(20.dp))
                     }
+                    SwipeToAnswer(
+                        video = call.video,
+                        s = s,
+                        onAnswer = { onAccept(call.video) },
+                        onDecline = { service.decline() },
+                    )
                 }
                 CallPhase.ENDED -> Spacer(Modifier.height(120.dp))
-                else -> Column(Modifier.fillMaxWidth().padding(bottom = 36.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        Toggle(QMusicIcons.MicOff, s.callMute, call.muted) { service.toggleMute() }
-                        if (call.video) {
-                            Toggle(QMusicIcons.CameraOff, s.callCameraOff, !call.cameraOn) { service.toggleCamera() }
-                            Toggle(QMusicIcons.SwitchCamera, s.callFlip, false) { service.switchCamera() }
-                        } else if (call.phase == CallPhase.ACTIVE) {
-                            // A voice call becomes a video call: the camera asks for its permission first.
-                            Toggle(QMusicIcons.Camera, s.callCameraOn, false) {
-                                askCamera(true) { granted -> if (granted) service.toggleCamera() }
+                else -> AnimatedVisibility(showControls, enter = fadeIn(), exit = fadeOut()) {
+                    Column(Modifier.fillMaxWidth().padding(bottom = 36.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            Toggle(QMusicIcons.MicOff, s.callMute, call.muted) { service.toggleMute() }
+                            if (call.video) {
+                                Toggle(QMusicIcons.CameraOff, s.callCameraOff, !call.cameraOn) { service.toggleCamera() }
+                                Toggle(QMusicIcons.SwitchCamera, s.callFlip, false) { service.switchCamera() }
+                            } else if (call.phase == CallPhase.ACTIVE) {
+                                // A voice call becomes a video call: the camera asks for its permission first.
+                                Toggle(QMusicIcons.Camera, s.callCameraOn, false) {
+                                    askCamera(true) { granted -> if (granted) service.toggleCamera() }
+                                }
                             }
-                        }
-                        // With a headset or Bluetooth there are more than two places for the sound: a list to pick from.
-                        Box {
-                            val current = call.routes.firstOrNull { it.id == call.route }
-                            val many = call.routes.size > 2
-                            Toggle(
-                                if (current?.kind == AudioRouteKind.BLUETOOTH || current?.kind == AudioRouteKind.WIRED) QMusicIcons.Headphones else QMusicIcons.Volume,
-                                if (many && current != null) routeName(current, s) else s.callSpeaker,
-                                call.speaker || (many && current?.kind != AudioRouteKind.EARPIECE),
-                            ) { if (many) routesOpen = true else service.toggleSpeaker() }
-                            androidx.compose.material3.DropdownMenu(
-                                expanded = routesOpen,
-                                onDismissRequest = { routesOpen = false },
-                                containerColor = DarkSurfaceVariant,
-                            ) {
-                                Text(s.soundOutput, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                                call.routes.forEach { r ->
-                                    androidx.compose.material3.DropdownMenuItem(
-                                        leadingIcon = {
-                                            Icon(
-                                                when (r.kind) {
-                                                    AudioRouteKind.SPEAKER -> QMusicIcons.Volume
-                                                    AudioRouteKind.EARPIECE -> QMusicIcons.Phone
-                                                    else -> QMusicIcons.Headphones
+                            // With a headset or Bluetooth there are more than two places for the sound: a list to pick from.
+                            Box {
+                                val current = call.routes.firstOrNull { it.id == call.route }
+                                val many = call.routes.size > 2
+                                Toggle(
+                                    if (current?.kind == AudioRouteKind.BLUETOOTH || current?.kind == AudioRouteKind.WIRED) QMusicIcons.Headphones else QMusicIcons.Volume,
+                                    if (many && current != null) routeName(current, s) else s.callSpeaker,
+                                    call.speaker || (many && current?.kind != AudioRouteKind.EARPIECE),
+                                ) { if (many) routesOpen = true else service.toggleSpeaker() }
+                                DropdownMenu(
+                                    expanded = routesOpen,
+                                    onDismissRequest = { routesOpen = false },
+                                    containerColor = DarkSurfaceVariant,
+                                ) {
+                                    Text(s.soundOutput, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                                    call.routes.forEach { r ->
+                                        DropdownMenuItem(
+                                            leadingIcon = {
+                                                Icon(
+                                                    when (r.kind) {
+                                                        AudioRouteKind.SPEAKER -> QMusicIcons.Volume
+                                                        AudioRouteKind.EARPIECE -> QMusicIcons.Phone
+                                                        else -> QMusicIcons.Headphones
+                                                    },
+                                                    null,
+                                                    tint = Color.White,
+                                                )
+                                            },
+                                            text = { Text(routeName(r, s), color = TextPrimary, fontWeight = if (r.id == call.route) FontWeight.Bold else FontWeight.Normal) },
+                                            trailingIcon = { if (r.id == call.route) Icon(QMusicIcons.Check, null, tint = Color.White) },
+                                            onClick = {
+                                                routesOpen = false
+                                                service.setAudioRoute(r.id)
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                            // The rest, once the call is on: add a person, show the screen, clean the noise.
+                            if (call.phase == CallPhase.ACTIVE) {
+                                Box {
+                                    Toggle(QMusicIcons.More, s.callMore, moreOpen) { moreOpen = true }
+                                    DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }, containerColor = DarkSurfaceVariant) {
+                                        val addable = people.filter { it.uid != call.peer.uid }
+                                        if (service.canAddPeople && addable.isNotEmpty()) {
+                                            DropdownMenuItem(
+                                                leadingIcon = { Icon(QMusicIcons.PersonAdd, null, tint = Color.White) },
+                                                text = { Text(s.callAddPerson, color = TextPrimary) },
+                                                onClick = {
+                                                    moreOpen = false
+                                                    addOpen = true
                                                 },
-                                                null,
-                                                tint = Color.White,
                                             )
-                                        },
-                                        text = { Text(routeName(r, s), color = TextPrimary, fontWeight = if (r.id == call.route) FontWeight.Bold else FontWeight.Normal) },
-                                        trailingIcon = { if (r.id == call.route) Icon(QMusicIcons.Check, null, tint = Color.White) },
-                                        onClick = {
-                                            routesOpen = false
-                                            service.setAudioRoute(r.id)
-                                        },
-                                    )
+                                        }
+                                        if (shareScreen != null) {
+                                            DropdownMenuItem(
+                                                leadingIcon = { Icon(QMusicIcons.ScreenShare, null, tint = Color.White) },
+                                                text = { Text(if (call.sharingScreen) s.callStopSharing else s.callShareScreen, color = TextPrimary) },
+                                                onClick = {
+                                                    moreOpen = false
+                                                    if (call.sharingScreen) service.stopScreenShare() else shareScreen()
+                                                },
+                                            )
+                                        }
+                                        DropdownMenuItem(
+                                            leadingIcon = { Icon(QMusicIcons.Waveform, null, tint = Color.White) },
+                                            text = { Text(s.callNoise, color = TextPrimary) },
+                                            trailingIcon = { if (call.noiseSuppression) Icon(QMusicIcons.Check, null, tint = Color.White) },
+                                            onClick = {
+                                                moreOpen = false
+                                                service.toggleNoiseSuppression()
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         }
+                        Spacer(Modifier.height(28.dp))
+                        RoundButton(QMusicIcons.PhoneEnd, s.callEnd, EndRed, Color.White, big = true) { service.hangUp() }
                     }
-                    Spacer(Modifier.height(28.dp))
-                    RoundButton(QMusicIcons.PhoneEnd, s.callEnd, EndRed, Color.White, big = true) { service.hangUp() }
                 }
             }
         }
 
-        // Our own picture, small in the corner, once theirs fills the screen.
-        if (showVideo && call.remoteVideo && call.cameraOn && call.phase == CallPhase.ACTIVE) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding()
-                    .padding(16.dp)
-                    .size(width = 110.dp, height = 160.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color.Black),
-            ) {
-                CallVideo(service, remote = false, modifier = Modifier.fillMaxSize())
+        // Emojis sent in the call float up from the bottom and fade.
+        FloatingReactions(call.reaction)
+
+        // Showing the screen did not start: said for a few seconds at the top.
+        var shareFailShown by remember { mutableStateOf(false) }
+        LaunchedEffect(call.shareFailures) {
+            if (call.shareFailures > 0) {
+                shareFailShown = true
+                delay(4000)
+                shareFailShown = false
             }
         }
+        androidx.compose.animation.AnimatedVisibility(
+            visible = shareFailShown,
+            enter = androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 72.dp, start = 16.dp, end = 16.dp),
+        ) {
+            Row(
+                Modifier.clip(RoundedCornerShape(20.dp)).background(Color(0xE6202020)).padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(QMusicIcons.ScreenShare, null, tint = EndRed, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(s.callShareFailed, color = Color.White, fontSize = 14.sp)
+            }
+        }
+
+        if (addOpen) {
+            AddPersonSheet(
+                s = s,
+                people = people.filter { it.uid != call.peer.uid },
+                onPick = { user ->
+                    addOpen = false
+                    service.addPerson(user)
+                },
+                onClose = { addOpen = false },
+            )
+        }
+        if (repliesOpen && call.phase == CallPhase.INCOMING && onQuickReply != null) {
+            QuickReplies(
+                s = s,
+                onPick = { text ->
+                    repliesOpen = false
+                    service.decline()
+                    onQuickReply(call.peer, text)
+                },
+                onClose = { repliesOpen = false },
+            )
+        }
+    }
+}
+
+private const val CONTROLS_SHOWN_MS = 4_000L
+
+/**
+ * Answering a ringing call by swiping (as on the lock screen of a phone): the button up answers, down declines. A tap
+ * makes it hop up to show the way.
+ */
+@Composable
+private fun SwipeToAnswer(video: Boolean, s: ChatStrings, onAnswer: () -> Unit, onDecline: () -> Unit) {
+    val density = LocalDensity.current
+    val up = with(density) { 120.dp.toPx() }
+    val down = with(density) { 90.dp.toPx() }
+    val offset = remember { Animatable(0f) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var done by remember { mutableStateOf(false) }
+    val t = rememberInfiniteTransition()
+    // The arrows above climb on their own, inviting the swipe.
+    val climb by t.animateFloat(0f, 1f, infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Restart))
+    val pull = (offset.value / down).coerceIn(0f, 1f)
+    val colour = lerp(AnswerGreen, EndRed, pull)
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(s.callSwipeAnswer, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
+        Spacer(Modifier.height(10.dp))
+        Box(Modifier.height(54.dp), contentAlignment = Alignment.BottomCenter) {
+            for (i in 0 until 3) {
+                val phase = ((climb + i / 3f) % 1f)
+                Icon(
+                    QMusicIcons.ChevronUp,
+                    null,
+                    tint = Color.White,
+                    modifier = Modifier.offset(y = (-phase * 36).dp).alpha((1f - phase) * (1f - pull)).size(22.dp),
+                )
+            }
+        }
+        Box(
+            Modifier
+                .offset { IntOffset(0, offset.value.roundToInt()) }
+                .size(78.dp)
+                .shadow(12.dp, CircleShape)
+                .clip(CircleShape)
+                .background(colour)
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragEnd = {
+                            scope.launch {
+                                when {
+                                    done -> Unit
+                                    offset.value < -up -> {
+                                        done = true
+                                        offset.animateTo(-up * 1.4f, tween(140))
+                                        onAnswer()
+                                    }
+                                    offset.value > down -> {
+                                        done = true
+                                        offset.animateTo(down * 1.3f, tween(140))
+                                        onDecline()
+                                    }
+                                    else -> offset.animateTo(0f, spring(dampingRatio = 0.55f))
+                                }
+                            }
+                        },
+                        onDragCancel = { scope.launch { offset.animateTo(0f, spring()) } },
+                    ) { change, amount ->
+                        change.consume()
+                        if (!done) scope.launch { offset.snapTo((offset.value + amount).coerceIn(-up * 1.5f, down * 1.4f)) }
+                    }
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures {
+                        scope.launch {
+                            offset.animateTo(-up * 0.35f, tween(160, easing = FastOutSlowInEasing))
+                            offset.animateTo(0f, spring(dampingRatio = 0.4f))
+                        }
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (pull > 0.5f) QMusicIcons.PhoneEnd else if (video) QMusicIcons.Camera else QMusicIcons.Phone,
+                contentDescription = s.callAccept,
+                tint = Color.White,
+                modifier = Modifier.size(34.dp),
+            )
+        }
+        Spacer(Modifier.height(18.dp))
+        Text(s.callSwipeDecline, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
+    }
+}
+
+/** Our picture (or theirs, swapped) small over the big one: dragged, it settles in the nearest corner. */
+@Composable
+private fun SmallPicture(service: CallService, remote: Boolean, bottomSpace: androidx.compose.ui.unit.Dp, onSwap: () -> Unit) {
+    val density = LocalDensity.current
+    BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(16.dp)) {
+        val w = with(density) { 110.dp.toPx() }
+        val h = with(density) { 160.dp.toPx() }
+        val top = with(density) { 56.dp.toPx() }
+        val bottom = with(density) { bottomSpace.toPx() }
+        val areaW = with(density) { maxWidth.toPx() }
+        val areaH = with(density) { maxHeight.toPx() }
+        // 0 top left, 1 top right, 2 bottom left, 3 bottom right.
+        var corner by remember { mutableIntStateOf(1) }
+        var dragged by remember { mutableStateOf<Offset?>(null) }
+        val target = Offset(
+            if (corner % 2 == 0) 0f else (areaW - w).coerceAtLeast(0f),
+            if (corner < 2) top else (areaH - h - bottom).coerceAtLeast(top),
+        )
+        val settled = animateOffsetAsState(target, spring(dampingRatio = 0.75f, stiffness = 400f))
+        val at = dragged ?: settled.value
+        Box(
+            Modifier
+                .offset { IntOffset(at.x.roundToInt(), at.y.roundToInt()) }
+                .size(110.dp, 160.dp)
+                .shadow(10.dp, RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.Black)
+                .pointerInput(areaW, areaH) {
+                    detectDragGestures(
+                        onDragStart = { dragged = settled.value },
+                        onDragEnd = {
+                            val p = dragged ?: settled.value
+                            val right = p.x + w / 2 > areaW / 2
+                            val low = p.y + h / 2 > areaH / 2
+                            corner = (if (low) 2 else 0) + (if (right) 1 else 0)
+                            dragged = null
+                        },
+                        onDragCancel = { dragged = null },
+                    ) { change, amount ->
+                        change.consume()
+                        val p = (dragged ?: settled.value) + amount
+                        dragged = Offset(p.x.coerceIn(0f, (areaW - w).coerceAtLeast(0f)), p.y.coerceIn(0f, (areaH - h).coerceAtLeast(0f)))
+                    }
+                }
+                .pointerInput(Unit) { detectTapGestures(onDoubleTap = { onSwap() }) },
+        ) {
+            CallVideo(service, remote = remote, modifier = Modifier.fillMaxSize(), overlay = true)
+        }
+    }
+}
+
+/** The emojis of the call rising from the bottom, each once. */
+@Composable
+private fun FloatingReactions(latest: CallReaction?) {
+    val shown = remember { mutableStateListOf<CallReaction>() }
+    LaunchedEffect(latest?.id) {
+        if (latest != null && shown.none { it.id == latest.id }) shown.add(latest)
+    }
+    BoxWithConstraints(Modifier.fillMaxSize().navigationBarsPadding()) {
+        val height = maxHeight
+        shown.toList().forEach { r ->
+            androidx.compose.runtime.key(r.id) {
+                val rise = remember { Animatable(0f) }
+                // Each from its own place along the bottom: ours on the right, theirs on the left.
+                val lane = remember { (if (r.mine) 0.62f else 0.18f) + (r.id % 7) / 40f }
+                LaunchedEffect(Unit) {
+                    rise.animateTo(1f, tween(2_400, easing = LinearEasing))
+                    shown.remove(r)
+                }
+                val v = rise.value
+                Text(
+                    r.emoji,
+                    fontSize = 44.sp,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .offset(x = maxWidth * lane, y = -(height * 0.15f) - (height * 0.55f) * v)
+                        .scale(0.6f + 0.6f * kotlin.math.min(1f, v * 4f))
+                        .alpha(if (v < 0.7f) 1f else (1f - v) / 0.3f),
+                )
+            }
+        }
+    }
+}
+
+/** Who to add to the call: the person's friends, with a search. */
+@Composable
+internal fun AddPersonSheet(s: ChatStrings, people: List<ChatUser>, onPick: (ChatUser) -> Unit, onClose: () -> Unit) {
+    var query by remember { mutableStateOf("") }
+    val shown = remember(people, query) {
+        val q = query.trim()
+        people.filter { q.isEmpty() || it.name.contains(q, ignoreCase = true) || it.username.contains(q, ignoreCase = true) }.sortedBy { it.name.lowercase() }
+    }
+    PlatformBackHandler(enabled = true) { onClose() }
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onClose() },
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().fillMaxHeight(0.75f).clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)).background(DarkSurfaceVariant)
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+                .navigationBarsPadding(),
+        ) {
+            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(s.callAddTitle, color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                IconButton(onClick = onClose) { Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = Color.White) }
+            }
+            Text(s.callAddNote, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp))
+            Spacer(Modifier.height(8.dp))
+            SearchPill(query, { query = it }, s.search)
+            LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+                items(shown, key = { it.uid }) { user ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onPick(user) }.padding(horizontal = 20.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ChatAvatar(user, 44.dp)
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(user.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (user.username.isNotEmpty()) Text("@" + user.username, color = TextSecondary, fontSize = 13.sp, maxLines = 1)
+                        }
+                        Icon(QMusicIcons.PersonAdd, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A ringing call declined with a few words: the ready ones. */
+@Composable
+private fun QuickReplies(s: ChatStrings, onPick: (String) -> Unit, onClose: () -> Unit) {
+    PlatformBackHandler(enabled = true) { onClose() }
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onClose() },
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)).background(DarkSurfaceVariant)
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+                .navigationBarsPadding().padding(vertical = 12.dp),
+        ) {
+            Text(s.callDeclineMessage, color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+            s.callQuickReplies.forEach { text ->
+                Text(
+                    text,
+                    color = TextPrimary,
+                    fontSize = 16.sp,
+                    modifier = Modifier.fillMaxWidth().clickable { onPick(text) }.padding(horizontal = 20.dp, vertical = 14.dp),
+                )
+            }
+        }
+    }
+}
+
+/** A small turning ring: "Reconnecting…". */
+@Composable
+private fun Spinner() {
+    val t = rememberInfiniteTransition()
+    val turn by t.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)))
+    androidx.compose.foundation.Canvas(Modifier.size(14.dp)) {
+        drawArc(
+            color = Color.White,
+            startAngle = turn,
+            sweepAngle = 270f,
+            useCenter = false,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = size.width * 0.16f, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+        )
     }
 }
 
@@ -253,7 +733,7 @@ internal fun statusText(call: CallState, s: ChatStrings): String = when (call.ph
                 delay(1_000)
             }
         }
-        duration(((now - (call.startedAt ?: now)) / 1000).coerceAtLeast(0))
+        if (call.reconnecting) s.callReconnecting else duration(((now - (call.startedAt ?: now)) / 1000).coerceAtLeast(0))
     }
     CallPhase.ENDED -> when (call.endReason) {
         CallEnd.DECLINED -> s.callDeclined
@@ -373,6 +853,54 @@ private fun CallBackdrop(photo: String?) {
     }
 }
 
+/**
+ * The call in the floating window while the app is out of sight: their picture in a video call; otherwise their photo
+ * with the ring that follows their voice, their name and the time.
+ */
+@Composable
+private fun CallWindow(service: CallService, call: CallState, s: ChatStrings, modifier: Modifier = Modifier) {
+    val picture = call.video && call.remoteVideo && !call.remotePaused
+    Box(modifier.fillMaxSize().background(Color(0xFF101016)), contentAlignment = Alignment.Center) {
+        if (picture) {
+            CallVideo(service, remote = true, modifier = Modifier.fillMaxSize(), overlay = false)
+        } else {
+            CallBackdrop(call.peer.photo)
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(8.dp)) {
+                val level by androidx.compose.animation.core.animateFloatAsState(
+                    if (call.reconnecting) 0f else call.remoteLevel,
+                    animationSpec = tween(120),
+                )
+                Box(contentAlignment = Alignment.Center) {
+                    if (level > 0.01f) {
+                        Box(
+                            Modifier.size(64.dp).scale(1f + (level * 2.2f).coerceAtMost(0.45f)).clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.12f + level * 0.25f)),
+                        )
+                    }
+                    ChatAvatar(callerUser(call.peer), 64.dp)
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    callerShown(call.peer),
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (call.muted) {
+                        Icon(QMusicIcons.MicOff, null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(13.dp))
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(statusText(call, s), color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
 /** The call shrunk into a bubble (the app usable under it), and the call service it shows. */
 object CallUi {
     val minimized = kotlinx.coroutines.flow.MutableStateFlow(false)
@@ -392,6 +920,12 @@ fun CallBubbleOverlay() {
     val call = state ?: return
     val minimized by CallUi.minimized.collectAsState()
     if (!minimized || call.phase == CallPhase.INCOMING || call.phase == CallPhase.ENDED) return
+    // Leaving the app with the call in its bubble: the floating window comes as it does from the full call screen.
+    val inWindow = CallPictureInPicture(armed = true)
+    if (inWindow) {
+        CallWindow(service, call, s, Modifier)
+        return
+    }
     val density = androidx.compose.ui.platform.LocalDensity.current
     val video = call.video && call.remoteVideo && call.phase == CallPhase.ACTIVE
     val margin = with(density) { 12.dp.toPx() }

@@ -24,6 +24,13 @@ object ChatNotificationActions {
         backend.markRead(if (isGroupId(peerUid)) peerUid else chatIdOf(me.uid, peerUid))
     }
 
+    /** The conversation stays quiet until [until] (no notifications; the server sends none either). */
+    suspend fun mute(context: Context, chatId: String, until: Long) {
+        val backend = FirebaseChatBackend.get(context.applicationContext) ?: return
+        backend.awaitMe() ?: return
+        backend.setMuted(chatId, until)
+    }
+
     /** A message notification arrived: this phone has it, the sender sees two ticks. */
     suspend fun delivered(context: Context, chatId: String) {
         val backend = FirebaseChatBackend.get(context.applicationContext) ?: return

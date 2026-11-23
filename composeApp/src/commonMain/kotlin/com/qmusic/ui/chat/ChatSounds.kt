@@ -39,7 +39,7 @@ data class SoundOption(val id: String, val tr: String, val en: String) {
 object ChatSoundCatalog {
     val options: Map<SoundKind, List<SoundOption>> = mapOf(
         SoundKind.SEND to listOf(
-            SoundOption("enter", "Klavye", "Keyboard"),
+            SoundOption("pop", "Pop", "Pop"),
             SoundOption("anahtar", "Anahtar", "Switch"),
             SoundOption("kabarcik", "Kabarcık", "Bubble"),
             SoundOption("firlat", "Fırlat", "Whoosh"),
@@ -48,7 +48,8 @@ object ChatSoundCatalog {
             SoundOption("kus", "Kuş", "Chirp"),
         ),
         SoundKind.RECEIVE to listOf(
-            SoundOption("yeni", "Nuvelo mesajı", "Nuvelo message"),
+            SoundOption("bildirim", "Nuvelo mesajı", "Nuvelo message"),
+            SoundOption("yeni", "Klasik", "Classic"),
             SoundOption("cit", "Çıt", "Click"),
             SoundOption("ikinota", "İki nota", "Two notes"),
             SoundOption("pit", "Pıt", "Pip"),
@@ -81,12 +82,13 @@ object ChatSoundCatalog {
     )
 
     /**
-     * What the person chose (2026-11-15): send, receive, notification and the small sounds from Kenney's CC0 "Interface
-     * Sounds" (tools/sounds/import_kenney.py); the ringtone is the 16-bar loop cut from their own track (cut_loop.py).
+     * What the person chose: the small sounds from Kenney's CC0 "Interface Sounds" (tools/sounds/import_kenney.py), the
+     * ringtone the 16-bar loop cut from their own track (cut_loop.py); since 2026-11-23 sending and receiving are recorded
+     * sounds from Freesound (CC0, tools/sounds/fetch_candidates.py): "SimplePop1" and "UI Toast Notification".
      */
     val defaults: Map<SoundKind, String> = mapOf(
-        SoundKind.SEND to "enter",
-        SoundKind.RECEIVE to "yeni",
+        SoundKind.SEND to "pop",
+        SoundKind.RECEIVE to "bildirim",
         SoundKind.NOTIFY to "yeni",
         SoundKind.RING to "plucky",
         SoundKind.RINGBACK to "klasik",
@@ -115,11 +117,6 @@ interface ChatSounds {
     /** The send / arrive sound of an open conversation (silent when the phone is on silent or vibrate). */
     fun play(kind: SoundKind)
     fun playSmall(sound: SmallSound)
-
-    /** A key's click while typing in the message box (a mechanical keyboard), when it is turned on. */
-    val typing: StateFlow<Boolean>
-    fun setTyping(on: Boolean)
-    fun playKey()
 }
 
 @Composable

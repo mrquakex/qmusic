@@ -101,11 +101,17 @@ fun WatchPage(
             val drag = remember { Animatable(0f) }
             val exit = remember { Animatable(0f) }
             val sheet = remember { Animatable(0f) }
+            val upright by controller.fullscreenUpright.collectAsState()
+            // Coming in upright (the page pulled down): the picture travels from its place on the page to the middle
+            // while the page fades into black, the same way as leaving, backwards.
+            val enter = remember { Animatable(if (upright) 1f else 0f) }
+            LaunchedEffect(Unit) {
+                if (enter.value > 0f) enter.animateTo(0f, tween(320, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+            }
             val raw = remember { floatArrayOf(0f, 0f) }
             val dragScope = rememberCoroutineScope()
             var screenHeight by remember { mutableStateOf(1f) }
             var screenWidth by remember { mutableStateOf(1f) }
-            val upright by controller.fullscreenUpright.collectAsState()
             val density = androidx.compose.ui.platform.LocalDensity.current
             val statusTop = androidx.compose.foundation.layout.WindowInsets.statusBars.getTop(density).toFloat()
             val exitAt = with(density) { 110.dp.toPx() }
@@ -122,7 +128,7 @@ fun WatchPage(
                         val grey = Color(0xFF151515)
                         val base = if (upright) androidx.compose.ui.graphics.lerp(Color.Black, grey, dragged())
                         else androidx.compose.ui.graphics.lerp(Color.Black, VideoColors.Background, dragged())
-                        drawRect(base.copy(alpha = 1f - exit.value))
+                        drawRect(base.copy(alpha = 1f - maxOf(exit.value, enter.value)))
                     }
                     .onSizeChanged {
                         screenHeight = it.height.toFloat().coerceAtLeast(1f)
@@ -137,14 +143,10 @@ fun WatchPage(
                             },
                             onVerticalDrag = { change, dy ->
                                 change.consume()
-                                if (upright) {
-                                    if (dy < 0f) {
-                                        if (raw[0] > 0f) raw[0] = (raw[0] + dy).coerceAtLeast(0f)
-                                        else raw[1] = (raw[1] - dy / sheetPx()).coerceAtMost(1f)
-                                    } else {
-                                        if (raw[1] > 0f) raw[1] = (raw[1] - dy / sheetPx()).coerceAtLeast(0f)
-                                        else raw[0] += dy
-                                    }
+                                // The details sheet open: the drag moves it; otherwise the picture follows the finger,
+                                // down or up (both leave upright, as both leave sideways).
+                                if (upright && raw[1] > 0f) {
+                                    raw[1] = (raw[1] - dy / sheetPx()).coerceIn(0f, 1f)
                                 } else {
                                     raw[0] += dy
                                 }
@@ -156,15 +158,13 @@ fun WatchPage(
                                 dragScope.launch {
                                     if (upright) {
                                         when {
-                                            raw[0] > exitAt -> {
-                                                exit.animateTo(1f, tween(240, easing = ease))
+                                            kotlin.math.abs(raw[0]) > exitAt -> {
+                                                // To its place on the page, the page coming up around it.
+                                                exit.animateTo(1f, tween(300, easing = ease))
                                                 controller.setFullscreen(false)
                                             }
-                                            raw[1] > 0.3f -> sheet.animateTo(1f, tween(200, easing = ease))
-                                            else -> {
-                                                launch { sheet.animateTo(0f, tween(200, easing = ease)) }
-                                                drag.animateTo(0f, tween(220, easing = ease))
-                                            }
+                                            raw[1] > 0f -> sheet.animateTo(if (raw[1] > 0.5f) 1f else 0f, tween(200, easing = ease))
+                                            else -> drag.animateTo(0f, androidx.compose.animation.core.spring(dampingRatio = 0.8f, stiffness = 500f))
                                         }
                                     } else if (kotlin.math.abs(raw[0]) > exitAt) {
                                         val way = if (raw[0] < 0f) -1f else 1f
@@ -184,19 +184,29 @@ fun WatchPage(
                         )
                     },
             ) {
-                // The page the picture is flying to: appears as it lands.
-                if (upright && exit.value > 0f) {
-                    Column(Modifier.fillMaxSize().background(VideoColors.Background).graphicsLayer { alpha = exit.value }) {
-                        Spacer(Modifier.statusBarsPadding().fillMaxWidth().aspectRatio(16f / 9f))
-                        WatchDetails(controller, w, s, onShare, onSignIn, seek, showRelated = true)
+                // The page the picture is flying to (or from): it shows more the further the picture is dragged, and
+                // in full as it lands; with its light (the video's colours) as on the page itself.
+                val pageShown = { maxOf(exit.value, enter.value, dragged() * 0.55f) }
+                if (upright && (exit.value > 0f || enter.value > 0f || drag.value != 0f)) {
+                    Box(Modifier.fillMaxSize().graphicsLayer { alpha = pageShown() }.background(VideoColors.Background)) {
+                        if (!com.qmusic.ui.theme.lightTheme) AmbientGlow(w.video.thumbnail, Modifier.fillMaxWidth().statusBarsPadding())
+                        Column(Modifier.fillMaxSize()) {
+                            Spacer(Modifier.statusBarsPadding().fillMaxWidth().aspectRatio(16f / 9f))
+                            WatchDetails(controller, w, s, onShare, onSignIn, seek, showRelated = true)
+                        }
                     }
+                }
+                // Upright, the black around the picture holds its colours, softly (gone as it leaves).
+                if (upright && !com.qmusic.ui.theme.lightTheme) {
+                    UprightGlow(w.video.thumbnail, Modifier.fillMaxSize().graphicsLayer { alpha = 1f - pageShown() })
                 }
                 Box(
                     Modifier.fillMaxSize().graphicsLayer {
                         val p = dragged()
                         if (upright) {
-                            val e = exit.value
-                            val scale = (1f - 0.05f * p) * (1f - e) + e
+                            // Leaving or coming in: between the middle (0) and its place on the page (1).
+                            val e = maxOf(exit.value, enter.value)
+                            val scale = (1f - 0.06f * p) * (1f - e) + e
                             val follow = drag.value - sheet.value * sheetPx() * 0.18f
                             translationY = follow * (1f - e) + slotShift() * e
                             scaleX = scale
@@ -319,7 +329,7 @@ fun WatchPage(
                                 },
                                 onDragEnd = {
                                     scope.launch {
-                                        // Up opens full screen, down shrinks the video into the small player.
+                                        // Up opens full screen (sideways), down shrinks the video into the small player.
                                         if (total < -SWIPE_PX) {
                                             offset.snapTo(0f)
                                             controller.setFullscreen(true)
@@ -378,10 +388,12 @@ fun WatchPage(
             } else {
                 Box(modifier = layer) {
                     if (ambient) AmbientGlow(w.video.thumbnail, Modifier.fillMaxWidth().then(fade))
-                    Column(Modifier.drawBehind { if (pull > 0f) drawRect(Color.Black) }) {
+                    // Pulled down: black opens between the picture and what is about it, darker the further it goes
+                    // (the light around the video sinks into it, never cut off at once).
+                    Column(Modifier.drawBehind { if (pull > 0f) drawRect(Color.Black.copy(alpha = (pull / pullFull).coerceIn(0f, 1f))) }) {
                         Box(
                             Modifier
-                                .drawBehind { if (progress() > 0f) drawRect(Color.Black) }
+                                .drawBehind { if (progress() > 0f) drawRect(Color.Black.copy(alpha = (progress() * 4f).coerceIn(0f, 1f))) }
                                 .graphicsLayer { translationY = pull * 0.45f },
                         ) { player() }
                         Box(
@@ -418,30 +430,89 @@ fun WatchPage(
 @Composable
 private fun AmbientGlow(picture: String?, modifier: Modifier) {
     if (picture == null) return
-    val tint = com.qmusic.ui.rememberDominantColor(picture)
-    BoxWithConstraints(modifier) {
-        // The player's height (16:9) and as much again below it, where the glow fades out.
+    // It comes up softly as the page opens.
+    val shown = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { shown.animateTo(1f, tween(900, easing = androidx.compose.animation.core.LinearOutSlowInEasing)) }
+    BoxWithConstraints(modifier.graphicsLayer { alpha = shown.value }) {
+        // The player's height (16:9) and somewhat more below it, where the light dies away.
         val playerHeight = maxWidth * 9f / 16f
-        Box(Modifier.fillMaxWidth().height(playerHeight * 2f)) {
+        // A new video: its light fades in over the last one's.
+        androidx.compose.animation.Crossfade(targetState = picture, animationSpec = tween(900), label = "ambient") { pic ->
+            GlowLayer(pic, Modifier.fillMaxWidth().height(playerHeight * 2.3f), centreAt = 0.28f)
+        }
+    }
+}
+
+/** Upright full screen: the video's light fills the black above and below the picture. */
+@Composable
+private fun UprightGlow(picture: String?, modifier: Modifier) {
+    if (picture == null) return
+    val shown = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { shown.animateTo(1f, tween(700, easing = androidx.compose.animation.core.LinearOutSlowInEasing)) }
+    androidx.compose.animation.Crossfade(targetState = picture, animationSpec = tween(900), label = "uprightAmbient", modifier = modifier.graphicsLayer { alpha = shown.value * 0.85f }) { pic ->
+        GlowLayer(pic, Modifier.fillMaxSize(), centreAt = 0.5f)
+    }
+}
+
+/**
+ * One video's light: its picture enlarged and blurred, with its main colour glowing from [centreAt] (0 top, 1 bottom),
+ * fading out smoothly downwards and at the sides into whatever is behind (no band where it ends). Phones that cannot
+ * blur (before Android 12) get the colour alone, never a sharp copy of the picture.
+ */
+@Composable
+private fun GlowLayer(picture: String, modifier: Modifier, centreAt: Float) {
+    val tint = com.qmusic.ui.rememberDominantColor(picture)
+    // The colour comes in gently once it is known.
+    val tintShown by androidx.compose.animation.core.animateFloatAsState(if (tint != null) 1f else 0f, tween(800), label = "tint")
+    Box(
+        modifier
+            .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                val edge = Color.Black
+                // Strong around the picture, gone well before the edges.
+                drawRect(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        0f to edge.copy(alpha = if (centreAt < 0.4f) 1f else 0.15f),
+                        centreAt to edge,
+                        (centreAt + (1f - centreAt) * 0.55f).coerceAtMost(0.98f) to edge.copy(alpha = 0.35f),
+                        1f to Color.Transparent,
+                    ),
+                    blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                )
+                drawRect(
+                    androidx.compose.ui.graphics.Brush.horizontalGradient(
+                        0f to edge.copy(alpha = 0.45f),
+                        0.22f to edge,
+                        0.78f to edge,
+                        1f to edge.copy(alpha = 0.45f),
+                    ),
+                    blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                )
+            },
+    ) {
+        if (com.qmusic.ui.chat.callBlurWorks) {
             AsyncImage(
                 model = picture,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                alpha = 0.55f,
-                modifier = Modifier.fillMaxWidth().height(playerHeight * 1.5f).graphicsLayer { scaleX = 1.3f; scaleY = 1.3f }.blur(70.dp),
+                alpha = 0.62f,
+                modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = 1.35f; scaleY = 1.35f }.blur(90.dp),
             )
-            tint?.let { c ->
-                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0f to c.copy(alpha = 0.22f), 0.7f to c.copy(alpha = 0.08f), 1f to Color.Transparent)))
-            }
-            // Down into the page's own background.
+        }
+        tint?.let { c ->
             Box(
-                Modifier.fillMaxSize().background(
-                    androidx.compose.ui.graphics.Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.45f to Color.Transparent,
-                        1f to VideoColors.Background,
-                    ),
-                ),
+                Modifier.fillMaxSize().drawBehind {
+                    drawRect(
+                        androidx.compose.ui.graphics.Brush.radialGradient(
+                            0f to c.copy(alpha = 0.5f * tintShown),
+                            0.55f to c.copy(alpha = 0.18f * tintShown),
+                            1f to Color.Transparent,
+                            center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height * centreAt),
+                            radius = size.width * 0.9f,
+                        ),
+                    )
+                },
             )
         }
     }

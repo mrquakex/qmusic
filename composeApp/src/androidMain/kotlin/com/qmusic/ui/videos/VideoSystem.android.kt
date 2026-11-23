@@ -21,12 +21,31 @@ import kotlinx.coroutines.flow.MutableStateFlow
 /** What the activity needs to know about the video (it asks for the floating window when the person leaves). */
 object VideoPip {
     @Volatile
-    var armed: Boolean = false
+    private var armedNow = false
 
-    /** An upright picture (a video call): the floating window is tall rather than wide. */
     @Volatile
-    var portrait: Boolean = false
+    private var portraitNow = false
+
+    var armed: Boolean
+        get() = armedNow
+        set(value) {
+            if (armedNow == value) return
+            armedNow = value
+            onChanged?.invoke()
+        }
+
+    /** An upright picture (a call): the floating window is tall rather than wide. */
+    var portrait: Boolean
+        get() = portraitNow
+        set(value) {
+            if (portraitNow == value) return
+            portraitNow = value
+            onChanged?.invoke()
+        }
     val active = MutableStateFlow(false)
+
+    /** Armed or not any more: the activity tells Android (on 12 and later the window then opens by itself). */
+    var onChanged: (() -> Unit)? = null
 }
 
 /** What the app does for a video that keeps playing out of sight (see MainActivity): set where the service is. */

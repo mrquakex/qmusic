@@ -97,6 +97,54 @@ async function reportCallPush(n, ok) {
 
 const GROUP = /^grp[A-Za-z0-9]{20}$/;
 
+/** A call someone added people to: it goes on as a group call of its own (callRooms/{id}). */
+const ROOM = /^room[A-Za-z0-9]{20}$/;
+
+/** Rings a person added to a call: only someone let into that call can ring, and only someone let in is rung. */
+async function handleRoom(n) {
+  if (!ROOM.test(n.chatId)) return;
+  if (Date.now() - (Number(n.at) || 0) > CALL_MAX_AGE_MS) return;
+  const people = (await db.ref(`callRooms/${n.chatId}/people`).get()).val() || {};
+  if (people[n.from] !== true || people[n.to] !== true || n.from === n.to) return;
+  if ((await db.ref(`blocked/${n.to}/${n.from}`).get()).val() === true) return;
+  const sender = (await db.ref(`users/${n.from}`).get()).val() || {};
+  const name = String(sender.name || "Biri");
+  const data = {
+    type: "groupcall",
+    chatId: n.chatId,
+    sender: n.chatId,
+    name: "Grup araması",
+    username: "",
+    photo: String(sender.photo || ""),
+    body: `${name} seni aramaya ekledi`,
+    text: `${name} seni aramaya ekledi`,
+    group: "1",
+    author: String(n.from),
+    authorName: name,
+    authorPhoto: String(sender.photo || ""),
+    starter: name,
+    video: n.video ? "1" : "0",
+    callAt: String(Number(n.at) || Date.now()),
+    room: "1",
+  };
+  const got = await deliver(n.to, data, 60 * 1000);
+  log(`roomcall -> ${got}`);
+}
+
+/** Calls made by adding people that nobody is in any more (after an hour) are taken away. */
+async function sweepRooms() {
+  try {
+    const old = (await db.ref("callRooms").orderByChild("at").endAt(Date.now() - 3600 * 1000).limitToFirst(200).get()).val() || {};
+    const updates = {};
+    for (const [id, room] of Object.entries(old)) {
+      if (ROOM.test(id) && !(room && room.members && Object.keys(room.members).length > 0)) updates[`callRooms/${id}`] = null;
+    }
+    if (Object.keys(updates).length > 0) await db.ref().update(updates);
+  } catch (e) {
+    log("call rooms sweep failed:", e.message);
+  }
+}
+
 /** Shortens a preview; a sealed one (end-to-end encrypted, "e2e:…") whole, or it could not be opened. */
 const cut = (text, n) => (text.startsWith("e2e:") ? text.slice(0, 2000) : text.slice(0, n));
 
@@ -236,6 +284,7 @@ async function handleReaction(n) {
 async function handle(n) {
   if (!n || typeof n.from !== "string" || typeof n.to !== "string" || typeof n.chatId !== "string") return;
   if (n.type === "reaction") return handleReaction(n);
+  if (n.type === "roomcall") return handleRoom(n);
   if (GROUP.test(n.chatId)) return handleGroup(n);
   if (n.from === n.to || !isMember(n.chatId, n.to)) return;
   // The owner's Claude speaks in the owner's conversations without being a member of them.
@@ -261,6 +310,10 @@ async function handle(n) {
   const viaClaude = n.from === "claudebot" && partner !== "claudebot";
   const shownFrom = viaClaude ? partner : n.from;
   const sender = (await db.ref(`users/${shownFrom}`).get()).val() || {};
+  // A photo shown to friends only: the notification has it when the one who gets it is a friend.
+  if (!sender.photo && sender.privacy && sender.privacy.photo === "FRIENDS" && (await db.ref(`friends/${shownFrom}/${n.to}`).get()).exists()) {
+    sender.photo = (await db.ref(`privateProfile/${shownFrom}/photo`).get()).val() || "";
+  }
   if (viaClaude) n.body = "Claude: " + String(n.body || "").replace(/^Claude: /, "");
 
   const data = {
@@ -372,6 +425,7 @@ async function sweepEndedGroups() {
 /** Removes the messages whose time is up, in the conversations that have disappearing messages on. */
 async function sweepExpired() {
   sweepEndedGroups();
+  sweepRooms();
   try {
     const chats = Object.keys((await db.ref("ttlChats").get()).val() || {});
     let removed = 0;
@@ -624,11 +678,19 @@ async function messageFromNuvelo(uid, text) {
   if (!(await db.ref(`users/${uid}/name`).get()).exists()) throw new Error("no such user");
   await ensureNuvelo();
   const chat = [uid, NUVELO].sort().join("_");
+  // Each side's list shows who the other is (without it the person saw "?" for Nuvelo).
+  const nuvelo = (await db.ref(`users/${NUVELO}`).get()).val() || {};
+  const person = (await db.ref(`users/${uid}`).get()).val() || {};
   const id = db.ref("x").push().key;
   const TS = admin.database.ServerValue.TIMESTAMP;
   await db.ref().update({
     [`chats/${chat}/messages/${id}`]: { from: NUVELO, text: body, at: TS },
     [`userChats/${uid}/${chat}/other`]: NUVELO,
+    [`userChats/${uid}/${chat}/name`]: String(nuvelo.name || "Nuvelo"),
+    [`userChats/${uid}/${chat}/username`]: String(nuvelo.username || NUVELO),
+    [`userChats/${NUVELO}/${chat}/name`]: String(person.name || "?"),
+    [`userChats/${NUVELO}/${chat}/username`]: String(person.username || ""),
+    [`userChats/${NUVELO}/${chat}/photo`]: person.photo || null,
     [`userChats/${uid}/${chat}/lastText`]: body.slice(0, 120),
     [`userChats/${uid}/${chat}/lastAt`]: TS,
     [`userChats/${uid}/${chat}/lastFrom`]: NUVELO,

@@ -152,10 +152,27 @@ object CallNotifications {
             // Rings until it is answered, declined or cancelled (not just once).
             n.flags = n.flags or Notification.FLAG_INSISTENT
             return runCatching { manager.notify(RING_ID, n) }
-                .onFailure { android.util.Log.w("QeyfCall", "ring notification refused: ${it.message}") }
+                .onFailure {
+                    android.util.Log.w("QeyfCall", "ring notification refused: ${it.message}")
+                    com.qmusic.ui.chat.CallHooks.trace?.invoke("ring notification refused: ${it.javaClass.simpleName}: ${it.message}")
+                }
                 .isSuccess
         }
-        if (callStyle == null || !post(callStyle)) post(plain())
+        val asCall = callStyle != null && post(callStyle)
+        val shown = asCall || post(plain())
+        // The app rings itself (the notification's channel is silent): the same call already ringing goes on as it is.
+        com.qmusic.ui.chat.IncomingRinger.start(context, callId.ifEmpty { "push:" + peer.uid }, peer.uid)
+        // For the call's trail (read on the server, in callDebug): how it rang and what could keep it silent.
+        runCatching {
+            val ch = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) manager.getNotificationChannel(channel) else null
+            val channelInfo = if (ch == null) "channel ${channel} -" else
+                "channel ${ch.id} importance ${ch.importance}, sound ${ch.sound ?: "NONE"}, " +
+                    "bypass dnd ${ch.canBypassDnd()}, blocked ${ch.importance == NotificationManager.IMPORTANCE_NONE}"
+            val calls = com.qmusic.ui.chat.CallHooks.ringDiagnosis(context)
+            com.qmusic.ui.chat.CallHooks.trace?.invoke(
+                "ring notification ${if (!shown) "NOT shown" else if (asCall) "call style" else "plain"}, full screen $fullScreen, $channelInfo, $calls",
+            )
+        }
     }
 
     /** The caller gave up (the push said so): if this phone was still ringing for that call, it is a missed call. */
@@ -233,6 +250,7 @@ object CallNotifications {
     }
 
     fun cancelIncoming(context: Context) {
+        com.qmusic.ui.chat.IncomingRinger.stop()
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
         context.getSystemService(NotificationManager::class.java).cancel(RING_ID)
     }
@@ -240,13 +258,19 @@ object CallNotifications {
     fun ongoing(context: Context, peer: ChatUser?, video: Boolean): Notification {
         channels(context)
         val tr = tr(context)
+        // Their photo (or their initial on their colour), in the notification and on the "on a call" sign.
+        val key = peer?.uid?.ifBlank { null } ?: peer?.name ?: "call"
+        val name = peer?.name ?: "Nuvelo"
         return NotificationCompat.Builder(context, ONGOING_CHANNEL)
             .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
-            .setContentTitle(peer?.name ?: "Nuvelo")
+            .setLargeIcon(NotificationAvatars.bitmap(key, name, peer?.photo))
+            .setContentTitle(name)
             .setContentText(if (tr) "Arama sürüyor" else "Call in progress")
+            // How long it has gone on, counting by itself.
+            .setUsesChronometer(true)
             .setStyle(
                 NotificationCompat.CallStyle.forOngoingCall(
-                    Person.Builder().setName(peer?.name ?: "Nuvelo").build(),
+                    Person.Builder().setName(name).setKey(key).setIcon(NotificationAvatars.icon(key, name, peer?.photo)).setImportant(true).build(),
                     action(context, CallActionReceiver.HANG_UP, 15),
                 ).setIsVideo(video),
             )
@@ -282,11 +306,17 @@ class CallKeepAliveService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Started a moment after the call already ended (a call cancelled within a second or two): Android still
         // needs it to show itself once, and then it goes at once, leaving nothing behind.
-        val live = com.qmusic.ui.chat.CallHooks.state?.value?.let { it.phase != com.qmusic.ui.chat.CallPhase.ENDED } == true
+        // A one-to-one call going on, or a group call (a call someone was added to goes on as one).
+        val live = com.qmusic.ui.chat.CallHooks.state?.value?.let { it.phase != com.qmusic.ui.chat.CallPhase.ENDED } == true ||
+            com.qmusic.ui.chat.CallHooks.groupActive
         val video = intent?.getBooleanExtra(EXTRA_VIDEO, false) == true
-        val peer = intent?.getStringExtra(EXTRA_NAME)?.let { ChatUser(uid = "", name = it, username = "") }
+        val screen = intent?.getBooleanExtra(EXTRA_SCREEN, false) == true
+        val peer = intent?.getStringExtra(EXTRA_NAME)?.let {
+            ChatUser(uid = intent.getStringExtra(EXTRA_UID).orEmpty(), name = it, username = "", photo = intent.getStringExtra(EXTRA_PHOTO)?.ifBlank { null })
+        }
         val media = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or (if (video) ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else 0)
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or (if (video) ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else 0) or
+                (if (screen) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION else 0)
         } else {
             0
         }
@@ -298,7 +328,22 @@ class CallKeepAliveService : Service() {
             add(0)
         }.distinct()
         val notification = CallNotifications.ongoing(this, peer, video)
-        val started = tries.any { type -> runCatching { ServiceCompat.startForeground(this, CallNotifications.ONGOING_ID, notification, type) }.isSuccess }
+        val startedAs = tries.firstOrNull { type -> runCatching { ServiceCompat.startForeground(this, CallNotifications.ONGOING_ID, notification, type) }.isSuccess }
+        val started = startedAs != null
+        // Asked to say "screen": the call waits for this before reading the screen. Android 14 needs the type itself.
+        if (screen) {
+            val screenOk = startedAs != null && live &&
+                (Build.VERSION.SDK_INT < 34 || (startedAs and ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) != 0)
+            com.qmusic.ui.chat.CallHooks.screenServiceReady?.complete(screenOk)
+        }
+        // Their photo not fetched yet: the notification shows their initial now and their photo as soon as it is in.
+        if (started && live && peer != null && !NotificationAvatars.has(peer.photo)) {
+            NotificationAvatars.prefetch(peer.photo) {
+                val still = com.qmusic.ui.chat.CallHooks.state?.value?.let { it.phase != com.qmusic.ui.chat.CallPhase.ENDED } == true ||
+                    com.qmusic.ui.chat.CallHooks.groupActive
+                if (still) runCatching { getSystemService(android.app.NotificationManager::class.java).notify(CallNotifications.ONGOING_ID, CallNotifications.ongoing(this, peer, video)) }
+            }
+        }
         if (!started || !live) {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -316,5 +361,14 @@ class CallKeepAliveService : Service() {
     companion object {
         const val EXTRA_VIDEO = "video"
         const val EXTRA_NAME = "name"
+        const val EXTRA_SCREEN = "screen"
+        const val EXTRA_UID = "uid"
+        const val EXTRA_PHOTO = "photo"
+
+        /** The call going on (for starting the service again when the screen is shown). */
+        @Volatile var lastVideo = false
+        @Volatile var lastName: String? = null
+        @Volatile var lastUid: String? = null
+        @Volatile var lastPhoto: String? = null
     }
 }

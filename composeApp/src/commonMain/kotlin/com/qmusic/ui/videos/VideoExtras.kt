@@ -91,8 +91,8 @@ data class VideoExtraStrings(
             sleepOffLabel = "Kapalı",
             sponsorBlock = "Sponsorları atla",
             sponsorBlockHint = "SponsorBlock: reklam ve tanıtım bölümlerini kendisi atlar",
-            feedPreview = "Listede önizleme",
-            feedPreviewHint = "Wi-Fi'dayken listede duran video sessiz oynar",
+            feedPreview = "Akışlarda oynatma",
+            feedPreviewHint = "Listede durduğun video sessiz oynamaya başlar; sesini açabilir, dokununca kaldığı yerden izleyebilirsin",
             sponsorSkipped = "Sponsor bölümü atlandı",
             download = "İndir",
             downloaded = "İndirildi",
@@ -121,8 +121,8 @@ data class VideoExtraStrings(
             sleepOffLabel = "Off",
             sponsorBlock = "Skip sponsors",
             sponsorBlockHint = "SponsorBlock: skips ads and plugs by itself",
-            feedPreview = "Previews in lists",
-            feedPreviewHint = "On Wi-Fi, the video a list stops at plays without sound",
+            feedPreview = "Playback in feeds",
+            feedPreviewHint = "The video a list stops at plays silently; turn its sound on, or tap to watch on from there",
             sponsorSkipped = "Skipped a sponsor segment",
             download = "Download",
             downloaded = "Downloaded",
@@ -144,6 +144,23 @@ data class VideoExtraStrings(
         )
     }
 }
+
+/** Under "2x" while the picture is held. */
+internal val VideoExtraStrings.holdToSeekHint: String get() = if (this == VideoExtraStrings.English) "Slide left or right to seek" else "Sarmak için sağa sola kaydır"
+
+/** The empty search page: "You may like", and taking a past search away. */
+internal val VideoExtraStrings.mayLike: String get() = if (this == VideoExtraStrings.English) "You may like" else "Hoşunuza gidebilecekler"
+internal val VideoExtraStrings.fromWatchedChannels: String get() = if (this == VideoExtraStrings.English) "From channels you watched" else "İzlediğiniz kanallardan"
+internal val VideoExtraStrings.removeSearch: String get() = if (this == VideoExtraStrings.English) "Remove from search history?" else "Arama geçmişinden kaldırılsın mı?"
+internal val VideoExtraStrings.removeLabel: String get() = if (this == VideoExtraStrings.English) "Remove" else "Kaldır"
+internal val VideoExtraStrings.cancelLabel: String get() = if (this == VideoExtraStrings.English) "Cancel" else "İptal"
+
+/** The choices of "Playback in feeds", and its sound button. */
+internal val VideoExtraStrings.previewAlways: String get() = if (this == VideoExtraStrings.English) "Always" else "Her zaman"
+internal val VideoExtraStrings.previewWifi: String get() = if (this == VideoExtraStrings.English) "Wi-Fi only" else "Yalnızca Wi-Fi"
+internal val VideoExtraStrings.previewOff: String get() = if (this == VideoExtraStrings.English) "Off" else "Kapalı"
+internal val VideoExtraStrings.previewSoundOn: String get() = if (this == VideoExtraStrings.English) "Turn sound on" else "Sesi aç"
+internal val VideoExtraStrings.previewSoundOff: String get() = if (this == VideoExtraStrings.English) "Mute" else "Sesi kapat"
 
 /** The extra words that go with these strings' language. */
 internal fun VideoStrings.extras(): VideoExtraStrings =

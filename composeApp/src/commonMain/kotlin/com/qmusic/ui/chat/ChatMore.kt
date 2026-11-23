@@ -88,7 +88,7 @@ internal fun PollDialog(s: ChatStrings, onSend: (ChatPoll) -> Unit, onDismiss: (
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 3.dp)) {
                         Box(Modifier.weight(1f)) { Field(value, { options[i] = it.take(100) }, s.pollOption + " ${i + 1}") }
                         if (options.size > 2) {
-                            IconButton(onClick = { options.removeAt(i) }) { Icon(QMusicIcons.Close, null, tint = TextSecondary) }
+                            IconButton(onClick = { options.removeAt(i) }) { Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = TextSecondary) }
                         }
                     }
                 }

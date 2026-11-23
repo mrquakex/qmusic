@@ -10,5 +10,8 @@
 - **Qeyf mesajı** (`snd_recv_yeni`, `snd_notify_yeni`, the default message and notification sound since 2.10.1): "New
   Notification 07" by Universfield, from Pixabay (Pixabay Content License: free to use in apps, no credit needed),
   sent by the owner; trimmed and normalised like the Kenney ones.
-- **Klavye** (`snd_send_enter`, the default send sound since 2.10.6) and the typing clicks (`snd_type_1`..`snd_type_5`):
-  cut from "Keyboard Sound Google Enter" by pexjojo on Pixabay (Pixabay Content License, no credit needed), sent by the owner.
+- **Pop** (`snd_send_pop`, the default send sound since 2.13.15): "SimplePop1" by NoisyRedFox,
+  https://freesound.org/people/NoisyRedFox/sounds/ (Freesound, CC0), via `fetch_candidates.py`.
+- **Nuvelo mesajı** (`snd_recv_bildirim`, the default in-chat receive sound since 2.13.15): "UI Toast Notification" by
+  Qvantor (Freesound, CC0), via `fetch_candidates.py`. The old message sound stays as "Klasik".
+- The keyboard send sound and the typing clicks were removed in 2.13.15.

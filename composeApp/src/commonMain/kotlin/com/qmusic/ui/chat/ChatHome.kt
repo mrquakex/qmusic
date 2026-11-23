@@ -8,6 +8,7 @@ import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -257,7 +258,7 @@ internal fun HomeTitle(title: String, onExit: () -> Unit, logo: Boolean = false,
         if (home) {
             Spacer(Modifier.width(12.dp))
         } else {
-            IconButton(onClick = onExit) { Icon(QMusicIcons.Back, contentDescription = null, tint = Ink) }
+            IconButton(onClick = onExit) { Icon(QMusicIcons.Back, contentDescription = com.qmusic.ui.A11y.back, tint = Ink) }
         }
         if (logo) {
             // The chats' page carries the app's name, as WhatsApp does.
@@ -295,7 +296,9 @@ internal fun SearchPill(value: String, onValue: (String) -> Unit, hint: String) 
             )
         }
         if (value.isNotEmpty()) {
-            Icon(QMusicIcons.Close, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(20.dp).clip(CircleShape).clickable { onValue("") })
+            Box(Modifier.size(40.dp).clip(CircleShape).clickable { onValue("") }, contentAlignment = Alignment.Center) {
+                Icon(QMusicIcons.Close, contentDescription = if (ChatMusic.english) "Clear" else "Temizle", tint = TextSecondary, modifier = Modifier.size(20.dp))
+            }
         }
     }
 }
@@ -753,10 +756,19 @@ private fun CallsTab(
     var menu by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
     var showFavorites by remember { mutableStateOf(false) }
+    // Only the missed ones (the red ones), or all.
+    var missedOnly by remember { mutableStateOf(false) }
+    // A line held down: take it (and the calls folded into it) out of the list.
+    var deleting by remember { mutableStateOf<CallRun?>(null) }
     val share = com.qmusic.ui.rememberShare()
-    val runs = remember(calls, search) {
+    val runs = remember(calls, search, missedOnly) {
         val q = search.trim()
-        runsOf(if (q.isEmpty()) calls else calls.filter { it.peer.name.contains(q, ignoreCase = true) || it.peer.username.contains(q, ignoreCase = true) })
+        runsOf(
+            calls.filter { c ->
+                (q.isEmpty() || c.peer.name.contains(q, ignoreCase = true) || c.peer.username.contains(q, ignoreCase = true)) &&
+                    (!missedOnly || c.outcome == CallOutcome.MISSED)
+            },
+        )
     }
     val favorites = remember(threads) { threads.orEmpty().filter { it.favorite && !it.isGroup } }
     // Looking at the tab clears its badge; new missed calls while on it too. (Ready beside another tab, it did
@@ -767,7 +779,7 @@ private fun CallsTab(
             stickyHeader(key = "title") {
                 HomeTitle(s.tabCalls, onExit) {
                     Box {
-                        IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Ink) }
+                        IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = com.qmusic.ui.A11y.more, tint = Ink) }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
                             DropdownMenuItem(text = { Text(s.callLink, color = TextPrimary) }, onClick = { menu = false; share(s.callLinkText + ": " + qeyfCallLink(me.username)) })
                             DropdownMenuItem(text = { Text(s.clearCalls, color = TextPrimary) }, enabled = calls.isNotEmpty(), onClick = { menu = false; confirmClear = true })
@@ -791,6 +803,14 @@ private fun CallsTab(
                     items(favorites, key = { "fav_" + it.id }) { t -> CallPersonRow(t.other, s, onCall, onOpen = { controller.push(ChatRoute.CallDetails(t.other)) }) }
                 }
             }
+            if (calls.isNotEmpty()) {
+                item(key = "callChips") {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(s.callsAll, !missedOnly) { missedOnly = false }
+                        FilterChip(s.callsMissedOnly, missedOnly) { missedOnly = true }
+                    }
+                }
+            }
             if (runs.isNotEmpty()) item(key = "recent") { SectionTitle(s.recentCalls) }
             if (calls.isEmpty()) item(key = "empty") { EmptyNote(s.callsEmpty) }
             items(runs, key = { it.first.id }) { run ->
@@ -798,7 +818,9 @@ private fun CallsTab(
                 val missed = c.outcome == CallOutcome.MISSED
                 val group = c.direction == CallDirection.GROUP
                 Row(
-                    Modifier.fillMaxWidth().clickable { controller.push(ChatRoute.CallDetails(c.peer)) }.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                    Modifier.fillMaxWidth()
+                        .combinedClickable(onClick = { controller.push(ChatRoute.CallDetails(c.peer)) }, onLongClick = { deleting = run })
+                        .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     ChatAvatar(c.peer, 50.dp)
@@ -814,7 +836,13 @@ private fun CallsTab(
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CallArrow(c)
-                            Text(listTime(c.at, s) + " " + clock(c.at), color = TextSecondary, fontSize = 13.sp, maxLines = 1)
+                            // How long it lasted, for a call that was answered.
+                            Text(
+                                listTime(c.at, s) + " " + clock(c.at) + if (c.seconds > 0) " · " + duration(c.seconds) else "",
+                                color = TextSecondary,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                            )
                         }
                     }
                     IconButton(onClick = {
@@ -828,6 +856,21 @@ private fun CallsTab(
             }
         }
         HomeFab(QMusicIcons.Phone, s.quickCall, Modifier.align(Alignment.BottomEnd)) { controller.push(ChatRoute.NewCall(group = false)) }
+    }
+    deleting?.let { run ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            containerColor = DarkSurfaceVariant,
+            title = { Text(run.first.peer.name + if (run.entries.size > 1) " (${run.entries.size})" else "", color = TextPrimary) },
+            text = { Text(s.callsDeleteEntry, color = TextSecondary) },
+            confirmButton = {
+                TextButton(onClick = {
+                    controller.deleteCalls(run.entries.map { it.id })
+                    deleting = null
+                }) { Text(s.delete, color = CallRed) }
+            },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text(s.cancel, color = TextSecondary) } },
+        )
     }
     if (confirmClear) {
         AlertDialog(
@@ -920,7 +963,7 @@ internal fun CallDetailsPage(controller: ChatController, s: ChatStrings, peer: C
             Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.clip(CircleShape).clickable { if (peer.isGroup) controller.openGroupInfo(peer) else controller.openProfile(peer) }) { ChatAvatar(peer, 104.dp) }
                 Spacer(Modifier.height(12.dp))
-                Text(peer.name, color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(peer.name, color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
                 if (peer.username.isNotEmpty()) Text("@" + peer.username, color = TextSecondary, fontSize = 14.sp)
                 Spacer(Modifier.height(18.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
