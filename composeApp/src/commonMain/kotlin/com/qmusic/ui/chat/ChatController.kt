@@ -928,6 +928,15 @@ class ChatController(
         scope.launch { backend.pin(id, message, preview, pinned).onFailure { _error.value = it.message } }
     }
 
+    /** Unpins a message by id (used from the pinned banner, even when the message is older than the loaded page). */
+    fun unpin(other: ChatUser, messageId: String) {
+        val id = chatIdWith(other) ?: return
+        scope.launch {
+            backend.pin(id, ChatMessage(id = messageId, from = "", text = "", at = 0L), "", false)
+                .onFailure { _error.value = it.message }
+        }
+    }
+
     fun opened(other: ChatUser) = chatIdWith(other)?.let { id -> backend.opened(id).catch { emit(emptyMap()) } } ?: flowOf(emptyMap())
 
     fun markOpened(other: ChatUser, message: ChatMessage) {

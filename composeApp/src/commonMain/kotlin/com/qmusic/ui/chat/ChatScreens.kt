@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -84,6 +85,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -1210,6 +1212,12 @@ private fun ConversationPage(
     // Opened from a search: straight to the message found.
     var jumpTo by remember { mutableStateOf(controller.takeJump(other)) }
     var flash by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(flash) {
+        if (flash != null) {
+            kotlinx.coroutines.delay(1600)
+            flash = null
+        }
+    }
     LaunchedEffect(jumpTo, rows) {
         val target = jumpTo ?: return@LaunchedEffect
         val index = rows?.indexOfFirst { it is ListRow.Message && it.m.id == target } ?: -1
@@ -1217,8 +1225,6 @@ private fun ConversationPage(
             listState.animateScrollToItem(index)
             jumpTo = null
             flash = target
-            kotlinx.coroutines.delay(1600)
-            flash = null
         } else if ((messages?.size ?: 0) >= limit.value && limit.value < 5_000) {
             limit.value += PAGE
         } else {
@@ -1504,26 +1510,78 @@ private fun ConversationPage(
         }
         if (pins.isNotEmpty() && !searching) {
             var pinIndex by remember(other.uid) { mutableStateOf(0) }
-            val pin = pins[pinIndex.coerceIn(0, pins.lastIndex)]
-            Row(
-                Modifier.fillMaxWidth().background(DarkSurface).clickable {
-                    jumpTo = pin.messageId
-                    pinIndex = (pinIndex + 1) % pins.size
-                }.padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // One bar per pin, the shown one bright.
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    pins.indices.forEach { i ->
-                        Box(Modifier.width(3.dp).height((24 / pins.size).dp).background(if (i == pinIndex.coerceIn(0, pins.lastIndex)) Ink else TextMuted))
+            var pinMenuFor by remember(other.uid) { mutableStateOf<PinnedMessage?>(null) }
+            val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+            val shownIndex = pinIndex.coerceIn(0, pins.lastIndex)
+            val pin = pins[shownIndex]
+            val menuTarget = pinMenuFor?.takeIf { target -> pins.any { it.messageId == target.messageId } }
+            LaunchedEffect(menuTarget) {
+                if (menuTarget == null && pinMenuFor != null) pinMenuFor = null
+            }
+            Box(Modifier.fillMaxWidth()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(DarkSurface)
+                        .rightClick { pinMenuFor = pin }
+                        .hoverLight()
+                        .combinedClickable(
+                            onClick = {
+                                jumpTo = pin.messageId
+                                pinIndex = (shownIndex + 1) % pins.size
+                            },
+                            onLongClick = {
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                pinMenuFor = pin
+                            },
+                        )
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // One bar per pin, the shown one bright.
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        pins.indices.forEach { i ->
+                            Box(Modifier.width(3.dp).height((24 / pins.size).dp).background(if (i == shownIndex) Ink else TextMuted))
+                        }
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Icon(QMusicIcons.Pin, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(s.pinnedMessages + if (pins.size > 1) " · ${shownIndex + 1}/${pins.size}" else "", color = TextSecondary, fontSize = 11.sp)
+                        Text(pin.text, color = TextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                Spacer(Modifier.width(10.dp))
-                Icon(QMusicIcons.Pin, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(s.pinnedMessages + if (pins.size > 1) " · ${pinIndex.coerceIn(0, pins.lastIndex) + 1}/${pins.size}" else "", color = TextSecondary, fontSize = 11.sp)
-                    Text(pin.text, color = TextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Box(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp)) {
+                    DropdownMenu(
+                        expanded = menuTarget != null,
+                        onDismissRequest = { pinMenuFor = null },
+                        modifier = Modifier.widthIn(min = 196.dp),
+                        offset = DpOffset(0.dp, 4.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        containerColor = DarkSurfaceVariant,
+                        border = BorderStroke(1.dp, BorderSubtle),
+                    ) {
+                        if (canPin) {
+                            DropdownMenuItem(
+                                text = { Text(s.unpinMessage, color = TextPrimary, fontSize = 15.sp) },
+                                onClick = {
+                                    val target = menuTarget ?: pin
+                                    pinMenuFor = null
+                                    controller.unpin(other, target.messageId)
+                                    pinIndex = shownIndex.coerceAtMost((pins.size - 2).coerceAtLeast(0))
+                                },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text(s.goToMessage, color = TextPrimary, fontSize = 15.sp) },
+                            onClick = {
+                                val target = menuTarget ?: pin
+                                pinMenuFor = null
+                                jumpTo = target.messageId
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -3198,6 +3256,7 @@ private fun Bubble(
             ) {
                 if (m.expireAt > 0) Icon(QMusicIcons.Timer, contentDescription = null, tint = fgSoft, modifier = Modifier.padding(end = 3.dp).size(12.dp))
                 if (starred) Icon(QMusicIcons.Star, contentDescription = null, tint = fgSoft, modifier = Modifier.padding(end = 3.dp).size(12.dp))
+                if (pinned && !m.deleted) Icon(QMusicIcons.Pin, contentDescription = null, tint = fgSoft, modifier = Modifier.padding(end = 3.dp).size(12.dp))
                 if (m.edited && !m.deleted) Text(s.edited + "  ", color = fgSoft, fontSize = 11.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
                 Text(clock(m.at), color = fgSoft, fontSize = 11.sp)
                 if (mine && !m.deleted) {

@@ -38,6 +38,7 @@ private class FakeChat : ChatBackend {
     )
     val blockedIds = MutableStateFlow<Set<String>>(emptySet())
     val sent = mutableListOf<Triple<ChatUser, String, SharedItem?>>()
+    val pinCalls = mutableListOf<Triple<String, String, Boolean>>()
     var takenNames = setOf("ali")
 
     override suspend fun signIn() = Result.success(Unit)
@@ -54,6 +55,10 @@ private class FakeChat : ChatBackend {
     }
     override suspend fun markRead(chatId: String) {}
     override suspend fun deleteMessage(chatId: String, messageId: String) = Result.success(Unit)
+    override suspend fun pin(chatId: String, message: ChatMessage, preview: String, pinned: Boolean): Result<Unit> {
+        pinCalls += Triple(chatId, message.id, pinned)
+        return Result.success(Unit)
+    }
     override fun blocked(): Flow<Set<String>> = blockedIds
     override suspend fun setBlocked(uid: String, blocked: Boolean): Result<Unit> {
         blockedIds.value = if (blocked) blockedIds.value + uid else blockedIds.value - uid
@@ -131,5 +136,13 @@ class ChatControllerTest {
         c.setBlocked(ALI, true)
         assertTrue(c.routes.value.isEmpty())
         assertEquals(setOf("bbb"), c.blocked.value)
+    }
+
+    @Test
+    fun unpinningFromBannerRemovesPinById() = runTest(UnconfinedTestDispatcher()) {
+        val backend = FakeChat()
+        val c = ChatController(backend, backgroundScope)
+        c.unpin(ALI, "msg-42")
+        assertEquals(listOf(Triple("aaa_bbb", "msg-42", false)), backend.pinCalls)
     }
 }

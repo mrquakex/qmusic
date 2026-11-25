@@ -417,6 +417,7 @@ data class ChatStrings(
     val pinMessage: String get() = if (english) "Pin" else "Sabitle"
     val unpinMessage: String get() = if (english) "Unpin" else "Sabitlemeyi kaldır"
     val pinnedMessages: String get() = if (english) "Pinned messages" else "Sabitlenen mesajlar"
+    val goToMessage: String get() = if (english) "Go to message" else "Mesaja git"
     val viewOnce: String get() = if (english) "View once" else "Tek seferlik"
     val viewOnceNote: String get() = if (english) "Opens once, then it is gone. It cannot be forwarded or saved." else "Bir kez açılır, sonra kaybolur. İletilemez, kaydedilemez."
     val viewOncePhoto: String get() = if (english) "View once photo" else "Tek seferlik fotoğraf"
