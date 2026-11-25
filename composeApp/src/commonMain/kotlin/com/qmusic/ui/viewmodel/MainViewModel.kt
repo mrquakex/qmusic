@@ -250,7 +250,7 @@ class MainViewModel(
         playerController.setVolume(clamped)
     }
 
-    private val _equalizerEnabled = MutableStateFlow(settings.bool(KEY_EQUALIZER_ENABLED, true))
+    private val _equalizerEnabled = MutableStateFlow(settings.bool(KEY_EQUALIZER_ENABLED, true).value)
     val equalizerEnabled: StateFlow<Boolean> = _equalizerEnabled.asStateFlow()
 
     // 10-Band Equalizer (-12 to +12 dB)

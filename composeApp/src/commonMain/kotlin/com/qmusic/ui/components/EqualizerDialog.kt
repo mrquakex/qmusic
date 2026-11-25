@@ -115,8 +115,7 @@ fun EqualizerDialog(
                     labelColor = MaterialTheme.colorScheme.onSurface,
                     disabledContainerColor = DarkSurfaceVariant.copy(alpha = 0.5f),
                     disabledLabelColor = TextSecondary,
-                    disabledSelectedContainerColor = Ink.copy(alpha = 0.35f),
-                    disabledSelectedLabelColor = InkInverse,
+                    disabledSelectedContainerColor = Ink.copy(alpha = 0.18f),
                 )
 
                 // Presets row
