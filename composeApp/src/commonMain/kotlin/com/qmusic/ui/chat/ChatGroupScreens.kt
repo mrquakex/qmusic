@@ -1,14 +1,19 @@
 package com.qmusic.ui.chat
 
+import kotlinx.datetime.Clock
 import kotlinx.datetime.toLocalDateTime
+import com.qmusic.ui.theme.BorderSubtle
 import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +24,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -36,6 +42,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +54,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -182,6 +190,7 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
     val encrypted = remember(e2eTick, group.uid) { E2e.api.version(group.uid) != null }
     val e2eWords = remember(ChatMusic.english) { E2eWords(ChatMusic.english) }
     if (g?.secret == true) SecureScreen()
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item { TopBar("", { controller.pop() }) }
         item {
@@ -333,8 +342,17 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
             dismissButton = { TextButton(onClick = { describing = false }) { Text(s.cancel, color = TextSecondary) } },
         )
     }
-    viewingPhotos?.let { (list, index) -> PhotoViewer(list, index, load = { i -> controller.imageBytes(group, i) }) { viewingPhotos = null } }
-    videoOpen?.let { url -> VideoViewer(url) { videoOpen = null } }
+    viewingPhotos?.let { (list, index) -> PhotoViewer(list, index, load = { i -> controller.imageBytes(group, i) }, s = s) { viewingPhotos = null } }
+    videoOpen?.let { url ->
+        val msg = messages?.firstOrNull { it.attachment?.url == url }
+        VideoViewer(
+            url = url,
+            caption = msg?.text.orEmpty(),
+            name = msg?.attachment?.name.orEmpty(),
+            mime = msg?.attachment?.mime.orEmpty(),
+            s = s,
+        ) { videoOpen = null }
+    }
     if (confirmLeave) {
         AlertDialog(
             onDismissRequest = { confirmLeave = false },
@@ -344,6 +362,7 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
             confirmButton = { TextButton(onClick = { confirmLeave = false; controller.leaveGroup(group) }) { Text(s.leave, color = Color(0xFFFF6B6B)) } },
             dismissButton = { TextButton(onClick = { confirmLeave = false }) { Text(s.cancel, color = TextSecondary) } },
         )
+    }
     }
 }
 
@@ -390,56 +409,155 @@ internal fun sizeLabel(bytes: Long): String = when {
     else -> "$bytes B"
 }
 
-/** A voice message: play/pause, its sound as bars (the part played lit), and how long it is. A tap on the bars seeks. */
+/** Interactive scrubbable waveform bars shared by [VoiceBubble] and the recording preview bar. */
 @Composable
-internal fun VoiceBubble(a: ChatAttachment, mine: Boolean, player: VoicePlayer?, progress: Float?) {
+internal fun VoiceWaveform(
+    wave: List<Int>,
+    progress: Float,
+    active: Boolean,
+    fg: Color,
+    dim: Color,
+    modifier: Modifier = Modifier,
+    onTap: (Float) -> Unit,
+    onScrubChange: (Float?) -> Unit,
+    onScrubCommit: (Float) -> Unit,
+) {
+    val bars = wave.ifEmpty { List(40) { 20 } }
+    var scrubbing by remember { mutableStateOf<Float?>(null) }
+    val shown = scrubbing ?: progress
+    Canvas(
+        modifier
+            .height(28.dp)
+            .pointerInput(bars) {
+                detectTapGestures { pos -> onTap((pos.x / size.width).coerceIn(0f, 1f)) }
+            }
+            .pointerInput(bars) {
+                detectHorizontalDragGestures(
+                    onDragStart = { pos ->
+                        val f = (pos.x / size.width).coerceIn(0f, 1f)
+                        scrubbing = f
+                        onScrubChange(f)
+                    },
+                    onDragEnd = {
+                        scrubbing?.let { onScrubCommit(it) }
+                        scrubbing = null
+                        onScrubChange(null)
+                    },
+                    onDragCancel = {
+                        scrubbing = null
+                        onScrubChange(null)
+                    },
+                    onHorizontalDrag = { change, amount ->
+                        val next = ((scrubbing ?: shown) + amount / size.width).coerceIn(0f, 1f)
+                        scrubbing = next
+                        onScrubChange(next)
+                        change.consume()
+                    },
+                )
+            },
+    ) {
+        val gap = 2.dp.toPx()
+        val barW = ((size.width - gap * (bars.size - 1)) / bars.size).coerceAtLeast(1f)
+        bars.forEachIndexed { i, v ->
+            val h = (size.height * (v / 100f)).coerceAtLeast(3.dp.toPx())
+            val x = i * (barW + gap)
+            val lit = (i + 0.5f) / bars.size <= shown
+            drawRoundRect(
+                color = if (lit) fg else dim,
+                topLeft = Offset(x, (size.height - h) / 2),
+                size = Size(barW, h),
+                cornerRadius = CornerRadius(barW / 2, barW / 2),
+            )
+        }
+        if (active || scrubbing != null) {
+            val kx = (size.width * shown).coerceIn(4.dp.toPx(), (size.width - 4.dp.toPx()).coerceAtLeast(4.dp.toPx()))
+            drawCircle(
+                color = fg,
+                radius = if (scrubbing != null) 5.5.dp.toPx() else 4.dp.toPx(),
+                center = Offset(kx, size.height / 2f),
+            )
+        }
+    }
+}
+
+/** A voice message: play/pause, its sound as scrubbable bars, played indicator, and how long it is. */
+@Composable
+internal fun VoiceBubble(
+    a: ChatAttachment,
+    mine: Boolean,
+    player: VoicePlayer?,
+    progress: Float?,
+    played: Boolean = false,
+    onPlay: () -> Unit = {},
+) {
     val playingUrl by (player?.playing ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
-    val played by (player?.progress ?: remember { kotlinx.coroutines.flow.MutableStateFlow(0f) }).collectAsState()
-    val isThis = playingUrl == a.url
+    val activeUrl by (player?.active ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
+    val playedFraction by (player?.progress ?: remember { kotlinx.coroutines.flow.MutableStateFlow(0f) }).collectAsState()
+    val isPlayingThis = playingUrl == a.url
+    val isActiveThis = activeUrl == a.url
+    var scrubbing by remember(a.url) { mutableStateOf<Float?>(null) }
     val fg = if (mine) InkInverse else Ink
     val dim = if (mine) InkInverse.copy(alpha = 0.28f) else Ink.copy(alpha = 0.3f)
+    val soft = if (mine) InkInverse.copy(alpha = 0.55f) else TextSecondary
     Row(Modifier.width(250.dp).padding(start = 6.dp, end = 10.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(
-            Modifier.size(40.dp).clip(CircleShape).background(if (mine) InkInverse else Ink).clickable(enabled = progress == null && player != null) { player?.toggle(a.url) },
+            Modifier.size(40.dp).clip(CircleShape).background(if (mine) InkInverse else Ink).clickable(enabled = progress == null && player != null) {
+                onPlay()
+                player?.toggle(a.url)
+            },
             contentAlignment = Alignment.Center,
         ) {
             if (progress != null) {
                 CircularProgressIndicator(progress = { progress }, color = if (mine) Ink else InkInverse, strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
             } else {
-                Icon(if (isThis) QMusicIcons.Pause else QMusicIcons.Play, contentDescription = null, tint = if (mine) Ink else InkInverse, modifier = Modifier.size(18.dp))
+                Icon(if (isPlayingThis) QMusicIcons.Pause else QMusicIcons.Play, contentDescription = null, tint = if (mine) Ink else InkInverse, modifier = Modifier.size(18.dp))
             }
         }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            val wave = a.wave.ifEmpty { List(40) { 20 } }
-            val shown = if (isThis) played else 0f
-            Canvas(
-                Modifier.fillMaxWidth().height(28.dp).pointerInput(a.url) {
-                    detectTapGestures { pos -> player?.seek(a.url, (pos.x / size.width).coerceIn(0f, 1f)) }
+            val baseProgress = if (isActiveThis) playedFraction else 0f
+            val shown = scrubbing ?: baseProgress
+            VoiceWaveform(
+                wave = a.wave,
+                progress = baseProgress,
+                active = isActiveThis,
+                fg = fg,
+                dim = dim,
+                modifier = Modifier.fillMaxWidth(),
+                onTap = { fraction ->
+                    if (isActiveThis) {
+                        player?.seek(a.url, fraction)
+                    } else if (progress == null && player != null) {
+                        onPlay()
+                        player.toggle(a.url)
+                    }
                 },
-            ) {
-                val gap = 2.dp.toPx()
-                val barW = ((size.width - gap * (wave.size - 1)) / wave.size).coerceAtLeast(1f)
-                wave.forEachIndexed { i, v ->
-                    val h = (size.height * (v / 100f)).coerceAtLeast(3.dp.toPx())
-                    val x = i * (barW + gap)
-                    val lit = (i + 0.5f) / wave.size <= shown
-                    drawRoundRect(
-                        color = if (lit) fg else dim,
-                        topLeft = Offset(x, (size.height - h) / 2),
-                        size = Size(barW, h),
-                        cornerRadius = CornerRadius(barW / 2, barW / 2),
-                    )
-                }
-            }
+                onScrubChange = { scrubbing = it },
+                onScrubCommit = { fraction ->
+                    if (isActiveThis) {
+                        player?.seek(a.url, fraction)
+                    } else if (progress == null && player != null) {
+                        onPlay()
+                        player.toggle(a.url)
+                    }
+                },
+            )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (isThis) mmss((a.durationMs * played).toLong()) else mmss(a.durationMs),
-                    color = if (mine) InkInverse.copy(alpha = 0.55f) else TextSecondary,
+                    if (isActiveThis || scrubbing != null) mmss((a.durationMs * shown).toLong()) else mmss(a.durationMs),
+                    color = soft,
                     fontSize = 11.sp,
-                    modifier = Modifier.weight(1f),
+                    fontWeight = if (!mine && !played && !isActiveThis) FontWeight.SemiBold else FontWeight.Normal,
                 )
-                if (isThis && player != null) {
+                if (!mine && !played && !isActiveThis && progress == null) {
+                    Spacer(Modifier.width(6.dp))
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(Ink))
+                } else if (played && !isActiveThis && progress == null) {
+                    Spacer(Modifier.width(5.dp))
+                    Icon(QMusicIcons.Check, contentDescription = null, tint = soft, modifier = Modifier.size(12.dp))
+                }
+                Spacer(Modifier.weight(1f))
+                if (isActiveThis && player != null) {
                     // 1× → 1.5× → 2×, like the apps people know.
                     val speed by player.speed.collectAsState()
                     Text(
@@ -511,14 +629,82 @@ internal fun FileBubble(a: ChatAttachment, mine: Boolean, progress: Float?, s: C
     }
 }
 
-/** A video message full screen; back or the close button leaves. */
+/** A video message full screen: playback controls, optional caption, share, and save to gallery. */
 @Composable
-internal fun VideoViewer(url: String, onClose: () -> Unit) {
+internal fun VideoViewer(
+    url: String,
+    caption: String = "",
+    name: String = "",
+    mime: String = "video/mp4",
+    s: ChatStrings = if (ChatMusic.english) ChatStrings.English else ChatStrings.Turkish,
+    onClose: () -> Unit,
+) {
     PlatformBackHandler(enabled = true) { onClose() }
+    val openAttachment = rememberAttachmentOpener()
+    var saving by remember(url) { mutableStateOf(false) }
+    var sharing by remember(url) { mutableStateOf(false) }
+    val shareHook = ChatMediaHooks.shareVideo
+    val saveHook = ChatMediaHooks.saveVideo
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        VideoMessagePlayer(url, Modifier.fillMaxSize())
-        IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(6.dp)) {
-            Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = Color.White)
+        CompositionLocalProvider(LocalVideoViewerMode provides true) {
+            VideoMessagePlayer(url, Modifier.fillMaxSize())
+        }
+        Row(
+            Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.65f), Color.Transparent)))
+                .statusBarsPadding()
+                .padding(horizontal = 6.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onClose) {
+                Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = Color.White)
+            }
+            Spacer(Modifier.weight(1f))
+            if (shareHook != null) {
+                IconButton(
+                    enabled = !sharing,
+                    onClick = {
+                        sharing = true
+                        shareHook(url, name.ifBlank { "Nuvelo_${Clock.System.now().toEpochMilliseconds()}.mp4" }) { sharing = false }
+                    },
+                ) {
+                    if (sharing) CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                    else Icon(QMusicIcons.Share, contentDescription = s.sharePhoto, tint = Color.White)
+                }
+            }
+            IconButton(
+                enabled = !saving,
+                onClick = {
+                    val fileName = name.ifBlank { "Nuvelo_${Clock.System.now().toEpochMilliseconds()}.mp4" }
+                    if (saveHook != null) {
+                        saving = true
+                        saveHook(url, fileName) { saving = false }
+                    } else {
+                        openAttachment(ChatAttachment(AttachmentKind.VIDEO, url, fileName, mime = mime.ifBlank { "video/mp4" }))
+                    }
+                },
+            ) {
+                if (saving) CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                else Icon(QMusicIcons.Download, contentDescription = s.download, tint = Color.White)
+            }
+        }
+        if (caption.isNotBlank()) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 88.dp)
+                    .heightIn(max = 140.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Text(caption, color = Color.White, fontSize = 14.sp, lineHeight = 20.sp)
+            }
         }
     }
 }
@@ -557,21 +743,22 @@ internal fun TogetherBanner(state: TogetherState, s: ChatStrings, onOpen: () -> 
     }
 }
 
-/** Recording a voice message: a red dot, the time, the loudness, and how to cancel. */
+/** Recording a voice message: a red dot (paused when frozen), the time, the loudness, and how to cancel. */
 @Composable
-internal fun RecordingBar(elapsedMs: Long, level: Float, hint: String, cancelling: Boolean, modifier: Modifier) {
+internal fun RecordingBar(elapsedMs: Long, level: Float, hint: String, cancelling: Boolean, modifier: Modifier, paused: Boolean = false) {
     val pulse = androidx.compose.animation.core.rememberInfiniteTransition()
         .animateFloat(0.3f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(600), androidx.compose.animation.core.RepeatMode.Reverse))
+    val dotAlpha = if (paused) 0.4f else pulse.value
     Row(
-        modifier.height(44.dp).clip(RoundedCornerShape(22.dp)).background(DarkSurfaceVariant).padding(horizontal = 16.dp),
+        modifier.height(44.dp).clip(RoundedCornerShape(22.dp)).background(DarkSurfaceVariant).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(10.dp).clip(CircleShape).background(Color(0xFFFF4D4D).copy(alpha = pulse.value)))
+        Box(Modifier.size(10.dp).clip(CircleShape).background((if (paused) TextMuted else Color(0xFFFF4D4D)).copy(alpha = dotAlpha)))
         Spacer(Modifier.width(10.dp))
         Text(mmss(elapsedMs), color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.width(10.dp))
-        Box(Modifier.width((6 + level * 40).dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Ink.copy(alpha = 0.7f)))
+        Box(Modifier.width((6 + level * 36).dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Ink.copy(alpha = 0.7f)))
         Spacer(Modifier.weight(1f))
-        Text(hint, color = if (cancelling) Color(0xFFFF6B6B) else TextMuted, fontSize = 13.sp, maxLines = 1)
+        Text(hint, color = if (cancelling) Color(0xFFFF6B6B) else TextMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

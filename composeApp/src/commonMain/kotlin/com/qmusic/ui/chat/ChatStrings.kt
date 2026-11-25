@@ -535,6 +535,17 @@ data class ChatStrings(
     val mediaClear: String get() = if (english) "Clear" else "Temizle"
     val mediaClearNote: String get() = if (english) "Clearing frees the room; photos and voice messages load again when opened." else "Temizleyince yer açılır; fotoğraflar ve sesli mesajlar açılınca yeniden iner."
 
+    val sharePhoto: String get() = if (english) "Share" else "Paylaş"
+    val saveAll: String get() = if (english) "Save all" else "Tümünü kaydet"
+    val photoLoadFailed: String get() = if (english) "Could not load photo. Tap to retry." else "Fotoğraf yüklenemedi. Yeniden denemek için dokun."
+    val videoLoadFailed: String get() = if (english) "Could not play video" else "Video oynatılamadı"
+    val recordVideo: String get() = if (english) "Record video" else "Video çek"
+    val voicePaused: String get() = if (english) "Paused" else "Duraklatıldı"
+    val voicePause: String get() = if (english) "Pause" else "Duraklat"
+    val voiceResume: String get() = if (english) "Resume" else "Devam et"
+    val voicePreview: String get() = if (english) "Preview" else "Ön dinleme"
+    val voiceEarpiece: String get() = if (english) "Earpiece" else "Ahize"
+
     companion object {
         val Turkish = ChatStrings(
             title = "Mesajlar",

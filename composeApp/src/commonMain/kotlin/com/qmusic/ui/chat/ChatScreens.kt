@@ -1035,7 +1035,21 @@ private fun ConversationPage(
     var sharedListOpen by remember { mutableStateOf(false) }
     var pendingPhotos by remember { mutableStateOf<List<PickedImage>?>(null) }
     var sendViewOnce by remember { mutableStateOf(false) }
-    var locked by remember { mutableStateOf(false) }
+    var locked by remember(other.uid) { mutableStateOf(false) }
+    var voicePreview by remember(other.uid) { mutableStateOf<PickedFile?>(null) }
+    var lastVoiceMsgId by remember(other.uid) { mutableStateOf<String?>(null) }
+    var sessionPlayed by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val activeVoiceUrl by (voicePlayer?.active ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
+    val playingVoiceUrl by (voicePlayer?.playing ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
+    val voiceProgress by (voicePlayer?.progress ?: remember { kotlinx.coroutines.flow.MutableStateFlow(0f) }).collectAsState()
+    val voiceSpeed by (voicePlayer?.speed ?: remember { kotlinx.coroutines.flow.MutableStateFlow(1f) }).collectAsState()
+    val voiceEarpiece by (voicePlayer?.earpiece ?: remember { kotlinx.coroutines.flow.MutableStateFlow(false) }).collectAsState()
+    val playerPlayed by (voicePlayer?.played ?: remember { kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet()) }).collectAsState()
+    val playedVoices = remember(playerPlayed, sessionPlayed) { playerPlayed + sessionPlayed }
+    LaunchedEffect(playingVoiceUrl) {
+        val url = playingVoiceUrl ?: return@LaunchedEffect
+        if (url !in sessionPlayed) sessionPlayed = sessionPlayed + url
+    }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val sounds = rememberChatSounds()
     // The last message heard here: a new one after it plays the send or arrive sound (not the first load).
@@ -1103,8 +1117,9 @@ private fun ConversationPage(
         }
     }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    var viewing by remember { mutableStateOf<Pair<List<ChatImage>, Int>?>(null) }
-    var videoOpen by remember { mutableStateOf<String?>(null) }
+    var viewing by remember(other.uid) { mutableStateOf<PhotoViewState?>(null) }
+    var videoOpen by remember(other.uid) { mutableStateOf<VideoViewState?>(null) }
+    var pendingVideo by remember(other.uid) { mutableStateOf<PickedFile?>(null) }
     val claudeState by controller.claudeState.collectAsState()
     var modelMenu by remember { mutableStateOf(false) }
     val isClaude = other.uid == CLAUDE_BOT_UID
@@ -1120,7 +1135,7 @@ private fun ConversationPage(
     }
     val pickPhoto = rememberImagePicker { sendPhotos(it) }
     val takePhoto = rememberCamera { photo -> photo?.let { sendPhotos(listOf(it)) } }
-    val pickVideo = rememberFilePicker(video = true, onPicked = sendPicked)
+    val pickVideo = rememberFilePicker(video = true) { file -> if (file != null) pendingVideo = file }
     val pickFile = rememberFilePicker(video = false, onPicked = sendPicked)
     val openFile = rememberAttachmentOpener()
     // Everyone's live location in this conversation (their cards follow it).
@@ -1153,19 +1168,27 @@ private fun ConversationPage(
         },
     )
 
-    // Voice messages: hold the microphone to record, let go to send, slide left to throw it away.
+    // Voice messages: hold the microphone to record, let go to send, slide left to throw it away, slide up to lock.
     val recorder = rememberVoiceRecorder()
     val askMic = rememberCallPermissions()
     var micReady by remember { mutableStateOf(false) }
-    var recordingSince by remember { mutableStateOf<Long?>(null) }
-    var cancelling by remember { mutableStateOf(false) }
-    var elapsed by remember { mutableStateOf(0L) }
+    var recordingSince by remember(other.uid) { mutableStateOf<Long?>(null) }
+    var cancelling by remember(other.uid) { mutableStateOf(false) }
+    var elapsed by remember(other.uid) { mutableStateOf(0L) }
     val level by (recorder?.level ?: remember { kotlinx.coroutines.flow.MutableStateFlow(0f) }).collectAsState()
-    LaunchedEffect(recordingSince) {
-        val since = recordingSince ?: return@LaunchedEffect
+    val recPaused by (recorder?.paused ?: remember { kotlinx.coroutines.flow.MutableStateFlow(false) }).collectAsState()
+    LaunchedEffect(recordingSince, recPaused) {
+        if (recordingSince == null) {
+            elapsed = 0L
+            return@LaunchedEffect
+        }
+        if (recPaused) return@LaunchedEffect
+        var last = Clock.System.now().toEpochMilliseconds()
         while (true) {
-            elapsed = Clock.System.now().toEpochMilliseconds() - since
-            kotlinx.coroutines.delay(200)
+            kotlinx.coroutines.delay(150)
+            val now = Clock.System.now().toEpochMilliseconds()
+            elapsed += (now - last).coerceAtLeast(0L)
+            last = now
         }
     }
 
@@ -1185,6 +1208,25 @@ private fun ConversationPage(
             controller.stopTyping(other)
             voicePlayer?.stop()
             recorder?.cancel()
+            voicePreview?.let { recorder?.discardPreview(it) }
+        }
+    }
+    // Auto-play the next consecutive voice message when one ends naturally.
+    val latestMessages by androidx.compose.runtime.rememberUpdatedState(messages)
+    val latestPreview by androidx.compose.runtime.rememberUpdatedState(voicePreview)
+    LaunchedEffect(voicePlayer, other.uid) {
+        val player = voicePlayer ?: return@LaunchedEffect
+        player.completed.collect { finishedUrl ->
+            if (latestPreview != null) return@collect
+            val list = latestMessages ?: return@collect
+            val idx = lastVoiceMsgId?.let { id -> list.indexOfFirst { it.id == id && it.attachment?.url == finishedUrl } }?.takeIf { it >= 0 }
+                ?: list.indexOfLast { it.attachment?.kind == AttachmentKind.VOICE && it.attachment.url == finishedUrl }
+            if (idx < 0) return@collect
+            val next = list.drop(idx + 1).firstOrNull { !it.system && !it.deleted }
+            if (next?.attachment?.kind == AttachmentKind.VOICE && next.progress == null) {
+                lastVoiceMsgId = next.id
+                player.toggle(next.attachment.url)
+            }
         }
     }
 
@@ -1614,6 +1656,39 @@ private fun ConversationPage(
                 else askMic(true) { granted -> if (granted) groupCalls.join(other.copy(name = title), true) else controller.reportError(s.callPermission) }
             }
         }
+        val activeVoiceMsg = remember(activeVoiceUrl, messages, lastVoiceMsgId) {
+            val url = activeVoiceUrl ?: return@remember null
+            val list = messages ?: return@remember null
+            lastVoiceMsgId?.let { id -> list.firstOrNull { it.id == id && it.attachment?.url == url } }
+                ?: list.lastOrNull { it.attachment?.kind == AttachmentKind.VOICE && it.attachment.url == url }
+        }
+        val activeVoiceOffscreen by remember(activeVoiceMsg?.id, listState) {
+            androidx.compose.runtime.derivedStateOf {
+                val msg = activeVoiceMsg ?: return@derivedStateOf false
+                val layout = listState.layoutInfo
+                if (layout.visibleItemsInfo.isEmpty()) return@derivedStateOf false
+                layout.visibleItemsInfo.none { it.key == msg.id }
+            }
+        }
+        if (activeVoiceMsg != null && activeVoiceOffscreen && voicePreview == null) {
+            val att = activeVoiceMsg.attachment
+            if (att != null) {
+                val senderLabel = if (activeVoiceMsg.from == me.uid) s.you else memberNames[activeVoiceMsg.from] ?: title
+                MiniVoiceBar(
+                    sender = senderLabel,
+                    durationMs = att.durationMs,
+                    progress = voiceProgress,
+                    playing = playingVoiceUrl == att.url,
+                    speed = voiceSpeed,
+                    earpiece = voiceEarpiece,
+                    s = s,
+                    onToggle = { voicePlayer?.toggle(att.url) },
+                    onCycleSpeed = { voicePlayer?.cycleSpeed() },
+                    onJump = { jumpTo = activeVoiceMsg.id },
+                    onClose = { voicePlayer?.stop() },
+                )
+            }
+        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             val list = messages
             val shown = rows
@@ -1758,12 +1833,14 @@ private fun ConversationPage(
                                     onReply = { if (!row.m.deleted && !row.m.system) replyTo = row.m },
                                     onReact = { emoji -> controller.react(other, row.m, emoji) },
                                     loadImage = { image -> controller.imageBytes(other, image) },
-                                    onOpenImages = { images, index -> viewing = images to index },
+                                    onOpenImages = { images, index -> viewing = PhotoViewState(images, index, row.m.text) },
                                     assisting = assist?.takeIf { it.target == row.m.id }?.phase,
                                     assistWork = assist?.takeIf { it.target == row.m.id },
                                     inClaudeChat = isClaude,
                                     voicePlayer = voicePlayer,
-                                    onOpenVideo = { url -> videoOpen = url },
+                                    voicePlayed = row.m.attachment?.url?.let { it in playedVoices } == true,
+                                    onVoicePlay = { lastVoiceMsgId = row.m.id },
+                                    onOpenVideo = { _ -> row.m.attachment?.let { att -> videoOpen = VideoViewState(att, row.m.text) } },
                                     onOpenFile = openFile,
                                     onJoin = { controller.joinTogether(other) },
                                     highlight = current?.id == row.m.id || flash == row.m.id,
@@ -1922,15 +1999,60 @@ private fun ConversationPage(
                 modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
-                if (recordingSince != null) {
+                val previewDraft = voicePreview
+                if (previewDraft != null) {
+                    IconButton(onClick = {
+                        voicePlayer?.stop()
+                        recorder?.discardPreview(previewDraft)
+                        voicePreview = null
+                    }) { Icon(QMusicIcons.Trash, contentDescription = com.qmusic.ui.A11y.delete, tint = TextPrimary) }
+                    VoicePreviewBar(
+                        draft = previewDraft,
+                        player = voicePlayer,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else if (recordingSince != null) {
                     if (locked) {
                         IconButton(onClick = {
                             recorder?.cancel()
+                            controller.setRecording(other, false)
                             recordingSince = null
                             locked = false
-                        }) { Icon(QMusicIcons.Trash, contentDescription = com.qmusic.ui.A11y.delete, tint = Color(0xFFFF6B6B)) }
+                        }) { Icon(QMusicIcons.Trash, contentDescription = com.qmusic.ui.A11y.delete, tint = TextPrimary) }
                     }
-                    RecordingBar(elapsed, level, if (locked) s.voiceLocked else s.voiceSlideCancel + "   " + s.voiceSlideLock, cancelling, Modifier.weight(1f))
+                    RecordingBar(
+                        elapsedMs = elapsed,
+                        level = level,
+                        hint = if (locked) (if (recPaused) s.voicePaused else s.voiceLocked) else s.voiceSlideCancel + "   " + s.voiceSlideLock,
+                        cancelling = cancelling,
+                        modifier = Modifier.weight(1f),
+                        paused = recPaused,
+                    )
+                    if (locked && recorder?.canPause == true) {
+                        if (!recPaused) {
+                            IconButton(onClick = { recorder.pause() }) {
+                                Icon(QMusicIcons.Pause, contentDescription = s.voicePause, tint = Ink)
+                            }
+                        } else {
+                            IconButton(onClick = {
+                                val draft = recorder.stop()
+                                controller.setRecording(other, false)
+                                recordingSince = null
+                                locked = false
+                                if (draft != null) {
+                                    voicePreview = draft
+                                    voicePlayer?.toggle(draft.location)
+                                } else if (recorder.lastSilent) {
+                                    controller.reportError(s.micSilent)
+                                }
+                            }) {
+                                Icon(QMusicIcons.Play, contentDescription = s.voicePreview, tint = Ink)
+                            }
+                            IconButton(onClick = { recorder.resume() }) {
+                                Icon(QMusicIcons.Mic, contentDescription = s.voiceResume, tint = Ink)
+                            }
+                        }
+                    }
                 } else {
                     IconButton(onClick = {
                         attach = !attach
@@ -1983,78 +2105,115 @@ private fun ConversationPage(
                 }
                 Spacer(Modifier.width(6.dp))
                 val canSend = text.isNotBlank()
-                if (locked && recordingSince != null) {
+                if (previewDraft != null) {
+                    Box(
+                        modifier = Modifier.size(44.dp).clip(CircleShape).background(Ink).clickable {
+                            voicePlayer?.stop()
+                            voicePreview = null
+                            sounds?.playSmall(SmallSound.REC_SENT)
+                            controller.sendFile(other, previewDraft, "", quoted())
+                            replyTo = null
+                        },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(QMusicIcons.Send, contentDescription = s.send, tint = InkInverse, modifier = Modifier.size(20.dp)) }
+                } else if (locked && recordingSince != null) {
                     // Locked: the button sends.
                     Box(
                         modifier = Modifier.size(44.dp).clip(CircleShape).background(Ink).clickable {
                             recordingSince = null
                             locked = false
-                            recorder?.stop()?.let { voice ->
+                            val voice = recorder?.stop()
+                            controller.setRecording(other, false)
+                            if (voice != null) {
                                 sounds?.playSmall(SmallSound.REC_SENT)
                                 controller.sendFile(other, voice, "", quoted())
                                 replyTo = null
+                            } else if (recorder?.lastSilent == true) {
+                                controller.reportError(s.micSilent)
                             }
                         },
                         contentAlignment = Alignment.Center,
-                    ) { Icon(QMusicIcons.Send, contentDescription = null, tint = InkInverse, modifier = Modifier.size(20.dp)) }
+                    ) { Icon(QMusicIcons.Send, contentDescription = s.send, tint = InkInverse, modifier = Modifier.size(20.dp)) }
                 } else if (!canSend && recorder != null && !isClaude && editing == null) {
                     val density = androidx.compose.ui.platform.LocalDensity.current
                     val cancelAt = with(density) { 110.dp.toPx() }
                     val lockAt = with(density) { 90.dp.toPx() }
-                    Box(
-                        modifier = Modifier
-                            .size(if (recordingSince != null) 56.dp else 44.dp)
-                            .clip(CircleShape)
-                            .background(if (recordingSince != null) (if (cancelling) Color(0xFF555555) else Color(0xFFFF4D4D)) else Ink)
-                            .pointerInput(micReady) {
-                                awaitEachGesture {
-                                    val down = awaitFirstDown()
-                                    if (!micReady) {
-                                        askMic(false) { granted -> micReady = granted }
-                                        return@awaitEachGesture
-                                    }
-                                    sounds?.playSmall(SmallSound.REC_START)
-                                    if (!recorder.start()) return@awaitEachGesture
-                                    controller.setRecording(other, true)
-                                    voicePlayer?.stop()
-                                    recordingSince = Clock.System.now().toEpochMilliseconds()
-                                    cancelling = false
-                                    while (true) {
-                                        val event = awaitPointerEvent()
-                                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                        cancelling = change.position.x - down.position.x < -cancelAt
-                                        // Slid up: it goes on without the finger, with its own send and bin buttons.
-                                        if (change.position.y - down.position.y < -lockAt) {
-                                            locked = true
-                                            cancelling = false
-                                            change.consume()
+                    Box(contentAlignment = Alignment.Center) {
+                        if (recordingSince != null && !locked) {
+                            androidx.compose.ui.window.Popup(
+                                alignment = Alignment.TopCenter,
+                                offset = androidx.compose.ui.unit.IntOffset(0, with(density) { (-62).dp.roundToPx() }),
+                                properties = androidx.compose.ui.window.PopupProperties(focusable = false),
+                            ) {
+                                Column(
+                                    Modifier
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .background(DarkSurfaceVariant)
+                                        .border(1.dp, BorderSubtle, RoundedCornerShape(18.dp))
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    Icon(QMusicIcons.Lock, contentDescription = null, tint = Ink, modifier = Modifier.size(16.dp))
+                                    Icon(QMusicIcons.ChevronUp, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+                                }
+                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(if (recordingSince != null) 56.dp else 44.dp)
+                                .clip(CircleShape)
+                                .background(if (recordingSince != null) (if (cancelling) Color(0xFF555555) else Color(0xFFFF4D4D)) else Ink)
+                                .pointerInput(micReady) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown()
+                                        if (!micReady) {
+                                            askMic(false) { granted -> micReady = granted }
                                             return@awaitEachGesture
                                         }
-                                        if (!change.pressed) break
-                                        change.consume()
-                                    }
-                                    val thrownAway = cancelling
-                                    recordingSince = null
-                                    cancelling = false
-                                    if (thrownAway) {
-                                        recorder.cancel()
-                                        controller.setRecording(other, false)
-                                    } else {
-                                        val voice = recorder.stop()
-                                        controller.setRecording(other, false)
-                                        if (voice != null) {
-                                            sounds?.playSmall(SmallSound.REC_SENT)
-                                            controller.sendFile(other, voice, "", quoted())
-                                            replyTo = null
-                                        } else if (recorder.lastSilent) {
-                                            controller.reportError(s.micSilent)
+                                        sounds?.playSmall(SmallSound.REC_START)
+                                        if (!recorder.start()) return@awaitEachGesture
+                                        controller.setRecording(other, true)
+                                        voicePlayer?.stop()
+                                        elapsed = 0L
+                                        recordingSince = Clock.System.now().toEpochMilliseconds()
+                                        cancelling = false
+                                        while (true) {
+                                            val event = awaitPointerEvent()
+                                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                            cancelling = change.position.x - down.position.x < -cancelAt
+                                            // Slid up: it goes on without the finger, with its own pause, preview, send and bin buttons.
+                                            if (change.position.y - down.position.y < -lockAt) {
+                                                locked = true
+                                                cancelling = false
+                                                change.consume()
+                                                return@awaitEachGesture
+                                            }
+                                            if (!change.pressed) break
+                                            change.consume()
+                                        }
+                                        val thrownAway = cancelling
+                                        recordingSince = null
+                                        cancelling = false
+                                        if (thrownAway) {
+                                            recorder.cancel()
+                                            controller.setRecording(other, false)
+                                        } else {
+                                            val voice = recorder.stop()
+                                            controller.setRecording(other, false)
+                                            if (voice != null) {
+                                                sounds?.playSmall(SmallSound.REC_SENT)
+                                                controller.sendFile(other, voice, "", quoted())
+                                                replyTo = null
+                                            } else if (recorder.lastSilent) {
+                                                controller.reportError(s.micSilent)
+                                            }
                                         }
                                     }
-                                }
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(QMusicIcons.Mic, contentDescription = s.voiceHold, tint = if (recordingSince != null) Ink else InkInverse, modifier = Modifier.size(22.dp))
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(QMusicIcons.Mic, contentDescription = s.voiceHold, tint = if (recordingSince != null) Ink else InkInverse, modifier = Modifier.size(22.dp))
+                        }
                     }
                 } else {
                     Box(
@@ -2086,6 +2245,12 @@ private fun ConversationPage(
                 add(AttachAction(s.contact, QMusicIcons.Contact, Color(0xFF2196F3)) { attach = false; pickContact() })
                 add(AttachAction(if (tr) "Belge" else "Document", QMusicIcons.File, Color(0xFF7E57C2)) { attach = false; pickFile() })
                 add(AttachAction(s.videoAttach, QMusicIcons.VideoPlay, Color(0xFFF4511E)) { attach = false; pickVideo() })
+                ChatMediaHooks.captureVideo?.let { startCapture ->
+                    add(AttachAction(s.recordVideo, QMusicIcons.VideoCallFilled, Ink) {
+                        attach = false
+                        startCapture { file -> if (file != null) pendingVideo = file }
+                    })
+                }
                 if (!isClaude) add(AttachAction(s.poll, QMusicIcons.Poll, Color(0xFFFFB300)) { attach = false; pollDialog = true })
                 if (!isClaude) add(AttachAction(if (tr) "Etkinlik" else "Event", QMusicIcons.Timer, Color(0xFFE53958)) { attach = false; eventDialog = true })
                 // What plays in Nuvelo now: sent as a card.
@@ -2121,17 +2286,31 @@ private fun ConversationPage(
             )
         }
     }
-    viewing?.let { (images, index) ->
-        PhotoViewer(images, index, load = { image -> controller.imageBytes(other, image) }) { viewing = null }
+    viewing?.let { v ->
+        PhotoViewer(v.images, v.index, load = { image -> controller.imageBytes(other, image) }, caption = v.caption, s = s) { viewing = null }
     }
     viewOnceOpen?.let { m ->
         // Shown once: closing it marks it opened, and it does not open again.
-        PhotoViewer(m.images.take(1), 0, load = { image -> controller.imageBytes(other, image) }) {
+        PhotoViewer(m.images.take(1), 0, load = { image -> controller.imageBytes(other, image) }, caption = m.text, viewOnce = true, s = s) {
             if (m.from != me.uid) controller.markOpened(other, m)
             viewOnceOpen = null
         }
     }
-    videoOpen?.let { url -> VideoViewer(url) { videoOpen = null } }
+    videoOpen?.let { v -> VideoViewer(v.attachment.url, caption = v.caption, name = v.attachment.name, mime = v.attachment.mime, s = s) { videoOpen = null } }
+    pendingVideo?.let { file ->
+        SendVideoPage(
+            file = file,
+            s = s,
+            caption = text,
+            onSend = { caption ->
+                controller.sendFile(other, file, caption, quoted())
+                text = ""
+                replyTo = null
+                pendingVideo = null
+            },
+            onCancel = { pendingVideo = null },
+        )
+    }
     aiPending?.let { run ->
         AlertDialog(
             onDismissRequest = { aiPending = null },
@@ -2452,44 +2631,366 @@ internal fun nameOf(uid: String, myUid: String, otherName: String, s: ChatString
     else -> otherName
 }
 
-/** The photos of a message, full screen: swipe between them; a tap or back closes it. */
+private data class PhotoViewState(val images: List<ChatImage>, val index: Int, val caption: String = "")
+
+private data class VideoViewState(val attachment: ChatAttachment, val caption: String = "")
+
+/** Subtle monochrome voice bar shown at the top of a conversation when scrolling away from a playing voice message. */
 @Composable
-internal fun PhotoViewer(images: List<ChatImage>, start: Int, load: suspend (ChatImage) -> ByteArray?, onClose: () -> Unit) {
-    PlatformBackHandler(enabled = true) { onClose() }
-    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = start.coerceIn(0, images.lastIndex)) { images.size }
-    val loaded = remember { androidx.compose.runtime.mutableStateMapOf<String, ByteArray>() }
-    val save = rememberImageSaver()
+private fun MiniVoiceBar(
+    sender: String,
+    durationMs: Long,
+    progress: Float,
+    playing: Boolean,
+    speed: Float,
+    earpiece: Boolean,
+    s: ChatStrings,
+    onToggle: () -> Unit,
+    onCycleSpeed: () -> Unit,
+    onJump: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().background(DarkSurface)) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 6.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onToggle, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    if (playing) QMusicIcons.Pause else QMusicIcons.Play,
+                    contentDescription = if (playing) com.qmusic.ui.A11y.pause else com.qmusic.ui.A11y.play,
+                    tint = Ink,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Column(
+                Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable(onClick = onJump).padding(horizontal = 6.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    sender + if (earpiece) " · ${s.voiceEarpiece}" else "",
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    mmss((durationMs * progress).toLong()) + if (durationMs > 0L) " / ${mmss(durationMs)}" else "",
+                    color = TextSecondary,
+                    fontSize = 11.sp,
+                )
+            }
+            Text(
+                (if (speed == 1f) "1" else if (speed == 1.5f) "1.5" else "2") + "×",
+                color = InkInverse,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Ink).clickable(onClick = onCycleSpeed).padding(horizontal = 7.dp, vertical = 3.dp),
+            )
+            IconButton(onClick = onClose, modifier = Modifier.size(34.dp)) {
+                Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = TextSecondary, modifier = Modifier.size(18.dp))
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(2.dp).background(BorderSubtle)) {
+            Box(Modifier.fillMaxWidth(progress.coerceIn(0f, 1f)).height(2.dp).background(Ink))
+        }
+    }
+}
+
+/** Previewing a locked/paused recording before sending: play/pause, scrubbable waveform, and elapsed duration. */
+@Composable
+private fun VoicePreviewBar(
+    draft: PickedFile,
+    player: VoicePlayer?,
+    modifier: Modifier = Modifier,
+) {
+    val playingUrl by (player?.playing ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
+    val activeUrl by (player?.active ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
+    val played by (player?.progress ?: remember { kotlinx.coroutines.flow.MutableStateFlow(0f) }).collectAsState()
+    val isPlayingThis = playingUrl == draft.location
+    val isActiveThis = activeUrl == draft.location
+    var scrubbing by remember(draft.location) { mutableStateOf<Float?>(null) }
+    val base = if (isActiveThis) played else 0f
+    val shown = scrubbing ?: base
+    Row(
+        modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(22.dp)).background(DarkSurfaceVariant).padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(32.dp).clip(CircleShape).background(Ink).clickable(enabled = player != null) { player?.toggle(draft.location) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(if (isPlayingThis) QMusicIcons.Pause else QMusicIcons.Play, contentDescription = null, tint = InkInverse, modifier = Modifier.size(16.dp))
+        }
+        Spacer(Modifier.width(8.dp))
+        VoiceWaveform(
+            wave = draft.wave,
+            progress = base,
+            active = isActiveThis,
+            fg = Ink,
+            dim = Ink.copy(alpha = 0.28f),
+            modifier = Modifier.weight(1f),
+            onTap = { fraction ->
+                if (isActiveThis) player?.seek(draft.location, fraction) else player?.toggle(draft.location)
+            },
+            onScrubChange = { scrubbing = it },
+            onScrubCommit = { fraction ->
+                if (isActiveThis) player?.seek(draft.location, fraction) else player?.toggle(draft.location)
+            },
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            mmss(if (isActiveThis || scrubbing != null) (draft.durationMs * shown).toLong() else draft.durationMs),
+            color = TextSecondary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
+/** Previewing a picked or camera-captured video before sending, with an optional caption. */
+@Composable
+private fun SendVideoPage(
+    file: PickedFile,
+    s: ChatStrings,
+    caption: String,
+    onSend: (String) -> Unit,
+    onCancel: () -> Unit,
+) {
+    PlatformBackHandler(enabled = true) { onCancel() }
+    var text by remember(file.location) { mutableStateOf(caption) }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
-            var bytes by remember(images[page].id) { mutableStateOf<ByteArray?>(null) }
-            LaunchedEffect(images[page].id) { bytes = load(images[page])?.also { loaded[images[page].id] = it } }
-            Box(Modifier.fillMaxSize().clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+        Column(Modifier.fillMaxSize().imePadding()) {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onCancel) { Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = Color.White) }
+                Spacer(Modifier.weight(1f))
+                val meta = listOf(
+                    if (file.durationMs > 0) mmss(file.durationMs) else "",
+                    if (file.size > 0) sizeLabel(file.size) else "",
+                ).filter { it.isNotBlank() }.joinToString(" · ")
+                if (meta.isNotEmpty()) {
+                    Text(meta, color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp, modifier = Modifier.padding(end = 12.dp))
+                }
+            }
+            VideoMessagePlayer(file.location, Modifier.weight(1f).fillMaxWidth())
+            Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(8.dp), verticalAlignment = Alignment.Bottom) {
+                Box(Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(22.dp)).background(DarkSurfaceVariant).padding(horizontal = 16.dp, vertical = 11.dp)) {
+                    if (text.isEmpty()) Text(s.addCaption, color = TextMuted, fontSize = 16.sp)
+                    BasicTextField(
+                        value = text,
+                        onValueChange = { text = it.take(ChatController.MAX_LENGTH) },
+                        textStyle = TextStyle(color = TextPrimary, fontSize = 16.sp),
+                        cursorBrush = SolidColor(Color.White),
+                        maxLines = 4,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
+                Box(
+                    Modifier.size(44.dp).clip(CircleShape).background(Color.White).clickable { onSend(text) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(QMusicIcons.Send, contentDescription = s.send, tint = Color.Black, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The photos of a message, full screen: pinch-to-zoom, pan when zoomed, double-tap zoom, vertical pull-to-dismiss,
+ * optional caption, share, save / save-all for albums, and view-once lockdown.
+ */
+@OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
+@Composable
+internal fun PhotoViewer(
+    images: List<ChatImage>,
+    start: Int,
+    load: suspend (ChatImage) -> ByteArray?,
+    caption: String = "",
+    viewOnce: Boolean = false,
+    s: ChatStrings = if (ChatMusic.english) ChatStrings.English else ChatStrings.Turkish,
+    onClose: () -> Unit,
+) {
+    if (images.isEmpty()) {
+        onClose()
+        return
+    }
+    PlatformBackHandler(enabled = true) { onClose() }
+    if (viewOnce) SecureScreen()
+    val force = LocalForceImage.current
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = start.coerceIn(0, images.lastIndex)) { images.size }
+    val loaded = remember(images) { androidx.compose.runtime.mutableStateMapOf<String, ByteArray>() }
+    val save = rememberImageSaver()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val shareHook = ChatMediaHooks.shareImage
+    val saveAllHook = ChatMediaHooks.saveAllImages
+
+    var showChrome by remember { mutableStateOf(true) }
+    var zoomed by remember { mutableStateOf(false) }
+    var pullOffset by remember { mutableStateOf(0f) }
+    var savingAll by remember { mutableStateOf(false) }
+    val fade = (1f - kotlin.math.abs(pullOffset) / 900f).coerceIn(0.3f, 1f)
+
+    // Ensure every photo paged to is forced when auto-download is off, not just the first tapped tile.
+    LaunchedEffect(pager.currentPage, images) {
+        zoomed = false
+        pullOffset = 0f
+        images.getOrNull(pager.currentPage)?.let { force(it) }
+    }
+
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = fade))) {
+        androidx.compose.foundation.pager.HorizontalPager(
+            state = pager,
+            userScrollEnabled = !zoomed,
+            modifier = Modifier.fillMaxSize(),
+        ) { page ->
+            val image = images[page]
+            var bytes by remember(image.id, image.url) { mutableStateOf<ByteArray?>(loaded[image.id]) }
+            var loading by remember(image.id, image.url) { mutableStateOf(bytes == null) }
+            var retry by remember(image.id, image.url) { mutableStateOf(0) }
+            LaunchedEffect(image.id, image.url, retry) {
+                val cached = loaded[image.id]
+                if (cached != null) {
+                    bytes = cached
+                    loading = false
+                    return@LaunchedEffect
+                }
+                loading = true
+                force(image)
+                val got = load(image)
+                if (got != null) loaded[image.id] = got
+                bytes = got
+                loading = false
+            }
+            ZoomableBox(
+                key = "${image.id}_$page",
+                onTap = { showChrome = !showChrome },
+                onDismiss = onClose,
+                onZoomChanged = { if (page == pager.currentPage) zoomed = it },
+                onPullChanged = { if (page == pager.currentPage) pullOffset = it },
+                modifier = Modifier.fillMaxSize(),
+            ) {
                 val b = bytes
                 if (b != null) {
                     AsyncImage(model = b, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
                 } else {
-                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp)
+                    val thumb = remember(image.thumb) { image.thumb.takeIf { it.isNotEmpty() }?.let { runCatching { kotlin.io.encoding.Base64.decode(it) }.getOrNull() } }
+                    if (thumb != null) {
+                        AsyncImage(model = thumb, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().blur(18.dp))
+                    }
+                    if (loading) {
+                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp)
+                    } else {
+                        Column(
+                            Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.Black.copy(alpha = 0.65f))
+                                .clickable { retry++ }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Icon(QMusicIcons.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp))
+                            Spacer(Modifier.height(6.dp))
+                            Text(s.photoLoadFailed, color = Color.White, fontSize = 13.sp)
+                        }
+                    }
                 }
             }
         }
-        if (images.size > 1) {
-            Text(
-                "${pager.currentPage + 1} / ${images.size}",
-                color = Color.White,
-                fontSize = 14.sp,
-                modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(12.dp)
-                    .clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.5f)).padding(horizontal = 10.dp, vertical = 4.dp),
-            )
-        }
         val current = images.getOrNull(pager.currentPage)?.let { loaded[it.id] }
-        if (current != null) {
-            Box(
-                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(12.dp).size(44.dp)
-                    .clip(CircleShape).background(Color.Black.copy(alpha = 0.5f))
-                    .clickable { save(current, "Nuvelo_" + Clock.System.now().toEpochMilliseconds()) },
-                contentAlignment = Alignment.Center,
+        if (showChrome) {
+            Row(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.65f), Color.Transparent)))
+                    .statusBarsPadding()
+                    .padding(horizontal = 6.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(QMusicIcons.Download, contentDescription = if (ChatMusic.english) "Download" else "İndir", tint = Color.White, modifier = Modifier.size(22.dp))
+                IconButton(onClick = onClose) {
+                    Icon(QMusicIcons.Back, contentDescription = com.qmusic.ui.A11y.back, tint = Color.White)
+                }
+                if (viewOnce) {
+                    Text(
+                        "1 · ${s.viewOnce}",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.16f)).padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                } else if (images.size > 1) {
+                    Text(
+                        "${pager.currentPage + 1} / ${images.size}",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                if (!viewOnce) {
+                    if (images.size > 1) {
+                        Row(
+                            Modifier
+                                .padding(end = 6.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.White.copy(alpha = 0.16f))
+                                .clickable(enabled = !savingAll) {
+                                    savingAll = true
+                                    scope.launch {
+                                        val stamp = Clock.System.now().toEpochMilliseconds()
+                                        val items = images.mapIndexedNotNull { idx, img ->
+                                            val b = loaded[img.id] ?: run {
+                                                force(img)
+                                                load(img)?.also { loaded[img.id] = it }
+                                            }
+                                            b?.let { it to "Nuvelo_${stamp}_${idx + 1}" }
+                                        }
+                                        if (items.isNotEmpty() && saveAllHook != null) {
+                                            saveAllHook(items) { _, _ -> savingAll = false }
+                                        } else {
+                                            items.forEach { (b, n) -> save(b, n) }
+                                            savingAll = false
+                                        }
+                                    }
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (savingAll) {
+                                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+                            } else {
+                                Text(s.saveAll, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                    if (current != null && shareHook != null) {
+                        IconButton(onClick = { shareHook(current, "Nuvelo_" + Clock.System.now().toEpochMilliseconds()) }) {
+                            Icon(QMusicIcons.Share, contentDescription = s.sharePhoto, tint = Color.White, modifier = Modifier.size(21.dp))
+                        }
+                    }
+                    if (current != null) {
+                        IconButton(onClick = { save(current, "Nuvelo_" + Clock.System.now().toEpochMilliseconds()) }) {
+                            Icon(QMusicIcons.Download, contentDescription = s.download, tint = Color.White, modifier = Modifier.size(22.dp))
+                        }
+                    }
+                }
+            }
+            if (caption.isNotBlank()) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))))
+                        .navigationBarsPadding()
+                        .heightIn(max = 180.dp)
+                        .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                ) {
+                    Text(caption, color = Color.White, fontSize = 14.sp, lineHeight = 20.sp)
+                }
             }
         }
     }
@@ -2767,9 +3268,18 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
             ZoomablePhoto(user.photo, user.name) { bigPhoto = false }
         }
         viewingPhotos?.let { (list, index) ->
-            PhotoViewer(list, index, load = { i -> controller.imageBytes(user, i) }) { viewingPhotos = null }
+            PhotoViewer(list, index, load = { i -> controller.imageBytes(user, i) }, s = s) { viewingPhotos = null }
         }
-        videoOpen?.let { url -> VideoViewer(url) { videoOpen = null } }
+        videoOpen?.let { url ->
+            val msg = messages?.firstOrNull { it.attachment?.url == url }
+            VideoViewer(
+                url = url,
+                caption = msg?.text.orEmpty(),
+                name = msg?.attachment?.name.orEmpty(),
+                mime = msg?.attachment?.mime.orEmpty(),
+                s = s,
+            ) { videoOpen = null }
+        }
     }
 }
 
@@ -2931,6 +3441,8 @@ private fun Bubble(
     /** In a group: who wrote it (shown over it). */
     senderName: String? = null,
     voicePlayer: VoicePlayer? = null,
+    voicePlayed: Boolean = false,
+    onVoicePlay: () -> Unit = {},
     onOpenVideo: (String) -> Unit = {},
     onOpenFile: (ChatAttachment) -> Unit = {},
     onJoin: () -> Unit = {},
@@ -3200,7 +3712,7 @@ private fun Bubble(
             m.attachment?.let { a ->
                 when (a.kind) {
                     AttachmentKind.VOICE -> Column {
-                        VoiceBubble(a, mine, voicePlayer, m.progress)
+                        VoiceBubble(a, mine, voicePlayer, m.progress, played = voicePlayed, onPlay = onVoicePlay)
                         if (!m.deleted && !m.pending) {
                             val (asked, said) = transcript
                             val soft = if (mine) InkInverse.copy(alpha = 0.7f) else TextSecondary

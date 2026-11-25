@@ -1,8 +1,19 @@
 package com.qmusic.ui.chat
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
+
+private val DefaultFalseState: StateFlow<Boolean> = MutableStateFlow(false)
+private val DefaultEmptySetState: StateFlow<Set<String>> = MutableStateFlow(emptySet())
+private val DefaultEmptyStringFlow: Flow<String> = emptyFlow()
 
 /** Records a voice message (held down the microphone button). */
 interface VoiceRecorder {
@@ -20,6 +31,21 @@ interface VoiceRecorder {
 
     /** The last recording heard nothing at all (the microphone was blocked or taken): it was not kept. */
     val lastSilent: Boolean get() = false
+
+    /** Whether recording is currently paused (hands-free locked mode). */
+    val paused: StateFlow<Boolean> get() = DefaultFalseState
+
+    /** Whether this platform supports pausing and resuming an active recording. */
+    val canPause: Boolean get() = false
+
+    /** Pauses the active recording without finalizing it. */
+    fun pause() {}
+
+    /** Resumes a paused recording. */
+    fun resume() {}
+
+    /** Deletes a finalized preview file if the user discards it before sending. */
+    fun discardPreview(file: PickedFile) {}
 }
 
 /** Plays voice messages, one at a time; the music pauses meanwhile. */
@@ -33,7 +59,7 @@ interface VoicePlayer {
     /** Plays [url] (from the start or where it was paused), or pauses it when it plays. */
     fun toggle(url: String)
 
-    /** Jumps to [fraction] of [url] (when it is the one playing). */
+    /** Jumps to [fraction] of [url] (when it is the one playing or paused). */
     fun seek(url: String, fraction: Float)
     fun stop()
 
@@ -42,6 +68,33 @@ interface VoicePlayer {
 
     /** 1× → 1.5× → 2× → 1×. */
     fun cycleSpeed()
+
+    /** The voice message currently loaded (playing or paused); null when stopped or finished. */
+    val active: StateFlow<String?> get() = playing
+
+    /** Emits a voice message's url when it finishes playing naturally to the end. */
+    val completed: Flow<String> get() = DefaultEmptyStringFlow
+
+    /** Voice message links that have been played locally on this device. */
+    val played: StateFlow<Set<String>> get() = DefaultEmptySetState
+
+    /** Whether playback is routed through the phone's earpiece via proximity sensor. */
+    val earpiece: StateFlow<Boolean> get() = DefaultFalseState
+}
+
+/** Set around [VideoMessagePlayer] inside [VideoViewer] so Android shows clean viewer playback controls. */
+internal val LocalVideoViewerMode = staticCompositionLocalOf { false }
+
+/**
+ * Optional platform capabilities wired by Android composables so commonMain screens gain native share, batch gallery
+ * save, video download/share, and camera video capture without changing expect/actual contracts for web or desktop.
+ */
+internal object ChatMediaHooks {
+    var shareImage: ((bytes: ByteArray, name: String) -> Unit)? by mutableStateOf(null)
+    var saveAllImages: ((items: List<Pair<ByteArray, String>>, onDone: (Int, Int) -> Unit) -> Unit)? by mutableStateOf(null)
+    var saveVideo: ((url: String, name: String, onDone: (Boolean) -> Unit) -> Unit)? by mutableStateOf(null)
+    var shareVideo: ((url: String, name: String, onDone: (Boolean) -> Unit) -> Unit)? by mutableStateOf(null)
+    var captureVideo: (((PickedFile?) -> Unit) -> Unit)? by mutableStateOf(null)
 }
 
 @Composable

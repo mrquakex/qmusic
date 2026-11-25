@@ -269,6 +269,123 @@ internal fun ExpandablePanel(
 }
 
 /**
+ * Pinch-to-zoom (up to 5x), pan while zoomed, double-tap zoom, and vertical pull-to-dismiss; shared by
+ * [ZoomablePhoto] and [PhotoViewer].
+ */
+@Composable
+internal fun ZoomableBox(
+    key: Any? = Unit,
+    onTap: () -> Unit = {},
+    onDismiss: () -> Unit,
+    onZoomChanged: (Boolean) -> Unit = {},
+    onPullChanged: (Float) -> Unit = {},
+    modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
+) {
+    var scale by remember(key) { mutableStateOf(1f) }
+    var offset by remember(key) { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    var pull by remember(key) { mutableStateOf(0f) }
+    androidx.compose.runtime.LaunchedEffect(key) {
+        onZoomChanged(false)
+        onPullChanged(0f)
+    }
+    Box(
+        modifier
+            .pointerInput(key) {
+                detectTapGestures(
+                    onTap = { onTap() },
+                    onDoubleTap = { at ->
+                        if (scale > 1.05f) {
+                            scale = 1f
+                            offset = androidx.compose.ui.geometry.Offset.Zero
+                            onZoomChanged(false)
+                        } else {
+                            // Zoomed in on where the finger was, clamped inside edges.
+                            val next = 2.5f
+                            val maxX = size.width * (next - 1f) / 2f
+                            val maxY = size.height * (next - 1f) / 2f
+                            val raw = (androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f) - at) * (next - 1f)
+                            scale = next
+                            offset = androidx.compose.ui.geometry.Offset(raw.x.coerceIn(-maxX, maxX), raw.y.coerceIn(-maxY, maxY))
+                            pull = 0f
+                            onPullChanged(0f)
+                            onZoomChanged(true)
+                        }
+                    },
+                )
+            }
+            .pointerInput(key) {
+                val slop = viewConfiguration.touchSlop
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var dragX = 0f
+                    var dragY = 0f
+                    var mode = 0 // 0: undecided, 1: vertical pull-to-dismiss, 2: horizontal pager swipe
+                    do {
+                        val event = awaitPointerEvent()
+                        val zoom = event.calculateZoom()
+                        val pan = event.calculatePan()
+                        val fingers = event.changes.count { it.pressed }
+                        if (fingers >= 2 || scale > 1.01f) {
+                            val next = (scale * zoom).coerceIn(1f, 5f)
+                            scale = next
+                            val maxX = size.width * (next - 1f) / 2f
+                            val maxY = size.height * (next - 1f) / 2f
+                            offset = androidx.compose.ui.geometry.Offset(
+                                (offset.x + pan.x).coerceIn(-maxX, maxX),
+                                (offset.y + pan.y).coerceIn(-maxY, maxY),
+                            )
+                            pull = 0f
+                            onPullChanged(0f)
+                            onZoomChanged(next > 1.01f)
+                            event.changes.forEach { if (it.positionChanged()) it.consume() }
+                        } else if (fingers == 1) {
+                            dragX += pan.x
+                            dragY += pan.y
+                            if (mode == 0) {
+                                val ax = kotlin.math.abs(dragX)
+                                val ay = kotlin.math.abs(dragY)
+                                when {
+                                    ay > slop && ay > ax * 1.15f -> mode = 1
+                                    ax > slop && ax > ay -> mode = 2
+                                }
+                            }
+                            if (mode == 1) {
+                                pull += pan.y
+                                onPullChanged(pull)
+                                event.changes.forEach { if (it.positionChanged()) it.consume() }
+                            }
+                        }
+                    } while (event.changes.any { it.pressed })
+                    if (scale <= 1.01f) {
+                        scale = 1f
+                        offset = androidx.compose.ui.geometry.Offset.Zero
+                        onZoomChanged(false)
+                    }
+                    if (kotlin.math.abs(pull) > 220f) {
+                        onDismiss()
+                    } else if (pull != 0f) {
+                        pull = 0f
+                        onPullChanged(0f)
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.fillMaxSize().graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                translationX = offset.x
+                translationY = offset.y + pull
+            },
+            contentAlignment = Alignment.Center,
+            content = content,
+        )
+    }
+}
+
+/**
  * A picture full screen, black around it: two fingers zoom it (up to 5x) and move it while zoomed, a double tap zooms
  * in and back, and pulled down while not zoomed it closes; [title] over its top with the back arrow.
  */
@@ -276,64 +393,23 @@ internal fun ExpandablePanel(
 fun ZoomablePhoto(url: String, title: String, onDismiss: () -> Unit) {
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
         DialogEdgeToEdge()
-        var scale by remember { mutableStateOf(1f) }
-        var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
         var pull by remember { mutableStateOf(0f) }
         val fade = (1f - kotlin.math.abs(pull) / 900f).coerceIn(0.3f, 1f)
-        Box(
-            Modifier.fillMaxSize().background(Color.Black.copy(alpha = fade))
-                .pointerInput(Unit) {
-                    detectTapGestures(onDoubleTap = { at ->
-                        if (scale > 1.05f) {
-                            scale = 1f
-                            offset = androidx.compose.ui.geometry.Offset.Zero
-                        } else {
-                            // Zoomed in on where the finger was.
-                            scale = 2.5f
-                            offset = (androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f) - at) * 1.5f
-                        }
-                    })
-                }
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false)
-                        do {
-                            val event = awaitPointerEvent()
-                            val zoom = event.calculateZoom()
-                            val pan = event.calculatePan()
-                            val fingers = event.changes.count { it.pressed }
-                            if (fingers >= 2 || scale > 1.01f) {
-                                val next = (scale * zoom).coerceIn(1f, 5f)
-                                scale = next
-                                // Kept within the picture's edges.
-                                val maxX = size.width * (next - 1f) / 2f
-                                val maxY = size.height * (next - 1f) / 2f
-                                offset = androidx.compose.ui.geometry.Offset(
-                                    (offset.x + pan.x).coerceIn(-maxX, maxX),
-                                    (offset.y + pan.y).coerceIn(-maxY, maxY),
-                                )
-                                event.changes.forEach { if (it.positionChanged()) it.consume() }
-                            } else if (fingers == 1) {
-                                pull += pan.y
-                            }
-                        } while (event.changes.any { it.pressed })
-                        if (kotlin.math.abs(pull) > 220f) onDismiss() else pull = 0f
-                    }
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            AsyncImage(
-                // Google's pictures come small by default: the large one is asked for.
-                model = sizedPhoto(url, 1600),
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize().graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                    translationX = offset.x
-                    translationY = offset.y + pull
-                },
-            )
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = fade))) {
+            ZoomableBox(
+                key = url,
+                onDismiss = onDismiss,
+                onPullChanged = { pull = it },
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                AsyncImage(
+                    // Google's pictures come small by default: the large one is asked for.
+                    model = sizedPhoto(url, 1600),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
             Row(
                 Modifier.align(Alignment.TopStart).fillMaxWidth()
                     .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)))
