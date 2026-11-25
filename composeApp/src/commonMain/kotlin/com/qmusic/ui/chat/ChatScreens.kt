@@ -1108,7 +1108,7 @@ private fun ConversationPage(
     val claudeState by controller.claudeState.collectAsState()
     var modelMenu by remember { mutableStateOf(false) }
     val isClaude = other.uid == CLAUDE_BOT_UID
-    val quoted: () -> ChatReply? = { replyTo?.let { ChatReply(it.id, it.from, quoteText(it)) } }
+    val quoted: () -> ChatReply? = { replyTo?.let { ChatReply(it.id, it.from, quoteText(it, s.english), replyThumbOf(it)) } }
     // Picked photos are shown first (caption, edits), then sent.
     val sendPhotos: (List<PickedImage>) -> Unit = { photos -> if (photos.isNotEmpty()) pendingPhotos = photos }
     val sendPicked: (PickedFile?) -> Unit = { file ->
@@ -1202,6 +1202,7 @@ private fun ConversationPage(
 
     // The rows newest first (the list is drawn from the bottom), and the messages the search finds, newest first.
     val rows = remember(messages, unreadLineOn) { messages?.let { withDays(it, if (unreadLineOn) openedReadAt else Long.MAX_VALUE, me.uid, openedAt).asReversed() } }
+    val deletedIds = remember(messages) { messages.orEmpty().filter { it.deleted }.mapTo(HashSet()) { it.id } }
     val selectedMessages = remember(messages, selected) { messages.orEmpty().filter { it.id in selected } }
     val starredIds = remember(starredList, chatId) { starredList.filter { it.chatId == chatId }.map { it.messageId }.toSet() }
     // In a group a message is read when every other member read it (delivered likewise).
@@ -1266,7 +1267,7 @@ private fun ConversationPage(
                 IconButton(onClick = { selected = emptySet() }) { Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = Ink) }
                 Text("${selected.size}", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp).weight(1f))
                 val one = selectedMessages.singleOrNull()
-                if (one != null && !one.deleted) {
+                if (one != null && !one.deleted && !one.system) {
                     IconButton(onClick = { replyTo = one; selected = emptySet() }) { Icon(QMusicIcons.Reply, contentDescription = s.reply, tint = TextPrimary, modifier = Modifier.size(22.dp)) }
                 }
                 IconButton(onClick = {
@@ -1549,7 +1550,7 @@ private fun ConversationPage(
                     Spacer(Modifier.width(8.dp))
                     Column(Modifier.weight(1f)) {
                         Text(s.pinnedMessages + if (pins.size > 1) " · ${shownIndex + 1}/${pins.size}" else "", color = TextSecondary, fontSize = 11.sp)
-                        Text(pin.text, color = TextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(ChatPreview.plain(pin.text, s.english), color = TextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 Box(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp)) {
@@ -1713,7 +1714,7 @@ private fun ConversationPage(
                                     },
                                     onForward = if (m.viewOnce || secretChat || m.locked) null else ({ forwarding = listOf(m) }),
                                     pinned = pins.any { it.messageId == m.id },
-                                    onPin = if (canPin && !m.deleted && !m.pending) ({ controller.pin(other, m, quoteText(m), pins.none { it.messageId == m.id }) }) else null,
+                                    onPin = if (canPin && !m.deleted && !m.pending) ({ controller.pin(other, m, quoteText(m, s.english), pins.none { it.messageId == m.id }) }) else null,
                                     openedOnce = if (mine) openedMap[m.id].orEmpty().any { it != me.uid } else me.uid in openedMap[m.id].orEmpty(),
                                     onOpenOnce = { viewOnceOpen = m },
                                     mentionsMe = me.uid in m.mentions,
@@ -1754,7 +1755,7 @@ private fun ConversationPage(
                                     myUid = me.uid,
                                     onOpenShare = onOpenShare,
                                     onDelete = { deleting = listOf(row.m) },
-                                    onReply = { replyTo = row.m },
+                                    onReply = { if (!row.m.deleted && !row.m.system) replyTo = row.m },
                                     onReact = { emoji -> controller.react(other, row.m, emoji) },
                                     loadImage = { image -> controller.imageBytes(other, image) },
                                     onOpenImages = { images, index -> viewing = images to index },
@@ -1766,6 +1767,7 @@ private fun ConversationPage(
                                     onOpenFile = openFile,
                                     onJoin = { controller.joinTogether(other) },
                                     highlight = current?.id == row.m.id || flash == row.m.id,
+                                    quoteDeleted = row.m.replyTo?.id in deletedIds,
                                 )
                             }
                         }
@@ -1878,6 +1880,8 @@ private fun ConversationPage(
                 }
             }
             replyTo?.let { q ->
+                val replyDeleted = q.id in deletedIds
+                val replyThumb = if (replyDeleted) "" else replyThumbOf(q)
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1886,8 +1890,15 @@ private fun ConversationPage(
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(if (q.from == me.uid) s.you else memberNames[q.from] ?: nameOf(q.from, me.uid, title, s), color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Text(ChatPreview.plain(quoteText(q), s.english), color = TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            if (replyDeleted) s.deletedMessage else ChatPreview.plain(quoteText(q, s.english), s.english),
+                            color = TextSecondary,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
+                    if (replyThumb.isNotEmpty()) QuoteThumb(replyThumb)
                     IconButton(onClick = { replyTo = null }) { Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = TextSecondary) }
                 }
             }
@@ -2971,9 +2982,11 @@ private fun Bubble(
     avatar: ChatUser? = null,
     /** The first of a run of the same sender's messages: it has the picture, the name and the tail. */
     firstOfRun: Boolean = true,
+    /** Whether the message this message replies to is loaded and deleted for everyone. */
+    quoteDeleted: Boolean = false,
 ) {
     if (m.system) {
-        SystemLine(m.text)
+        SystemLine(systemLineText(m, mine, otherName, names, s))
         return
     }
     var menu by remember { mutableStateOf(false) }
@@ -3004,15 +3017,15 @@ private fun Bubble(
             .background(if (selected) Ink.copy(alpha = 0.12f) else Color.Transparent)
             // Picking: a tap anywhere on its row ticks it (or unticks it).
             .then(if (selecting) Modifier.clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { onToggleSelect() } else Modifier)
-            .pointerInput(m.id, selecting) {
-                if (selecting) return@pointerInput
+            .pointerInput(m.id, selecting, m.deleted, m.system) {
+                if (selecting || m.deleted || m.system) return@pointerInput
                 // Where the finger has pulled it, kept here: each move adds to this, not to the shown value (which
                 // lags a frame behind on a slow phone, so the bubble jumped back and forth: the shaking).
                 var pulled = 0f
                 detectHorizontalDragGestures(
                     onDragStart = { pulled = swipe.value },
                     onDragEnd = {
-                        if (pulled >= threshold) onReply()
+                        if (pulled >= threshold && !m.deleted && !m.system) onReply()
                         pulled = 0f
                         swipeScope.launch { swipe.animateTo(0f, androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 600f)) }
                     },
@@ -3127,16 +3140,18 @@ private fun Bubble(
                 )
             }
             m.replyTo?.takeIf { !m.deleted }?.let { quoted ->
+                val showThumb = !quoteDeleted && quoted.thumb.isNotEmpty()
                 Row(
                     modifier = Modifier
                         .padding(start = 8.dp, end = 8.dp, top = 8.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(if (mine) InkInverse.copy(alpha = 0.07f) else Ink.copy(alpha = 0.07f))
                         .clickable(enabled = !selecting) { onQuoteTap(if (quoted.id.startsWith("status_")) "status:" + quoted.from else quoted.id) }
-                        .padding(end = 10.dp),
+                        .padding(end = if (showThumb) 4.dp else 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(Modifier.width(3.dp).height(40.dp).background(if (mine) InkInverse else Ink))
-                    Column(Modifier.padding(start = 8.dp, top = 4.dp, bottom = 4.dp)) {
+                    Column(Modifier.weight(1f, fill = false).padding(start = 8.dp, top = 4.dp, bottom = 4.dp)) {
                         Text(
                             if (quoted.from == myUid) s.you else names[quoted.from] ?: nameOf(quoted.from, myUid, otherName, s),
                             color = if (mine) InkInverse else TextPrimary,
@@ -3144,16 +3159,17 @@ private fun Bubble(
                             fontWeight = FontWeight.Medium,
                         )
                         Text(
-                            emojiFitted(ChatPreview.plain(quoted.text, s.english)),
+                            if (quoteDeleted) androidx.compose.ui.text.AnnotatedString(s.deletedMessage) else emojiFitted(ChatPreview.plain(quoted.text, s.english)),
                             color = fgSoft,
                             fontSize = 13.sp,
                             lineHeight = 17.sp,
+                            fontStyle = if (quoteDeleted) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
                             style = androidx.compose.ui.text.TextStyle(lineHeightStyle = EvenLines),
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    if (quoted.thumb.isNotEmpty()) QuoteThumb(quoted.thumb)
+                    if (showThumb) QuoteThumb(quoted.thumb)
                 }
             }
             // Claude's answers: who (in other conversations) and which model.
@@ -3368,18 +3384,43 @@ private fun Bubble(
     }
 }
 
+private fun replyThumbOf(m: ChatMessage): String =
+    if (m.deleted || m.viewOnce) ""
+    else m.images.firstOrNull()?.thumb?.takeIf { it.isNotEmpty() } ?: m.attachment?.thumb.orEmpty()
+
+private fun systemLineText(m: ChatMessage, mine: Boolean, otherName: String, names: Map<String, String>, s: ChatStrings): String {
+    val t = m.text
+    val who = when {
+        t == "Bir mesajı sabitlediniz" || t == "You pinned a message" -> ""
+        t.endsWith(" bir mesajı sabitledi") -> t.removeSuffix(" bir mesajı sabitledi")
+        t.endsWith(" pinned a message") -> t.removeSuffix(" pinned a message")
+        else -> return t
+    }
+    if (mine) return s.pinnedYou
+    val name = who.ifBlank { names[m.from]?.substringBefore(' ') ?: if (names.isEmpty()) otherName.substringBefore(' ') else "?" }
+    return s.pinnedBy(name)
+}
+
 /** A message as a quote: its text, or what it shared. */
-internal fun quoteText(m: ChatMessage): String = m.text.ifBlank {
-    when {
-        m.attachment?.kind == AttachmentKind.VOICE -> "🎤 " + mmss(m.attachment.durationMs)
-        m.attachment?.kind == AttachmentKind.VIDEO -> "🎬 Video"
-        m.attachment?.kind == AttachmentKind.FILE -> "📄 " + m.attachment.name
-        m.poll != null -> "📊 " + m.poll.question
-        m.location != null -> "📍"
-        m.contact != null -> "👤 " + m.contact.name
-        m.images.isNotEmpty() -> if (m.images.size == 1) "📷" else "📷 ×" + m.images.size
-        m.share != null -> (if (m.share.kind == ShareKind.SONG) "🎵 " else "🎬 ") + m.share.title
-        else -> ""
+internal fun quoteText(m: ChatMessage, english: Boolean = ChatMusic.english): String = if (m.deleted) {
+    if (english) "This message was deleted" else "Bu mesaj silindi"
+} else if (m.locked) {
+    "🔒"
+} else {
+    m.text.ifBlank {
+        when {
+            m.attachment?.kind == AttachmentKind.VOICE -> "🎤 " + mmss(m.attachment.durationMs)
+            m.attachment?.kind == AttachmentKind.VIDEO -> "🎬 Video"
+            m.attachment?.kind == AttachmentKind.FILE -> if (m.attachment.name.isNotBlank()) "📄 " + m.attachment.name else "📄"
+            m.gif != null -> if (m.gif.sticker) (if (english) "Sticker" else "Çıkartma") else "GIF"
+            m.event != null -> "📅 " + m.event.title.ifBlank { if (english) "Event" else "Etkinlik" }
+            m.poll != null -> "📊 " + m.poll.question
+            m.location != null -> "📍"
+            m.contact != null -> "👤 " + m.contact.name.ifBlank { m.contact.phone }
+            m.images.isNotEmpty() -> if (m.images.size == 1) "📷" else "📷 ×" + m.images.size
+            m.share != null -> (if (m.share.kind == ShareKind.SONG) "🎵 " else "🎬 ") + m.share.title
+            else -> ""
+        }
     }
 }
 

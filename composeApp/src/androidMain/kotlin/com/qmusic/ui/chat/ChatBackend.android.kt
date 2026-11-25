@@ -485,6 +485,21 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         } else {
             ref.updateChildren(mapOf("text" to body, "edited" to true)).await()
         }
+        val pinRef = root.child("chats").child(chatId).child("pinned").child(messageId)
+        if (runCatching { pinRef.get().await().exists() }.getOrDefault(false)) {
+            runCatching {
+                val version = e2e.versionNow(chatId) ?: sealed?.substringAfter("e2e:")?.substringBefore(':')?.toIntOrNull()
+                val pinText = if (version != null) {
+                    e2e.loadKey(chatId, version) ?: error("e2e-key")
+                    e2e.sealText(chatId, version, takeUtf8(body, 180)) ?: error("e2e-key")
+                } else {
+                    if (sealed != null) error("e2e-key")
+                    body.take(300)
+                }
+                pinRef.child("text").setValue(pinText).await()
+            }
+        }
+        Unit
     }
 
     override suspend fun deleteForEveryone(chatId: String, messageId: String): Result<Unit> = runCatching {
@@ -507,6 +522,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 "gif" to null,
             ),
         ).await()
+        runCatching { root.child("chats").child(chatId).child("pinned").child(messageId).removeValue().await() }
+        Unit
     }
 
     override suspend fun forward(fromChatId: String, message: ChatMessage, targets: List<ChatUser>): Result<Unit> = runCatching {
@@ -583,20 +600,35 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             ref.removeValue()
             return
         }
-        val text = message.text.ifBlank {
-            when {
-                message.attachment?.kind == AttachmentKind.VOICE -> "🎤"
-                message.attachment?.kind == AttachmentKind.VIDEO -> "🎬"
-                message.attachment != null -> "📄 " + message.attachment.name
-                message.images.isNotEmpty() -> "📷"
-                message.share != null -> "🎵 " + message.share.title
-                message.poll != null -> "📊 " + message.poll.question
-                message.location != null -> "📍"
-                message.contact != null -> "👤 " + message.contact.name
-                else -> ""
+        val tr = app.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+        val str = if (tr) ChatStrings.Turkish else ChatStrings.English
+        val text = if (message.locked) {
+            "🔒"
+        } else {
+            message.text.ifBlank {
+                when {
+                    message.attachment?.kind == AttachmentKind.VOICE -> "🎤"
+                    message.attachment?.kind == AttachmentKind.VIDEO -> "🎬"
+                    message.attachment != null -> if (message.attachment.name.isNotBlank()) "📄 " + message.attachment.name else "📄"
+                    message.gif != null -> if (message.gif.sticker) str.sticker else "GIF"
+                    message.event != null -> "📅 " + message.event.title.ifBlank { if (tr) "Etkinlik" else "Event" }
+                    message.images.isNotEmpty() -> if (message.images.size == 1) "📷" else "📷 ×" + message.images.size
+                    message.share != null -> (if (message.share.kind == ShareKind.SONG) "🎵 " else "🎬 ") + message.share.title
+                    message.poll != null -> "📊 " + message.poll.question
+                    message.location != null -> "📍"
+                    message.contact != null -> "👤 " + message.contact.name.ifBlank { message.contact.phone }
+                    else -> ""
+                }
             }
         }
-        val starText = e2e.versionNow(chatId)?.let { v -> e2e.loadKey(chatId, v); e2e.sealText(chatId, v, text.take(300)) } ?: text.take(300)
+        val version = e2e.versionNow(chatId)
+        val starText = if (version != null) {
+            e2e.loadKey(chatId, version) ?: return
+            e2e.sealText(chatId, version, takeUtf8(text, 300)) ?: return
+        } else {
+            if (message.e2e) return
+            text.take(300)
+        }
         ref.setValue(mapOf("chatId" to chatId, "messageId" to message.id, "text" to starText, "from" to message.from, "fromName" to fromName, "chatName" to chatName, "at" to message.at))
     }
 
@@ -758,7 +790,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val id = key ?: return null
         val from = child("from").getValue(String::class.java) ?: return null
         // "Messages are now end-to-end encrypted": no longer shown (encryption is simply how chats are).
-        if (child("system").getValue(String::class.java) == "e2e") return null
+        val sys = child("system").getValue(String::class.java)
+        if (sys == "e2e") return null
         val shareSnap = child("share")
         val share = if (!shareSnap.exists()) {
             null
@@ -819,10 +852,23 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         // An album ("images"), or one photo as the first version wrote it ("image").
         val images = child("images").children.mapNotNull { it.toImage() }.ifEmpty { listOfNotNull(child("image").toImage()) }
         val locked = child("_locked").getValue(Boolean::class.java) == true
+        val rawText = if (locked) E2e.UNREADABLE else child("text").getValue(String::class.java).orEmpty()
+        val msgText = if (sys == "pin") {
+            val tr = app.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+            val str = if (tr) ChatStrings.Turkish else ChatStrings.English
+            if (from == auth.currentUser?.uid) {
+                str.pinnedYou
+            } else {
+                val who = child("who").getValue(String::class.java).orEmpty()
+                if (who.isNotBlank()) str.pinnedBy(who) else rawText
+            }
+        } else {
+            rawText
+        }
         return ChatMessage(
             id = id,
             from = from,
-            text = if (locked) E2e.UNREADABLE else child("text").getValue(String::class.java).orEmpty(),
+            text = msgText,
             replyTo = reply,
             images = images,
             model = child("model").getValue(String::class.java),
@@ -1367,14 +1413,60 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     //   chats/{id}/opened/{messageId}/{uid}  when a view-once photo was opened
     //   statusLikes/{owner}/{id}/{uid}       a heart on a status (only its owner reads them)
 
+    /** Returns the longest prefix of [text] whose UTF-8 encoding fits in [maxBytes] without splitting surrogate pairs or multi-byte characters. */
+    private fun takeUtf8(text: String, maxBytes: Int): String {
+        if (maxBytes <= 0 || text.isEmpty()) return ""
+        var bytes = 0
+        var i = 0
+        while (i < text.length) {
+            val cp = Character.codePointAt(text, i)
+            val cpBytes = when {
+                cp <= 0x7F -> 1
+                cp <= 0x7FF -> 2
+                cp <= 0xFFFF -> 3
+                else -> 4
+            }
+            if (bytes + cpBytes > maxBytes) break
+            bytes += cpBytes
+            i += Character.charCount(cp)
+        }
+        return text.substring(0, i)
+    }
+
+    private suspend fun chatPeer(chatId: String, me: ChatUser): ChatUser? {
+        if (isGroupId(chatId)) {
+            val info = groupInfo(chatId) ?: return null
+            return ChatUser(chatId, info.name, "", info.photo)
+        }
+        val parts = chatId.split("_")
+        if (parts.size != 2) return null
+        val otherUid = if (parts[0] == me.uid) parts[1] else parts[0]
+        if (otherUid == me.uid) return me
+        liveProfiles.value[otherUid]?.let { p ->
+            return ChatUser(otherUid, p.name, p.username, p.photo)
+        }
+        user(otherUid)?.let { return it }
+        val uc = runCatching { root.child("userChats").child(me.uid).child(chatId).get().await() }.getOrNull()
+        val name = uc?.child("name")?.getValue(String::class.java) ?: return null
+        return ChatUser(
+            uid = otherUid,
+            name = name,
+            username = uc.child("username").getValue(String::class.java).orEmpty(),
+            photo = uc.child("photo").getValue(String::class.java),
+        )
+    }
+
     override fun pinned(chatId: String): Flow<List<PinnedMessage>> = callbackFlow {
+        e2e.watch(chatId)
         val job = launch {
             runCatching {
-                listen(root.child("chats").child(chatId).child("pinned")).collect { snap ->
+                combine(listen(root.child("chats").child(chatId).child("pinned")), e2e.changes) { snap, _ -> snap }.collect { snap ->
                     trySend(
                         snap.children.mapNotNull { p ->
                             val id = p.key ?: return@mapNotNull null
-                            val pinText = p.child("text").getValue(String::class.java).orEmpty().let { t -> e2e.openText(chatId, t)?.takeIf { it != E2e.UNREADABLE } ?: if (t.startsWith("e2e:")) "🔒" else t }
+                            val pinText = p.child("text").getValue(String::class.java).orEmpty().let { t ->
+                                if (t.startsWith("e2e:")) e2e.openText(chatId, t)?.takeIf { it != E2e.UNREADABLE } ?: "🔒" else t
+                            }
                             PinnedMessage(id, pinText, p.child("from").getValue(String::class.java).orEmpty(), p.child("at").getValue(Long::class.java) ?: 0L)
                         }.sortedByDescending { it.at },
                     )
@@ -1392,11 +1484,33 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         }
         // Three at most: the oldest pin makes room.
         val current = ref.get().await().children.mapNotNull { c -> c.key?.let { it to (c.child("at").getValue(Long::class.java) ?: 0L) } }
+        val alreadyPinned = current.any { it.first == message.id }
         val updates = HashMap<String, Any?>()
         current.filter { it.first != message.id }.sortedByDescending { it.second }.drop(2).forEach { updates[it.first] = null }
-        val pinText = e2e.versionNow(chatId)?.let { v -> e2e.loadKey(chatId, v); e2e.sealText(chatId, v, preview.take(300)) } ?: preview.take(300)
+        val version = e2e.versionNow(chatId)
+        val pinText = if (version != null) {
+            e2e.loadKey(chatId, version) ?: error("e2e-key")
+            e2e.sealText(chatId, version, takeUtf8(preview, 180)) ?: error("e2e-key")
+        } else {
+            if (message.e2e) error("e2e-key")
+            preview.take(300)
+        }
         updates[message.id] = mapOf("text" to pinText, "from" to message.from, "at" to ServerValue.TIMESTAMP)
         ref.updateChildren(updates).await()
+        if (!alreadyPinned) {
+            val me = (_account.value as? ChatAccount.Ready)?.me
+            if (me != null) {
+                runCatching {
+                    val peer = chatPeer(chatId, me) ?: return@runCatching
+                    if (peer.uid == CLAUDE_BOT_UID) return@runCatching
+                    val tr = app.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+                    val who = me.name.substringBefore(' ').ifBlank { me.username }
+                    val line = (if (tr) ChatStrings.Turkish else ChatStrings.English).pinnedBy(who)
+                    sendMessage(peer, line, null, null, null, line, extra = mapOf("system" to "pin", "who" to who))
+                }
+            }
+        }
+        Unit
     }
 
     override fun opened(chatId: String): Flow<Map<String, Set<String>>> = callbackFlow {

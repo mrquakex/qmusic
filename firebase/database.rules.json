@@ -83,7 +83,7 @@
         "pinned": {
           "$messageId": {
             ".write": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists())) && (!$chatId.matches(/^grp[A-Za-z0-9]{20}$/) || (root.child('groups').child($chatId).child('settings').child('editAdmins').val() !== true || root.child('groups').child($chatId).child('members').child(auth.uid).child('role').val() === 'admin'))",
-            ".validate": "!newData.exists() || (newData.hasChildren(['text', 'from', 'at']) && newData.child('text').isString() && newData.child('text').val().length <= 300)"
+            ".validate": "!newData.exists() || (newData.hasChildren(['text', 'from', 'at']) && newData.child('text').isString() && newData.child('text').val().length <= 1200)"
           }
         },
         "opened": {
