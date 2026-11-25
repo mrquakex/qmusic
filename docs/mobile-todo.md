@@ -9,23 +9,23 @@
 
 ## Paket 1 — Kritik Hatalar, Gizlilik & Çökme Riskleri
 
-- [ ] `ChatPush.kt`: Kilitli/gizli sohbet bildirimlerinde "Nuvelo" kısayoluna Yanıtla / Okundu işaretle (`__locked`) aksiyonlarının eklenmemesi.
-- [ ] `LiveLocation.android.kt` & `E2eEngine.android.kt`: Servis arka planda `MainActivity` olmadan yeniden başladığında `E2eEngine` hazır değilse şifreli sohbette konumun (`lat/lng/trail/bat`) düz metin yazılmasının engellenmesi; `ArrivalWatch` ve Android 12+ `ACTION_STOP` bildirim aksiyonunun güvenli hale getirilmesi.
-- [ ] `ChatBackend.android.kt` & `firebase/database.rules.json` *(DB kuralı)*: E2E + Base64 genişlemesi yüzünden ~130–190 karakter üzeri şifreli sabitlenen mesajların 300 karakter kuralında reddedilmesinin giderilmesi.
-- [ ] `VideoKeepAliveService.kt` & `MainActivity.kt`: Android 12+ arka plandan korumasız `startForegroundService` çağrısının korunması ve `MainActivity` yaşam döngüsü dinleyici sızıntılarının giderilmesi.
-- [ ] `UpdatedReceiver`, `MainViewModel.kt`, `AutoUpdate.kt`: Değişiklik notları anahtar uyumsuzluğunun (`release_notes_` vs `update_notes_`) giderilmesi; `AutoUpdate.quiet()` içinde aktif arama/indirme kontrolü ve bildirim ID çakışmasının çözülmesi.
+- [x] `ChatPush.kt`: Kilitli/gizli sohbet bildirimlerinde "Nuvelo" kısayoluna Yanıtla / Okundu işaretle (`__locked`) aksiyonlarının eklenmemesi.
+- [x] `LiveLocation.android.kt` & `E2eEngine.android.kt`: Servis arka planda `MainActivity` olmadan yeniden başladığında `E2eEngine` hazır değilse şifreli sohbette konumun (`lat/lng/trail/bat`) düz metin yazılmasının engellenmesi; `ArrivalWatch` ve Android 12+ `ACTION_STOP` bildirim aksiyonunun güvenli hale getirilmesi.
+- [x] `ChatBackend.android.kt` & `firebase/database.rules.json` *(DB kuralı)*: E2E + Base64 genişlemesi yüzünden ~130–190 karakter üzeri şifreli sabitlenen mesajların 300 karakter kuralında reddedilmesinin giderilmesi.
+- [x] `VideoKeepAliveService.kt` & `MainActivity.kt`: Android 12+ arka plandan korumasız `startForegroundService` çağrısının korunması ve `MainActivity` yaşam döngüsü dinleyici sızıntılarının giderilmesi.
+- [x] `UpdatedReceiver`, `MainViewModel.kt`, `AutoUpdate.kt`: Değişiklik notları anahtar uyumsuzluğunun (`release_notes_` vs `update_notes_`) giderilmesi; `AutoUpdate.quiet()` içinde aktif arama/indirme kontrolü ve bildirim ID çakışmasının çözülmesi.
 
 ---
 
 ## Paket 2 — Sabitlenen Mesajlar & Sohbet İçi Düzeltmeler
 
 - [x] `ChatScreens.kt`, `ChatController.kt`, `ChatStrings.kt`, `ChatControllerTest.kt`: Sabitlenen mesaj şeridinde basılı tutma menüsü (`Sabitlemeyi kaldır` / `Mesaja git`), `flash` vurgu zamanlayıcı düzeltmesi ve sabit balonda iğne simgesi (`2a284c17`).
-- [ ] `ChatBackend.android.kt`: `deleteForEveryone` çağrısında mesaj sabitliyse `chats/{id}/pinned/{messageId}` kaydının da silinmesi.
-- [ ] `ChatBackend.android.kt`: `editMessage` çağrısında mesaj sabitliyse `chats/{id}/pinned/{messageId}/text` önizlemesinin güncellenmesi.
-- [ ] `ChatBackend.android.kt`: `pinned()` akışının `e2e.changes` ile birleştirilmesi (anahtar sonradan yüklenince `"🔒"` metnin otomatik çözülmesi).
-- [ ] `ChatBackend.android.kt`, `ChatScreens.kt`, `ChatStrings.kt`: Mesaj sabitlenince sohbet içi `"Bir mesajı sabitlediniz"` sistem satırı eklenmesi (ve istenirse `24 saat / 7 gün / 30 gün` süre seçimi — *(DB kuralı)*).
-- [ ] `ChatScreens.kt`, `ChatBackend.android.kt`: Sağa kaydırıp yanıtlamanın silinmiş mesajlarda engellenmesi; `quoteText` ve `setStarred` içine GIF, çıkartma ve etkinlik türlerinin eklenmesi; fotoğraf/video yanıtlarına küçük önizleme (thumbnail) eklenmesi; silinen mesaja yapılan alıntının korunması/güncellenmesi.
-- [ ] `ChatReplyReceiver.kt`, `ChatPush.kt`: Hızlı yanıt hatası veya zaman aşımında bildirimin dönmede takılı kalmaması; bildirim kaydırılıp kapatılınca geçmişin temizlenmesi.
+- [x] `ChatBackend.android.kt`: `deleteForEveryone` çağrısında mesaj sabitliyse `chats/{id}/pinned/{messageId}` kaydının da silinmesi.
+- [x] `ChatBackend.android.kt`: `editMessage` çağrısında mesaj sabitliyse `chats/{id}/pinned/{messageId}/text` önizlemesinin güncellenmesi.
+- [x] `ChatBackend.android.kt`: `pinned()` akışının `e2e.changes` ile birleştirilmesi (anahtar sonradan yüklenince `"🔒"` metnin otomatik çözülmesi).
+- [x] `ChatBackend.android.kt`, `ChatScreens.kt`, `ChatStrings.kt`: Mesaj sabitlenince sohbet içi `"Bir mesajı sabitlediniz"` sistem satırı eklenmesi *(süre seçimi isteğe bağlı olarak ertelendi)*.
+- [x] `ChatScreens.kt`, `ChatBackend.android.kt`: Sağa kaydırıp yanıtlamanın silinmiş mesajlarda engellenmesi; `quoteText` ve `setStarred` içine GIF, çıkartma ve etkinlik türlerinin eklenmesi; fotoğraf/video yanıtlarına küçük önizleme (thumbnail) eklenmesi; silinen mesaja yapılan alıntının korunması/güncellenmesi.
+- [x] `ChatReplyReceiver.kt`, `ChatPush.kt`: Hızlı yanıt hatası veya zaman aşımında bildirimin dönmede takılı kalmaması; bildirim kaydırılıp kapatılınca geçmişin temizlenmesi.
 
 ---
 
