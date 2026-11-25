@@ -1,7 +1,10 @@
 package com.qmusic.ui.chat
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
@@ -10,6 +13,8 @@ import android.media.AudioManager
 import android.media.RingtoneManager
 import android.media.ToneGenerator
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -91,9 +96,16 @@ object CallHooks {
     /** A call is going on (keep the app alive with a foreground service), or it is over. */
     var onActive: ((active: Boolean, peer: ChatUser?, video: Boolean) -> Unit)? = null
 
+    /** Observable mirror of [groupActive] for MainActivity (lock screen / screen-on). */
+    val groupActiveFlow = MutableStateFlow(false)
+
     /** A group call is going on here (the call's service stays up for it). */
     @Volatile
     var groupActive: Boolean = false
+        set(value) {
+            field = value
+            groupActiveFlow.value = value
+        }
 
     /** The screen is shown in the call now, or no longer: the foreground service says so to Android (needed first). */
     var onScreenShare: ((sharing: Boolean) -> Unit)? = null
@@ -283,6 +295,12 @@ internal class FirebaseCallService(
         var screenTrack: VideoTrack? = null
         /** The call went on as a group call (a third person was added): it ends here without "ended". */
         var moved = false
+        /** Whether the foreground service has already been started with camera type for this call. */
+        var serviceHasVideo = video
+        /** Prior mute/camera/screen-share state saved while the system puts the call on hold. */
+        var wasMutedBeforeHold = false
+        var wasCameraOnBeforeHold = true
+        var wasScreenSharingBeforeHold = false
         val callRef: DatabaseReference get() = root.child("calls").child(chatId)
 
         /** What happened in this call, in order (sent to callDebug when it ends, to find why a call failed). */
@@ -304,16 +322,84 @@ internal class FirebaseCallService(
         t.onRemoteHangUp = { scope.launch { hangUp() } }
         t.onMuteChanged = { muted ->
             scope.launch {
-                if (session != null && _state.value?.muted != muted) {
-                    session?.audio?.setEnabled(!muted)
+                val s = session ?: return@launch
+                val st = _state.value ?: return@launch
+                if (st.held) {
+                    s.wasMutedBeforeHold = muted
+                } else if (st.muted != muted) {
+                    s.audio?.setEnabled(!muted)
                     _state.update { it?.copy(muted = muted) }
                 }
             }
         }
-        t.onUnavailable = { scope.launch { if (session != null) routeAudio(_state.value?.speaker == true) } }
+        t.onHoldChanged = { held ->
+            scope.launch {
+                val s = session ?: return@launch
+                if (s.ended) return@launch
+                val st = _state.value ?: return@launch
+                if (held == st.held) return@launch
+                if (held) {
+                    s.note("call put on hold")
+                    s.wasMutedBeforeHold = st.muted
+                    s.wasCameraOnBeforeHold = st.cameraOn
+                    s.wasScreenSharingBeforeHold = st.sharingScreen
+                    s.audio?.setEnabled(false)
+                    if (st.video && s.videoTrack != null && st.cameraOn) {
+                        s.videoTrack?.setEnabled(false)
+                        if (s.screenTrack == null) runCatching { s.capturer?.stopCapture() }
+                        me()?.uid?.let { s.callRef.child("cam").child(it).setValue(false) }
+                    }
+                    if (s.screenTrack != null) s.screenTrack?.setEnabled(false)
+                    _state.update {
+                        it?.copy(
+                            held = true,
+                            muted = true,
+                            cameraOn = if (it.video && s.videoTrack != null) false else it.cameraOn,
+                        )
+                    }
+                    updateProximity()
+                } else {
+                    s.note("call resumed from hold")
+                    val restoreMuted = s.wasMutedBeforeHold
+                    val restoreCam = s.wasCameraOnBeforeHold
+                    requestCallAudioFocus()
+                    runCatching { audioManager.mode = AudioManager.MODE_IN_COMMUNICATION }
+                    s.audio?.setEnabled(!restoreMuted)
+                    if (s.screenTrack != null) {
+                        s.screenTrack?.setEnabled(true)
+                    } else if (st.video && s.videoTrack != null) {
+                        s.videoTrack?.setEnabled(restoreCam)
+                        if (restoreCam) runCatching { s.capturer?.startCapture(1280, 720, 30) }
+                        me()?.uid?.let { s.callRef.child("cam").child(it).setValue(restoreCam) }
+                    }
+                    _state.update {
+                        it?.copy(
+                            held = false,
+                            muted = restoreMuted,
+                            cameraOn = if (it.video && s.videoTrack != null) restoreCam else it.cameraOn,
+                        )
+                    }
+                    if (!telecom.active) {
+                        routeAudio(wantSpeaker)
+                        publishDevices()
+                    }
+                    updateProximity()
+                }
+            }
+        }
+        t.onUnavailable = {
+            scope.launch {
+                if (session != null) {
+                    routeAudio(wantSpeaker)
+                    publishDevices()
+                    updateProximity()
+                }
+            }
+        }
         t.onRoutes = { routes, current ->
             scope.launch {
                 _state.update { st -> st?.copy(routes = routes, route = current, speaker = routes.firstOrNull { it.id == current }?.kind == AudioRouteKind.SPEAKER) }
+                updateProximity()
             }
         }
     }
@@ -634,7 +720,7 @@ internal class FirebaseCallService(
                     // In a voice call their camera coming on makes it a video call here too.
                     if (theirCamera && !s.video && !s.upgraded) s.upgraded = true
                     _state.update { it?.copy(remoteVideo = theirCamera && remoteTrack.value != null, video = it.video || theirCamera) }
-                    if (theirCamera) releaseProximity()
+                    if (theirCamera) updateProximity()
                 }
                 // A third person was added on either phone: both go on in the group call it made.
                 val moveTo = snap.child("moveTo").getValue(String::class.java)
@@ -876,7 +962,7 @@ internal class FirebaseCallService(
                         // Our call, answered: handed to the phone's call system now, as a call that is already on.
                         if (!s.connectedOnce && s.caller) telecom.start(s.peer, _state.value?.video ?: s.video, incoming = false, active = true)
                         s.connectedOnce = true
-                        telecom.setActive()
+                        if (_state.value?.held != true) telecom.setActive()
                         watchStats(s)
                     }
                     // A tunnel or a switch from Wi-Fi to mobile: "Reconnecting…", a new route asked for again and again,
@@ -1128,10 +1214,10 @@ internal class FirebaseCallService(
                     s.callRef.child("screen").child(uid).setValue(true)
                     s.callRef.child("cam").child(uid).setValue(true)
                 }
-                releaseProximity()
+                updateProximity()
                 _state.update { it?.copy(sharingScreen = true) }
-                // A voice call: the phone is looked at, not held to the ear, so the sound comes out of the speaker.
-                if (_state.value?.speaker != true) toggleSpeaker()
+                // A voice call: the phone is looked at, not held to the ear, so the sound comes out of the speaker unless a headset is connected.
+                if (_state.value?.speaker != true && !isHeadsetActiveOrConnected()) toggleSpeaker()
                 s.note("screen shared")
             }.onFailure {
                 s.note("screen share failed: ${it.javaClass.simpleName}: ${it.message}")
@@ -1160,6 +1246,7 @@ internal class FirebaseCallService(
         }
         _state.update { it?.copy(sharingScreen = false) }
         CallHooks.onScreenShare?.invoke(false)
+        updateProximity()
         s.note("screen share stopped")
     }
 
@@ -1176,6 +1263,7 @@ internal class FirebaseCallService(
     }
 
     override fun toggleMute() {
+        if (_state.value?.held == true) return
         val muted = !(_state.value?.muted ?: false)
         session?.audio?.setEnabled(!muted)
         _state.update { it?.copy(muted = muted) }
@@ -1183,14 +1271,21 @@ internal class FirebaseCallService(
 
     override fun toggleSpeaker() {
         val on = !(_state.value?.speaker ?: false)
-        if (!telecom.setSpeaker(on)) routeAudio(on)
-        _state.update { it?.copy(speaker = on) }
-        if (!telecom.active) publishDevices()
+        pickedDevice = null
+        pickedLegacyRoute = null
+        userForcedSpeaker = on
+        wantSpeaker = on
+        if (!telecom.setSpeaker(on)) {
+            routeAudio(on)
+        } else {
+            _state.update { it?.copy(speaker = on) }
+        }
+        updateProximity()
     }
 
     override fun toggleCamera() {
         val s = session ?: return
-        if (s.screenTrack != null) return
+        if (_state.value?.held == true || s.screenTrack != null) return
         if (s.autoPaused) pauseVideo(s, false)
         if (s.videoTrack == null) {
             // A voice call: the camera comes on and its picture goes through the slot kept for it.
@@ -1207,9 +1302,19 @@ internal class FirebaseCallService(
             s.upgraded = true
             me()?.uid?.let { s.callRef.child("cam").child(it).setValue(true) }
             _state.update { it?.copy(video = true, cameraOn = true) }
-            releaseProximity()
-            // A video call is held away from the ear.
-            if (_state.value?.speaker != true) toggleSpeaker()
+            if (!s.serviceHasVideo) {
+                s.serviceHasVideo = true
+                CallHooks.onActive?.invoke(true, s.peer, true)
+            }
+            updateProximity()
+            // A video call is held away from the ear; prefer speaker only when no headset is connected.
+            defaultVideoAudio = true
+            telecom.onVideoChanged(true)
+            if (!telecom.active && !isHeadsetActiveOrConnected() && _state.value?.speaker != true) {
+                wantSpeaker = true
+                userForcedSpeaker = false
+                routeAudio(true)
+            }
             return
         }
         val on = !(_state.value?.cameraOn ?: true)
@@ -1217,6 +1322,11 @@ internal class FirebaseCallService(
         if (on) runCatching { s.capturer?.startCapture(1280, 720, 30) } else runCatching { s.capturer?.stopCapture() }
         me()?.uid?.let { s.callRef.child("cam").child(it).setValue(on) }
         _state.update { it?.copy(cameraOn = on) }
+        if (on && !s.serviceHasVideo) {
+            s.serviceHasVideo = true
+            CallHooks.onActive?.invoke(true, s.peer, true)
+        }
+        updateProximity()
     }
 
     override fun setAudioRoute(id: String) {
@@ -1224,21 +1334,28 @@ internal class FirebaseCallService(
         // Without the system's call: the app sends the sound to that device itself.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val device = audioManager.availableCommunicationDevices.firstOrNull { it.id.toString() == id } ?: return
-            audioManager.setCommunicationDevice(device)
             pickedDevice = device.id
-            _state.update { it?.copy(route = id, speaker = device.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) }
+            val isSpeaker = device.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+            userForcedSpeaker = isSpeaker
+            wantSpeaker = isSpeaker
+            runCatching { audioManager.setCommunicationDevice(device) }
+            _state.update { it?.copy(route = id, speaker = isSpeaker) }
+            publishDevices(id)
         } else {
+            pickedLegacyRoute = id
             val speaker = id == "speaker"
+            userForcedSpeaker = speaker
+            wantSpeaker = speaker
             routeAudio(speaker)
-            _state.update { it?.copy(route = id, speaker = speaker) }
         }
+        updateProximity()
     }
 
     /** The app's own list of places for the sound (when the system does not have the call). */
-    private fun publishDevices() {
+    private fun publishDevices(preferredRouteId: String? = null) {
         if (telecom.active) return
-        val routes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            audioManager.availableCommunicationDevices.mapNotNull { d ->
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val routes = audioManager.availableCommunicationDevices.mapNotNull { d ->
                 val kind = when (d.type) {
                     AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> AudioRouteKind.EARPIECE
                     AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> AudioRouteKind.SPEAKER
@@ -1248,22 +1365,143 @@ internal class FirebaseCallService(
                 } ?: return@mapNotNull null
                 AudioRoute(d.id.toString(), kind, d.productName?.toString().orEmpty())
             }.distinctBy { it.kind to it.name }
+            val currentId = preferredRouteId?.takeIf { pid -> routes.any { it.id == pid } }
+                ?: audioManager.communicationDevice?.id?.toString()?.takeIf { cid -> routes.any { it.id == cid } }
+                ?: _state.value?.route?.takeIf { rid -> routes.any { it.id == rid } }
+            val currentSpeaker = routes.firstOrNull { it.id == currentId }?.kind == AudioRouteKind.SPEAKER
+            _state.update { it?.copy(routes = routes, route = currentId, speaker = currentSpeaker) }
         } else {
-            listOf(AudioRoute("earpiece", AudioRouteKind.EARPIECE), AudioRoute("speaker", AudioRouteKind.SPEAKER))
+            val outputs = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            val btDevice = outputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+            val wiredDevice = outputs.firstOrNull { isWiredHeadsetType(it.type) }
+            val hasEarpiece = outputs.any { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+            val routes = buildList {
+                if (hasEarpiece || wiredDevice == null) add(AudioRoute("earpiece", AudioRouteKind.EARPIECE))
+                add(AudioRoute("speaker", AudioRouteKind.SPEAKER))
+                if (wiredDevice != null || wiredPlugged == true) {
+                    add(AudioRoute("wired", AudioRouteKind.WIRED, wiredDevice?.productName?.toString().orEmpty()))
+                }
+                if (btDevice != null) {
+                    add(AudioRoute("bluetooth", AudioRouteKind.BLUETOOTH, btDevice.productName?.toString().orEmpty()))
+                }
+            }
+            val currentId = preferredRouteId?.takeIf { pid -> routes.any { it.id == pid } } ?: when {
+                audioManager.isSpeakerphoneOn -> "speaker"
+                btDevice != null && (scoStarted || audioManager.isBluetoothScoOn) -> "bluetooth"
+                wiredDevice != null || wiredPlugged == true -> "wired"
+                else -> "earpiece"
+            }
+            _state.update { it?.copy(routes = routes, route = currentId, speaker = currentId == "speaker") }
         }
-        val current = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audioManager.communicationDevice?.id?.toString()
-        else if (_state.value?.speaker == true) "speaker" else "earpiece"
-        _state.update { it?.copy(routes = routes, route = current) }
     }
 
     private var pickedDevice: Int? = null
+    private var pickedLegacyRoute: String? = null
+    private var defaultVideoAudio: Boolean = false
+    private var wantSpeaker: Boolean = false
+    private var userForcedSpeaker: Boolean = false
+    private var scoStarted: Boolean = false
+    private var scoConnected: Boolean = false
+    private var wiredPlugged: Boolean? = null
+    private var knownHeadsetIds: Set<Int> = emptySet()
+    private var audioReceiverRegistered: Boolean = false
+    private var commListener: Any? = null
+
     private val deviceCallback = object : android.media.AudioDeviceCallback() {
         override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) {
-            scope.launch { publishDevices() }
+            scope.launch {
+                val s = session
+                if (s == null || s.ended) return@launch
+                val addedHeadsets = added.filter { it.isSink && isHeadsetType(it.type) }.map { it.id }
+                val newHeadsets = addedHeadsets - knownHeadsetIds
+                knownHeadsetIds = knownHeadsetIds + addedHeadsets
+                if (!telecom.active) {
+                    if (newHeadsets.isNotEmpty()) {
+                        // A headset connected mid-call takes over automatically.
+                        pickedDevice = null
+                        pickedLegacyRoute = null
+                        userForcedSpeaker = false
+                        wantSpeaker = defaultVideoAudio
+                        routeAudio(wantSpeaker)
+                    } else {
+                        publishDevices()
+                    }
+                }
+                updateProximity()
+            }
         }
 
         override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) {
-            scope.launch { publishDevices() }
+            scope.launch {
+                val s = session
+                if (s == null || s.ended) return@launch
+                val removedIds = removed.mapTo(HashSet()) { it.id }
+                val hadKnownHeadset = (removedIds intersect knownHeadsetIds).isNotEmpty()
+                knownHeadsetIds = knownHeadsetIds - removedIds
+                if (pickedDevice != null && pickedDevice in removedIds) pickedDevice = null
+                if (!telecom.active) {
+                    if (pickedLegacyRoute == "bluetooth" && !hasBtSco()) pickedLegacyRoute = null
+                    if (pickedLegacyRoute == "wired" && !hasWiredHeadset()) pickedLegacyRoute = null
+                    if (hadKnownHeadset || pickedDevice == null) {
+                        routeAudio(wantSpeaker)
+                    } else {
+                        publishDevices()
+                    }
+                }
+                updateProximity()
+            }
+        }
+    }
+
+    private val audioRoutingReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val action = intent?.action ?: return
+            scope.launch {
+                val s = session
+                if (s == null || s.ended) return@launch
+                when (action) {
+                    Intent.ACTION_HEADSET_PLUG -> {
+                        val plugged = intent.getIntExtra("state", 0) == 1
+                        if (wiredPlugged == plugged) return@launch
+                        val hadBefore = wiredPlugged
+                        wiredPlugged = plugged
+                        if (!telecom.active) {
+                            if (plugged && hadBefore != null) {
+                                pickedDevice = null
+                                pickedLegacyRoute = null
+                                userForcedSpeaker = false
+                                wantSpeaker = defaultVideoAudio
+                                routeAudio(wantSpeaker)
+                            } else if (!plugged && hadBefore == true) {
+                                if (pickedLegacyRoute == "wired") pickedLegacyRoute = null
+                                routeAudio(wantSpeaker)
+                            }
+                        }
+                        updateProximity()
+                    }
+                    AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED -> {
+                        val state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, AudioManager.SCO_AUDIO_STATE_ERROR)
+                        if (state == AudioManager.SCO_AUDIO_STATE_CONNECTED) {
+                            scoConnected = true
+                            if (!telecom.active && Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
+                                !audioManager.isSpeakerphoneOn && pickedLegacyRoute != "wired" && pickedLegacyRoute != "earpiece"
+                            ) {
+                                runCatching { audioManager.isBluetoothScoOn = true }
+                            }
+                        } else if (state == AudioManager.SCO_AUDIO_STATE_DISCONNECTED) {
+                            scoConnected = false
+                            scoStarted = false
+                            if (!telecom.active && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                                runCatching { audioManager.isBluetoothScoOn = false }
+                                if (pickedLegacyRoute == "bluetooth") pickedLegacyRoute = null
+                                routeAudio(wantSpeaker, allowScoStart = false)
+                            }
+                        }
+                        if (!telecom.active) publishDevices()
+                        updateProximity()
+                    }
+                }
+            }
         }
     }
 
@@ -1370,6 +1608,8 @@ internal class FirebaseCallService(
         runCatching { s.helper?.dispose() }
         runCatching { s.pc?.close() }
         runCatching { s.pc?.dispose() }
+        runCatching { s.audio?.dispose() }
+        runCatching { s.audioSource?.dispose() }
         localTrack.value = null
         remoteTrack.value = null
         // "Ended", for a call that was on (still in the call's sound route, before it is let go).
@@ -1386,6 +1626,7 @@ internal class FirebaseCallService(
             if (session === s) {
                 session = null
                 _state.value = null
+                CallUi.minimized.value = false
                 settle()
             }
         }
@@ -1480,7 +1721,7 @@ internal class FirebaseCallService(
                 }
                 // Nothing arriving from them (no bytes) for 6 seconds: noted once, with the connection's figures.
                 val now = System.currentTimeMillis()
-                if (bytes > lastBytes) {
+                if (bytes > lastBytes || _state.value?.held == true) {
                     silentSince = 0L
                 } else if (silentSince == 0L) {
                     silentSince = now
@@ -1498,70 +1739,242 @@ internal class FirebaseCallService(
     private var focus: AudioFocusRequest? = null
     private var proximity: PowerManager.WakeLock? = null
 
-    private fun startAudio(video: Boolean) {
-        MusicDuringCall.pause()
+    private fun isBluetoothHeadsetType(type: Int): Boolean =
+        type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && type == AudioDeviceInfo.TYPE_BLE_HEADSET)
+
+    private fun isWiredHeadsetType(type: Int): Boolean =
+        type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+            type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && type == AudioDeviceInfo.TYPE_USB_HEADSET)
+
+    private fun isHeadsetType(type: Int): Boolean = isBluetoothHeadsetType(type) || isWiredHeadsetType(type)
+
+    private fun hasBtSco(): Boolean =
+        audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+
+    private fun hasWiredHeadset(): Boolean =
+        audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { isWiredHeadsetType(it.type) }
+
+    private fun currentHeadsetDeviceIds(): Set<Int> =
+        audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .filter { isHeadsetType(it.type) }
+            .mapTo(HashSet()) { it.id }
+
+    private fun isHeadsetActiveOrConnected(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val comm = audioManager.communicationDevice
+            if (comm != null) return isHeadsetType(comm.type)
+            return audioManager.availableCommunicationDevices.any { isHeadsetType(it.type) }
+        }
+        return scoConnected || scoStarted || audioManager.isBluetoothScoOn || hasBtSco() || hasWiredHeadset() || wiredPlugged == true
+    }
+
+    private fun requestCallAudioFocus() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // Taking the focus pauses the music (and a video) for the call.
+            focus?.let { runCatching { audioManager.abandonAudioFocusRequest(it) } }
             focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build(),
+                )
                 .build()
                 .also { audioManager.requestAudioFocus(it) }
         }
-        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        watchNetwork(true)
-        // Where the phone's call system has the call it sends the sound (see CallTelecom); until it has it (and where
-        // there is none), the app does.
-        if (!telecom.active) routeAudio(video)
-        runCatching { audioManager.registerAudioDeviceCallback(deviceCallback, android.os.Handler(android.os.Looper.getMainLooper())) }
-        scope.launch {
-            // The system's list comes through CallTelecom; this is for when it does not have the call.
-            delay(600)
-            publishDevices()
-        }
-        if (!video) {
-            // A voice call held to the ear turns the screen off (no cheek on the buttons).
-            val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
-            if (pm.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) {
-                proximity = pm.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "qmusic:call").also { it.acquire(4 * 60 * 60 * 1000L) }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun startScoIfNeeded() {
+        if (scoStarted && audioManager.isBluetoothScoOn) return
+        runCatching {
+            audioManager.isBluetoothScoOn = true
+            if (!scoStarted) {
+                audioManager.startBluetoothSco()
+                scoStarted = true
             }
         }
     }
 
     @Suppress("DEPRECATION")
-    private fun routeAudio(speaker: Boolean) {
+    private fun stopScoIfNeeded() {
+        if (!scoStarted && !audioManager.isBluetoothScoOn) return
+        runCatching {
+            audioManager.isBluetoothScoOn = false
+            if (scoStarted) audioManager.stopBluetoothSco()
+        }
+        scoStarted = false
+        scoConnected = false
+    }
+
+    private fun startAudio(video: Boolean) {
+        MusicDuringCall.pause()
+        requestCallAudioFocus()
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        defaultVideoAudio = video
+        wantSpeaker = video
+        userForcedSpeaker = false
+        pickedDevice = null
+        pickedLegacyRoute = null
+        scoStarted = false
+        scoConnected = false
+        wiredPlugged = hasWiredHeadset()
+        knownHeadsetIds = currentHeadsetDeviceIds()
+        watchNetwork(true)
+        // Where the phone's call system has the call it sends the sound (see CallTelecom); until it has it (and where
+        // there is none), the app does.
+        if (!telecom.active) routeAudio(video)
+        runCatching { audioManager.registerAudioDeviceCallback(deviceCallback, Handler(Looper.getMainLooper())) }
+        if (!audioReceiverRegistered) {
+            runCatching {
+                ContextCompat.registerReceiver(
+                    app,
+                    audioRoutingReceiver,
+                    IntentFilter().apply {
+                        addAction(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
+                        addAction(Intent.ACTION_HEADSET_PLUG)
+                    },
+                    ContextCompat.RECEIVER_NOT_EXPORTED,
+                )
+                audioReceiverRegistered = true
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && commListener == null) {
+            val l = AudioManager.OnCommunicationDeviceChangedListener { device ->
+                scope.launch {
+                    val s = session
+                    if (s == null || s.ended) return@launch
+                    if (!telecom.active) publishDevices(device?.id?.toString())
+                    updateProximity()
+                }
+            }
+            commListener = l
+            runCatching { audioManager.addOnCommunicationDeviceChangedListener(ContextCompat.getMainExecutor(app), l) }
+        }
+        scope.launch {
+            // The system's list comes through CallTelecom; this is for when it does not have the call.
+            delay(600)
+            publishDevices()
+            updateProximity()
+        }
+        updateProximity()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun routeAudio(speaker: Boolean, allowScoStart: Boolean = true) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val devices = audioManager.availableCommunicationDevices
-            // A headset or Bluetooth device in use wins over the speaker and the earpiece.
-            val headset = devices.firstOrNull {
-                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
-                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES || it.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
-                    it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
-            }
+            val picked = pickedDevice?.let { id -> devices.firstOrNull { it.id == id } }
+            if (picked == null) pickedDevice = null
+            // A headset or Bluetooth device wins over default speaker (even in video calls) unless user explicitly forced speaker.
+            val headset = devices.firstOrNull { isBluetoothHeadsetType(it.type) }
+                ?: devices.firstOrNull { isWiredHeadsetType(it.type) }
             val target = when {
-                speaker -> devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                picked != null -> picked
+                userForcedSpeaker && speaker -> devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
                 headset != null -> headset
+                speaker -> devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
                 else -> devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+                    ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
             }
-            if (target != null) audioManager.setCommunicationDevice(target) else audioManager.clearCommunicationDevice()
+            if (target != null) {
+                runCatching { audioManager.setCommunicationDevice(target) }
+            } else {
+                runCatching { audioManager.clearCommunicationDevice() }
+            }
+            publishDevices(target?.id?.toString())
         } else {
-            audioManager.isSpeakerphoneOn = speaker
+            val btAvailable = hasBtSco()
+            val wiredAvailable = hasWiredHeadset() || wiredPlugged == true
+            val targetRoute = when {
+                pickedLegacyRoute == "speaker" -> "speaker"
+                pickedLegacyRoute == "bluetooth" && btAvailable -> "bluetooth"
+                pickedLegacyRoute == "wired" && wiredAvailable -> "wired"
+                pickedLegacyRoute == "earpiece" -> "earpiece"
+                userForcedSpeaker && speaker -> "speaker"
+                btAvailable && allowScoStart -> "bluetooth"
+                wiredAvailable -> "wired"
+                speaker -> "speaker"
+                else -> "earpiece"
+            }
+            when (targetRoute) {
+                "bluetooth" -> {
+                    audioManager.isSpeakerphoneOn = false
+                    startScoIfNeeded()
+                }
+                "speaker" -> {
+                    stopScoIfNeeded()
+                    audioManager.isSpeakerphoneOn = true
+                }
+                else -> {
+                    stopScoIfNeeded()
+                    audioManager.isSpeakerphoneOn = false
+                }
+            }
+            publishDevices(targetRoute)
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun stopAudio() {
         watchNetwork(false)
         runCatching { audioManager.unregisterAudioDeviceCallback(deviceCallback) }
+        if (audioReceiverRegistered) {
+            runCatching { app.unregisterReceiver(audioRoutingReceiver) }
+            audioReceiverRegistered = false
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (commListener as? AudioManager.OnCommunicationDeviceChangedListener)?.let {
+                runCatching { audioManager.removeOnCommunicationDeviceChangedListener(it) }
+            }
+            commListener = null
+            runCatching { audioManager.clearCommunicationDevice() }
+        } else {
+            stopScoIfNeeded()
+            runCatching { audioManager.isSpeakerphoneOn = false }
+        }
         pickedDevice = null
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audioManager.clearCommunicationDevice()
+        pickedLegacyRoute = null
+        defaultVideoAudio = false
+        wantSpeaker = false
+        userForcedSpeaker = false
+        wiredPlugged = null
+        knownHeadsetIds = emptySet()
         audioManager.mode = AudioManager.MODE_NORMAL
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) focus?.let { audioManager.abandonAudioFocusRequest(it) }
         focus = null
         releaseProximity()
     }
 
-    /** The screen-off-near-the-ear lock of a voice call let go: a video call keeps its screen on. */
+    /** Only black out the screen during active earpiece voice audio — never on speaker, wired, Bluetooth, video, or hold. */
+    private fun shouldHoldProximity(): Boolean {
+        val s = session ?: return false
+        val st = _state.value ?: return false
+        if (s.ended || st.phase == CallPhase.ENDED || st.phase == CallPhase.INCOMING) return false
+        if (st.video || st.sharingScreen || st.held || st.speaker) return false
+        val currentRoute = st.routes.firstOrNull { it.id == st.route }
+        if (currentRoute != null) return currentRoute.kind == AudioRouteKind.EARPIECE
+        return !isHeadsetActiveOrConnected()
+    }
+
+    private fun updateProximity() {
+        if (shouldHoldProximity()) acquireProximity() else releaseProximity()
+    }
+
+    private fun acquireProximity() {
+        if (proximity?.isHeld == true) return
+        val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (pm.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) {
+            proximity = pm.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "qmusic:call").also {
+                it.acquire(4 * 60 * 60 * 1000L)
+            }
+        }
+    }
+
+    /** The screen-off-near-the-ear lock of a voice call let go: a video call, speaker, headset, or hold keeps its screen on. */
     private fun releaseProximity() {
-        proximity?.let { if (it.isHeld) it.release() }
+        proximity?.let { if (it.isHeld) runCatching { it.release() } }
         proximity = null
     }
 
@@ -1728,14 +2141,21 @@ actual fun rememberCallPermissions(): (video: Boolean, onResult: (Boolean) -> Un
     }
 }
 
+private val callPipHolders = HashSet<Any>()
+
 @Composable
 actual fun CallPictureInPicture(armed: Boolean): Boolean {
+    val token = remember { Any() }
     DisposableEffect(armed) {
-        com.qmusic.ui.videos.VideoPip.armed = armed
-        com.qmusic.ui.videos.VideoPip.portrait = armed
+        if (armed) callPipHolders += token else callPipHolders -= token
+        val nowArmed = callPipHolders.isNotEmpty()
+        com.qmusic.ui.videos.VideoPip.armed = nowArmed
+        com.qmusic.ui.videos.VideoPip.portrait = nowArmed
         onDispose {
-            com.qmusic.ui.videos.VideoPip.armed = false
-            com.qmusic.ui.videos.VideoPip.portrait = false
+            callPipHolders -= token
+            val stillArmed = callPipHolders.isNotEmpty()
+            com.qmusic.ui.videos.VideoPip.armed = stillArmed
+            com.qmusic.ui.videos.VideoPip.portrait = stillArmed
         }
     }
     val inside by com.qmusic.ui.videos.VideoPip.active.collectAsState()

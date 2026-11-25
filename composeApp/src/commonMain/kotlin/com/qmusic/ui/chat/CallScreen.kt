@@ -40,12 +40,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -64,10 +67,12 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -116,10 +121,10 @@ fun CallScreen(
     val remoteShown = showVideo && call.remoteVideo && !call.remotePaused && (call.phase == CallPhase.ACTIVE || call.phase == CallPhase.CONNECTING)
     val localShown = showVideo && call.cameraOn && !call.sharingScreen && call.phase != CallPhase.INCOMING
     // Leaving the app during a call (ringing out too): it goes on in a floating window (their picture, or their photo
-    // and the time).
+    // and the time). Armed across camera toggles whenever the call can shrink.
     val inWindow = CallPictureInPicture(armed = canShrink)
     if (inWindow) {
-        CallWindow(service, call, s, modifier)
+        CallWindow(service, call, s, Modifier.fillMaxSize())
         return
     }
 
@@ -136,11 +141,12 @@ fun CallScreen(
             controlsShown = false
         }
     }
-    val showControls = controlsShown || !videoUp
+    val showControls = controlsShown || !videoUp || call.held
     // Double tap on the small picture: theirs and ours change places.
     var swapped by remember { mutableStateOf(false) }
     val swap = swapped && videoUp && localShown
 
+    CompositionLocalProvider(LocalContentColor provides TextPrimary) {
     Box(modifier.fillMaxSize().background(BgRoot)) {
         // No picture of them on screen: their photo fills the back, blurred, over a wash of its own colour.
         if (!remoteShown && !localShown) CallBackdrop(call.peer.photo)
@@ -269,6 +275,27 @@ fun CallScreen(
                         Icon(QMusicIcons.Lock, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(12.dp))
                         Spacer(Modifier.width(5.dp))
                         Text(E2eWords(ChatMusic.english).encrypted, color = TextSecondary, fontSize = 12.sp)
+                    }
+                    // Subtle status banner while Telecom holds the call (e.g. a cellular call is active).
+                    if (call.held && call.phase != CallPhase.ENDED) {
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(DarkSurfaceVariant.copy(alpha = 0.85f))
+                                .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(20.dp))
+                                .padding(horizontal = 14.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(QMusicIcons.Pause, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (s.english) "Call on hold" else "Arama bekletiliyor",
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
                     }
                     // Our screen is on show: one tap stops it.
                     if (call.sharingScreen) {
@@ -456,6 +483,7 @@ fun CallScreen(
                 onClose = { repliesOpen = false },
             )
         }
+    }
     }
 }
 
@@ -656,7 +684,7 @@ internal fun AddPersonSheet(s: ChatStrings, people: List<ChatUser>, onPick: (Cha
             }
             Text(s.callAddNote, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp))
             Spacer(Modifier.height(8.dp))
-            SearchPill(query, { query = it }, s.search)
+            CallSearchPill(query, { query = it }, s.search, s.english)
             LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
                 items(shown, key = { it.uid }) { user ->
                     Row(
@@ -704,6 +732,40 @@ private fun QuickReplies(s: ChatStrings, onPick: (String) -> Unit, onClose: () -
     }
 }
 
+/** Always-dark search input inside call sheets so light theme never produces light-on-dark controls. */
+@Composable
+private fun CallSearchPill(value: String, onValue: (String) -> Unit, hint: String, english: Boolean) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .height(48.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color.White.copy(alpha = 0.08f))
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(QMusicIcons.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Box(Modifier.weight(1f)) {
+            if (value.isEmpty()) Text(hint, color = TextSecondary, fontSize = 16.sp)
+            BasicTextField(
+                value = value,
+                onValueChange = onValue,
+                singleLine = true,
+                textStyle = TextStyle(color = TextPrimary, fontSize = 16.sp),
+                cursorBrush = SolidColor(Color.White),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (value.isNotEmpty()) {
+            Box(Modifier.size(40.dp).clip(CircleShape).clickable { onValue("") }, contentAlignment = Alignment.Center) {
+                Icon(QMusicIcons.Close, contentDescription = if (english) "Clear" else "Temizle", tint = TextSecondary, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
 /** A small turning ring: "Reconnecting…". */
 @Composable
 private fun Spinner() {
@@ -733,7 +795,9 @@ internal fun statusText(call: CallState, s: ChatStrings): String = when (call.ph
                 delay(1_000)
             }
         }
-        if (call.reconnecting) s.callReconnecting else duration(((now - (call.startedAt ?: now)) / 1000).coerceAtLeast(0))
+        if (call.reconnecting) s.callReconnecting
+        else if (call.held) (if (s.english) "On hold" else "Bekletiliyor")
+        else duration(((now - (call.startedAt ?: now)) / 1000).coerceAtLeast(0))
     }
     CallPhase.ENDED -> when (call.endReason) {
         CallEnd.DECLINED -> s.callDeclined
@@ -860,41 +924,89 @@ private fun CallBackdrop(photo: String?) {
 @Composable
 private fun CallWindow(service: CallService, call: CallState, s: ChatStrings, modifier: Modifier = Modifier) {
     val picture = call.video && call.remoteVideo && !call.remotePaused
-    Box(modifier.fillMaxSize().background(Color(0xFF101016)), contentAlignment = Alignment.Center) {
-        if (picture) {
-            CallVideo(service, remote = true, modifier = Modifier.fillMaxSize(), overlay = false)
-        } else {
-            CallBackdrop(call.peer.photo)
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(8.dp)) {
-                val level by androidx.compose.animation.core.animateFloatAsState(
-                    if (call.reconnecting) 0f else call.remoteLevel,
-                    animationSpec = tween(120),
-                )
-                Box(contentAlignment = Alignment.Center) {
-                    if (level > 0.01f) {
-                        Box(
-                            Modifier.size(64.dp).scale(1f + (level * 2.2f).coerceAtMost(0.45f)).clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.12f + level * 0.25f)),
+    CompositionLocalProvider(LocalContentColor provides TextPrimary) {
+        Box(modifier.fillMaxSize().background(BgRoot), contentAlignment = Alignment.Center) {
+            if (picture) {
+                CallVideo(service, remote = true, modifier = Modifier.fillMaxSize(), overlay = false)
+            } else {
+                CallBackdrop(call.peer.photo)
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(8.dp)) {
+                    val level by androidx.compose.animation.core.animateFloatAsState(
+                        if (call.reconnecting || call.held) 0f else call.remoteLevel,
+                        animationSpec = tween(120),
+                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        if (level > 0.01f) {
+                            Box(
+                                Modifier.size(64.dp).scale(1f + (level * 2.2f).coerceAtMost(0.45f)).clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.12f + level * 0.25f)),
+                            )
+                        }
+                        ChatAvatar(callerUser(call.peer), 64.dp)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        callerShown(call.peer),
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (call.held) {
+                            Icon(QMusicIcons.Pause, null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(13.dp))
+                            Spacer(Modifier.width(4.dp))
+                        } else if (call.muted) {
+                            Icon(QMusicIcons.MicOff, null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(13.dp))
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(statusText(call, s), color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp, maxLines = 1)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Full-bleed PiP window for a group call: shows the first active remote video, or local video, or the group card.
+ */
+@Composable
+internal fun GroupCallWindow(service: GroupCallService, call: GroupCallState, s: ChatStrings, modifier: Modifier = Modifier) {
+    val remoteVideo = call.members.firstOrNull { it.connected && it.hasVideo && it.cameraOn }
+    val showVideo = remoteVideo != null || (call.video && call.cameraOn)
+    var now by remember { mutableLongStateOf(kotlinx.datetime.Clock.System.now().toEpochMilliseconds()) }
+    LaunchedEffect(call.startedAt) {
+        while (call.startedAt != null) {
+            now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+            delay(1_000)
+        }
+    }
+    CompositionLocalProvider(LocalContentColor provides TextPrimary) {
+        Box(modifier.fillMaxSize().background(BgRoot), contentAlignment = Alignment.Center) {
+            if (showVideo) {
+                GroupCallVideo(service, remoteVideo?.user?.uid, Modifier.fillMaxSize())
+            } else {
+                CallBackdrop(call.group.photo)
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(8.dp)) {
+                    ChatAvatar(call.group, 64.dp)
+                    Spacer(Modifier.height(10.dp))
+                    Text(call.group.name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (call.muted) {
+                            Icon(QMusicIcons.MicOff, null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(13.dp))
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(
+                            call.startedAt?.let { duration(((now - it) / 1000).coerceAtLeast(0)) } ?: "${call.members.size + 1} ${s.people}",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 13.sp,
+                            maxLines = 1,
                         )
                     }
-                    ChatAvatar(callerUser(call.peer), 64.dp)
-                }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    callerShown(call.peer),
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (call.muted) {
-                        Icon(QMusicIcons.MicOff, null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(13.dp))
-                        Spacer(Modifier.width(4.dp))
-                    }
-                    Text(statusText(call, s), color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp, maxLines = 1)
                 }
             }
         }
@@ -909,11 +1021,17 @@ object CallUi {
 }
 
 /**
- * Over the whole app while a call is shrunk: a small bubble (their picture and the time, or their video), dragged
+ * Over the whole app while a 1-on-1 or group call is shrunk: a small bubble (picture and time, or video), dragged
  * anywhere and settling on the nearer side; a tap brings the call back to full screen.
  */
 @Composable
 fun CallBubbleOverlay() {
+    OneToOneCallBubbleOverlay()
+    GroupCallBubbleOverlay()
+}
+
+@Composable
+private fun OneToOneCallBubbleOverlay() {
     val service = CallUi.service ?: return
     val s = CallUi.strings ?: return
     val state by service.state.collectAsState()
@@ -923,54 +1041,105 @@ fun CallBubbleOverlay() {
     // Leaving the app with the call in its bubble: the floating window comes as it does from the full call screen.
     val inWindow = CallPictureInPicture(armed = true)
     if (inWindow) {
-        CallWindow(service, call, s, Modifier)
+        CallWindow(service, call, s, Modifier.fillMaxSize())
         return
     }
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val video = call.video && call.remoteVideo && call.phase == CallPhase.ACTIVE
+    val video = call.video && call.remoteVideo && !call.remotePaused && call.phase == CallPhase.ACTIVE
+    FloatingCallBubble(video = video, onExpand = { CallUi.minimized.value = false }) {
+        if (video) {
+            CallVideo(service, remote = true, modifier = Modifier.fillMaxSize())
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(56.dp).clip(CircleShape).border(2.dp, Color(0xFF1DAA61), CircleShape).padding(3.dp), contentAlignment = Alignment.Center) {
+                    ChatAvatar(callerUser(call.peer), 50.dp)
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(statusText(call, s), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupCallBubbleOverlay() {
+    val service = GroupCallUi.service ?: return
+    val s = GroupCallUi.strings ?: CallUi.strings ?: return
+    val state by service.state.collectAsState()
+    val call = state ?: return
+    val minimized by GroupCallUi.minimized.collectAsState()
+    if (!minimized) return
+    val inWindow = CallPictureInPicture(armed = true)
+    if (inWindow) {
+        GroupCallWindow(service, call, s, Modifier.fillMaxSize())
+        return
+    }
+    val remoteVideo = call.members.firstOrNull { it.connected && it.hasVideo && it.cameraOn }
+    val video = remoteVideo != null || (call.video && call.cameraOn)
+    var now by remember { mutableLongStateOf(kotlinx.datetime.Clock.System.now().toEpochMilliseconds()) }
+    LaunchedEffect(call.startedAt) {
+        while (call.startedAt != null) {
+            now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+            delay(1_000)
+        }
+    }
+    val label = call.startedAt?.let { duration(((now - it) / 1000).coerceAtLeast(0)) } ?: "${call.members.size + 1} ${s.people}"
+    FloatingCallBubble(video = video, onExpand = { GroupCallUi.minimized.value = false }) {
+        if (video) {
+            GroupCallVideo(service, remoteVideo?.user?.uid, Modifier.fillMaxSize())
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 6.dp)) {
+                Box(Modifier.size(56.dp).clip(CircleShape).border(2.dp, Color(0xFF1DAA61), CircleShape).padding(3.dp), contentAlignment = Alignment.Center) {
+                    ChatAvatar(call.group, 50.dp)
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FloatingCallBubble(
+    video: Boolean,
+    onExpand: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val density = LocalDensity.current
     val margin = with(density) { 12.dp.toPx() }
-    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-        val areaW = with(density) { maxWidth.toPx() }
-        val areaH = with(density) { maxHeight.toPx() }
-        val w = with(density) { (if (video) 112.dp else 84.dp).toPx() }
-        val h = with(density) { (if (video) 160.dp else 104.dp).toPx() }
-        var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset(areaW - w - margin, with(density) { 80.dp.toPx() })) }
-        val shape = RoundedCornerShape(if (video) 16.dp else 26.dp)
-        Box(
-            Modifier
-                .offset { androidx.compose.ui.unit.IntOffset(offset.x.roundToInt(), offset.y.roundToInt()) }
-                .size(with(density) { w.toDp() }, with(density) { h.toDp() })
-                .shadow(14.dp, shape)
-                .clip(shape)
-                .background(Color(0xFF15151B))
-                .pointerInput(areaW, areaH) {
-                    detectDragGestures(
-                        onDragEnd = {
-                            // To the nearer side, like the system's own bubbles.
-                            val x = if (offset.x + w / 2 < areaW / 2) margin else areaW - w - margin
-                            offset = androidx.compose.ui.geometry.Offset(x, offset.y.coerceIn(margin, areaH - h - margin))
-                        },
-                    ) { change, drag ->
-                        change.consume()
-                        offset = androidx.compose.ui.geometry.Offset(
-                            (offset.x + drag.x).coerceIn(0f, areaW - w),
-                            (offset.y + drag.y).coerceIn(0f, areaH - h),
-                        )
+    CompositionLocalProvider(LocalContentColor provides TextPrimary) {
+        BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+            val areaW = with(density) { maxWidth.toPx() }
+            val areaH = with(density) { maxHeight.toPx() }
+            val w = with(density) { (if (video) 112.dp else 84.dp).toPx() }
+            val h = with(density) { (if (video) 160.dp else 104.dp).toPx() }
+            var offset by remember { mutableStateOf(Offset(areaW - w - margin, with(density) { 80.dp.toPx() })) }
+            val shape = RoundedCornerShape(if (video) 16.dp else 26.dp)
+            Box(
+                Modifier
+                    .offset { IntOffset(offset.x.roundToInt(), offset.y.roundToInt()) }
+                    .size(with(density) { w.toDp() }, with(density) { h.toDp() })
+                    .shadow(14.dp, shape)
+                    .clip(shape)
+                    .background(Color(0xFF15151B))
+                    .pointerInput(areaW, areaH) {
+                        detectDragGestures(
+                            onDragEnd = {
+                                // To the nearer side, like the system's own bubbles.
+                                val x = if (offset.x + w / 2 < areaW / 2) margin else areaW - w - margin
+                                offset = Offset(x, offset.y.coerceIn(margin, areaH - h - margin))
+                            },
+                        ) { change, drag ->
+                            change.consume()
+                            offset = Offset(
+                                (offset.x + drag.x).coerceIn(0f, areaW - w),
+                                (offset.y + drag.y).coerceIn(0f, areaH - h),
+                            )
+                        }
                     }
-                }
-                .clickable { CallUi.minimized.value = false },
-            contentAlignment = Alignment.Center,
-        ) {
-            if (video) {
-                CallVideo(service, remote = true, modifier = Modifier.fillMaxSize())
-            } else {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(Modifier.size(56.dp).clip(CircleShape).border(2.dp, Color(0xFF1DAA61), CircleShape).padding(3.dp), contentAlignment = Alignment.Center) {
-                        ChatAvatar(callerUser(call.peer), 50.dp)
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    Text(statusText(call, s), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                }
+                    .clickable(onClick = onExpand),
+                contentAlignment = Alignment.Center,
+            ) {
+                content()
             }
         }
     }

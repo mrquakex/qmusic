@@ -44,13 +44,19 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
     private var generation = 0
     private var endpoints: List<CallEndpointCompat> = emptyList()
     private var current: CallEndpointCompat? = null
+    private var defaultVideo = false
     private var wantSpeaker = false
+    private var speakerForced = false
+    private var lastHeadsetIds: Set<String> = emptySet()
 
     /** The person hung up from somewhere else (a headset, the car, the system's call screen). */
     var onRemoteHangUp: (() -> Unit)? = null
 
     /** The system muted or unmuted the microphone (a headset button, the car). */
     var onMuteChanged: ((Boolean) -> Unit)? = null
+
+    /** The system put this call on hold (`true`, e.g. an incoming cellular call) or made it active again (`false`). */
+    var onHoldChanged: ((Boolean) -> Unit)? = null
 
     /** The system could not take the call: the app routes its own sound. */
     var onUnavailable: (() -> Unit)? = null
@@ -79,7 +85,11 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
         }
         end(DisconnectCause.LOCAL)
         val gen = ++generation
+        defaultVideo = video
         wantSpeaker = video
+        speakerForced = false
+        picked = null
+        lastHeadsetIds = emptySet()
         val type = if (video) CallAttributesCompat.CALL_TYPE_VIDEO_CALL else CallAttributesCompat.CALL_TYPE_AUDIO_CALL
         job = scope.launch {
             try {
@@ -93,8 +103,8 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
                     ),
                     onAnswer = { },
                     onDisconnect = { onRemoteHangUp?.invoke() },
-                    onSetActive = { },
-                    onSetInactive = { },
+                    onSetActive = { onHoldChanged?.invoke(false) },
+                    onSetInactive = { onHoldChanged?.invoke(true) },
                 ) {
                     // Ended while the system was still taking it: told at once, so no call is left behind in the
                     // phone (which would then think it is still on a call).
@@ -107,6 +117,16 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
                     if (incoming) launch { answer(type) } else if (active) launch { runCatching { setActive() } }
                     launch {
                         availableEndpoints.collect { list ->
+                            val headsetIds = list.filter {
+                                it.type == CallEndpointCompat.TYPE_BLUETOOTH || it.type == CallEndpointCompat.TYPE_WIRED_HEADSET
+                            }.mapTo(HashSet()) { idOf(it) }
+                            // Mid-call headset connect takes priority over manual/speaker choice.
+                            if (endpoints.isNotEmpty() && (headsetIds - lastHeadsetIds).isNotEmpty()) {
+                                picked = null
+                                speakerForced = false
+                                wantSpeaker = defaultVideo
+                            }
+                            lastHeadsetIds = headsetIds
                             endpoints = list
                             route()
                             publish()
@@ -138,9 +158,19 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
     /** Speaker on, or back to the headset / earpiece. False when the system does not have the call (route it by hand). */
     fun setSpeaker(on: Boolean): Boolean {
         if (control == null) return false
+        picked = null
         wantSpeaker = on
+        speakerForced = on
         route()
         return true
+    }
+
+    /** Call upgraded to video: prefer speaker only when no headset is connected and user did not force another route. */
+    fun onVideoChanged(video: Boolean) {
+        defaultVideo = video
+        if (control == null || !video || speakerForced) return
+        wantSpeaker = true
+        route()
     }
 
     private fun idOf(e: CallEndpointCompat) = e.identifier.toString()
@@ -167,6 +197,7 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
         val target = endpoints.firstOrNull { idOf(it) == id } ?: return false
         picked = id
         wantSpeaker = target.type == CallEndpointCompat.TYPE_SPEAKER
+        speakerForced = wantSpeaker
         scope.launch {
             val result = runCatching { c.requestEndpointChange(target) }.getOrNull()
             if (result is CallControlResult.Success) {
@@ -177,23 +208,28 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
         return true
     }
 
-    /** Sends the sound where it should go: speaker if asked, else a headset or Bluetooth if one is there, else the earpiece. */
+    /** Sends the sound where it should go: explicit speaker > headset (Bluetooth/wired) > default speaker > earpiece. */
     private fun route() {
         val c = control ?: return
         val list = endpoints.ifEmpty { return }
         // What the person picked stays as long as it is there.
         picked?.let { id -> if (list.any { idOf(it) == id }) return else picked = null }
-        val target = if (wantSpeaker) {
-            list.firstOrNull { it.type == CallEndpointCompat.TYPE_SPEAKER }
-        } else {
-            list.firstOrNull { it.type == CallEndpointCompat.TYPE_BLUETOOTH }
-                ?: list.firstOrNull { it.type == CallEndpointCompat.TYPE_WIRED_HEADSET }
-                ?: list.firstOrNull { it.type == CallEndpointCompat.TYPE_EARPIECE }
+        val headset = list.firstOrNull { it.type == CallEndpointCompat.TYPE_BLUETOOTH }
+            ?: list.firstOrNull { it.type == CallEndpointCompat.TYPE_WIRED_HEADSET }
+        val target = when {
+            speakerForced -> list.firstOrNull { it.type == CallEndpointCompat.TYPE_SPEAKER }
+            headset != null -> headset
+            wantSpeaker -> list.firstOrNull { it.type == CallEndpointCompat.TYPE_SPEAKER }
+            else -> list.firstOrNull { it.type == CallEndpointCompat.TYPE_EARPIECE }
+                ?: list.firstOrNull { it.type == CallEndpointCompat.TYPE_SPEAKER }
         } ?: return
-        if (current?.type == target.type) return
+        if (current?.let(::idOf) == idOf(target)) return
         scope.launch {
             val result = runCatching { c.requestEndpointChange(target) }.getOrNull()
-            if (result is CallControlResult.Success) current = target
+            if (result is CallControlResult.Success) {
+                current = target
+                publish()
+            }
         }
     }
 
@@ -207,6 +243,10 @@ internal class CallTelecom(app: Context, private val scope: CoroutineScope) {
         endpoints = emptyList()
         current = null
         picked = null
+        defaultVideo = false
+        wantSpeaker = false
+        speakerForced = false
+        lastHeadsetIds = emptySet()
         val all = synchronized(open) { open.toList().also { open.clear() } }
         if (all.isEmpty() && j == null) return
         scope.launch {

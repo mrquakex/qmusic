@@ -1,6 +1,9 @@
 package com.qmusic.ui.chat
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -60,4 +63,11 @@ data class GroupCallRequest(val group: ChatUser, val video: Boolean, val join: B
 
 object GroupCallLaunch {
     val request = kotlinx.coroutines.flow.MutableStateFlow<GroupCallRequest?>(null)
+}
+
+/** The group call shrunk into a floating bubble while the rest of the app stays usable. */
+object GroupCallUi {
+    val minimized = kotlinx.coroutines.flow.MutableStateFlow(false)
+    var service by mutableStateOf<GroupCallService?>(null)
+    var strings by mutableStateOf<ChatStrings?>(null)
 }

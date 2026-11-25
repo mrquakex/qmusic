@@ -63,6 +63,8 @@ data class CallState(
     val noiseSuppression: Boolean = true,
     /** The last emoji sent in the call (by either side); a new [CallReaction.id] floats up once. */
     val reaction: CallReaction? = null,
+    /** Put on hold by the system (e.g. a second call on the phone): local mic and camera are paused. */
+    val held: Boolean = false,
 )
 
 /** An emoji sent during a call: it floats up over the call on both phones. */
