@@ -318,7 +318,7 @@ internal class FirebaseCallService(
     var onMoveToRoom: ((room: ChatUser, video: Boolean) -> Unit)? = null
 
     /** The phone's own call system (Core-Telecom), where the phone has one: see [CallTelecom]. */
-    private val telecom = CallTelecom(app, scope).also { t ->
+    private val telecom: CallTelecom = CallTelecom(app, scope).also { t ->
         t.onRemoteHangUp = { scope.launch { hangUp() } }
         t.onMuteChanged = { muted ->
             scope.launch {
@@ -379,7 +379,7 @@ internal class FirebaseCallService(
                             cameraOn = if (it.video && s.videoTrack != null) restoreCam else it.cameraOn,
                         )
                     }
-                    if (!telecom.active) {
+                    if (!t.active) {
                         routeAudio(wantSpeaker)
                         publishDevices()
                     }
