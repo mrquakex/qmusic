@@ -1024,19 +1024,32 @@ private fun ConversationPage(
             if (convId != null && E2e.api.version(convId) == null) controller.enableEncryption(other, quiet = true)
         }
     }
-    var editing by remember(other.uid) { mutableStateOf<ChatMessage?>(null) }
-    var selected by remember(other.uid) { mutableStateOf(setOf<String>()) }
-    var emojiOpen by remember { mutableStateOf(false) }
-    var infoFor by remember { mutableStateOf<ChatMessage?>(null) }
-    var forwarding by remember { mutableStateOf<List<ChatMessage>?>(null) }
-    var deleting by remember { mutableStateOf<List<ChatMessage>?>(null) }
-    var muteDialog by remember { mutableStateOf(false) }
-    var ttlDialog by remember { mutableStateOf(false) }
-    var sharedListOpen by remember { mutableStateOf(false) }
-    var pendingPhotos by remember { mutableStateOf<List<PickedImage>?>(null) }
-    var sendViewOnce by remember { mutableStateOf(false) }
-    var locked by remember(other.uid) { mutableStateOf(false) }
-    var voicePreview by remember(other.uid) { mutableStateOf<PickedFile?>(null) }
+    val editingState = remember(other.uid) { mutableStateOf<ChatMessage?>(null) }
+    var editing by editingState
+    val selectedState = remember(other.uid) { mutableStateOf(setOf<String>()) }
+    var selected by selectedState
+    val emojiOpenState = remember { mutableStateOf(false) }
+    var emojiOpen by emojiOpenState
+    val infoForState = remember { mutableStateOf<ChatMessage?>(null) }
+    var infoFor by infoForState
+    val forwardingState = remember { mutableStateOf<List<ChatMessage>?>(null) }
+    var forwarding by forwardingState
+    val deletingState = remember { mutableStateOf<List<ChatMessage>?>(null) }
+    var deleting by deletingState
+    val muteDialogState = remember { mutableStateOf(false) }
+    var muteDialog by muteDialogState
+    val ttlDialogState = remember { mutableStateOf(false) }
+    var ttlDialog by ttlDialogState
+    val sharedListOpenState = remember { mutableStateOf(false) }
+    var sharedListOpen by sharedListOpenState
+    val pendingPhotosState = remember { mutableStateOf<List<PickedImage>?>(null) }
+    var pendingPhotos by pendingPhotosState
+    val sendViewOnceState = remember { mutableStateOf(false) }
+    var sendViewOnce by sendViewOnceState
+    val lockedState = remember(other.uid) { mutableStateOf(false) }
+    var locked by lockedState
+    val voicePreviewState = remember(other.uid) { mutableStateOf<PickedFile?>(null) }
+    var voicePreview by voicePreviewState
     var lastVoiceMsgId by remember(other.uid) { mutableStateOf<String?>(null) }
     var sessionPlayed by remember { mutableStateOf<Set<String>>(emptySet()) }
     val activeVoiceUrl by (voicePlayer?.active ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
@@ -1058,13 +1071,19 @@ private fun ConversationPage(
     // when it opens) are quiet.
     val soundsFrom = remember(other.uid) { controller.serverNow() }
     val pollVotes by remember(other.uid) { controller.pollVotes(other) }.collectAsState(initial = emptyMap())
-    var pollDialog by remember { mutableStateOf(false) }
-    var eventDialog by remember { mutableStateOf(false) }
-    var locationChoice by remember { mutableStateOf(false) }
-    var liveDuration by remember { mutableStateOf(0L) }
+    val pollDialogState = remember { mutableStateOf(false) }
+    var pollDialog by pollDialogState
+    val eventDialogState = remember { mutableStateOf(false) }
+    var eventDialog by eventDialogState
+    val locationChoiceState = remember { mutableStateOf(false) }
+    var locationChoice by locationChoiceState
+    val liveDurationState = remember { mutableStateOf(0L) }
+    var liveDuration by liveDurationState
     var liveMapFocus by remember { mutableStateOf<Pair<Double, Double>?>(null) }
-    var votersFor by remember { mutableStateOf<ChatMessage?>(null) }
-    var reactionsFor by remember { mutableStateOf<ChatMessage?>(null) }
+    val votersForState = remember { mutableStateOf<ChatMessage?>(null) }
+    var votersFor by votersForState
+    val reactionsForState = remember { mutableStateOf<ChatMessage?>(null) }
+    var reactionsFor by reactionsForState
     val saveContact = rememberContactSaver()
     val shareTextFile = rememberTextFileShare()
     val exportScope = androidx.compose.runtime.rememberCoroutineScope()
@@ -1083,30 +1102,39 @@ private fun ConversationPage(
     // A group where only admins write: the box gives way to a note for everyone else.
     val writeLocked = isGroup && group?.settings?.sendAdmins == true && !iAmAdmin
     val canPin = !isGroup || group?.settings?.editAdmins != true || iAmAdmin
-    var viewOnceOpen by remember { mutableStateOf<ChatMessage?>(null) }
-    var reporting by remember { mutableStateOf(false) }
-    var scheduling by remember { mutableStateOf(false) }
-    var scheduledOpen by remember { mutableStateOf(false) }
+    val viewOnceOpenState = remember { mutableStateOf<ChatMessage?>(null) }
+    var viewOnceOpen by viewOnceOpenState
+    val reportingState = remember { mutableStateOf(false) }
+    var reporting by reportingState
+    val schedulingState = remember { mutableStateOf(false) }
+    var scheduling by schedulingState
+    val scheduledOpenState = remember { mutableStateOf(false) }
+    var scheduledOpen by scheduledOpenState
     val allScheduled by ScheduledMessages.all.collectAsState()
     val scheduledHere = remember(allScheduled, other.uid) { allScheduled.filter { it.peer.uid == other.uid }.sortedBy { it.at } }
     val transcripts by controller.transcripts.collectAsState()
     val translations by controller.translations.collectAsState()
     // In an encrypted chat, once per visit: the message leaves the phone for this (it is said first).
-    var aiAgreed by remember(other.uid) { mutableStateOf(false) }
-    var aiPending by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val aiAgreedState = remember(other.uid) { mutableStateOf(false) }
+    var aiAgreed by aiAgreedState
+    val aiPendingState = remember { mutableStateOf<(() -> Unit)?>(null) }
+    var aiPending by aiPendingState
     val aiAsk: (Boolean, () -> Unit) -> Unit = { sealed, run -> if (!sealed || aiAgreed) run() else aiPending = run }
     // Who is named with @ in the box, by the name written for them.
     var mentionNames by remember(other.uid) { mutableStateOf(mapOf<String, String>()) }
     // What was left unsent here last time comes back into the box.
     val draftId = remember(other.uid) { controller.chatIdWith(other) ?: other.uid }
-    var text by remember(other.uid) { mutableStateOf(ChatDrafts.get(draftId)) }
+    val textState = remember(other.uid) { mutableStateOf(ChatDrafts.get(draftId)) }
+    var text by textState
     // Kept as it is written (not on leaving only: the app may be closed from the recent apps).
     LaunchedEffect(draftId) {
         androidx.compose.runtime.snapshotFlow { text }.collect { typed: String -> if (editing == null) ChatDrafts.set(draftId, typed) }
     }
     var menu by remember { mutableStateOf(false) }
-    var attach by remember { mutableStateOf(false) }
-    var replyTo by remember(other.uid) { mutableStateOf<ChatMessage?>(null) }
+    val attachState = remember { mutableStateOf(false) }
+    var attach by attachState
+    val replyToState = remember(other.uid) { mutableStateOf<ChatMessage?>(null) }
+    var replyTo by replyToState
     // Answering a message (pulled to the right, or from its menu) puts the cursor in the box and opens the keyboard.
     val inputFocus = remember { FocusRequester() }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
@@ -1117,9 +1145,12 @@ private fun ConversationPage(
         }
     }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    var viewing by remember(other.uid) { mutableStateOf<PhotoViewState?>(null) }
-    var videoOpen by remember(other.uid) { mutableStateOf<VideoViewState?>(null) }
-    var pendingVideo by remember(other.uid) { mutableStateOf<PickedFile?>(null) }
+    val viewingState = remember(other.uid) { mutableStateOf<PhotoViewState?>(null) }
+    var viewing by viewingState
+    val videoOpenState = remember(other.uid) { mutableStateOf<VideoViewState?>(null) }
+    var videoOpen by videoOpenState
+    val pendingVideoState = remember(other.uid) { mutableStateOf<PickedFile?>(null) }
+    var pendingVideo by pendingVideoState
     val claudeState by controller.claudeState.collectAsState()
     var modelMenu by remember { mutableStateOf(false) }
     val isClaude = other.uid == CLAUDE_BOT_UID
@@ -1171,10 +1202,14 @@ private fun ConversationPage(
     // Voice messages: hold the microphone to record, let go to send, slide left to throw it away, slide up to lock.
     val recorder = rememberVoiceRecorder()
     val askMic = rememberCallPermissions()
-    var micReady by remember { mutableStateOf(false) }
-    var recordingSince by remember(other.uid) { mutableStateOf<Long?>(null) }
-    var cancelling by remember(other.uid) { mutableStateOf(false) }
-    var elapsed by remember(other.uid) { mutableStateOf(0L) }
+    val micReadyState = remember { mutableStateOf(false) }
+    var micReady by micReadyState
+    val recordingSinceState = remember(other.uid) { mutableStateOf<Long?>(null) }
+    var recordingSince by recordingSinceState
+    val cancellingState = remember(other.uid) { mutableStateOf(false) }
+    var cancelling by cancellingState
+    val elapsedState = remember(other.uid) { mutableStateOf(0L) }
+    var elapsed by elapsedState
     val level by (recorder?.level ?: remember { kotlinx.coroutines.flow.MutableStateFlow(0f) }).collectAsState()
     val recPaused by (recorder?.paused ?: remember { kotlinx.coroutines.flow.MutableStateFlow(false) }).collectAsState()
     LaunchedEffect(recordingSince, recPaused) {
@@ -1551,83 +1586,7 @@ private fun ConversationPage(
                 IconButton(onClick = { E2e.api.dismissKeyChange(other.uid) }) { Icon(QMusicIcons.Close, contentDescription = com.qmusic.ui.A11y.close, tint = TextSecondary, modifier = Modifier.size(18.dp)) }
             }
         }
-        if (pins.isNotEmpty() && !searching) {
-            var pinIndex by remember(other.uid) { mutableStateOf(0) }
-            var pinMenuFor by remember(other.uid) { mutableStateOf<PinnedMessage?>(null) }
-            val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-            val shownIndex = pinIndex.coerceIn(0, pins.lastIndex)
-            val pin = pins[shownIndex]
-            val menuTarget = pinMenuFor?.takeIf { target -> pins.any { it.messageId == target.messageId } }
-            LaunchedEffect(menuTarget) {
-                if (menuTarget == null && pinMenuFor != null) pinMenuFor = null
-            }
-            Box(Modifier.fillMaxWidth()) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(DarkSurface)
-                        .rightClick { pinMenuFor = pin }
-                        .hoverLight()
-                        .combinedClickable(
-                            onClick = {
-                                jumpTo = pin.messageId
-                                pinIndex = (shownIndex + 1) % pins.size
-                            },
-                            onLongClick = {
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                                pinMenuFor = pin
-                            },
-                        )
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // One bar per pin, the shown one bright.
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        pins.indices.forEach { i ->
-                            Box(Modifier.width(3.dp).height((24 / pins.size).dp).background(if (i == shownIndex) Ink else TextMuted))
-                        }
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    Icon(QMusicIcons.Pin, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(s.pinnedMessages + if (pins.size > 1) " · ${shownIndex + 1}/${pins.size}" else "", color = TextSecondary, fontSize = 11.sp)
-                        Text(ChatPreview.plain(pin.text, s.english), color = TextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-                Box(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp)) {
-                    DropdownMenu(
-                        expanded = menuTarget != null,
-                        onDismissRequest = { pinMenuFor = null },
-                        modifier = Modifier.widthIn(min = 196.dp),
-                        offset = DpOffset(0.dp, 4.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        containerColor = DarkSurfaceVariant,
-                        border = BorderStroke(1.dp, BorderSubtle),
-                    ) {
-                        if (canPin) {
-                            DropdownMenuItem(
-                                text = { Text(s.unpinMessage, color = TextPrimary, fontSize = 15.sp) },
-                                onClick = {
-                                    val target = menuTarget ?: pin
-                                    pinMenuFor = null
-                                    controller.unpin(other, target.messageId)
-                                    pinIndex = shownIndex.coerceAtMost((pins.size - 2).coerceAtLeast(0))
-                                },
-                            )
-                        }
-                        DropdownMenuItem(
-                            text = { Text(s.goToMessage, color = TextPrimary, fontSize = 15.sp) },
-                            onClick = {
-                                val target = menuTarget ?: pin
-                                pinMenuFor = null
-                                jumpTo = target.messageId
-                            },
-                        )
-                    }
-                }
-            }
-        }
+        if (pins.isNotEmpty() && !searching) PinnedBar(pins, s, other, controller, canPin) { jumpTo = it }
         if (searching) {
             val searchFocus = remember { FocusRequester() }
             LaunchedEffect(Unit) { runCatching { searchFocus.requestFocus() } }
@@ -1994,244 +1953,11 @@ private fun ConversationPage(
                     controller.stopTyping(other)
                 }
             }
-            val enterSends = LocalEnterSends.current
-            Row(
-                modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                val previewDraft = voicePreview
-                if (previewDraft != null) {
-                    IconButton(onClick = {
-                        voicePlayer?.stop()
-                        recorder?.discardPreview(previewDraft)
-                        voicePreview = null
-                    }) { Icon(QMusicIcons.Trash, contentDescription = com.qmusic.ui.A11y.delete, tint = TextPrimary) }
-                    VoicePreviewBar(
-                        draft = previewDraft,
-                        player = voicePlayer,
-                        modifier = Modifier.weight(1f),
-                    )
-                } else if (recordingSince != null) {
-                    if (locked) {
-                        IconButton(onClick = {
-                            recorder?.cancel()
-                            controller.setRecording(other, false)
-                            recordingSince = null
-                            locked = false
-                        }) { Icon(QMusicIcons.Trash, contentDescription = com.qmusic.ui.A11y.delete, tint = TextPrimary) }
-                    }
-                    RecordingBar(
-                        elapsedMs = elapsed,
-                        level = level,
-                        hint = if (locked) (if (recPaused) s.voicePaused else s.voiceLocked) else s.voiceSlideCancel + "   " + s.voiceSlideLock,
-                        cancelling = cancelling,
-                        modifier = Modifier.weight(1f),
-                        paused = recPaused,
-                    )
-                    if (locked && recorder?.canPause == true) {
-                        if (!recPaused) {
-                            IconButton(onClick = { recorder.pause() }) {
-                                Icon(QMusicIcons.Pause, contentDescription = s.voicePause, tint = Ink)
-                            }
-                        } else {
-                            IconButton(onClick = {
-                                val draft = recorder.stop()
-                                controller.setRecording(other, false)
-                                recordingSince = null
-                                locked = false
-                                if (draft != null) {
-                                    voicePreview = draft
-                                    voicePlayer?.toggle(draft.location)
-                                } else if (recorder.lastSilent) {
-                                    controller.reportError(s.micSilent)
-                                }
-                            }) {
-                                Icon(QMusicIcons.Play, contentDescription = s.voicePreview, tint = Ink)
-                            }
-                            IconButton(onClick = { recorder.resume() }) {
-                                Icon(QMusicIcons.Mic, contentDescription = s.voiceResume, tint = Ink)
-                            }
-                        }
-                    }
-                } else {
-                    IconButton(onClick = {
-                        attach = !attach
-                        if (attach) {
-                            emojiOpen = false
-                            keyboard?.hide()
-                        }
-                    }) { Icon(if (attach) QMusicIcons.Close else QMusicIcons.Add, contentDescription = null, tint = Ink) }
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 44.dp)
-                            .clip(RoundedCornerShape(22.dp))
-                            .background(DarkSurfaceVariant)
-                            .padding(start = 4.dp, end = 16.dp),
-                        verticalAlignment = Alignment.Bottom,
-                    ) {
-                        Box(
-                            Modifier.size(40.dp).clip(CircleShape).clickable {
-                                emojiOpen = !emojiOpen
-                                if (emojiOpen) attach = false
-                                if (emojiOpen) keyboard?.hide() else { runCatching { inputFocus.requestFocus() }; keyboard?.show() }
-                            },
-                            contentAlignment = Alignment.Center,
-                        ) { Icon(if (emojiOpen) QMusicIcons.ChevronDown else QMusicIcons.Mood, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(24.dp)) }
-                    Box(Modifier.weight(1f).padding(vertical = 11.dp)) {
-                        if (text.isEmpty()) Text(s.messageHint, color = TextMuted, fontSize = 16.sp)
-                        BasicTextField(
-                            value = text,
-                            onValueChange = { v ->
-                                text = v.take(ChatController.MAX_LENGTH)
-                                if (v.isNotBlank()) controller.onTyping(other, Clock.System.now().toEpochMilliseconds()) else controller.stopTyping(other)
-                            },
-                            textStyle = TextStyle(color = TextPrimary, fontSize = 16.sp),
-                            cursorBrush = SolidColor(Ink),
-                            maxLines = 6,
-                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                            modifier = Modifier.fillMaxWidth().focusRequester(inputFocus).onFocusChanged { if (it.isFocused) { emojiOpen = false; attach = false } }
-                                .onPreviewKeyEvent { k ->
-                                    if (enterSends && k.key == androidx.compose.ui.input.key.Key.Enter && k.type == androidx.compose.ui.input.key.KeyEventType.KeyDown && !k.isShiftPressed) {
-                                        submit()
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                },
-                        )
-                    }
-                    }
-                }
-                Spacer(Modifier.width(6.dp))
-                val canSend = text.isNotBlank()
-                if (previewDraft != null) {
-                    Box(
-                        modifier = Modifier.size(44.dp).clip(CircleShape).background(Ink).clickable {
-                            voicePlayer?.stop()
-                            voicePreview = null
-                            sounds?.playSmall(SmallSound.REC_SENT)
-                            controller.sendFile(other, previewDraft, "", quoted())
-                            replyTo = null
-                        },
-                        contentAlignment = Alignment.Center,
-                    ) { Icon(QMusicIcons.Send, contentDescription = s.send, tint = InkInverse, modifier = Modifier.size(20.dp)) }
-                } else if (locked && recordingSince != null) {
-                    // Locked: the button sends.
-                    Box(
-                        modifier = Modifier.size(44.dp).clip(CircleShape).background(Ink).clickable {
-                            recordingSince = null
-                            locked = false
-                            val voice = recorder?.stop()
-                            controller.setRecording(other, false)
-                            if (voice != null) {
-                                sounds?.playSmall(SmallSound.REC_SENT)
-                                controller.sendFile(other, voice, "", quoted())
-                                replyTo = null
-                            } else if (recorder?.lastSilent == true) {
-                                controller.reportError(s.micSilent)
-                            }
-                        },
-                        contentAlignment = Alignment.Center,
-                    ) { Icon(QMusicIcons.Send, contentDescription = s.send, tint = InkInverse, modifier = Modifier.size(20.dp)) }
-                } else if (!canSend && recorder != null && !isClaude && editing == null) {
-                    val density = androidx.compose.ui.platform.LocalDensity.current
-                    val cancelAt = with(density) { 110.dp.toPx() }
-                    val lockAt = with(density) { 90.dp.toPx() }
-                    Box(contentAlignment = Alignment.Center) {
-                        if (recordingSince != null && !locked) {
-                            androidx.compose.ui.window.Popup(
-                                alignment = Alignment.TopCenter,
-                                offset = androidx.compose.ui.unit.IntOffset(0, with(density) { (-62).dp.roundToPx() }),
-                                properties = androidx.compose.ui.window.PopupProperties(focusable = false),
-                            ) {
-                                Column(
-                                    Modifier
-                                        .clip(RoundedCornerShape(18.dp))
-                                        .background(DarkSurfaceVariant)
-                                        .border(1.dp, BorderSubtle, RoundedCornerShape(18.dp))
-                                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                ) {
-                                    Icon(QMusicIcons.Lock, contentDescription = null, tint = Ink, modifier = Modifier.size(16.dp))
-                                    Icon(QMusicIcons.ChevronUp, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(14.dp))
-                                }
-                            }
-                        }
-                        Box(
-                            modifier = Modifier
-                                .size(if (recordingSince != null) 56.dp else 44.dp)
-                                .clip(CircleShape)
-                                .background(if (recordingSince != null) (if (cancelling) Color(0xFF555555) else Color(0xFFFF4D4D)) else Ink)
-                                .pointerInput(micReady) {
-                                    awaitEachGesture {
-                                        val down = awaitFirstDown()
-                                        if (!micReady) {
-                                            askMic(false) { granted -> micReady = granted }
-                                            return@awaitEachGesture
-                                        }
-                                        sounds?.playSmall(SmallSound.REC_START)
-                                        if (!recorder.start()) return@awaitEachGesture
-                                        controller.setRecording(other, true)
-                                        voicePlayer?.stop()
-                                        elapsed = 0L
-                                        recordingSince = Clock.System.now().toEpochMilliseconds()
-                                        cancelling = false
-                                        while (true) {
-                                            val event = awaitPointerEvent()
-                                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                            cancelling = change.position.x - down.position.x < -cancelAt
-                                            // Slid up: it goes on without the finger, with its own pause, preview, send and bin buttons.
-                                            if (change.position.y - down.position.y < -lockAt) {
-                                                locked = true
-                                                cancelling = false
-                                                change.consume()
-                                                return@awaitEachGesture
-                                            }
-                                            if (!change.pressed) break
-                                            change.consume()
-                                        }
-                                        val thrownAway = cancelling
-                                        recordingSince = null
-                                        cancelling = false
-                                        if (thrownAway) {
-                                            recorder.cancel()
-                                            controller.setRecording(other, false)
-                                        } else {
-                                            val voice = recorder.stop()
-                                            controller.setRecording(other, false)
-                                            if (voice != null) {
-                                                sounds?.playSmall(SmallSound.REC_SENT)
-                                                controller.sendFile(other, voice, "", quoted())
-                                                replyTo = null
-                                            } else if (recorder.lastSilent) {
-                                                controller.reportError(s.micSilent)
-                                            }
-                                        }
-                                    }
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(QMusicIcons.Mic, contentDescription = s.voiceHold, tint = if (recordingSince != null) Ink else InkInverse, modifier = Modifier.size(22.dp))
-                        }
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(if (canSend) Ink else DarkSurfaceVariant)
-                            .combinedClickable(
-                                enabled = canSend,
-                                // Held: sent later, at a chosen time (not an edit, not to Claude).
-                                onLongClick = if (editing == null && ScheduledMessages.supported && !isClaude) ({ scheduling = true }) else null,
-                            ) { submit() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(QMusicIcons.Send, contentDescription = null, tint = if (canSend) InkInverse else TextMuted, modifier = Modifier.size(20.dp))
-                    }
-                }
-            }
+            ConversationInputRow(
+                controller, s, other, isClaude, recorder, voicePlayer, askMic, sounds, quoted, inputFocus, keyboard, submit, recPaused, level,
+                voicePreviewState, recordingSinceState, lockedState, cancellingState, elapsedState, attachState, emojiOpenState,
+                textState, editingState, replyToState, micReadyState, schedulingState,
+            )
         }
         if (attach && !isBlocked && !writeLocked) {
             val tr = !s.english
@@ -2286,6 +2012,427 @@ private fun ConversationPage(
             )
         }
     }
+    ConversationDialogs(
+        controller,
+        s,
+        me,
+        other,
+        title,
+        isGroup,
+        messages,
+        chatId,
+        group,
+        memberUsers,
+        memberNames,
+        scheduledHere,
+        readAt,
+        deliveredAt,
+        readMarks,
+        deliveredMarks,
+        pollVotes,
+        reactions,
+        ttl,
+        quoted,
+        pickLocation,
+        pickLiveLocation,
+        viewingState,
+        viewOnceOpenState,
+        videoOpenState,
+        pendingVideoState,
+        textState,
+        replyToState,
+        aiPendingState,
+        aiAgreedState,
+        schedulingState,
+        scheduledOpenState,
+        reportingState,
+        pendingPhotosState,
+        sendViewOnceState,
+        forwardingState,
+        selectedState,
+        deletingState,
+        infoForState,
+        pollDialogState,
+        eventDialogState,
+        locationChoiceState,
+        liveDurationState,
+        votersForState,
+        reactionsForState,
+        muteDialogState,
+        ttlDialogState,
+        sharedListOpenState,
+    )
+    liveMapFocus?.let { focus ->
+        LiveMapScreen(
+            chatId = controller.chatIdWith(other),
+            focus = focus,
+            people = liveHere.mapNotNull { (uid, l) -> (if (uid == me.uid) me else memberUsers[uid] ?: other.takeIf { it.uid == uid })?.let { it to l } },
+            myUid = me.uid,
+            onStop = { controller.stopLiveLocation(other) },
+        ) { liveMapFocus = null }
+    }
+}
+
+
+@Composable
+private fun ConversationInputRow(
+    controller: ChatController,
+    s: ChatStrings,
+    other: ChatUser,
+    isClaude: Boolean,
+    recorder: VoiceRecorder?,
+    voicePlayer: VoicePlayer?,
+    askMic: (Boolean, (Boolean) -> Unit) -> Unit,
+    sounds: ChatSounds?,
+    quoted: () -> ChatReply?,
+    inputFocus: FocusRequester,
+    keyboard: androidx.compose.ui.platform.SoftwareKeyboardController?,
+    submit: () -> Unit,
+    recPaused: Boolean,
+    level: Float,
+    voicePreviewState: androidx.compose.runtime.MutableState<PickedFile?>,
+    recordingSinceState: androidx.compose.runtime.MutableState<Long?>,
+    lockedState: androidx.compose.runtime.MutableState<Boolean>,
+    cancellingState: androidx.compose.runtime.MutableState<Boolean>,
+    elapsedState: androidx.compose.runtime.MutableState<Long>,
+    attachState: androidx.compose.runtime.MutableState<Boolean>,
+    emojiOpenState: androidx.compose.runtime.MutableState<Boolean>,
+    textState: androidx.compose.runtime.MutableState<String>,
+    editingState: androidx.compose.runtime.MutableState<ChatMessage?>,
+    replyToState: androidx.compose.runtime.MutableState<ChatMessage?>,
+    micReadyState: androidx.compose.runtime.MutableState<Boolean>,
+    schedulingState: androidx.compose.runtime.MutableState<Boolean>,
+) {
+    var voicePreview by voicePreviewState
+    var recordingSince by recordingSinceState
+    var locked by lockedState
+    var cancelling by cancellingState
+    var elapsed by elapsedState
+    var attach by attachState
+    var emojiOpen by emojiOpenState
+    var text by textState
+    val editing by editingState
+    var replyTo by replyToState
+    var micReady by micReadyState
+    var scheduling by schedulingState
+    val enterSends = LocalEnterSends.current
+
+    Row(
+        modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        val previewDraft = voicePreview
+        if (previewDraft != null) {
+            IconButton(onClick = {
+                voicePlayer?.stop()
+                recorder?.discardPreview(previewDraft)
+                voicePreview = null
+            }) { Icon(QMusicIcons.Trash, contentDescription = com.qmusic.ui.A11y.delete, tint = TextPrimary) }
+            VoicePreviewBar(
+                draft = previewDraft,
+                player = voicePlayer,
+                modifier = Modifier.weight(1f),
+            )
+        } else if (recordingSince != null) {
+            if (locked) {
+                IconButton(onClick = {
+                    recorder?.cancel()
+                    controller.setRecording(other, false)
+                    recordingSince = null
+                    locked = false
+                }) { Icon(QMusicIcons.Trash, contentDescription = com.qmusic.ui.A11y.delete, tint = TextPrimary) }
+            }
+            RecordingBar(
+                elapsedMs = elapsed,
+                level = level,
+                hint = if (locked) (if (recPaused) s.voicePaused else s.voiceLocked) else s.voiceSlideCancel + "   " + s.voiceSlideLock,
+                cancelling = cancelling,
+                modifier = Modifier.weight(1f),
+                paused = recPaused,
+            )
+            if (locked && recorder?.canPause == true) {
+                if (!recPaused) {
+                    IconButton(onClick = { recorder.pause() }) {
+                        Icon(QMusicIcons.Pause, contentDescription = s.voicePause, tint = Ink)
+                    }
+                } else {
+                    IconButton(onClick = {
+                        val draft = recorder.stop()
+                        controller.setRecording(other, false)
+                        recordingSince = null
+                        locked = false
+                        if (draft != null) {
+                            voicePreview = draft
+                            voicePlayer?.toggle(draft.location)
+                        } else if (recorder.lastSilent) {
+                            controller.reportError(s.micSilent)
+                        }
+                    }) {
+                        Icon(QMusicIcons.Play, contentDescription = s.voicePreview, tint = Ink)
+                    }
+                    IconButton(onClick = { recorder.resume() }) {
+                        Icon(QMusicIcons.Mic, contentDescription = s.voiceResume, tint = Ink)
+                    }
+                }
+            }
+        } else {
+            IconButton(onClick = {
+                attach = !attach
+                if (attach) {
+                    emojiOpen = false
+                    keyboard?.hide()
+                }
+            }) { Icon(if (attach) QMusicIcons.Close else QMusicIcons.Add, contentDescription = null, tint = Ink) }
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 44.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(DarkSurfaceVariant)
+                    .padding(start = 4.dp, end = 16.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Box(
+                    Modifier.size(40.dp).clip(CircleShape).clickable {
+                        emojiOpen = !emojiOpen
+                        if (emojiOpen) attach = false
+                        if (emojiOpen) keyboard?.hide() else { runCatching { inputFocus.requestFocus() }; keyboard?.show() }
+                    },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(if (emojiOpen) QMusicIcons.ChevronDown else QMusicIcons.Mood, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(24.dp)) }
+            Box(Modifier.weight(1f).padding(vertical = 11.dp)) {
+                if (text.isEmpty()) Text(s.messageHint, color = TextMuted, fontSize = 16.sp)
+                BasicTextField(
+                    value = text,
+                    onValueChange = { v ->
+                        text = v.take(ChatController.MAX_LENGTH)
+                        if (v.isNotBlank()) controller.onTyping(other, Clock.System.now().toEpochMilliseconds()) else controller.stopTyping(other)
+                    },
+                    textStyle = TextStyle(color = TextPrimary, fontSize = 16.sp),
+                    cursorBrush = SolidColor(Ink),
+                    maxLines = 6,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                    modifier = Modifier.fillMaxWidth().focusRequester(inputFocus).onFocusChanged { if (it.isFocused) { emojiOpen = false; attach = false } }
+                        .onPreviewKeyEvent { k ->
+                            if (enterSends && k.key == androidx.compose.ui.input.key.Key.Enter && k.type == androidx.compose.ui.input.key.KeyEventType.KeyDown && !k.isShiftPressed) {
+                                submit()
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                )
+            }
+            }
+        }
+        Spacer(Modifier.width(6.dp))
+        val canSend = text.isNotBlank()
+        if (previewDraft != null) {
+            Box(
+                modifier = Modifier.size(44.dp).clip(CircleShape).background(Ink).clickable {
+                    voicePlayer?.stop()
+                    voicePreview = null
+                    sounds?.playSmall(SmallSound.REC_SENT)
+                    controller.sendFile(other, previewDraft, "", quoted())
+                    replyTo = null
+                },
+                contentAlignment = Alignment.Center,
+            ) { Icon(QMusicIcons.Send, contentDescription = s.send, tint = InkInverse, modifier = Modifier.size(20.dp)) }
+        } else if (locked && recordingSince != null) {
+            // Locked: the button sends.
+            Box(
+                modifier = Modifier.size(44.dp).clip(CircleShape).background(Ink).clickable {
+                    recordingSince = null
+                    locked = false
+                    val voice = recorder?.stop()
+                    controller.setRecording(other, false)
+                    if (voice != null) {
+                        sounds?.playSmall(SmallSound.REC_SENT)
+                        controller.sendFile(other, voice, "", quoted())
+                        replyTo = null
+                    } else if (recorder?.lastSilent == true) {
+                        controller.reportError(s.micSilent)
+                    }
+                },
+                contentAlignment = Alignment.Center,
+            ) { Icon(QMusicIcons.Send, contentDescription = s.send, tint = InkInverse, modifier = Modifier.size(20.dp)) }
+        } else if (!canSend && recorder != null && !isClaude && editing == null) {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val cancelAt = with(density) { 110.dp.toPx() }
+            val lockAt = with(density) { 90.dp.toPx() }
+            Box(contentAlignment = Alignment.Center) {
+                if (recordingSince != null && !locked) {
+                    androidx.compose.ui.window.Popup(
+                        alignment = Alignment.TopCenter,
+                        offset = androidx.compose.ui.unit.IntOffset(0, with(density) { (-62).dp.roundToPx() }),
+                        properties = androidx.compose.ui.window.PopupProperties(focusable = false),
+                    ) {
+                        Column(
+                            Modifier
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(DarkSurfaceVariant)
+                                .border(1.dp, BorderSubtle, RoundedCornerShape(18.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Icon(QMusicIcons.Lock, contentDescription = null, tint = Ink, modifier = Modifier.size(16.dp))
+                            Icon(QMusicIcons.ChevronUp, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .size(if (recordingSince != null) 56.dp else 44.dp)
+                        .clip(CircleShape)
+                        .background(if (recordingSince != null) (if (cancelling) Color(0xFF555555) else Color(0xFFFF4D4D)) else Ink)
+                        .pointerInput(micReady) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown()
+                                if (!micReady) {
+                                    askMic(false) { granted -> micReady = granted }
+                                    return@awaitEachGesture
+                                }
+                                sounds?.playSmall(SmallSound.REC_START)
+                                if (!recorder.start()) return@awaitEachGesture
+                                controller.setRecording(other, true)
+                                voicePlayer?.stop()
+                                elapsed = 0L
+                                recordingSince = Clock.System.now().toEpochMilliseconds()
+                                cancelling = false
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    cancelling = change.position.x - down.position.x < -cancelAt
+                                    // Slid up: it goes on without the finger, with its own pause, preview, send and bin buttons.
+                                    if (change.position.y - down.position.y < -lockAt) {
+                                        locked = true
+                                        cancelling = false
+                                        change.consume()
+                                        return@awaitEachGesture
+                                    }
+                                    if (!change.pressed) break
+                                    change.consume()
+                                }
+                                val thrownAway = cancelling
+                                recordingSince = null
+                                cancelling = false
+                                if (thrownAway) {
+                                    recorder.cancel()
+                                    controller.setRecording(other, false)
+                                } else {
+                                    val voice = recorder.stop()
+                                    controller.setRecording(other, false)
+                                    if (voice != null) {
+                                        sounds?.playSmall(SmallSound.REC_SENT)
+                                        controller.sendFile(other, voice, "", quoted())
+                                        replyTo = null
+                                    } else if (recorder.lastSilent) {
+                                        controller.reportError(s.micSilent)
+                                    }
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(QMusicIcons.Mic, contentDescription = s.voiceHold, tint = if (recordingSince != null) Ink else InkInverse, modifier = Modifier.size(22.dp))
+                }
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(if (canSend) Ink else DarkSurfaceVariant)
+                    .combinedClickable(
+                        enabled = canSend,
+                        // Held: sent later, at a chosen time (not an edit, not to Claude).
+                        onLongClick = if (editing == null && ScheduledMessages.supported && !isClaude) ({ scheduling = true }) else null,
+                    ) { submit() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(QMusicIcons.Send, contentDescription = null, tint = if (canSend) InkInverse else TextMuted, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConversationDialogs(
+    controller: ChatController,
+    s: ChatStrings,
+    me: ChatUser,
+    other: ChatUser,
+    title: String,
+    isGroup: Boolean,
+    messages: List<ChatMessage>?,
+    chatId: String?,
+    group: GroupInfo?,
+    memberUsers: Map<String, ChatUser>,
+    memberNames: Map<String, String>,
+    scheduledHere: List<ScheduledMessage>,
+    readAt: Long,
+    deliveredAt: Long,
+    readMarks: Map<String, Long>,
+    deliveredMarks: Map<String, Long>,
+    pollVotes: Map<String, Map<String, List<Int>>>,
+    reactions: Map<String, Map<String, String>>,
+    ttl: Long,
+    quoted: () -> ChatReply?,
+    pickLocation: () -> Unit,
+    pickLiveLocation: () -> Unit,
+    viewingState: androidx.compose.runtime.MutableState<PhotoViewState?>,
+    viewOnceOpenState: androidx.compose.runtime.MutableState<ChatMessage?>,
+    videoOpenState: androidx.compose.runtime.MutableState<VideoViewState?>,
+    pendingVideoState: androidx.compose.runtime.MutableState<PickedFile?>,
+    textState: androidx.compose.runtime.MutableState<String>,
+    replyToState: androidx.compose.runtime.MutableState<ChatMessage?>,
+    aiPendingState: androidx.compose.runtime.MutableState<(() -> Unit)?>,
+    aiAgreedState: androidx.compose.runtime.MutableState<Boolean>,
+    schedulingState: androidx.compose.runtime.MutableState<Boolean>,
+    scheduledOpenState: androidx.compose.runtime.MutableState<Boolean>,
+    reportingState: androidx.compose.runtime.MutableState<Boolean>,
+    pendingPhotosState: androidx.compose.runtime.MutableState<List<PickedImage>?>,
+    sendViewOnceState: androidx.compose.runtime.MutableState<Boolean>,
+    forwardingState: androidx.compose.runtime.MutableState<List<ChatMessage>?>,
+    selectedState: androidx.compose.runtime.MutableState<Set<String>>,
+    deletingState: androidx.compose.runtime.MutableState<List<ChatMessage>?>,
+    infoForState: androidx.compose.runtime.MutableState<ChatMessage?>,
+    pollDialogState: androidx.compose.runtime.MutableState<Boolean>,
+    eventDialogState: androidx.compose.runtime.MutableState<Boolean>,
+    locationChoiceState: androidx.compose.runtime.MutableState<Boolean>,
+    liveDurationState: androidx.compose.runtime.MutableState<Long>,
+    votersForState: androidx.compose.runtime.MutableState<ChatMessage?>,
+    reactionsForState: androidx.compose.runtime.MutableState<ChatMessage?>,
+    muteDialogState: androidx.compose.runtime.MutableState<Boolean>,
+    ttlDialogState: androidx.compose.runtime.MutableState<Boolean>,
+    sharedListOpenState: androidx.compose.runtime.MutableState<Boolean>,
+) {
+    var viewing by viewingState
+    var viewOnceOpen by viewOnceOpenState
+    var videoOpen by videoOpenState
+    var pendingVideo by pendingVideoState
+    var text by textState
+    var replyTo by replyToState
+    var aiPending by aiPendingState
+    var aiAgreed by aiAgreedState
+    var scheduling by schedulingState
+    var scheduledOpen by scheduledOpenState
+    var reporting by reportingState
+    var pendingPhotos by pendingPhotosState
+    var sendViewOnce by sendViewOnceState
+    var forwarding by forwardingState
+    var selected by selectedState
+    var deleting by deletingState
+    var infoFor by infoForState
+    var pollDialog by pollDialogState
+    var eventDialog by eventDialogState
+    var locationChoice by locationChoiceState
+    var liveDuration by liveDurationState
+    var votersFor by votersForState
+    var reactionsFor by reactionsForState
+    var muteDialog by muteDialogState
+    var ttlDialog by ttlDialogState
+    var sharedListOpen by sharedListOpenState
     viewing?.let { v ->
         PhotoViewer(v.images, v.index, load = { image -> controller.imageBytes(other, image) }, caption = v.caption, s = s) { viewing = null }
     }
@@ -2432,15 +2579,6 @@ private fun ConversationPage(
             },
         ) { locationChoice = false }
     }
-    liveMapFocus?.let { focus ->
-        LiveMapScreen(
-            chatId = controller.chatIdWith(other),
-            focus = focus,
-            people = liveHere.mapNotNull { (uid, l) -> (if (uid == me.uid) me else memberUsers[uid] ?: other.takeIf { it.uid == uid })?.let { it to l } },
-            myUid = me.uid,
-            onStop = { controller.stopLiveLocation(other) },
-        ) { liveMapFocus = null }
-    }
     // A person's name in this conversation (us, the other, or a group member).
     val nameOfUid: (String) -> String = { uid ->
         when (uid) {
@@ -2491,6 +2629,92 @@ private fun ConversationPage(
     if (sharedListOpen && chatId != null) {
         SharedListPage(controller, s, me, chatId, title) { sharedListOpen = false }
     }
+}
+
+@Composable
+private fun PinnedBar(
+    pins: List<PinnedMessage>,
+    s: ChatStrings,
+    other: ChatUser,
+    controller: ChatController,
+    canPin: Boolean,
+    onJump: (String) -> Unit,
+) {
+        var pinIndex by remember(other.uid) { mutableStateOf(0) }
+        var pinMenuFor by remember(other.uid) { mutableStateOf<PinnedMessage?>(null) }
+        val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+        val shownIndex = pinIndex.coerceIn(0, pins.lastIndex)
+        val pin = pins[shownIndex]
+        val menuTarget = pinMenuFor?.takeIf { target -> pins.any { it.messageId == target.messageId } }
+        LaunchedEffect(menuTarget) {
+            if (menuTarget == null && pinMenuFor != null) pinMenuFor = null
+        }
+        Box(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(DarkSurface)
+                    .rightClick { pinMenuFor = pin }
+                    .hoverLight()
+                    .combinedClickable(
+                        onClick = {
+                            onJump(pin.messageId)
+                            pinIndex = (shownIndex + 1) % pins.size
+                        },
+                        onLongClick = {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                            pinMenuFor = pin
+                        },
+                    )
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // One bar per pin, the shown one bright.
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    pins.indices.forEach { i ->
+                        Box(Modifier.width(3.dp).height((24 / pins.size).dp).background(if (i == shownIndex) Ink else TextMuted))
+                    }
+                }
+                Spacer(Modifier.width(10.dp))
+                Icon(QMusicIcons.Pin, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(s.pinnedMessages + if (pins.size > 1) " · ${shownIndex + 1}/${pins.size}" else "", color = TextSecondary, fontSize = 11.sp)
+                    Text(ChatPreview.plain(pin.text, s.english), color = TextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Box(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp)) {
+                DropdownMenu(
+                    expanded = menuTarget != null,
+                    onDismissRequest = { pinMenuFor = null },
+                    modifier = Modifier.widthIn(min = 196.dp),
+                    offset = DpOffset(0.dp, 4.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    containerColor = DarkSurfaceVariant,
+                    border = BorderStroke(1.dp, BorderSubtle),
+                ) {
+                    if (canPin) {
+                        DropdownMenuItem(
+                            text = { Text(s.unpinMessage, color = TextPrimary, fontSize = 15.sp) },
+                            onClick = {
+                                val target = menuTarget ?: pin
+                                pinMenuFor = null
+                                controller.unpin(other, target.messageId)
+                                pinIndex = shownIndex.coerceAtMost((pins.size - 2).coerceAtLeast(0))
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text(s.goToMessage, color = TextPrimary, fontSize = 15.sp) },
+                        onClick = {
+                            val target = menuTarget ?: pin
+                            pinMenuFor = null
+                            onJump(target.messageId)
+                        },
+                    )
+                }
+            }
+        }
 }
 
 private const val PAGE = 150
