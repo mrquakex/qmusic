@@ -95,12 +95,15 @@ object AutoUpdate {
         com.qmusic.ui.UpdateReady.version.value = if (ready(app) != null) prefs.getString(KEY_VERSION, null) else null
     }
 
-    /** Not on screen, no sound playing (music or video, ours or another app's), no call. */
+    /** Not on screen, no sound playing (music or video, ours or another app's), no call, no download. */
     private fun quiet(context: Context): Boolean {
-        val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         return !com.qmusic.ui.chat.CallHooks.appVisible &&
             com.qmusic.ui.chat.CallHooks.state?.value == null &&
-            !audio.isMusicActive
+            !com.qmusic.ui.chat.CallHooks.groupActive &&
+            audio?.isMusicActive != true &&
+            (context.applicationContext as? QMusicApplication)?.container?.downloads?.progress?.value?.isNotEmpty() != true &&
+            com.qmusic.ui.videos.VideoDownloadHooks.activeCount <= 0
     }
 
     /** Installs the waiting update when the moment is right; otherwise tries again a while later. */
@@ -189,7 +192,7 @@ class UpdatedReceiver : BroadcastReceiver() {
         )
         runCatching {
             manager.notify(
-                1004,
+                1005,
                 NotificationCompat.Builder(context, "qmusic_updates")
                     .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
                     .setContentTitle(if (english) "Nuvelo updated to $version" else "Nuvelo $version sürümüne güncellendi")

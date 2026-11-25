@@ -654,6 +654,7 @@ class MainViewModel(
     fun showWhatsNew() {
         scope.launch {
             var notes = settings.string(notesKey(currentAppVersion), "").value
+                .ifBlank { settings.string("update_notes_" + currentAppVersion.removePrefix("v"), "").value }
             if (notes.isBlank()) {
                 notes = updateChecker.releaseNotes(currentAppVersion).getOrNull().orEmpty()
                 if (notes.isBlank()) {

@@ -68,6 +68,10 @@ actual suspend fun fetchSponsorSegments(videoId: String): List<SkipSegment> = wi
 
 /** What the app does while videos download (see DownloadKeepAliveService): set where the service is. */
 object VideoDownloadHooks {
+    /** Number of currently active or queued video downloads. */
+    @Volatile
+    var activeCount: Int = 0
+
     /** [count] downloads are running, [percent] through, the first of them called [title]; count 0 = nothing runs. */
     var onActive: ((count: Int, percent: Int, title: String?) -> Unit)? = null
 }
@@ -187,6 +191,7 @@ internal object VideoDownloadManager : VideoDownloads {
         val bytes = running.sumOf { it.bytes }
         val total = running.sumOf { it.total }
         val percent = if (total > 0) ((bytes * 100) / total).toInt().coerceIn(0, 100) else 0
+        VideoDownloadHooks.activeCount = running.size
         VideoDownloadHooks.onActive?.invoke(running.size, percent, running.firstOrNull()?.item?.title)
     }
 

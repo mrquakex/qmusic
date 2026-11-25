@@ -26,7 +26,12 @@ class VideoKeepAliveService : Service() {
         if (intent?.action == ACTION_TOGGLE) VideoBackground.toggle?.invoke()
         intent?.getStringExtra(EXTRA_TITLE)?.let { title = it }
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else 0
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(), type)
+        runCatching {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(), type)
+        }.onFailure {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_NOT_STICKY
     }
 

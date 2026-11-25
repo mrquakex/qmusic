@@ -25,7 +25,12 @@ class DownloadKeepAliveService : Service() {
         val percent = intent?.getIntExtra(EXTRA_PERCENT, 0) ?: 0
         val title = intent?.getStringExtra(EXTRA_TITLE).orEmpty()
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(count, percent, title), type)
+        runCatching {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(count, percent, title), type)
+        }.onFailure {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_NOT_STICKY
     }
 

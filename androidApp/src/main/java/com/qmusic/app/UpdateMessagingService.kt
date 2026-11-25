@@ -108,12 +108,19 @@ object UpdatePush {
     }
 
     /** What is new in [version], as the release push gave it (null: not known). */
-    fun notes(context: Context, version: String): String? =
-        context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("update_notes_$version", null)
+    fun notes(context: Context, version: String): String? {
+        val prefs = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE)
+        val clean = version.removePrefix("v")
+        return prefs.getString("release_notes_$clean", null)?.takeIf { it.isNotBlank() }
+            ?: prefs.getString("update_notes_$clean", null)?.takeIf { it.isNotBlank() }
+            ?: prefs.getString("update_notes_$version", null)?.takeIf { it.isNotBlank() }
+    }
 
     fun notify(context: Context, version: String, summary: String? = null) {
         val prefs = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE)
-        if (!summary.isNullOrBlank()) prefs.edit().putString("update_notes_$version", summary).apply()
+        if (!summary.isNullOrBlank()) {
+            prefs.edit().putString("release_notes_" + version.removePrefix("v"), summary).apply()
+        }
         if (!prefs.getBoolean("update_notifications", true)) return
         if (!isNewer(version, installedVersion(context))) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
