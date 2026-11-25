@@ -123,6 +123,7 @@ object ChatPush {
     const val ACTION_REPLY = "com.qmusic.app.CHAT_REPLY"
     const val ACTION_READ = "com.qmusic.app.CHAT_READ"
     const val ACTION_MUTE = "com.qmusic.app.CHAT_MUTE"
+    const val ACTION_DISMISS = "com.qmusic.app.CHAT_DISMISS"
     private const val HISTORY = 8
 
     /** One line of a conversation's notification: who wrote it (null: the person themself), what, and when. */
@@ -229,10 +230,14 @@ object ChatPush {
     /** The phone was unlocked: the notifications kept short on the lock screen show in full, quietly. */
     fun unlocked(context: Context) {
         if (!com.qmusic.ui.chat.NotificationPrefs.hideOnLock.value) return
-        val all = synchronized(history) { history.mapValues { (id, lines) -> lines.toList() to (unread[id] ?: 0) } }
-        all.forEach { (chatId, pair) ->
-            val (conversation, group) = shown[chatId] ?: return@forEach
-            show(context, chatId, conversation, group, pair.first, pair.second, alert = false)
+        val all = synchronized(history) {
+            history.mapNotNull { (id, lines) ->
+                val conv = shown[id] ?: return@mapNotNull null
+                Triple(id, conv, lines.toList() to (unread[id] ?: 0))
+            }
+        }
+        all.forEach { (chatId, conv, pair) ->
+            show(context, chatId, conv.first, conv.second, pair.first, pair.second, alert = false)
         }
     }
 
@@ -300,10 +305,58 @@ object ChatPush {
         synchronized(history) {
             history.remove(chatId)
             unread.remove(chatId)
+            shown.remove(chatId)
         }
         (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(chatId.hashCode())
         updateSummary(context)
     }
+
+    /** Swiped away from the shade: forget its lines and count without cancelling again. */
+    fun dismissed(context: Context, chatId: String) {
+        synchronized(history) {
+            history.remove(chatId)
+            unread.remove(chatId)
+            shown.remove(chatId)
+        }
+        updateSummary(context)
+    }
+
+    /** Re-shows the current notification quietly (so Android clears a failed or timed-out inline reply spinner). */
+    fun repost(context: Context, chatId: String) {
+        val state = synchronized(history) {
+            val pair = shown[chatId] ?: return@synchronized null
+            val lines = history[chatId]?.toList().orEmpty()
+            val count = unread[chatId] ?: 0
+            Triple(pair.first, pair.second, lines to count)
+        }
+        if (state != null) {
+            val (conversation, group, linesAndCount) = state
+            val (lines, count) = linesAndCount
+            if (lines.isNotEmpty()) {
+                show(context, chatId, conversation, group, lines, count, alert = false)
+                return
+            }
+        }
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val existing = runCatching { manager.activeNotifications.firstOrNull { it.id == chatId.hashCode() }?.notification }.getOrNull()
+        if (existing != null) {
+            val recovered = runCatching {
+                android.app.Notification.Builder.recoverBuilder(context, existing).setOnlyAlertOnce(true).build()
+            }.getOrNull()
+            if (recovered != null && runCatching { manager.notify(chatId.hashCode(), recovered) }.isSuccess) return
+            runCatching { manager.cancel(chatId.hashCode()) }
+            updateSummary(context)
+        }
+    }
+
+    private fun dismissIntent(context: Context, chatId: String) = PendingIntent.getBroadcast(
+        context,
+        chatId.hashCode() + 4,
+        Intent(context, ChatReplyReceiver::class.java)
+            .setAction(ACTION_DISMISS)
+            .putExtra(ChatReplyReceiver.EXTRA_CHAT, chatId),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
 
     /**
      * The conversation as an Android "conversation": a long-lived shortcut with its picture, which the notification
@@ -350,6 +403,7 @@ object ChatPush {
                         .setSilent(!alert)
                         .setAutoCancel(true)
                         .setContentIntent(openChat(context, conversation))
+                        .setDeleteIntent(dismissIntent(context, chatId))
                         .build(),
                 )
             }
@@ -358,6 +412,37 @@ object ChatPush {
         }
         // The messages channel plays the chosen Qeyf sound (see QeyfSounds).
         val channel = com.qmusic.ui.chat.QeyfSounds.messageChannelId(context)
+        // A locked or secret conversation: no shortcut, no Reply / Mark read / Mute actions, minimal private text only.
+        if (conversation.uid == LOCKED_UID) {
+            val said = if (count > 1) {
+                if (tr) "$count yeni mesaj" else "$count new messages"
+            } else {
+                lines.lastOrNull()?.text?.takeIf { it.isNotBlank() } ?: if (tr) "Yeni mesaj" else "New message"
+            }
+            runCatching {
+                manager.notify(
+                    chatId.hashCode(),
+                    NotificationCompat.Builder(context, channel)
+                        .setSmallIcon(com.qmusic.player.R.drawable.ic_qmusic_notification)
+                        .setContentTitle("Nuvelo")
+                        .setContentText(said)
+                        .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                        .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                        .setPriority(NotificationCompat.PRIORITY_HIGH)
+                        .setNumber(count)
+                        .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
+                        .setGroup(GROUP_KEY)
+                        .setOnlyAlertOnce(!alert)
+                        .setSilent(!alert)
+                        .setAutoCancel(true)
+                        .setContentIntent(openChat(context, conversation))
+                        .setDeleteIntent(dismissIntent(context, chatId))
+                        .build(),
+                )
+            }
+            updateSummary(context)
+            return
+        }
         val conversationIcon = NotificationAvatars.icon(conversation.uid, conversation.name, conversation.photo)
         val conversationPerson = Person.Builder().setName(conversation.name).setKey(conversation.uid).setIcon(conversationIcon).setImportant(true).build()
         publishShortcut(context, chatId, conversation, conversationIcon, conversationPerson)
@@ -435,6 +520,7 @@ object ChatPush {
                     .setSilent(!alert)
                     .setAutoCancel(true)
                     .setContentIntent(openChat(context, conversation))
+                    .setDeleteIntent(dismissIntent(context, chatId))
                     .setGroup(GROUP_KEY)
                     .addAction(reply)
                     .addAction(read)
@@ -476,7 +562,7 @@ object ChatPush {
     }
 
     /** Who a locked conversation's notification is "from". */
-    private const val LOCKED_UID = "__locked"
+    internal const val LOCKED_UID = "__locked"
 
     /** Android's own category for conversation shortcuts (ShortcutInfo.SHORTCUT_CATEGORY_CONVERSATION). */
     private const val SHORTCUT_CATEGORY = "android.shortcut.conversation"

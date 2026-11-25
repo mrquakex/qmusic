@@ -146,6 +146,10 @@
             android:exported="false"
             android:foregroundServiceType="location" />
 
+        <receiver
+            android:name="com.qmusic.ui.chat.LiveLocationStopReceiver"
+            android:exported="false" />
+
         <service
             android:name=".CallKeepAliveService"
             android:exported="false"

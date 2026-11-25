@@ -488,15 +488,26 @@ internal class E2eEngine(private val app: Context, private val root: DatabaseRef
 
     override fun version(chatId: String): Int? = versions[chatId]?.takeIf { it > 0 }
 
-    /** Known whether on or off (a send waits for this). */
-    suspend fun versionNow(chatId: String): Int? {
-        versions[chatId]?.let { return it.takeIf { v -> v > 0 } }
-        val v = runCatching { root.child("chats").child(chatId).child("e2e").child("v").get().await().getValue(Int::class.java) }.getOrNull() ?: 0
+    /** Encryption version when known: `> 0` if encrypted, `0` if confirmed unencrypted, `null` if unknown/offline. */
+    suspend fun knownVersion(chatId: String): Int? {
+        versions[chatId]?.let { return it }
+        if (uid == null) return null
+        val snap = try {
+            root.child("chats").child(chatId).child("e2e").child("v").get().await()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            return null
+        }
+        val v = snap.getValue(Int::class.java) ?: 0
         versions[chatId] = v
         watch(chatId)
         if (v > 0) loadKey(chatId, v)
-        return v.takeIf { it > 0 }
+        return v
     }
+
+    /** Known whether on or off (a send waits for this). */
+    suspend fun versionNow(chatId: String): Int? = knownVersion(chatId)?.takeIf { it > 0 }
 
     override fun watch(chatId: String) {
         if (uid == null || watched.containsKey(chatId)) return
@@ -510,7 +521,7 @@ internal class E2eEngine(private val app: Context, private val root: DatabaseRef
             }
 
             override fun onCancelled(error: DatabaseError) {
-                versions.putIfAbsent(chatId, 0)
+                watched.remove(chatId)
             }
         }
         watched[chatId] = l

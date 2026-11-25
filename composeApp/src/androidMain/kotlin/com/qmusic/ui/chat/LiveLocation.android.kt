@@ -7,6 +7,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -32,8 +33,10 @@ import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ServerValue
 import com.google.firebase.database.ValueEventListener
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * The phone's part of [LiveShare]: the sharings kept (so they survive the app being closed), the service that sends
@@ -104,6 +107,7 @@ object LiveLocations {
             Trail.clear(context, chatId)
         }
         save(context, emptyMap())
+        runCatching { context.getSystemService(NotificationManager::class.java)?.cancel(LiveLocationService.NOTIFICATION_ID) }
         context.stopService(Intent(context, LiveLocationService::class.java))
     }
 
@@ -120,27 +124,36 @@ object LiveLocations {
 
     /** Writes this phone's place to every sharing going on. */
     fun send(context: Context, location: Location) {
+        val appContext = context.applicationContext
         val now = System.currentTimeMillis() + (FirebaseChatBackend.peek()?.serverOffset?.value ?: 0L)
         val battery = runCatching {
-            (context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager)
+            (appContext.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager)
                 .getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it in 0..100 }
         }.getOrNull()
         val bearing = if (location.hasBearing() && location.hasSpeed() && location.speed > 0.7f) location.bearing.toDouble() else null
         val speed = if (location.hasSpeed()) location.speed.toDouble() else null
-        load(context).forEach { (chatId, until) ->
+        load(appContext).forEach { (chatId, until) ->
             if (until <= now) return@forEach
-            val trail = Trail.add(context, chatId, location.latitude, location.longitude)
+            val trail = Trail.add(appContext, chatId, location.latitude, location.longitude)
             work.launch {
-                // An encrypted conversation: the place goes sealed with its key (the server cannot see it).
-                val engine = E2eEngine.instance
-                val version = engine?.versionNow(chatId)
-                val place: Map<String, Any?> = if (version != null) {
+                // Ensure backend/E2E are initialized even after a cold service restart without MainActivity,
+                // and never write plaintext if encryption state is unknown or the conversation is secret.
+                FirebaseChatBackend.get(appContext) ?: return@launch
+                val engine = E2eEngine.instance ?: return@launch
+                val ready = withTimeoutOrNull(6_000) {
+                    while (!engine.ready.value) delay(100)
+                    true
+                } ?: false
+                if (!ready) return@launch
+                val version = engine.knownVersion(chatId) ?: return@launch
+                val place: Map<String, Any?> = if (version > 0) {
                     engine.loadKey(chatId, version) ?: return@launch
                     val plain = listOf(location.latitude, location.longitude, location.accuracy.toDouble(), bearing ?: "", speed ?: "", battery ?: "")
                         .joinToString(",") + "|" + trail
                     val sealed = engine.sealText(chatId, version, plain) ?: return@launch
                     mapOf("e" to sealed, "at" to ServerValue.TIMESTAMP, "until" to until)
                 } else {
+                    if (chatId in SecretChats.ids) return@launch
                     mapOf(
                         "lat" to location.latitude,
                         "lng" to location.longitude,
@@ -153,8 +166,8 @@ object LiveLocations {
                         "until" to until,
                     )
                 }
-                mine(context, chatId)?.setValue(place)
-                ArrivalWatch.check(context, chatId, location)
+                mine(appContext, chatId)?.setValue(place)
+                ArrivalWatch.check(appContext, chatId, location)
             }
         }
     }
@@ -255,6 +268,7 @@ class LiveLocationService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             LiveLocations.stopAll(this)
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -352,8 +366,8 @@ class LiveLocationService : Service() {
         val until = sharing.values.maxOrNull() ?: now
         val minutes = ((until - now) / 60_000).coerceAtLeast(1)
         val left = if (minutes >= 60) "${minutes / 60} ${if (tr()) "sa" else "h"} ${minutes % 60} ${if (tr()) "dk" else "min"}" else "$minutes ${if (tr()) "dk" else "min"}"
-        val stop = PendingIntent.getService(
-            this, 1, Intent(this, LiveLocationService::class.java).setAction(ACTION_STOP),
+        val stop = PendingIntent.getBroadcast(
+            this, 1, Intent(this, LiveLocationStopReceiver::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val open = packageManager.getLaunchIntentForPackage(packageName)?.let {
@@ -376,13 +390,20 @@ class LiveLocationService : Service() {
 
     companion object {
         private const val CHANNEL = "qeyf_live_location"
-        private const val NOTIFICATION_ID = 4101
+        internal const val NOTIFICATION_ID = 4101
         private const val ACTION_STOP = "com.qmusic.live.STOP"
         private const val MIN_GAP_MS = 3_000L
 
         fun start(context: Context) {
-            ContextCompat.startForegroundService(context, Intent(context, LiveLocationService::class.java))
+            runCatching { ContextCompat.startForegroundService(context, Intent(context, LiveLocationService::class.java)) }
         }
+    }
+}
+
+/** Stops every live location sharing when "Stop" is tapped on the notification (Android 12+ safe). */
+class LiveLocationStopReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        LiveLocations.stopAll(context.applicationContext)
     }
 }
 
@@ -437,10 +458,7 @@ object ArrivalWatch {
             c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("t_$chatId", "$lat,$lng,$label").apply()
             LiveShare.arrivals.value = targets(c).mapValues { it.value.third }
         }
-        LiveShare.cancelArrival = { chatId ->
-            c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove("t_$chatId").apply()
-            LiveShare.arrivals.value = targets(c).mapValues { it.value.third }
-        }
+        LiveShare.cancelArrival = { chatId -> cancel(c, chatId) }
         LiveShare.home = {
             c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("home", null)?.split(',')?.let { p ->
                 val lat = p.getOrNull(0)?.toDoubleOrNull()
@@ -449,6 +467,12 @@ object ArrivalWatch {
             }
         }
         LiveShare.saveHome = { lat, lng -> c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("home", "$lat,$lng").apply() }
+    }
+
+    fun cancel(context: Context, chatId: String) {
+        val c = context.applicationContext
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove("t_$chatId").apply()
+        LiveShare.arrivals.value = targets(c).mapValues { it.value.third }
     }
 
     private fun targets(context: Context): Map<String, Triple<Double, Double, String>> =
@@ -464,7 +488,7 @@ object ArrivalWatch {
     suspend fun check(context: Context, chatId: String, location: android.location.Location) {
         val (lat, lng, label) = targets(context)[chatId] ?: return
         if (distanceMeters(lat, lng, location.latitude, location.longitude) > NEAR_M) return
-        LiveShare.cancelArrival(chatId)
+        cancel(context, chatId)
         val backend = FirebaseChatBackend.get(context) ?: return
         val me = backend.awaitMe() ?: return
         val tr = context.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"

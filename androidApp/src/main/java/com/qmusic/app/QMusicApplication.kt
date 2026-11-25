@@ -16,6 +16,7 @@ class QMusicApplication : Application() {
         AutoUpdate.schedule(this, delayMs = 60_000)
         AutoUpdate.hookBanner(this)
         HeadsetResume.start(this, container.settings)
+        com.qmusic.ui.chat.ArrivalWatch.init(this)
     }
 
     /** Calls: the ringing notification when the app is not on screen, and the service that keeps a call going. */
