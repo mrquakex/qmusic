@@ -1,9 +1,14 @@
 package com.qmusic.ui.screens
 
+import com.qmusic.ui.theme.BgRoot
+import com.qmusic.ui.theme.BorderSubtle
+import com.qmusic.ui.theme.DarkSurface
+import com.qmusic.ui.theme.DarkSurfaceVariant
 import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -45,7 +50,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,10 +62,6 @@ import com.qmusic.ringtone.RingtoneStep
 import com.qmusic.ringtone.RingtoneStudio
 import com.qmusic.ringtone.RingtoneTarget
 import com.qmusic.ui.strings.LocalStrings
-import com.qmusic.ui.theme.BgRoot
-import com.qmusic.ui.theme.DarkBackground
-import com.qmusic.ui.theme.DarkSurface
-import com.qmusic.ui.theme.DarkSurfaceVariant
 import com.qmusic.ui.theme.QMusicIcons
 import kotlin.math.abs
 import kotlin.math.max
@@ -85,7 +85,7 @@ fun RingtoneEditorScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(DarkBackground)
+            .background(BgRoot)
             .statusBarsPadding(),
     ) {
         Row(
@@ -248,7 +248,7 @@ private fun Editor(d: RingtoneDraft, playhead: Long?, studio: RingtoneStudio) {
             Icon(
                 imageVector = if (d.previewing) QMusicIcons.Pause else QMusicIcons.Play,
                 contentDescription = if (d.previewing) s.ringtoneStopPreview else s.ringtonePreview,
-                tint = BgRoot,
+                tint = InkInverse,
                 modifier = Modifier.size(28.dp),
             )
         }
@@ -287,6 +287,8 @@ private fun Editor(d: RingtoneDraft, playhead: Long?, studio: RingtoneStudio) {
             focusedContainerColor = DarkSurfaceVariant,
             unfocusedContainerColor = DarkSurfaceVariant,
             disabledContainerColor = DarkSurfaceVariant,
+            focusedBorderColor = Ink,
+            unfocusedBorderColor = BorderSubtle,
             focusedTextColor = MaterialTheme.colorScheme.onSurface,
             unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
         ),
@@ -309,7 +311,7 @@ private fun Editor(d: RingtoneDraft, playhead: Long?, studio: RingtoneStudio) {
         ) {
             Icon(QMusicIcons.Bell, contentDescription = null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(10.dp))
-            Text(s.ringtoneCreate, style = MaterialTheme.typography.titleMedium, color = BgRoot)
+            Text(s.ringtoneCreate, style = MaterialTheme.typography.titleMedium, color = InkInverse)
         }
     }
 }
@@ -323,7 +325,7 @@ private fun Saved(d: RingtoneDraft, studio: RingtoneStudio, onOpenList: () -> Un
             modifier = Modifier.size(64.dp).clip(CircleShape).background(Ink),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(QMusicIcons.Check, contentDescription = null, tint = BgRoot, modifier = Modifier.size(34.dp))
+            Icon(QMusicIcons.Check, contentDescription = null, tint = InkInverse, modifier = Modifier.size(34.dp))
         }
         Spacer(Modifier.height(14.dp))
         Text(s.ringtoneReady, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
@@ -445,7 +447,7 @@ private fun OptionRow(title: String, subtitle: String, checked: Boolean, enabled
             onCheckedChange = onChange,
             enabled = enabled,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = BgRoot,
+                checkedThumbColor = InkInverse,
                 checkedTrackColor = Ink,
                 uncheckedThumbColor = Ink.copy(alpha = 0.7f),
                 uncheckedTrackColor = DarkSurfaceVariant,
@@ -481,6 +483,7 @@ private fun RingtoneWave(
             .height(136.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(DarkSurface)
+            .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
             .pointerInput(durationMs, enabled) {
                 if (!enabled || durationMs <= 0) return@pointerInput
                 var mode = DRAG_CLIP
@@ -521,12 +524,14 @@ private fun RingtoneWave(
             },
     ) {
         if (durationMs <= 0 || bars.isEmpty()) return@Canvas
+        val ink = Ink
+        val inkInverse = InkInverse
         val w = size.width
         val h = size.height
         val xs = range.startMs.toFloat() / durationMs * w
         val xe = range.endMs.toFloat() / durationMs * w
 
-        drawRect(Ink.copy(alpha = 0.07f), Offset(xs, 0f), Size(xe - xs, h))
+        drawRect(ink.copy(alpha = 0.07f), Offset(xs, 0f), Size(xe - xs, h))
 
         val slot = w / bars.size
         val barWidth = slot * 0.6f
@@ -534,7 +539,7 @@ private fun RingtoneWave(
             val cx = slot * i + slot / 2
             val bh = max(4.dp.toPx(), v * h * 0.76f)
             drawRoundRect(
-                color = if (cx in xs..xe) Ink else Ink.copy(alpha = 0.3f),
+                color = if (cx in xs..xe) ink else ink.copy(alpha = 0.3f),
                 topLeft = Offset(cx - barWidth / 2, (h - bh) / 2),
                 size = Size(barWidth, bh),
                 cornerRadius = CornerRadius(barWidth / 2),
@@ -543,16 +548,16 @@ private fun RingtoneWave(
 
         val line = 2.dp.toPx()
         listOf(xs, xe).forEach { x ->
-            drawRect(Ink, Offset(x - line / 2, 0f), Size(line, h))
+            drawRect(ink, Offset(x - line / 2, 0f), Size(line, h))
             drawRoundRect(
-                color = Ink,
+                color = ink,
                 topLeft = Offset(x - 6.dp.toPx(), h / 2 - 17.dp.toPx()),
                 size = Size(12.dp.toPx(), 34.dp.toPx()),
                 cornerRadius = CornerRadius(6.dp.toPx()),
             )
             for (dx in listOf(-2f, 2f)) {
                 drawLine(
-                    color = Color(0xFF0B0B0F),
+                    color = inkInverse,
                     start = Offset(x + dx.dp.toPx(), h / 2 - 7.dp.toPx()),
                     end = Offset(x + dx.dp.toPx(), h / 2 + 7.dp.toPx()),
                     strokeWidth = 1.5.dp.toPx(),
@@ -562,8 +567,8 @@ private fun RingtoneWave(
 
         playheadMs?.let { ms ->
             val x = ms.toFloat() / durationMs * w
-            drawLine(Ink.copy(alpha = 0.9f), Offset(x, 0f), Offset(x, h), strokeWidth = 1.5.dp.toPx())
-            drawCircle(Ink, 4.dp.toPx(), Offset(x, 6.dp.toPx()))
+            drawLine(ink.copy(alpha = 0.9f), Offset(x, 0f), Offset(x, h), strokeWidth = 1.5.dp.toPx())
+            drawCircle(ink, 4.dp.toPx(), Offset(x, 6.dp.toPx()))
         }
     }
 }

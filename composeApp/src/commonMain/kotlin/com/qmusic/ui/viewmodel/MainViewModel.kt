@@ -250,16 +250,19 @@ class MainViewModel(
         playerController.setVolume(clamped)
     }
 
+    private val _equalizerEnabled = MutableStateFlow(settings.bool(KEY_EQUALIZER_ENABLED, true))
+    val equalizerEnabled: StateFlow<Boolean> = _equalizerEnabled.asStateFlow()
+
     // 10-Band Equalizer (-12 to +12 dB)
     private val _equalizerBands = MutableStateFlow(List(10) { 0f })
     val equalizerBands: StateFlow<List<Float>> = _equalizerBands.asStateFlow()
 
-    private val _selectedPreset = MutableStateFlow(EqualizerPreset.FLAT)
-    val selectedPreset: StateFlow<EqualizerPreset> = _selectedPreset.asStateFlow()
+    private val _selectedPreset = MutableStateFlow<EqualizerPreset?>(EqualizerPreset.FLAT)
+    val selectedPreset: StateFlow<EqualizerPreset?> = _selectedPreset.asStateFlow()
 
     // Database Collections
     private val localFavorites: StateFlow<List<SongItem>> = repository.getFavorites()
-        .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     /** "Liked music" of the signed-in YouTube account; empty while signed out. */
     private val _likedSongs = MutableStateFlow<List<SongItem>>(emptyList())
@@ -358,10 +361,10 @@ class MainViewModel(
     }
 
     val history: StateFlow<List<SongItem>> = repository.getHistory()
-        .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     val playlists: StateFlow<List<PlaylistEntity>> = repository.getPlaylists()
-        .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     // Search Screen State
     private val _searchQuery = MutableStateFlow("")
@@ -388,7 +391,7 @@ class MainViewModel(
     val showSearchResults: StateFlow<Boolean> = _showSearchResults.asStateFlow()
 
     val searchHistory: StateFlow<List<String>> = repository.getSearchHistory()
-        .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _remoteSuggestions = MutableStateFlow<List<SearchSuggestion>>(emptyList())
 
@@ -508,7 +511,7 @@ class MainViewModel(
     val downloadedSongs: StateFlow<List<SongItem>> =
         combine(repository.getDownloadedSongs(), downloads.downloadedIds) { saved, ready ->
             saved.filter { it.id in ready }
-        }.stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     val autoDownloadLiked: StateFlow<Boolean> = settings.autoDownloadLiked
     val wifiOnly: StateFlow<Boolean> = settings.wifiOnly
@@ -729,11 +732,24 @@ class MainViewModel(
         }
         // The sound settings chosen last time: crossfade length and equalizer.
         setCrossfadeDuration(settings.crossfadeSeconds.value)
-        runCatching { EqualizerPreset.valueOf(settings.equalizerPreset.value) }.getOrNull()?.let { _selectedPreset.value = it }
-        settings.equalizerBands.value.split(",").mapNotNull { it.toFloatOrNull() }.takeIf { it.size == 10 }?.let { bands ->
-            _equalizerBands.value = bands
-            bands.forEachIndexed { index, gain -> playerController.setEqualizerBand(index, gain) }
+        val eqEnabled = _equalizerEnabled.value
+        val savedPresetName = settings.equalizerPreset.value
+        val restoredBands = settings.equalizerBands.value.split(",").mapNotNull { it.toFloatOrNull() }.takeIf { it.size == 10 }
+        if (restoredBands != null) {
+            _equalizerBands.value = restoredBands
+            _selectedPreset.value = if (savedPresetName == CUSTOM_PRESET_NAME) {
+                null
+            } else {
+                runCatching { EqualizerPreset.valueOf(savedPresetName) }.getOrNull()
+                    ?: EqualizerPreset.entries.firstOrNull { it.gains == restoredBands }
+            }
+            if (eqEnabled) {
+                restoredBands.forEachIndexed { index, gain -> playerController.setEqualizerBand(index, gain) }
+            }
+        } else {
+            _selectedPreset.value = runCatching { EqualizerPreset.valueOf(savedPresetName) }.getOrNull() ?: EqualizerPreset.FLAT
         }
+        playerController.setEqualizerEnabled(eqEnabled)
         restoreSession()
         // The queue and the moment are written down as they change, so a later launch can carry on.
         scope.launch {
@@ -758,18 +774,19 @@ class MainViewModel(
         // The seek bar's preview frames: only for the song on screen in the full player, each song asked for once.
         scope.launch {
             combine(playerController.currentTrack.distinctUntilChangedBy { it?.id }, _isPlayerExpanded) { track, open -> track to open }
-                .collect { (track, open) ->
+                .collectLatest { (track, open) ->
                     if (track == null) {
                         _seekPreview.value = null
-                        return@collect
+                        return@collectLatest
                     }
                     if (previewCache.containsKey(track.id)) {
                         _seekPreview.value = previewCache[track.id]
-                        return@collect
+                        return@collectLatest
                     }
                     _seekPreview.value = null
-                    if (!open || !connectivity.isOnline.value) return@collect
-                    val frames = youTube.previewFrames(track.id).getOrNull()
+                    if (!open || !connectivity.isOnline.value) return@collectLatest
+                    val videoId = ytId(track) ?: return@collectLatest
+                    val frames = youTube.previewFrames(videoId).getOrNull()
                     previewCache[track.id] = frames
                     if (playerController.currentTrack.value?.id == track.id) _seekPreview.value = frames
                 }
@@ -921,6 +938,15 @@ class MainViewModel(
         if (currentTrack.value == null) playerController.play(song) else playerController.appendToQueue(listOf(song))
     }
 
+    fun addToQueue(songs: List<SongItem>) {
+        if (songs.isEmpty()) return
+        if (currentTrack.value == null) {
+            playerController.playQueue(songs, 0)
+        } else {
+            playerController.appendToQueue(songs)
+        }
+    }
+
     fun skipToQueueIndex(index: Int) {
         playerController.skipTo(index)
     }
@@ -993,22 +1019,39 @@ class MainViewModel(
         settings.setCrossfadeSeconds(clamped)
     }
 
+    fun setEqualizerEnabled(enabled: Boolean) {
+        _equalizerEnabled.value = enabled
+        settings.setBool(KEY_EQUALIZER_ENABLED, enabled)
+        playerController.setEqualizerEnabled(enabled)
+        if (enabled) {
+            _equalizerBands.value.forEachIndexed { index, gain ->
+                playerController.setEqualizerBand(index, gain)
+            }
+        }
+    }
+
     fun setEqualizerBand(bandIndex: Int, gainDb: Float) {
         if (bandIndex in 0..9) {
             val clamped = gainDb.coerceIn(-12f, 12f)
             val updated = _equalizerBands.value.toMutableList()
             updated[bandIndex] = clamped
             _equalizerBands.value = updated
-            playerController.setEqualizerBand(bandIndex, clamped)
-            settings.setEqualizer(updated.joinToString(","), _selectedPreset.value.name)
+            val matchingPreset = EqualizerPreset.entries.firstOrNull { it.gains == updated }
+            _selectedPreset.value = matchingPreset
+            if (_equalizerEnabled.value) {
+                playerController.setEqualizerBand(bandIndex, clamped)
+            }
+            settings.setEqualizer(updated.joinToString(","), matchingPreset?.name ?: CUSTOM_PRESET_NAME)
         }
     }
 
     fun applyEqualizerPreset(preset: EqualizerPreset) {
         _selectedPreset.value = preset
         _equalizerBands.value = preset.gains
-        preset.gains.forEachIndexed { index, gain ->
-            playerController.setEqualizerBand(index, gain)
+        if (_equalizerEnabled.value) {
+            preset.gains.forEachIndexed { index, gain ->
+                playerController.setEqualizerBand(index, gain)
+            }
         }
         settings.setEqualizer(preset.gains.joinToString(","), preset.name)
     }
@@ -1082,6 +1125,10 @@ class MainViewModel(
         scope.launch { youTube.library("FEmusic_liked_albums").onSuccess { _ytAlbums.value = it } }
         scope.launch { youTube.library("FEmusic_library_corpus_artists").onSuccess { _ytArtists.value = it } }
     }
+
+    /** Filters [list] to playlists the user owns in Spotify mode so followed playlists aren't offered as writable targets. */
+    fun editableRemotePlaylists(list: List<CollectionItem>): List<CollectionItem> =
+        if (isSpotify) list.filter { it.browseId in spotifyOwned } else list
 
     /** Adds [song] to one of the account's YouTube Music playlists, and says how it went. */
     fun addSongToYouTubePlaylist(playlist: CollectionItem, song: SongItem) {
@@ -1180,13 +1227,19 @@ class MainViewModel(
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return
         scope.launch {
-            if (onYouTube && isSpotify) {
-                runCatching { spotify.createPlaylist(trimmed, listOfNotNull(spotifyTrackId(song))) }
+            if (onYouTube && isSpotify && spotifySignedIn.value) {
+                runCatching {
+                    val trackId = spotifyTrackId(song) ?: error("No Spotify track")
+                    spotify.createPlaylist(trimmed, listOf(trackId))
+                }
                     .onSuccess {
                         showMessage(strings.addedToPlaylist(trimmed))
                         loadYouTubeLibrary()
                     }
-                    .onFailure { showMessage(strings.couldNotAddToPlaylist) }
+                    .onFailure {
+                        onSpotifyFailure(it)
+                        showMessage(strings.couldNotAddToPlaylist)
+                    }
             } else if (onYouTube && youTubeAuth.isLoggedIn) {
                 youTube.createPlaylist(trimmed, listOf(song.id))
                     .onSuccess {
@@ -1311,9 +1364,10 @@ class MainViewModel(
     }
 
     fun removeAllDownloads() {
-        val saved = downloadedSongs.value
         downloads.removeAll()
-        scope.launch { saved.forEach { repository.setDownloaded(it, false) } }
+        scope.launch {
+            repository.getDownloadedSongs().first().forEach { repository.setDownloaded(it, false) }
+        }
     }
 
     fun setAutoDownloadLiked(enabled: Boolean) {
@@ -1395,7 +1449,14 @@ class MainViewModel(
         scope.launch {
             val id = repository.createPlaylist(trimmed)
             songs.forEach { repository.addSongToPlaylist(id, it) }
-            if (youTubeAuth.isLoggedIn) {
+            if (isSpotify && spotifySignedIn.value) {
+                val trackIds = songs.mapNotNull { spotifyTrackId(it) }
+                if (trackIds.isNotEmpty()) {
+                    runCatching { spotify.createPlaylist(trimmed, trackIds) }
+                        .onSuccess { loadYouTubeLibrary() }
+                        .onFailure { onSpotifyFailure(it) }
+                }
+            } else if (youTubeAuth.isLoggedIn) {
                 youTube.createPlaylist(trimmed, songs.map { it.id }).onSuccess { loadYouTubeLibrary() }
             }
             showMessage(strings.queueSaved(trimmed))
@@ -1541,6 +1602,10 @@ class MainViewModel(
             is AppLink.Album -> openCollection(CollectionItem(browseId = link.browseId, title = "", kind = CollectionKind.ALBUM))
             is AppLink.Artist -> openArtist(link.channelId, "")
             is AppLink.Spotify -> openSpotifyLink(link)
+            is AppLink.SpotifyShort -> scope.launch {
+                val resolved = AppLinks.resolveShortSpotify(link.url)
+                if (resolved != null) openSpotifyLink(resolved) else showMessage(strings.linkNotSupported)
+            }
         }
     }
 
@@ -2221,7 +2286,12 @@ class MainViewModel(
         _spotifyImportStatus.value = strings.spotifyImportFetching
 
         scope.launch {
-            val playlistResult = spotifyImporter.importPlaylistFromUrl(cleanUrl)
+            val targetUrl = when (val parsed = AppLinks.parse(cleanUrl)) {
+                is AppLink.SpotifyShort -> AppLinks.resolveShortSpotify(parsed.url)
+                    ?.let { "https://open.spotify.com/${it.kind}/${it.id}" } ?: cleanUrl
+                else -> cleanUrl
+            }
+            val playlistResult = spotifyImporter.importPlaylistFromUrl(targetUrl)
             playlistResult.onSuccess { playlist ->
                 val totalTracks = playlist.tracks.size
                 if (totalTracks == 0) {
@@ -2480,6 +2550,8 @@ class MainViewModel(
 
     private companion object {
         const val KEY_WHATS_NEW_SEEN = "whats_new_seen"
+        const val KEY_EQUALIZER_ENABLED = "equalizer_enabled"
+        const val CUSTOM_PRESET_NAME = "CUSTOM"
         const val RADIO_REFILL_THRESHOLD = 3
         const val CACHE_REFRESH_MS = 600L
         const val SAMPLE_SEEDS = 5

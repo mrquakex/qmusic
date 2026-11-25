@@ -6,6 +6,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,8 +22,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -49,10 +51,14 @@ import com.qmusic.engine.models.SongItem
 import com.qmusic.ui.motion.pressScale
 import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.BgRoot
+import com.qmusic.ui.theme.BorderSubtle
+import com.qmusic.ui.theme.DarkSurface
 import com.qmusic.ui.theme.DarkSurfaceVariant
 import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import com.qmusic.ui.theme.QMusicIcons
+import com.qmusic.ui.theme.TextPrimary
+import com.qmusic.ui.theme.TextSecondary
 
 /**
  * "Liked music", as YouTube Music has it: a violet glow at the top behind the back arrow, "add to queue" and the menu;
@@ -87,7 +93,6 @@ fun LikedSongsScreen(
     val saved = songs.count { it.id in downloadedIds }
     val pending = songs.count { it.id in downloadProgress }
     val missing = songs.size - saved - pending
-    val violet = Color(0xFF7B4CC2)
 
     val listState = rememberLazyListState()
     val density = LocalDensity.current
@@ -104,19 +109,16 @@ fun LikedSongsScreen(
             item {
                 Box(
                     Modifier.fillMaxWidth().drawBehind {
-                        // The glow: violet from the top, lightest in the middle, fading into the page's black (the
-                        // fade at its foot is long, so there is no edge where the list begins).
                         drawRect(
                             Brush.verticalGradient(
-                                0f to violet,
-                                0.45f to violet.copy(alpha = 0.55f),
-                                0.8f to violet.copy(alpha = 0.12f),
+                                0f to DarkSurfaceVariant,
+                                0.55f to DarkSurface.copy(alpha = 0.65f),
                                 1f to BgRoot,
                             ),
                         )
                         drawRect(
                             Brush.radialGradient(
-                                listOf(Color.White.copy(alpha = 0.22f), Color.Transparent),
+                                listOf(Ink.copy(alpha = 0.08f), Color.Transparent),
                                 center = androidx.compose.ui.geometry.Offset(size.width * 0.5f, size.height * 0.08f),
                                 radius = size.width * 0.75f,
                             ),
@@ -129,18 +131,27 @@ fun LikedSongsScreen(
                         Spacer(Modifier.height(18.dp))
                         // The tile, the name, how many.
                         Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                            LikedTile(size = 64.dp, corner = 10.dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(DarkSurfaceVariant)
+                                    .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(QMusicIcons.ThumbUpFilled, contentDescription = null, tint = Ink, modifier = Modifier.size(28.dp))
+                            }
                             Spacer(Modifier.width(16.dp))
                             Column {
-                                Text(w.liked, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
-                                Text(w.songs(songs.size), color = Color.White.copy(alpha = 0.7f), fontSize = 15.sp)
+                                Text(w.liked, color = TextPrimary, fontSize = 30.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
+                                Text(w.songs(songs.size), color = TextSecondary, fontSize = 15.sp)
                             }
                         }
                         Spacer(Modifier.height(14.dp))
                         Text(
                             if (english) "The songs you like show here. Tap the heart on any song to add it."
                             else "Beğendiğin şarkılar burada gösterilir. Bir şarkıdaki kalbe dokununca buraya eklenir.",
-                            color = Color.White.copy(alpha = 0.7f),
+                            color = TextSecondary,
                             fontSize = 14.sp,
                             lineHeight = 20.sp,
                             modifier = Modifier.padding(horizontal = 20.dp),
@@ -149,7 +160,7 @@ fun LikedSongsScreen(
                         // Download on the left; shuffle and play on the right.
                         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                             Box(
-                                Modifier.size(56.dp).pressScale(0.92f).clip(CircleShape).background(Color.White.copy(alpha = 0.12f))
+                                Modifier.size(56.dp).pressScale(0.92f).clip(CircleShape).background(Ink.copy(alpha = 0.12f))
                                     .clickable(enabled = songs.isNotEmpty()) {
                                         when {
                                             pending > 0 -> onCancelDownloads()
@@ -161,21 +172,21 @@ fun LikedSongsScreen(
                                 if (pending > 0) {
                                     CircularProgressIndicator(
                                         progress = { if (songs.isEmpty()) 0f else saved.toFloat() / songs.size },
-                                        color = Color.White,
-                                        trackColor = Color.White.copy(alpha = 0.2f),
+                                        color = Ink,
+                                        trackColor = Ink.copy(alpha = 0.2f),
                                         strokeWidth = 3.dp,
                                         modifier = Modifier.size(34.dp),
                                     )
                                 } else {
                                     Icon(
                                         if (songs.isNotEmpty() && missing == 0) QMusicIcons.DownloadDone else QMusicIcons.Download,
-                                        contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp),
+                                        contentDescription = null, tint = Ink, modifier = Modifier.size(26.dp),
                                     )
                                 }
                             }
                             Spacer(Modifier.weight(1f))
                             IconButton(onClick = { if (songs.isNotEmpty()) onShuffle(songs) }, modifier = Modifier.size(56.dp)) {
-                                Icon(QMusicIcons.Shuffle, contentDescription = s.shuffle, tint = Color.White, modifier = Modifier.size(28.dp))
+                                Icon(QMusicIcons.Shuffle, contentDescription = s.shuffle, tint = Ink, modifier = Modifier.size(28.dp))
                             }
                             Spacer(Modifier.width(14.dp))
                             Box(
@@ -189,7 +200,7 @@ fun LikedSongsScreen(
             if (songs.isEmpty()) {
                 item { EmptyLibraryPlaceholder(s.favoritesEmpty) }
             } else {
-                items(songs, key = { it.id }) { song ->
+                itemsIndexed(songs, key = { index, song -> "${index}_${song.id}" }) { _, song ->
                     Box(Modifier.padding(horizontal = 8.dp)) {
                         SongListItem(
                             song = song,
@@ -210,15 +221,15 @@ fun LikedSongsScreen(
             Modifier.fillMaxWidth().background(BgRoot.copy(alpha = scrolled)).statusBarsPadding(),
         ) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) { Icon(QMusicIcons.Back, contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp)) }
+                IconButton(onClick = onBack) { Icon(QMusicIcons.Back, contentDescription = s.back, tint = Ink, modifier = Modifier.size(26.dp)) }
                 Spacer(Modifier.weight(1f))
                 if (songs.isNotEmpty()) {
                     IconButton(onClick = { onAddToQueue(songs) }) {
-                        Icon(QMusicIcons.PlayNext, contentDescription = if (english) "Add to queue" else "Sıraya ekle", tint = Color.White, modifier = Modifier.size(26.dp))
+                        Icon(QMusicIcons.PlayNext, contentDescription = if (english) "Add to queue" else "Sıraya ekle", tint = Ink, modifier = Modifier.size(26.dp))
                     }
                 }
                 Box {
-                    IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Color.White) }
+                    IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = s.moreOptions, tint = Ink) }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
                         MenuSwitch(s.autoDownloadLikedTitle, autoDownload) { onAutoDownloadChange(it) }
                         if (autoDownload) MenuSwitch(s.wifiOnlyTitle, wifiOnly) { onWifiOnlyChange(it) }
@@ -227,7 +238,7 @@ fun LikedSongsScreen(
             }
             Text(
                 w.liked,
-                color = Color.White,
+                color = TextPrimary,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
@@ -245,7 +256,13 @@ private fun MenuSwitch(title: String, checked: Boolean, onChange: (Boolean) -> U
             Switch(
                 checked = checked,
                 onCheckedChange = onChange,
-                colors = SwitchDefaults.colors(checkedThumbColor = BgRoot, checkedTrackColor = Ink, uncheckedTrackColor = DarkSurfaceVariant),
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = InkInverse,
+                    checkedTrackColor = Ink,
+                    uncheckedThumbColor = Ink.copy(alpha = 0.7f),
+                    uncheckedTrackColor = DarkSurfaceVariant,
+                    uncheckedBorderColor = Ink.copy(alpha = 0.3f),
+                ),
             )
         },
         onClick = { onChange(!checked) },

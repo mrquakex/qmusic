@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -133,6 +134,7 @@ fun ArtistScreen(
                         page = page,
                         onToggleSubscribe = onToggleSubscribe,
                         onRadio = { page.topSongs.firstOrNull()?.let(onStartRadio) },
+                        onShuffle = { onShuffle(page.topSongs) },
                         onPlay = { onPlayAll(page.topSongs) },
                     )
                 }
@@ -163,7 +165,7 @@ fun ArtistScreen(
                             }
                         }
                     }
-                    items(page.topSongs, key = { it.id }) { song ->
+                    itemsIndexed(page.topSongs, key = { index, song -> "${index}_${song.id}" }) { _, song ->
                         SongListItem(
                             song = song,
                             isFavorite = isFavoritePredicate(song.id),
@@ -303,12 +305,13 @@ private fun Hero(page: ArtistPage, height: Dp, scrolled: () -> Float, heroPx: Fl
     }
 }
 
-/** Subscribe on the left; radio and a large white play button on the right. */
+/** Subscribe on the left; radio, shuffle and a large play button on the right. */
 @Composable
 private fun ActionRow(
     page: ArtistPage,
     onToggleSubscribe: () -> Unit,
     onRadio: () -> Unit,
+    onShuffle: () -> Unit,
     onPlay: () -> Unit,
 ) {
     val s = LocalStrings.current
@@ -322,6 +325,7 @@ private fun ActionRow(
             val label = if (page.subscribed) s.subscribedLabel else s.subscribe
             Box(
                 modifier = Modifier
+                    .weight(1f, fill = false)
                     .clip(RoundedCornerShape(50))
                     .background(if (page.subscribed) Color.Transparent else Ink)
                     .then(if (page.subscribed) Modifier.border(1.dp, Ink.copy(alpha = 0.4f), RoundedCornerShape(50)) else Modifier)
@@ -333,15 +337,21 @@ private fun ActionRow(
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                     color = if (page.subscribed) Ink else InkInverse,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
+        Spacer(Modifier.width(8.dp))
         Spacer(Modifier.weight(1f))
         if (page.topSongs.isNotEmpty()) {
-            IconButton(onClick = onRadio, modifier = Modifier.size(52.dp)) {
-                Icon(QMusicIcons.Radio, contentDescription = s.startRadio, tint = Ink, modifier = Modifier.size(30.dp))
+            IconButton(onClick = onRadio, modifier = Modifier.size(48.dp)) {
+                Icon(QMusicIcons.Radio, contentDescription = s.startRadio, tint = Ink, modifier = Modifier.size(28.dp))
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(4.dp))
+            IconButton(onClick = onShuffle, modifier = Modifier.size(48.dp)) {
+                Icon(QMusicIcons.Shuffle, contentDescription = s.shuffle, tint = Ink, modifier = Modifier.size(26.dp))
+            }
+            Spacer(Modifier.width(10.dp))
             Box(
                 modifier = Modifier
                     .size(68.dp)

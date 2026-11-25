@@ -18,6 +18,7 @@ import com.qmusic.player.DownloadController
 import com.qmusic.player.cache.CacheProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -92,7 +93,8 @@ class OfflineDownloader(
         // Visible as "waiting" straight away, before it is its turn.
         setProgress(id, 0f)
         ensureServiceRunning()
-        jobs[id] = scope.launch {
+        lateinit var job: Job
+        job = scope.launch(start = CoroutineStart.LAZY) {
             val key = cacheKey(id)
             try {
                 songGate.withPermit {
@@ -107,10 +109,16 @@ class OfflineDownloader(
                 // A half-written song would play as a truncated one; it is only listed once complete, and
                 // the cached parts are kept so the next try resumes instead of starting over.
             } finally {
-                _progress.value = _progress.value - id
-                jobs.remove(id)
+                jobs.remove(id, job)
+                if (jobs[id] == null) _progress.value = _progress.value - id
                 refreshBytes()
             }
+        }
+        val previous = jobs.putIfAbsent(id, job)
+        if (previous == null) {
+            job.start()
+        } else {
+            job.cancel()
         }
     }
 
@@ -190,25 +198,42 @@ class OfflineDownloader(
     }
 
     override fun remove(songId: String) {
-        jobs.remove(songId)?.cancel()
+        val job = jobs.remove(songId)
+        job?.cancel()
+        _downloaded.value = _downloaded.value - songId
+        _progress.value = _progress.value - songId
         scope.launch {
+            runCatching { job?.join() }
             runCatching { cache.removeResource(cacheKey(songId)) }
             _downloaded.value = _downloaded.value - songId
-            _progress.value = _progress.value - songId
+            if (jobs[songId] == null) _progress.value = _progress.value - songId
             refreshBytes()
         }
     }
 
     override fun cancelAll() {
-        jobs.values.toList().forEach { it.cancel() }
+        val active = jobs.values.toList()
+        jobs.clear()
+        active.forEach { it.cancel() }
+        _progress.value = emptyMap()
     }
 
     override fun removeAll() {
-        cancelAll()
+        val active = jobs.values.toList()
+        val knownIds = _downloaded.value
+        jobs.clear()
+        active.forEach { it.cancel() }
+        _downloaded.value = emptySet()
+        _progress.value = emptyMap()
         scope.launch {
-            _downloaded.value.forEach { id -> runCatching { cache.removeResource(cacheKey(id)) } }
-            _downloaded.value = emptySet()
-            _progress.value = emptyMap()
+            active.forEach { runCatching { it.join() } }
+            val keys = (cache.keys.toList().filter { it.startsWith(KEY_PREFIX) } + knownIds.map(::cacheKey)).distinct()
+            keys.forEach { key ->
+                val id = key.removePrefix(KEY_PREFIX)
+                if (!jobs.containsKey(id)) runCatching { cache.removeResource(key) }
+            }
+            _downloaded.value = _downloaded.value.filterTo(HashSet()) { jobs.containsKey(it) }
+            _progress.value = _progress.value.filterKeys { jobs.containsKey(it) }
             refreshBytes()
         }
     }

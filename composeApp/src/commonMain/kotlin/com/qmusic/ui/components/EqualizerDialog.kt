@@ -1,6 +1,5 @@
 package com.qmusic.ui.components
 
-import androidx.compose.foundation.background
 import com.qmusic.ui.theme.QMusicIcons
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -25,15 +24,21 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.DarkSurface
 import com.qmusic.ui.theme.DarkSurfaceVariant
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
+import com.qmusic.ui.theme.TextSecondary
 import com.qmusic.ui.viewmodel.EqualizerPreset
 import kotlin.math.roundToInt
 
@@ -45,13 +50,16 @@ private val BandLabels = listOf(
 @Composable
 fun EqualizerDialog(
     equalizerBands: List<Float>,
-    selectedPreset: EqualizerPreset,
+    selectedPreset: EqualizerPreset?,
     onBandGainChange: (Int, Float) -> Unit,
     onPresetSelect: (EqualizerPreset) -> Unit,
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
+    equalizerEnabled: Boolean = true,
+    onEnabledChange: (Boolean) -> Unit = {},
 ) {
     val s = LocalStrings.current
+    val customLabel = if (s.english) "Custom" else "Özel"
     Dialog(onDismissRequest = onDismissRequest) {
         Card(
             modifier = modifier
@@ -69,14 +77,26 @@ fun EqualizerDialog(
                 // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         text = s.equalizerTitle,
                         style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
                     )
+                    Switch(
+                        checked = equalizerEnabled,
+                        onCheckedChange = onEnabledChange,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = InkInverse,
+                            checkedTrackColor = Ink,
+                            uncheckedThumbColor = Ink.copy(alpha = 0.7f),
+                            uncheckedTrackColor = DarkSurfaceVariant,
+                            uncheckedBorderColor = Ink.copy(alpha = 0.3f),
+                        ),
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
                     IconButton(onClick = onDismissRequest) {
                         Icon(
                             imageVector = QMusicIcons.Close,
@@ -87,6 +107,17 @@ fun EqualizerDialog(
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
+
+                val chipColors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = Ink,
+                    selectedLabelColor = InkInverse,
+                    containerColor = DarkSurfaceVariant,
+                    labelColor = MaterialTheme.colorScheme.onSurface,
+                    disabledContainerColor = DarkSurfaceVariant.copy(alpha = 0.5f),
+                    disabledLabelColor = TextSecondary,
+                    disabledSelectedContainerColor = Ink.copy(alpha = 0.35f),
+                    disabledSelectedLabelColor = InkInverse,
+                )
 
                 // Presets row
                 Row(
@@ -99,57 +130,66 @@ fun EqualizerDialog(
                         val isSelected = preset == selectedPreset
                         FilterChip(
                             selected = isSelected,
+                            enabled = equalizerEnabled,
                             onClick = { onPresetSelect(preset) },
                             label = { Text(s.presetDisplayName(preset)) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                                containerColor = DarkSurfaceVariant,
-                                labelColor = MaterialTheme.colorScheme.onSurface,
-                            ),
+                            colors = chipColors,
                         )
                     }
+                    FilterChip(
+                        selected = selectedPreset == null,
+                        enabled = equalizerEnabled,
+                        onClick = { },
+                        label = { Text(customLabel) },
+                        colors = chipColors,
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // 10 Band sliders
-                equalizerBands.take(10).forEachIndexed { index, gain ->
-                    val label = BandLabels.getOrElse(index) { "Band $index" }
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                Column(modifier = Modifier.alpha(if (equalizerEnabled) 1f else 0.55f)) {
+                    equalizerBands.take(10).forEachIndexed { index, gain ->
+                        val label = BandLabels.getOrElse(index) { "Band $index" }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
                         ) {
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            val roundedGain = gain.roundToInt()
-                            val sign = if (roundedGain > 0) "+$roundedGain" else "$roundedGain"
-                            Text(
-                                text = "${sign} dB",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.secondary,
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                val roundedGain = gain.roundToInt()
+                                val sign = if (roundedGain > 0) "+$roundedGain" else "$roundedGain"
+                                Text(
+                                    text = "${sign} dB",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                )
+                            }
+
+                            Slider(
+                                value = gain,
+                                onValueChange = { onBandGainChange(index, it) },
+                                enabled = equalizerEnabled,
+                                valueRange = -12f..12f,
+                                steps = 23,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Ink,
+                                    activeTrackColor = Ink,
+                                    inactiveTrackColor = DarkSurfaceVariant,
+                                    disabledThumbColor = Ink.copy(alpha = 0.4f),
+                                    disabledActiveTrackColor = Ink.copy(alpha = 0.4f),
+                                    disabledInactiveTrackColor = DarkSurfaceVariant.copy(alpha = 0.5f),
+                                ),
                             )
                         }
-
-                        Slider(
-                            value = gain,
-                            onValueChange = { onBandGainChange(index, it) },
-                            valueRange = -12f..12f,
-                            steps = 23,
-                            colors = SliderDefaults.colors(
-                                thumbColor = MaterialTheme.colorScheme.secondary,
-                                activeTrackColor = MaterialTheme.colorScheme.primary,
-                                inactiveTrackColor = DarkSurfaceVariant,
-                            ),
-                        )
                     }
                 }
 
@@ -161,7 +201,8 @@ fun EqualizerDialog(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
+                        containerColor = Ink,
+                        contentColor = InkInverse,
                     ),
                 ) {
                     Text(s.applyAndClose)

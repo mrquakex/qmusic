@@ -64,9 +64,11 @@ import com.qmusic.engine.models.SongItem
 import com.qmusic.ui.components.SharpCover
 import com.qmusic.ui.strings.LocalStrings
 import com.qmusic.ui.theme.BgRoot
-import com.qmusic.ui.theme.DarkBackground
+import com.qmusic.ui.theme.BgSurface
 import com.qmusic.ui.theme.DarkSurfaceVariant
 import com.qmusic.ui.theme.QMusicIcons
+import com.qmusic.ui.theme.TextPrimary
+import com.qmusic.ui.theme.TextSecondary
 
 /**
  * An album, playlist or podcast, laid out like YouTube Music: the cover over a blurred copy of itself that fades
@@ -100,7 +102,7 @@ fun CollectionScreen(
     val isAlbum = item.kind == CollectionKind.ALBUM
     val editable = page?.editable == true
 
-    BoxWithConstraints(modifier = modifier.fillMaxSize().background(DarkBackground)) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize().background(BgRoot)) {
         val headerPx = with(LocalDensity.current) { (maxWidth * 0.9f).toPx() }
         val barAlpha by remember {
             derivedStateOf {
@@ -119,16 +121,17 @@ fun CollectionScreen(
             }
 
             else -> {
-                var draggingId by remember { mutableStateOf<String?>(null) }
-                var dragOffset by remember { mutableFloatStateOf(0f) }
-                var dragFrom by remember { mutableStateOf(-1) }
-                var dragTo by remember { mutableStateOf(-1) }
+                val keyedSongs = remember(songs) { songs.mapIndexed { i, song -> "${i}_${song.id}" to song } }
+                var draggingKey by remember(songs) { mutableStateOf<String?>(null) }
+                var dragOffset by remember(songs) { mutableFloatStateOf(0f) }
+                var dragFrom by remember(songs) { mutableStateOf(-1) }
+                var dragTo by remember(songs) { mutableStateOf(-1) }
                 val rowPx = with(LocalDensity.current) { ROW_HEIGHT.toPx() }
                 // While dragging, the list shows the song at its new place; the move is sent once, on release.
-                val shown = if (draggingId != null && dragFrom >= 0 && dragTo >= 0) {
-                    songs.toMutableList().apply { add(dragTo, removeAt(dragFrom)) }
+                val shown = if (draggingKey != null && dragFrom in keyedSongs.indices && dragTo in keyedSongs.indices) {
+                    keyedSongs.toMutableList().apply { add(dragTo, removeAt(dragFrom)) }
                 } else {
-                    songs
+                    keyedSongs
                 }
 
                 LazyColumn(
@@ -138,13 +141,13 @@ fun CollectionScreen(
                 ) {
                     item { Header(item, page, onPlay = { onPlayAll(songs) }, onShuffle = { onShuffle(songs) }, onDownloadAll = { onDownloadAll(songs) }) }
 
-                    itemsIndexed(shown, key = { _, song -> song.id }) { index, song ->
-                        val dragged = draggingId == song.id
+                    itemsIndexed(shown, key = { _, (entryKey, _) -> entryKey }) { index, (entryKey, song) ->
+                        val dragged = draggingKey == entryKey
                         val latestIndex by rememberUpdatedState(index)
                         Row(
                             modifier = Modifier
                                 .then(if (dragged) Modifier.zIndex(1f).graphicsLayer { translationY = dragOffset } else Modifier)
-                                .padding(start = 16.dp, end = if (editable) 0.dp else 0.dp),
+                                .padding(start = 16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             if (isAlbum) {
@@ -176,23 +179,23 @@ fun CollectionScreen(
                                     modifier = Modifier
                                         .size(44.dp)
                                         .padding(10.dp)
-                                        .pointerInput(song.id) {
+                                        .pointerInput(entryKey) {
                                             detectDragGestures(
                                                 onDragStart = {
-                                                    draggingId = song.id
+                                                    draggingKey = entryKey
                                                     dragFrom = latestIndex
                                                     dragTo = latestIndex
                                                     dragOffset = 0f
                                                 },
                                                 onDragEnd = {
                                                     if (dragFrom >= 0 && dragTo >= 0 && dragFrom != dragTo) onMove(dragFrom, dragTo)
-                                                    draggingId = null
+                                                    draggingKey = null
                                                     dragFrom = -1
                                                     dragTo = -1
                                                     dragOffset = 0f
                                                 },
                                                 onDragCancel = {
-                                                    draggingId = null
+                                                    draggingKey = null
                                                     dragFrom = -1
                                                     dragTo = -1
                                                     dragOffset = 0f
@@ -219,7 +222,9 @@ fun CollectionScreen(
             }
         }
 
-        // Top bar: plain icons over the cover; a solid bar with the title fades in as the header scrolls away.
+        // Top bar: plain icons over the cover (with a soft disc so they read on dark and light covers alike);
+        // a solid bar with the title fades in as the header scrolls away.
+        val disc = Modifier.drawBehind { drawCircle(BgRoot.copy(alpha = 0.6f * (1f - barAlpha)), radius = size.minDimension * 0.42f) }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -228,22 +233,22 @@ fun CollectionScreen(
                 .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
+            IconButton(onClick = onBack, modifier = disc) {
                 Icon(QMusicIcons.Back, contentDescription = s.back, tint = Ink)
             }
             Text(
                 text = page?.title?.ifBlank { item.title } ?: item.title,
                 style = MaterialTheme.typography.titleMedium,
-                color = Ink,
+                color = TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).graphicsLayer { alpha = barAlpha },
             )
-            IconButton(onClick = onShare) {
+            IconButton(onClick = onShare, modifier = disc) {
                 Icon(QMusicIcons.Share, contentDescription = s.share, tint = Ink)
             }
             if (editable) {
-                IconButton(onClick = { confirmDelete = true }) {
+                IconButton(onClick = { confirmDelete = true }, modifier = disc) {
                     Icon(QMusicIcons.Trash, contentDescription = s.delete, tint = Ink)
                 }
             }
@@ -253,6 +258,7 @@ fun CollectionScreen(
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
+            containerColor = BgSurface,
             title = { Text(s.deleteYouTubePlaylistTitle) },
             text = { Text(s.deleteYouTubePlaylistMessage) },
             confirmButton = {
@@ -291,7 +297,7 @@ private fun Header(
         Box(
             Modifier
                 .matchParentSize()
-                .background(Brush.verticalGradient(0f to InkInverse.copy(alpha = 0.3f), 0.6f to BgRoot.copy(alpha = 0.6f), 1f to BgRoot)),
+                .background(Brush.verticalGradient(0f to BgRoot.copy(alpha = 0.4f), 0.55f to BgRoot.copy(alpha = 0.75f), 1f to BgRoot)),
         )
         Column(
             modifier = Modifier
@@ -315,17 +321,17 @@ private fun Header(
             Text(
                 text = page?.title?.ifBlank { item.title } ?: item.title,
                 style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                color = Ink,
+                color = TextPrimary,
                 textAlign = TextAlign.Center,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             (page?.subtitle ?: item.subtitle)?.let {
                 Spacer(Modifier.height(6.dp))
-                Text(it, style = MaterialTheme.typography.titleSmall, color = Ink, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(it, style = MaterialTheme.typography.titleSmall, color = TextPrimary, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             listOfNotNull(page?.kindLine, page?.countLine).forEach { line ->
-                Text(line, style = MaterialTheme.typography.bodyMedium, color = Ink.copy(alpha = 0.65f), textAlign = TextAlign.Center, maxLines = 1)
+                Text(line, style = MaterialTheme.typography.bodyMedium, color = TextSecondary, textAlign = TextAlign.Center, maxLines = 1)
             }
             Spacer(Modifier.height(18.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(28.dp)) {
@@ -348,7 +354,7 @@ private fun Header(
                 Text(
                     text = description,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Ink.copy(alpha = 0.7f),
+                    color = TextSecondary,
                     maxLines = if (expanded) Int.MAX_VALUE else 3,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.clickable(

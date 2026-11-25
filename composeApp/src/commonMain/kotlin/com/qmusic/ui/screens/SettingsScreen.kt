@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -45,7 +47,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import com.qmusic.settings.MoreSettings
 import com.qmusic.settings.MoreSettingsChange
 import com.qmusic.ui.strings.LocalStrings
@@ -218,7 +224,7 @@ fun SettingsScreen(
                 )
                 Slider(
                     value = crossfadeSeconds.toFloat(),
-                    onValueChange = { onCrossfadeChange(it.toInt()) },
+                    onValueChange = { onCrossfadeChange(it.roundToInt()) },
                     valueRange = 0f..12f,
                     steps = 11,
                     colors = SliderDefaults.colors(
@@ -338,7 +344,7 @@ fun SettingsScreen(
                 )
                 RowDivider()
             }
-            if (accountMode == com.qmusic.settings.AccountMode.NONE) {
+            if (accountMode != com.qmusic.settings.AccountMode.SPOTIFY) {
                 ActionRow(
                     icon = QMusicIcons.PlaylistAdd,
                     title = s.importSpotifyTitle,
@@ -388,13 +394,16 @@ fun SettingsScreen(
                     }
                 }
             }
-            SwitchRow(
-                icon = null,
-                title = s.amoledTitle,
-                subtitle = s.amoledSubtitle,
-                checked = more.amoled,
-                onChange = { onMore(MoreSettingsChange.Amoled(it)) },
-            )
+            if (!com.qmusic.ui.theme.lightTheme) {
+                RowDivider()
+                SwitchRow(
+                    icon = null,
+                    title = s.amoledTitle,
+                    subtitle = s.amoledSubtitle,
+                    checked = more.amoled,
+                    onChange = { onMore(MoreSettingsChange.Amoled(it)) },
+                )
+            }
         }
 
         Section(s.sectionUpdates) {
@@ -539,6 +548,12 @@ fun SettingsScreen(
     if (lastFmDialog) {
         var user by remember { mutableStateOf("") }
         var password by remember { mutableStateOf("") }
+        val submitLastFm = {
+            if (user.isNotBlank() && password.isNotEmpty()) {
+                lastFmDialog = false
+                onMore(MoreSettingsChange.LastFmSignIn(user, password))
+            }
+        }
         AlertDialog(
             onDismissRequest = { lastFmDialog = false },
             title = { Text("Last.fm") },
@@ -549,23 +564,26 @@ fun SettingsScreen(
                         onValueChange = { user = it },
                         singleLine = true,
                         label = { Text(s.lastFmUsername) },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                     )
                     androidx.compose.material3.OutlinedTextField(
                         value = password,
                         onValueChange = { password = it },
                         singleLine = true,
                         label = { Text(s.lastFmPassword) },
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Password,
+                            imeAction = ImeAction.Done,
+                        ),
+                        keyboardActions = KeyboardActions(onDone = { submitLastFm() }),
                     )
                 }
             },
             confirmButton = {
                 TextButton(
                     enabled = user.isNotBlank() && password.isNotEmpty(),
-                    onClick = {
-                        lastFmDialog = false
-                        onMore(MoreSettingsChange.LastFmSignIn(user, password))
-                    },
+                    onClick = submitLastFm,
                 ) { Text(s.signIn) }
             },
             dismissButton = { TextButton(onClick = { lastFmDialog = false }) { Text(s.cancel) } },

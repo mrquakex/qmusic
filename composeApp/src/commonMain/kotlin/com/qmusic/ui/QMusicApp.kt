@@ -93,9 +93,10 @@ import com.qmusic.ui.screens.LibraryScreen
 import com.qmusic.ui.screens.LocalPlaylistScreen
 import com.qmusic.ui.screens.SearchScreen
 import com.qmusic.ui.screens.SettingsScreen
+import com.qmusic.ui.theme.BgRoot
 import com.qmusic.ui.theme.BgSurface
 import com.qmusic.ui.theme.BorderSubtle
-import com.qmusic.ui.theme.DarkBackground
+import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.QMusicHeaderLogo
 import com.qmusic.ui.theme.QMusicIcons
 import com.qmusic.ui.theme.QMusicTheme
@@ -129,7 +130,7 @@ fun QMusicApp(
     val light = themeMode == "light" || (themeMode == "system" && !systemDark)
     // Set before the first frame is drawn, so the app never flashes the other theme.
     if (com.qmusic.ui.theme.lightTheme != light) com.qmusic.ui.theme.lightTheme = light
-    androidx.compose.runtime.SideEffect { com.qmusic.ui.theme.amoledTheme = amoled }
+    if (com.qmusic.ui.theme.amoledTheme != amoled) com.qmusic.ui.theme.amoledTheme = amoled
     SystemBarsTheme(light)
     QMusicTheme {
 
@@ -534,6 +535,7 @@ fun QMusicApp(
                 if (offerUpdateNow && newVersion != null && updateProgressNow == null) {
                     AlertDialog(
                         onDismissRequest = { viewModel.dismissUpdateOffer() },
+                        containerColor = BgSurface,
                         title = { Text(strings.updateDialogTitle(newVersion.versionName)) },
                         text = { Text(strings.updateDialogBody) },
                         confirmButton = { TextButton(onClick = { viewModel.installUpdate() }) { Text(strings.updateNow) } },
@@ -547,6 +549,24 @@ fun QMusicApp(
                 val whatsNew by viewModel.whatsNew.collectAsState()
                 whatsNew?.let { news ->
                     WhatsNewDialog(news, english = language == "en", onDismiss = { viewModel.dismissWhatsNew() })
+                }
+            }
+            // Downloaded songs keep their large covers too: collected above Messages/Videos early returns so
+            // offline cover caching stays active even when the app opens straight into Messages or Videos.
+            val downloadedSongs by viewModel.downloadedSongs.collectAsState()
+            val isOnline by viewModel.isOnline.collectAsState()
+            val platformContext = LocalPlatformContext.current
+            val prefetchedCovers = remember { HashSet<String>() }
+            LaunchedEffect(downloadedSongs, isOnline) {
+                if (!isOnline) return@LaunchedEffect
+                val loader = SingletonImageLoader.get(platformContext)
+                downloadedSongs.forEach { song ->
+                    val url = song.thumbnail ?: song.thumbnails.lastOrNull()?.url ?: return@forEach
+                    if (prefetchedCovers.add(song.id)) {
+                        listOf(800, 256).forEach { px ->
+                            loader.enqueue(ImageRequest.Builder(platformContext).data(url.upscaleThumbnail(px)).build())
+                        }
+                    }
                 }
             }
             // Shrunk into its bubble (Back or the chevron), the call leaves the app usable; a new call starts full.
@@ -756,24 +776,6 @@ fun QMusicApp(
             onSaved = { viewModel.onBackupSaved(it) },
             onOpened = { viewModel.importBackup(it) },
         )
-        // Downloaded songs keep their large covers too: fetched once while online, they show in the full player
-        // without a connection (the small cover is cached anyway by the lists that show it).
-        val platformContext = LocalPlatformContext.current
-        val prefetchedCovers = remember { HashSet<String>() }
-        val songsWithCovers by viewModel.downloadedSongs.collectAsState()
-        val onlineForCovers by viewModel.isOnline.collectAsState()
-        LaunchedEffect(songsWithCovers, onlineForCovers) {
-            if (!onlineForCovers) return@LaunchedEffect
-            val loader = SingletonImageLoader.get(platformContext)
-            songsWithCovers.forEach { song ->
-                val url = song.thumbnail ?: song.thumbnails.lastOrNull()?.url ?: return@forEach
-                if (prefetchedCovers.add(song.id)) {
-                    listOf(800, 256).forEach { px ->
-                        loader.enqueue(ImageRequest.Builder(platformContext).data(url.upscaleThumbnail(px)).build())
-                    }
-                }
-            }
-        }
         val samples by viewModel.samples.collectAsState()
         val isLoadingSamples by viewModel.isLoadingSamples.collectAsState()
         val listeningStats by viewModel.stats.collectAsState()
@@ -793,7 +795,6 @@ fun QMusicApp(
         // A song touched anywhere starts getting ready before the tap is even finished.
         androidx.compose.runtime.LaunchedEffect(viewModel) { com.qmusic.ui.components.SongPress.warm = { song -> viewModel.playerController.preparePress(song) } }
         val speedDialPins by viewModel.speedDialPins.collectAsState()
-        val isOnline by viewModel.isOnline.collectAsState()
         val libraryStartTab by viewModel.libraryStartTab.collectAsState()
         val selectedHomeChip by viewModel.selectedHomeChip.collectAsState()
         val isLoadingMoreHome by viewModel.isLoadingMoreHome.collectAsState()
@@ -805,6 +806,7 @@ fun QMusicApp(
         val showSpotifyImportDialog by viewModel.showSpotifyImportDialog.collectAsState()
         val showYouTubeLoginDialog by viewModel.showYouTubeLoginDialog.collectAsState()
 
+        val equalizerEnabled by viewModel.equalizerEnabled.collectAsState()
         val equalizerBands by viewModel.equalizerBands.collectAsState()
         val selectedPreset by viewModel.selectedPreset.collectAsState()
 
@@ -844,7 +846,6 @@ fun QMusicApp(
         val playlists by viewModel.playlists.collectAsState()
         val downloadedIds by viewModel.downloadedIds.collectAsState()
         val downloadProgress by viewModel.downloadProgress.collectAsState()
-        val downloadedSongs by viewModel.downloadedSongs.collectAsState()
         val downloadedBytes by viewModel.downloadedBytes.collectAsState()
         val autoDownload by viewModel.autoDownloadLiked.collectAsState()
         val wifiOnly by viewModel.wifiOnly.collectAsState()
@@ -1197,7 +1198,7 @@ fun QMusicApp(
                         onBack = { viewModel.popRoute() },
                         onPlayAll = { viewModel.playAll(it) },
                         onShuffle = { viewModel.shuffleAll(it) },
-                        onAddToQueue = { list -> list.forEach { viewModel.addToQueue(it) } },
+                        onAddToQueue = { list -> viewModel.addToQueue(list) },
                         onSongClick = { song, context -> viewModel.play(song, context) },
                         onSongMore = { viewModel.showSongMenu(it) },
                         onToggleFavorite = { viewModel.toggleFavorite(it) },
@@ -1268,7 +1269,7 @@ fun QMusicApp(
 
                 // On a tablet the bars of the system (and a camera cut-out sideways) are kept clear: the player's
                 // buttons sat under the navigation bar.
-                Column(modifier = Modifier.fillMaxSize().background(DarkBackground).systemBarsPadding().displayCutoutPadding()) {
+                Column(modifier = Modifier.fillMaxSize().background(BgRoot).systemBarsPadding().displayCutoutPadding()) {
                     com.qmusic.ui.components.DesktopTopNavBar(
                         searchQuery = searchQuery,
                         onSearchQueryChange = { q ->
@@ -1473,12 +1474,12 @@ fun QMusicApp(
                 Row(modifier = Modifier.fillMaxSize()) {
                     Scaffold(
                         modifier = Modifier.weight(1f).fillMaxHeight(),
-                        containerColor = DarkBackground,
+                        containerColor = BgRoot,
                         topBar = {
                             // Pages bring their own header (and sit under the status bar), so the logo bar steps aside;
                             // Home draws its own, over its tinted top.
                             if (topRoute == null && currentTab != ScreenTab.HOME && currentTab != ScreenTab.SEARCH && currentTab != ScreenTab.FOR_YOU) {
-                                Column(modifier = Modifier.fillMaxWidth().background(DarkBackground.copy(alpha = 0.92f))) {
+                                Column(modifier = Modifier.fillMaxWidth().background(BgRoot.copy(alpha = 0.92f))) {
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -1750,8 +1751,8 @@ fun QMusicApp(
                         viewModel.dismissPlaylistPicker()
                     },
                     onDismiss = { viewModel.dismissPlaylistPicker() },
-                    ytPlaylists = ytPlaylists,
-                    canSaveToYouTube = isLoggedInYouTube,
+                    ytPlaylists = viewModel.editableRemotePlaylists(ytPlaylists),
+                    canSaveToYouTube = isLoggedInYouTube || (accountMode == com.qmusic.settings.AccountMode.SPOTIFY && spotifySignedIn),
                     onCreateOnYouTube = {
                         viewModel.createPlaylistAndAdd(it, song, onYouTube = true)
                         viewModel.dismissPlaylistPicker()
@@ -1768,6 +1769,8 @@ fun QMusicApp(
                 EqualizerDialog(
                     equalizerBands = equalizerBands,
                     selectedPreset = selectedPreset,
+                    equalizerEnabled = equalizerEnabled,
+                    onEnabledChange = { viewModel.setEqualizerEnabled(it) },
                     onBandGainChange = { band, gain -> viewModel.setEqualizerBand(band, gain) },
                     onPresetSelect = { viewModel.applyEqualizerPreset(it) },
                     onDismissRequest = { viewModel.setShowEqualizerDialog(false) },
@@ -1811,6 +1814,7 @@ fun QMusicApp(
 private fun WhatsNewDialog(news: com.qmusic.ui.viewmodel.MainViewModel.WhatsNew, english: Boolean, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = BgSurface,
         icon = { com.qmusic.ui.theme.QMusicLogo(size = 40.dp, tint = MaterialTheme.colorScheme.primary) },
         title = { Text(if (english) "Updated to Nuvelo ${news.version}" else "Nuvelo ${news.version} sürümüne güncellendi") },
         text = {
@@ -1843,6 +1847,7 @@ private fun UpdatingDialog(progress: Float, info: com.qmusic.updater.model.Updat
     val notes = remember(info?.changelog) { cleanReleaseNotes(info?.changelog.orEmpty()) }
     AlertDialog(
         onDismissRequest = {},
+        containerColor = BgSurface,
         properties = androidx.compose.ui.window.DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
         title = {
             Column {
@@ -1865,6 +1870,8 @@ private fun UpdatingDialog(progress: Float, info: com.qmusic.updater.model.Updat
                 LinearProgressIndicator(
                     progress = { progress.coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color = Ink,
+                    trackColor = BorderSubtle,
                     strokeCap = androidx.compose.ui.graphics.StrokeCap.Round,
                     gapSize = 0.dp,
                     drawStopIndicator = {},

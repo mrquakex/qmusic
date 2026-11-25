@@ -1,8 +1,7 @@
 package com.qmusic.ui.screens
 
-import com.qmusic.ui.theme.Ink
-import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,7 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -38,10 +36,15 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.qmusic.engine.models.SongItem
 import com.qmusic.ui.strings.LocalStrings
-import com.qmusic.ui.theme.DarkBackground
+import com.qmusic.ui.theme.BgRoot
+import com.qmusic.ui.theme.BorderSubtle
 import com.qmusic.ui.theme.DarkSurface
 import com.qmusic.ui.theme.DarkSurfaceVariant
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import com.qmusic.ui.theme.QMusicIcons
+import com.qmusic.ui.theme.TextPrimary
+import com.qmusic.ui.theme.TextSecondary
 import com.qmusic.ui.viewmodel.ListeningStats
 import com.qmusic.ui.viewmodel.StatsPeriod
 
@@ -65,7 +68,7 @@ fun StatsScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(DarkBackground),
+            .background(BgRoot),
     ) {
         Row(
             modifier = Modifier
@@ -130,23 +133,24 @@ fun StatsScreen(
                     }
                 }
             } else {
-                // The big number, on a card coloured like a year-end recap
+                // The big number, on a monochrome recap card
                 item {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(22.dp))
-                            .background(Brush.linearGradient(listOf(Color(0xFF5B2A86), Color(0xFF1E1240))))
+                            .background(Brush.linearGradient(listOf(DarkSurfaceVariant, DarkSurface)))
+                            .border(1.dp, BorderSubtle, RoundedCornerShape(22.dp))
                             .padding(22.dp),
                     ) {
-                        Text(periodLabel, style = MaterialTheme.typography.labelLarge, color = Ink.copy(alpha = 0.75f))
+                        Text(periodLabel, style = MaterialTheme.typography.labelLarge, color = TextSecondary)
                         Spacer(Modifier.height(6.dp))
                         Text(
                             text = stats.minutes.toString(),
                             style = MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.Black, fontSize = 56.sp),
-                            color = Ink,
+                            color = TextPrimary,
                         )
-                        Text(s.statsMinutes, style = MaterialTheme.typography.titleMedium, color = Ink)
+                        Text(s.statsMinutes, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
                         Spacer(Modifier.height(14.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                             Figure(stats.plays.toString(), s.statsPlays)
@@ -180,8 +184,8 @@ fun StatsScreen(
 @Composable
 private fun Figure(value: String, label: String) {
     Column {
-        Text(value, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = Ink)
-        Text(label, style = MaterialTheme.typography.bodySmall, color = Ink.copy(alpha = 0.75f))
+        Text(value, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = TextPrimary)
+        Text(label, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
     }
 }
 

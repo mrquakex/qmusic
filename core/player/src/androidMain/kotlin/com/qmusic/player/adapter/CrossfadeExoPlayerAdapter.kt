@@ -436,6 +436,7 @@ class CrossfadeExoPlayerAdapter(
     }
 
     override fun appendToQueue(songs: List<SongItem>) {
+        if (songs.isEmpty()) return
         val known = _queue.value.mapTo(HashSet()) { it.id }
         val fresh = songs.filter { known.add(it.id) }
         if (fresh.isEmpty()) return
@@ -1221,9 +1222,27 @@ class CrossfadeExoPlayerAdapter(
         _playbackPosition.value = positionMs
     }
 
+    @Volatile
+    private var equalizerEnabled: Boolean = true
+    private val equalizerGains = FloatArray(10) { 0f }
+
+    override fun setEqualizerEnabled(enabled: Boolean) {
+        if (equalizerEnabled == enabled) return
+        equalizerEnabled = enabled
+        for (i in equalizerGains.indices) {
+            val applied = if (enabled) equalizerGains[i] else 0f
+            equalizerProcessorA.setBandGain(i, applied)
+            equalizerProcessorB.setBandGain(i, applied)
+        }
+    }
+
     override fun setEqualizerBand(bandIndex: Int, gainDb: Float) {
-        equalizerProcessorA.setBandGain(bandIndex, gainDb)
-        equalizerProcessorB.setBandGain(bandIndex, gainDb)
+        if (bandIndex in equalizerGains.indices) {
+            equalizerGains[bandIndex] = gainDb
+        }
+        val applied = if (equalizerEnabled) gainDb else 0f
+        equalizerProcessorA.setBandGain(bandIndex, applied)
+        equalizerProcessorB.setBandGain(bandIndex, applied)
     }
 
     override fun setCrossfadeDuration(seconds: Int) {
