@@ -68,7 +68,12 @@ data class StatusItem(
 data class StatusOverlay(val text: String, val x: Float, val y: Float, val color: Long)
 
 /** What a status carries besides its picture or words. */
-data class StatusExtras(val overlay: StatusOverlay? = null, val song: SharedItem? = null)
+data class StatusExtras(
+    val overlay: StatusOverlay? = null,
+    val song: SharedItem? = null,
+    val trimStartMs: Long = 0L,
+    val trimEndMs: Long = 0L,
+)
 
 /** Someone's statuses, oldest first, and whether the person has seen all of them. */
 data class StatusGroup(val owner: ChatUser, val items: List<StatusItem>, val seenAll: Boolean, val seen: Set<String>)

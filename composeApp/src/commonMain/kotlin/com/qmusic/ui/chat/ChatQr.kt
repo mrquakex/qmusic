@@ -112,9 +112,20 @@ fun statusSongStart(song: SharedItem): Long = if (song.startMs > 0) song.startMs
 @Composable
 expect fun DialogEdgeToEdge()
 
-/** A status video: no controls, paused when asked; [onReady] says how long it is (ms). */
+/**
+ * A status video: no controls, paused when asked, [muted] when silenced or covered by a status song;
+ * [onReady] says how long it is (ms), [onBuffering] whether it is downloading/buffering, and [onError] when playback fails.
+ */
 @Composable
-expect fun StatusVideo(url: String, paused: Boolean, modifier: Modifier, onReady: (Long) -> Unit)
+expect fun StatusVideo(
+    url: String,
+    paused: Boolean,
+    modifier: Modifier = Modifier,
+    muted: Boolean = false,
+    onReady: (Long) -> Unit = {},
+    onBuffering: (Boolean) -> Unit = {},
+    onError: () -> Unit = {},
+)
 
 /** The person's own code: friends scan it to find them; it can be shared as a link too. */
 @Composable

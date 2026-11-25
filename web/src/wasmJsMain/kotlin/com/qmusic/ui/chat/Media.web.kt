@@ -392,12 +392,31 @@ private external fun downloadLink(url: String, name: String)
  * hold one).
  */
 @Composable
-internal fun HtmlVideo(src: String, modifier: Modifier, controls: Boolean, autoplay: Boolean, loop: Boolean, muted: Boolean, fill: Boolean, paused: Boolean = false, onReady: (Long) -> Unit = {}) {
+internal fun HtmlVideo(
+    src: String,
+    modifier: Modifier,
+    controls: Boolean,
+    autoplay: Boolean,
+    loop: Boolean,
+    muted: Boolean,
+    fill: Boolean,
+    paused: Boolean = false,
+    onReady: (Long) -> Unit = {},
+    onBuffering: (Boolean) -> Unit = {},
+    onError: () -> Unit = {},
+) {
     val ready = rememberUpdatedState(onReady)
+    val buffering = rememberUpdatedState(onBuffering)
+    val error = rememberUpdatedState(onError)
     val density = LocalDensity.current.density
-    val id = remember(src) { videoNew(src, controls, autoplay, loop, muted, fill) { ms -> ready.value(ms.toLong()) } }
+    val id = remember(src) {
+        videoNew(src, controls, autoplay, loop, muted, fill) { ms -> ready.value(ms.toLong()) }.also { vid ->
+            videoEvents(vid, { b -> buffering.value(b) }, { error.value() })
+        }
+    }
     DisposableEffect(id) { onDispose { videoDrop(id) } }
     LaunchedEffect(id, paused) { videoPaused(id, paused) }
+    LaunchedEffect(id, muted) { videoMuted(id, muted) }
     Box(
         modifier.onGloballyPositioned { c ->
             val r = c.boundsInWindow()
@@ -421,6 +440,22 @@ internal fun HtmlVideo(src: String, modifier: Modifier, controls: Boolean, autop
     }""",
 )
 private external fun videoNew(src: String, controls: Boolean, autoplay: Boolean, loop: Boolean, muted: Boolean, fill: Boolean, ready: (Double) -> Unit): Int
+
+@JsFun(
+    """(id, onBuffering, onError) => {
+        const v = window.__nuveloVideos && window.__nuveloVideos.get(id); if (!v) return;
+        v.onwaiting = () => onBuffering(true);
+        v.onstalled = () => { if (v.readyState < 3) onBuffering(true); };
+        v.onplaying = () => onBuffering(false);
+        v.oncanplay = () => onBuffering(false);
+        v.onended = () => onBuffering(false);
+        v.onerror = () => { onBuffering(false); onError(); };
+    }""",
+)
+private external fun videoEvents(id: Int, onBuffering: (Boolean) -> Unit, onError: () -> Unit)
+
+@JsFun("(id, m) => { const v = window.__nuveloVideos && window.__nuveloVideos.get(id); if (v) v.muted = m; }")
+private external fun videoMuted(id: Int, muted: Boolean)
 
 @JsFun(
     """(id, x, y, w, h) => {
@@ -450,8 +485,28 @@ actual fun VideoMessagePlayer(url: String, modifier: Modifier) {
 }
 
 @Composable
-actual fun StatusVideo(url: String, paused: Boolean, modifier: Modifier, onReady: (Long) -> Unit) {
-    HtmlVideo(url, modifier, controls = false, autoplay = true, loop = false, muted = false, fill = false, paused = paused, onReady = onReady)
+actual fun StatusVideo(
+    url: String,
+    paused: Boolean,
+    modifier: Modifier,
+    muted: Boolean,
+    onReady: (Long) -> Unit,
+    onBuffering: (Boolean) -> Unit,
+    onError: () -> Unit,
+) {
+    HtmlVideo(
+        url,
+        modifier,
+        controls = false,
+        autoplay = true,
+        loop = false,
+        muted = muted,
+        fill = false,
+        paused = paused,
+        onReady = onReady,
+        onBuffering = onBuffering,
+        onError = onError,
+    )
 }
 
 /** A status's song: the web has no music player (the status shows without its sound). */

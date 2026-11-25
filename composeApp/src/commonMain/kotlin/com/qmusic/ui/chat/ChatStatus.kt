@@ -7,6 +7,7 @@ import kotlinx.coroutines.launch
 import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -53,6 +54,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -373,6 +375,9 @@ internal fun StatusOverlayText(overlay: StatusOverlay, modifier: Modifier = Modi
     BoxWithConstraints(modifier.fillMaxSize()) {
         val w = constraints.maxWidth.toFloat()
         val h = constraints.maxHeight.toFloat()
+        val latestMove by rememberUpdatedState(onMove)
+        val latestW by rememberUpdatedState(w)
+        val latestH by rememberUpdatedState(h)
         var size by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
         val dark = overlay.color == 0xFF000000
         Text(
@@ -398,7 +403,9 @@ internal fun StatusOverlayText(overlay: StatusOverlay, modifier: Modifier = Modi
                         Modifier.pointerInput(Unit) {
                             detectDragGestures { change, drag ->
                                 change.consume()
-                                onMove(drag.x / w, drag.y / h)
+                                val cw = latestW
+                                val ch = latestH
+                                if (cw > 0f && ch > 0f) latestMove?.invoke(drag.x / cw, drag.y / ch)
                             }
                         }
                     },
@@ -557,6 +564,10 @@ internal fun StatusMediaComposer(
     var colour by remember { mutableStateOf(0) }
     var song by remember { mutableStateOf<SharedItem?>(null) }
     var picking by remember { mutableStateOf(false) }
+    val totalVideoMs = video?.durationMs ?: 0L
+    val maxTrimMs = 60_000L
+    var trimStartMs by remember(video) { mutableLongStateOf(0L) }
+    var trimEndMs by remember(video) { mutableLongStateOf(if (totalVideoMs > 0L) totalVideoMs.coerceAtMost(maxTrimMs) else 0L) }
     // The bars of the screen, measured out here: inside its own window the dialog does not hear about them, and the
     // caption box went under the gesture bar.
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -585,7 +596,10 @@ internal fun StatusMediaComposer(
             }
             // The words over it, draggable.
             overlay?.takeIf { !writing }?.let { o ->
-                StatusOverlayText(o, onMove = { dx, dy -> overlay = o.copy(x = (o.x + dx).coerceIn(0.05f, 0.95f), y = (o.y + dy).coerceIn(0.08f, 0.92f)) })
+                StatusOverlayText(o, onMove = { dx, dy ->
+                    val cur = overlay ?: o
+                    overlay = cur.copy(x = (cur.x + dx).coerceIn(0.05f, 0.95f), y = (cur.y + dy).coerceIn(0.08f, 0.92f))
+                })
             }
             Column(Modifier.fillMaxWidth().padding(top = topBar).padding(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -610,8 +624,21 @@ internal fun StatusMediaComposer(
                 song?.let { g ->
                     ComposerSongChip(g, s, Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp), onPart = { song = g.copy(startMs = it) }) { song = null }
                 }
+                if (video != null && !ChatPlatform.web && totalVideoMs > 2_000L && !writing) {
+                    VideoTrimBar(
+                        totalMs = totalVideoMs,
+                        maxWindowMs = maxTrimMs,
+                        startMs = trimStartMs,
+                        endMs = trimEndMs,
+                        s = s,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    ) { ns, ne ->
+                        trimStartMs = ns
+                        trimEndMs = ne
+                    }
+                }
             }
-            if (video != null && video.durationMs > 60_000L) {
+            if (video != null && (ChatPlatform.web || totalVideoMs <= 2_000L) && video.durationMs > 60_000L) {
                 Text(
                     s.statusVideoLimit,
                     color = Color.White,
@@ -638,7 +665,12 @@ internal fun StatusMediaComposer(
                     Spacer(Modifier.width(10.dp))
                     Box(
                         Modifier.size(52.dp).clip(CircleShape).background(Color.White).clickable {
-                            onShare(caption, photo.takeIf { it !== image }, StatusExtras(overlay = overlay, song = song))
+                            val extras = if (video != null && !ChatPlatform.web && totalVideoMs > 2_000L) {
+                                StatusExtras(overlay = overlay, song = song, trimStartMs = trimStartMs, trimEndMs = trimEndMs)
+                            } else {
+                                StatusExtras(overlay = overlay, song = song)
+                            }
+                            onShare(caption, photo.takeIf { it !== image }, extras)
                         },
                         contentAlignment = Alignment.Center,
                     ) { Icon(QMusicIcons.Send, contentDescription = s.statusShare, tint = Color.Black) }
@@ -686,6 +718,159 @@ internal fun StatusMediaComposer(
         }
     }
     if (picking) StatusSongPicker(s, songs().filter { it.kind == ShareKind.SONG }, searchSongs, onPick = { song = it.copy(startMs = 0, quote = "") }) { picking = false }
+}
+
+/** Monochrome dual-handle trim slider for picking up to [maxWindowMs] of a video status. */
+@Composable
+private fun VideoTrimBar(
+    totalMs: Long,
+    maxWindowMs: Long,
+    startMs: Long,
+    endMs: Long,
+    s: ChatStrings,
+    modifier: Modifier = Modifier,
+    onRangeChange: (Long, Long) -> Unit,
+) {
+    val minWindowMs = minOf(1_000L, totalMs)
+    val maxClipMs = minOf(maxWindowMs, totalMs)
+    val latestStart by rememberUpdatedState(startMs)
+    val latestEnd by rememberUpdatedState(endMs)
+    val latestOnChange by rememberUpdatedState(onRangeChange)
+    Column(
+        modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.Black.copy(alpha = 0.65f))
+            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "${secondsLabel(startMs)} – ${secondsLabel(endMs)}",
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.weight(1f))
+            val clipLabel = secondsLabel((endMs - startMs).coerceAtLeast(0L))
+            Text(
+                if (totalMs > maxWindowMs) "$clipLabel · ${s.statusVideoLimit}" else clipLabel,
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        val thumbRadius = 10.dp
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val padPx = with(density) { thumbRadius.toPx() }
+        BoxWithConstraints(
+            Modifier
+                .fillMaxWidth()
+                .height(30.dp)
+                .pointerInput(totalMs, minWindowMs, maxClipMs) {
+                    awaitEachGesture {
+                        val trackW = (size.width - padPx * 2f).coerceAtLeast(1f)
+                        val down = awaitFirstDown()
+                        down.consume()
+                        val startFrac = (latestStart.toFloat() / totalMs).coerceIn(0f, 1f)
+                        val endFrac = (latestEnd.toFloat() / totalMs).coerceIn(0f, 1f)
+                        val startPx = padPx + startFrac * trackW
+                        val endPx = padPx + endFrac * trackW
+                        val distStart = abs(down.position.x - startPx)
+                        val distEnd = abs(down.position.x - endPx)
+                        val handleSlop = padPx * 2.2f
+                        // 0 = start handle, 1 = end handle, 2 = slide whole window
+                        val target = when {
+                            endPx - startPx > handleSlop * 2f &&
+                                down.position.x > startPx + handleSlop &&
+                                down.position.x < endPx - handleSlop -> 2
+                            abs(distStart - distEnd) < 2f -> if (down.position.x >= (startPx + endPx) / 2f) 1 else 0
+                            distStart < distEnd -> 0
+                            else -> 1
+                        }
+                        var dragStart = latestStart
+                        var dragEnd = latestEnd
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            val dx = change.positionChange().x
+                            change.consume()
+                            if (target == 2) {
+                                val deltaMs = ((dx / trackW) * totalMs).toLong()
+                                val len = (dragEnd - dragStart).coerceIn(minWindowMs, maxClipMs)
+                                val ns = (dragStart + deltaMs).coerceIn(0L, (totalMs - len).coerceAtLeast(0L))
+                                dragStart = ns
+                                dragEnd = ns + len
+                            } else {
+                                val posMs = (((change.position.x - padPx) / trackW).coerceIn(0f, 1f) * totalMs).toLong()
+                                if (target == 0) {
+                                    val ns = posMs.coerceIn(0L, (totalMs - minWindowMs).coerceAtLeast(0L))
+                                    val ne = when {
+                                        dragEnd - ns < minWindowMs -> (ns + minWindowMs).coerceAtMost(totalMs)
+                                        dragEnd - ns > maxClipMs -> ns + maxClipMs
+                                        else -> dragEnd
+                                    }
+                                    dragStart = ns.coerceAtMost(ne - minWindowMs)
+                                    dragEnd = ne
+                                } else {
+                                    val ne = posMs.coerceIn(minWindowMs, totalMs)
+                                    val ns = when {
+                                        ne - dragStart < minWindowMs -> (ne - minWindowMs).coerceAtLeast(0L)
+                                        ne - dragStart > maxClipMs -> ne - maxClipMs
+                                        else -> dragStart
+                                    }
+                                    dragStart = ns
+                                    dragEnd = ne.coerceAtLeast(dragStart + minWindowMs)
+                                }
+                            }
+                            latestOnChange(dragStart, dragEnd)
+                        }
+                    }
+                },
+        ) {
+            val trackWidth = (maxWidth - thumbRadius * 2).coerceAtLeast(1.dp)
+            val sFrac = (startMs.toFloat() / totalMs).coerceIn(0f, 1f)
+            val eFrac = (endMs.toFloat() / totalMs).coerceIn(sFrac, 1f)
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(horizontal = thumbRadius)
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color.White.copy(alpha = 0.25f)),
+            )
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = thumbRadius + trackWidth * sFrac)
+                    .width((trackWidth * (eFrac - sFrac)).coerceAtLeast(2.dp))
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color.White),
+            )
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = trackWidth * sFrac)
+                    .size(thumbRadius * 2)
+                    .clip(CircleShape)
+                    .background(Color.White)
+                    .border(2.dp, Color.Black, CircleShape),
+            )
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = trackWidth * eFrac)
+                    .size(thumbRadius * 2)
+                    .clip(CircleShape)
+                    .background(Color.White)
+                    .border(2.dp, Color.Black, CircleShape),
+            )
+        }
+    }
 }
 
 // ------------------------------------------------------------------ watching
@@ -744,12 +929,13 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
     // it (a few seconds at most), so the song is not half over when it is heard.
     val soundOn by ChatMusic.statusSound.collectAsState()
     var songUrl by remember(item.id) { mutableStateOf<String?>(null) }
-    var songReady by remember(item.id) { mutableStateOf(item.song == null || item.kind == StatusKind.VIDEO) }
-    var songLoading by remember(item.id) { mutableStateOf(item.song != null && item.kind != StatusKind.VIDEO) }
+    var songReady by remember(item.id) { mutableStateOf(item.song == null) }
+    var songLoading by remember(item.id) { mutableStateOf(item.song != null) }
+    var songFailed by remember(item.id) { mutableStateOf(false) }
     var songRetried by remember(item.id) { mutableStateOf(false) }
     val songScope = rememberCoroutineScope()
     LaunchedEffect(item.id) {
-        val g = item.song?.takeIf { item.kind != StatusKind.VIDEO } ?: return@LaunchedEffect
+        val g = item.song ?: return@LaunchedEffect
         launch {
             kotlinx.coroutines.delay(SONG_WAIT_MS)
             songReady = true
@@ -758,28 +944,36 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
         if (songUrl == null) {
             songReady = true
             songLoading = false
+            songFailed = true
         }
     }
     // The songs of the next few statuses are looked up while this one shows.
     LaunchedEffect(owner, at) {
         items.drop(at + 1).take(3).mapNotNull { it.song?.id }.forEach { id -> launch { ChatMusic.songUrl(id) } }
     }
-    if (!soundOn) songReady = true
+    var videoReady by remember(item.id) { mutableStateOf(item.kind != StatusKind.VIDEO) }
+    var videoBuffering by remember(item.id) { mutableStateOf(item.kind == StatusKind.VIDEO) }
+    var videoError by remember(item.id) { mutableStateOf(false) }
+    var videoRetry by remember(item.id) { mutableIntStateOf(0) }
+    val waitingForVideo = item.kind == StatusKind.VIDEO && (!videoReady || videoBuffering || videoError)
+    val waitingForSong = item.song != null && !songReady && soundOn
     songUrl?.let { url ->
         androidx.compose.runtime.key(url) {
             StatusAudio(
                 url = url,
-                playing = !paused && !listening && soundOn,
+                playing = !paused && !listening && soundOn && !waitingForVideo,
                 startMs = item.song?.let { statusSongStart(it) } ?: STATUS_SONG_DEFAULT_START,
                 onReady = {
                     songReady = true
                     songLoading = false
+                    songFailed = false
                 },
                 onFailed = {
                     val g = item.song
                     if (songRetried || g == null) {
                         songReady = true
                         songLoading = false
+                        songFailed = true
                     } else {
                         // An address that stopped working: a fresh one, once.
                         songRetried = true
@@ -789,6 +983,7 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
                             if (songUrl == null) {
                                 songReady = true
                                 songLoading = false
+                                songFailed = true
                             }
                         }
                     }
@@ -796,9 +991,8 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
             )
         }
     }
-    var videoReady by remember(item.id) { mutableStateOf(item.kind != StatusKind.VIDEO) }
-    LaunchedEffect(item.id, paused, videoReady, videoLength, songReady) {
-        if (paused || !videoReady || !songReady) return@LaunchedEffect
+    LaunchedEffect(item.id, paused, videoReady, videoBuffering, videoError, videoLength, songReady, soundOn) {
+        if (paused || waitingForVideo || waitingForSong) return@LaunchedEffect
         var last = Clock.System.now().toEpochMilliseconds()
         while (progress < 1f) {
             kotlinx.coroutines.delay(32)
@@ -853,14 +1047,76 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
                     modifier = Modifier.padding(28.dp),
                 )
                 StatusKind.PHOTO -> AsyncImage(model = item.url, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
-                StatusKind.VIDEO -> StatusVideo(
-                    url = item.url,
-                    paused = paused,
-                    modifier = Modifier.fillMaxSize(),
-                    onReady = { ms ->
-                        if (ms > 0) videoLength = ms
-                        videoReady = true
-                    },
+                StatusKind.VIDEO -> androidx.compose.runtime.key(item.id, videoRetry) {
+                    StatusVideo(
+                        url = item.url,
+                        paused = paused || waitingForSong || videoError,
+                        modifier = Modifier.fillMaxSize(),
+                        muted = !soundOn || (item.song != null && !songFailed),
+                        onReady = { ms ->
+                            if (ms > 0) videoLength = ms
+                            videoReady = true
+                            videoBuffering = false
+                            videoError = false
+                        },
+                        onBuffering = { buffering ->
+                            if (!videoError) videoBuffering = buffering
+                        },
+                        onError = {
+                            videoBuffering = false
+                            videoError = true
+                        },
+                    )
+                }
+            }
+        }
+
+        if (item.kind == StatusKind.VIDEO) {
+            when {
+                videoError -> Column(
+                    Modifier
+                        .align(Alignment.Center)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color.Black.copy(alpha = 0.72f))
+                        .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(20.dp))
+                        .padding(horizontal = 24.dp, vertical = 18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        if (s.english) "Couldn't load video" else "Video yüklenemedi",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color.White)
+                            .clickable {
+                                videoError = false
+                                videoReady = false
+                                videoBuffering = true
+                                progress = 0f
+                                videoRetry++
+                            }
+                            .padding(horizontal = 16.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(QMusicIcons.Refresh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (s.english) "Retry" else "Tekrar dene",
+                            color = Color.Black,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+                !videoReady || videoBuffering -> CircularProgressIndicator(
+                    color = Color.White,
+                    strokeWidth = 2.5.dp,
+                    modifier = Modifier.align(Alignment.Center).size(38.dp),
                 )
             }
         }
@@ -884,20 +1140,18 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
                     listening = true
                     controller.openShare(g)
                 }
-                if (item.kind != StatusKind.VIDEO) {
-                    Spacer(Modifier.width(8.dp))
-                    val mw = ChatMusic.words()
-                    Box(
-                        Modifier.size(36.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)).clickable { ChatMusic.statusSound.value = !soundOn },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            if (soundOn) QMusicIcons.Volume else QMusicIcons.VolumeMute,
-                            contentDescription = if (soundOn) mw.soundOff else mw.soundOn,
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
+                Spacer(Modifier.width(8.dp))
+                val mw = ChatMusic.words()
+                Box(
+                    Modifier.size(36.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)).clickable { ChatMusic.statusSound.value = !soundOn },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        if (soundOn) QMusicIcons.Volume else QMusicIcons.VolumeMute,
+                        contentDescription = if (soundOn) mw.soundOff else mw.soundOn,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp),
+                    )
                 }
             }
         }
@@ -924,6 +1178,16 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
                 Column(Modifier.weight(1f)) {
                     Text(if (mine) s.myStatus else who.name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(agoText(item.at, now, s), color = Color.White.copy(alpha = 0.75f), fontSize = 12.sp)
+                }
+                if (item.kind == StatusKind.VIDEO && item.song == null) {
+                    val mw = ChatMusic.words()
+                    IconButton(onClick = { ChatMusic.statusSound.value = !soundOn }) {
+                        Icon(
+                            if (soundOn) QMusicIcons.Volume else QMusicIcons.VolumeMute,
+                            contentDescription = if (soundOn) mw.soundOff else mw.soundOn,
+                            tint = Color.White,
+                        )
+                    }
                 }
                 if (mine) {
                     Box {

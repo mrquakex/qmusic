@@ -58,28 +58,72 @@ actual fun rememberQrScanner(onResult: (String) -> Unit): (() -> Unit)? {
 }
 
 @Composable
-actual fun StatusVideo(url: String, paused: Boolean, modifier: Modifier, onReady: (Long) -> Unit) {
+actual fun StatusVideo(
+    url: String,
+    paused: Boolean,
+    modifier: Modifier,
+    muted: Boolean,
+    onReady: (Long) -> Unit,
+    onBuffering: (Boolean) -> Unit,
+    onError: () -> Unit,
+) {
     val context = LocalContext.current
     val ready = rememberUpdatedState(onReady)
+    val buffering = rememberUpdatedState(onBuffering)
+    val error = rememberUpdatedState(onError)
     val player = remember(url) {
         ExoPlayer.Builder(context).build().apply {
+            volume = if (muted) 0f else 1f
             setMediaItem(MediaItem.fromUri(if (url.startsWith("/")) Uri.fromFile(File(url)) else Uri.parse(url)))
             prepare()
         }
     }
     DisposableEffect(player) {
+        var announcedReady = false
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_READY) ready.value(player.duration.takeIf { it > 0 } ?: 0L)
+                when (state) {
+                    Player.STATE_BUFFERING -> buffering.value(true)
+                    Player.STATE_READY -> {
+                        buffering.value(false)
+                        if (!announcedReady) {
+                            announcedReady = true
+                            ready.value(player.duration.takeIf { it != androidx.media3.common.C.TIME_UNSET && it > 0 } ?: 0L)
+                        }
+                    }
+                    Player.STATE_ENDED -> buffering.value(false)
+                    else -> Unit
+                }
+            }
+
+            override fun onPlayerError(playbackError: androidx.media3.common.PlaybackException) {
+                buffering.value(false)
+                error.value()
             }
         }
         player.addListener(listener)
+        when (player.playbackState) {
+            Player.STATE_BUFFERING -> buffering.value(true)
+            Player.STATE_READY -> {
+                buffering.value(false)
+                if (!announcedReady) {
+                    announcedReady = true
+                    ready.value(player.duration.takeIf { it != androidx.media3.common.C.TIME_UNSET && it > 0 } ?: 0L)
+                }
+            }
+            else -> Unit
+        }
+        if (player.playerError != null) {
+            buffering.value(false)
+            error.value()
+        }
         onDispose {
             player.removeListener(listener)
             player.release()
         }
     }
     LaunchedEffect(player, paused) { player.playWhenReady = !paused }
+    LaunchedEffect(player, muted) { player.volume = if (muted) 0f else 1f }
     AndroidView(
         factory = { ctx ->
             PlayerView(ctx).apply {
@@ -88,6 +132,9 @@ actual fun StatusVideo(url: String, paused: Boolean, modifier: Modifier, onReady
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 setBackgroundColor(android.graphics.Color.BLACK)
             }
+        },
+        update = { view ->
+            if (view.player !== player) view.player = player
         },
         modifier = modifier,
     )

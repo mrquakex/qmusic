@@ -2476,11 +2476,25 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
 
     override suspend fun postVideoStatus(file: PickedFile, caption: String, extras: StatusExtras): Result<Unit> = runCatching {
         val uid = me()
-        // Made small first, like a video in a message.
+        val trimStart = extras.trimStartMs.coerceAtLeast(0L)
+        val rawEnd = extras.trimEndMs.coerceAtLeast(0L)
+        val trimEnd = when {
+            rawEnd > trimStart -> minOf(rawEnd, trimStart + STATUS_VIDEO_MS)
+            file.durationMs > trimStart + STATUS_VIDEO_MS -> trimStart + STATUS_VIDEO_MS
+            else -> 0L
+        }
+        val trimmed = trimStart > 0L || (trimEnd > trimStart && (file.durationMs <= 0L || trimEnd < file.durationMs)) || file.durationMs > STATUS_VIDEO_MS
+        // Made small first, like a video in a message (and clipped to the selected window).
         var source = file.location
         var size = file.size
-        VideoCompressor.compress(app, file.location, maxMs = if (file.durationMs > STATUS_VIDEO_MS) STATUS_VIDEO_MS else 0L) {}?.let { small ->
-            if (small.length() in 1 until size) {
+        VideoCompressor.compress(
+            app,
+            file.location,
+            maxMs = if (trimmed) STATUS_VIDEO_MS else 0L,
+            startMs = if (trimmed) trimStart else 0L,
+            endMs = if (trimmed) trimEnd else 0L,
+        ) {}?.let { small ->
+            if (small.length() > 0L && (trimmed || small.length() < size)) {
                 source = small.absolutePath
                 size = small.length()
             }
@@ -2490,10 +2504,15 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             MediaUpload.upload(token(), "u_$uid", "mp4", "video/mp4", size, { openLocation(source) }) {}
         }
         if (source != file.location) runCatching { java.io.File(source).delete() }
+        val effectiveDur = when {
+            trimEnd > trimStart -> (trimEnd - trimStart).coerceAtMost(STATUS_VIDEO_MS)
+            file.durationMs > trimStart -> (file.durationMs - trimStart).coerceAtMost(STATUS_VIDEO_MS)
+            else -> file.durationMs.coerceAtMost(STATUS_VIDEO_MS)
+        }
         postStatus(
             mapOf(
                 "kind" to StatusKind.VIDEO.name, "url" to url, "text" to caption.trim().take(700), "thumb" to file.thumb,
-                "w" to file.width, "h" to file.height, "dur" to file.durationMs.coerceAtMost(STATUS_VIDEO_MS),
+                "w" to file.width, "h" to file.height, "dur" to effectiveDur,
             ) + extras.fields(),
         )
     }
