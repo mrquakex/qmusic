@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > - **Yayınlama yok:** Hiçbir aşamada sürüm yükseltilmez, `publish-*` çalıştırılmaz.
-> - **Derleme notu (`AGENTS.md`):** Ev sunucusunda (~5.7 GB RAM, `local.properties` / `google-services.json` / Android SDK / imza anahtarı yok) Android APK derlemesi alınmaz. Her paket `agent/baslangic` dalına commit'lenip merkeze (`git merkeze-gonder`) gönderilir; tüm paketler bitince sahibin bilgisayarında `git sunucudan-al` ardından debug/test derlemesi alınır.
+> - **Derleme notu (`AGENTS.md`):** Kod derleme kontrolü ev sunucusunda `:composeApp:compileDebugKotlinAndroid` göreviyle (tek seferde bir Gradle işlemi, düşük bellek bayrakları + `--no-daemon`, sonrasında `./gradlew --stop`) yapılır. Tam APK (`assembleRelease`) yalnızca proje sahibi açıkça istediğinde derlenir; `qmusic.versionCode`/`versionName` izinsiz değiştirilmez; `~/.android/debug.keystore`, `androidApp/google-services.json` ve `local.properties` dosyalarına asla dokunulmaz/okunmaz/depoya eklenmez. Her paket `agent/baslangic` dalına commit'lenip merkeze (`git merkeze-gonder`) gönderilir.
 > - `*(DB kuralı)*` etiketli maddeler `firebase/database.rules.json` değişikliği içerir (dağıtım yalnızca sahibin onayıyla bilgisayarından yapılır).
 
 ---
