@@ -669,6 +669,9 @@ internal fun AdminUserExtras(controller: ChatController, console: AdminConsole, 
         SwitchLine(tt("Claude erişimi", "Claude access"), tt("Claude ile sohbet edebilir.", "They can chat with Claude."), user.claude) { on ->
             scope.launch { done(console.setClaude(user.uid, on), tt("Kaydedildi", "Saved")) }
         }
+        SwitchLine(tt("Antigravity erişimi", "Antigravity access"), tt("Antigravity (Gemini) ile sohbet edebilir.", "They can chat with Antigravity (Gemini)."), user.antigravity) { on ->
+            scope.launch { done(console.setAntigravity(user.uid, on), tt("Kaydedildi", "Saved")) }
+        }
         SectionTitle(tt("İletişim", "Contact"))
         Column(Modifier.fillMaxWidth().clickable { writing = true }.padding(horizontal = 16.dp, vertical = 13.dp)) {
             Text(tt("Nuvelo adına mesaj gönder", "Message from Nuvelo"), color = TextPrimary, fontSize = 15.sp)

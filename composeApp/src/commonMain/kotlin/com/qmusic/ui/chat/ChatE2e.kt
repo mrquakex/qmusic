@@ -117,7 +117,7 @@ sealed interface PinResult {
  * answers in them). Everyone else's are encrypted as before.
  */
 object E2ePolicy {
-    fun exempt(members: List<String>): Boolean = members.any { it == CLAUDE_OWNER_UID || it in ClaudeAccess.granted.value }
+    fun exempt(members: List<String>): Boolean = members.any { it == CLAUDE_OWNER_UID || it in ClaudeAccess.granted.value || it in AntigravityAccess.granted.value }
 }
 
 object E2e {

@@ -271,7 +271,7 @@ fun ChatSendDialog(controller: ChatController, s: ChatStrings, item: SharedItem,
     var query by remember { mutableStateOf("") }
     var atSecond by remember { mutableStateOf(item.startMs > 0) }
     val ready = account is ChatAccount.Ready
-    val shown = targets.filter { it.uid != CLAUDE_BOT_UID && (query.isBlank() || it.name.contains(query, ignoreCase = true)) }
+    val shown = targets.filter { !isAiBot(it.uid) && (query.isBlank() || it.name.contains(query, ignoreCase = true)) }
     AlertDialog(
         onDismissRequest = { onDone(null) },
         containerColor = DarkSurfaceVariant,
@@ -914,6 +914,37 @@ object ClaudeAccess {
     val granted = MutableStateFlow<Set<String>>(emptySet())
     var set: suspend (String, Boolean) -> Boolean = { _, _ -> false }
     fun allowed(uid: String) = uid == CLAUDE_OWNER_UID || uid in granted.value
+}
+
+/** Who may call Antigravity (Gemini): the founder (whose Google account it runs on) and those they gave it to (antigravityAccess/{uid}). */
+object AntigravityAccess {
+    val granted = MutableStateFlow<Set<String>>(emptySet())
+    var set: suspend (String, Boolean) -> Boolean = { _, _ -> false }
+    fun allowed(uid: String) = uid == CLAUDE_OWNER_UID || uid in granted.value
+}
+
+/** On someone's profile, for the founder alone: giving or taking Antigravity (they get their own Antigravity conversation). */
+@Composable
+internal fun AntigravityAccessSwitch(controller: ChatController, user: ChatUser) {
+    val english = ChatMusic.english
+    val granted by AntigravityAccess.granted.collectAsState()
+    val on = user.uid in granted
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    SettingSwitch(
+        if (english) "Antigravity" else "Antigravity yetkisi",
+        if (english) "They get their own Antigravity (Gemini) chat and can call it in their chats; it runs on your Google account"
+        else "Kendi Antigravity (Gemini) sohbeti olur, sohbetlerinde de çağırabilir; senin Google hesabınla çalışır",
+        on,
+    ) { give ->
+        if (!busy) {
+            busy = true
+            scope.launch {
+                if (!AntigravityAccess.set(user.uid, give)) controller.reportError(if (english) "That did not work, try again" else "Olmadı, tekrar dene")
+                busy = false
+            }
+        }
+    }
 }
 
 /** On someone's profile, for the founder alone: giving or taking Claude (they get their own Claude conversation). */

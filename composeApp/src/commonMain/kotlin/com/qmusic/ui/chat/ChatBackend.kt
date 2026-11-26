@@ -280,6 +280,18 @@ class PickedImage(val jpeg: ByteArray, val width: Int, val height: Int, val thum
 /** The uid of the owner's Claude (see server/qmusic-push/claude-bot.js). */
 const val CLAUDE_BOT_UID = "claudebot"
 
+/** The uid of the owner's Antigravity (Gemini, see server/qmusic-push/antigravity-bot.js). */
+const val ANTIGRAVITY_BOT_UID = "antigravitybot"
+
+/** One of the owner's AI assistants in the messages (Claude or Antigravity). */
+fun isAiBot(uid: String): Boolean = uid == CLAUDE_BOT_UID || uid == ANTIGRAVITY_BOT_UID
+
+/** An assistant's name as people see it. */
+fun aiBotName(uid: String): String = if (uid == ANTIGRAVITY_BOT_UID) "Antigravity" else "Claude"
+
+/** Where a bot's state and settings live: claudeState / antigravityState, claudeSettings / antigravitySettings. */
+fun aiBotNode(bot: String, kind: String): String = (if (bot == ANTIGRAVITY_BOT_UID) "antigravity" else "claude") + kind
+
 /** Nuvelo's own account (its team's messages to people). */
 const val NUVELO_UID = "nuvelo"
 
@@ -288,6 +300,9 @@ const val CLAUDE_OWNER_UID = "2hxOw0dRcwUwsW7N6ogH4fRcqXo1"
 
 /** A message that calls Claude into a conversation: it starts with "claude" or "@claude". */
 fun callsClaude(text: String): Boolean = Regex("^\\s*@?claude\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)
+
+/** A message that calls Antigravity into a conversation: it starts with "antigravity" / "@antigravity" (or "gemini"). */
+fun callsAntigravity(text: String): Boolean = Regex("^\\s*@?(antigravity|gemini)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)
 
 /** Where two people stand: nothing yet, a request one way or the other, or friends. */
 enum class FriendStatus { NONE, REQUESTED, INCOMING, FRIENDS }
@@ -298,6 +313,12 @@ data class ClaudeState(val model: String, val label: String)
 /** The models the owner can pick, with a word about each. */
 val CLAUDE_MODELS = listOf("opus", "sonnet", "haiku")
 
+/** Antigravity's models (Gemini 4 Neon, Carbon, Argon; Flash the quick one). */
+val ANTIGRAVITY_MODELS = listOf("neon", "carbon", "argon", "flash")
+
+/** The models of [bot]. */
+fun aiBotModels(bot: String): List<String> = if (bot == ANTIGRAVITY_BOT_UID) ANTIGRAVITY_MODELS else CLAUDE_MODELS
+
 /** Claude at work on a message: [phase] is looking (at a photo), thinking or writing. */
 data class ClaudeAssist(
     val target: String,
@@ -306,6 +327,8 @@ data class ClaudeAssist(
     val detail: String = "",
     /** Its thoughts so far (the last part). */
     val thought: String = "",
+    /** Which assistant is at work (claudebot or antigravitybot). */
+    val by: String = CLAUDE_BOT_UID,
 )
 
 /** The message a message answers: shown quoted above it. */
@@ -522,13 +545,13 @@ interface ChatBackend {
     suspend fun user(uid: String): ChatUser? = null
 
     /** The owner's Claude: which model answers now (null where there is none). */
-    fun claudeState(): Flow<ClaudeState?> = kotlinx.coroutines.flow.flowOf(null)
+    fun claudeState(bot: String = CLAUDE_BOT_UID): Flow<ClaudeState?> = kotlinx.coroutines.flow.flowOf(null)
 
     /** Picks the model of the owner's Claude ("opus", "sonnet", "haiku"). */
-    suspend fun setClaudeModel(model: String) {}
+    suspend fun setClaudeModel(model: String, bot: String = CLAUDE_BOT_UID) {}
 
     /** Starts the owner's conversation with Claude afresh. */
-    suspend fun resetClaude() {}
+    suspend fun resetClaude(bot: String = CLAUDE_BOT_UID) {}
 
     /** The photo [id] of [chatId] (kept on the phone after the first time). */
     suspend fun imageBytes(chatId: String, id: String): ByteArray? = null

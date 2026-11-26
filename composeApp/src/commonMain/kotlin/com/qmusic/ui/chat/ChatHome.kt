@@ -415,7 +415,7 @@ private fun ChatsTab(
     }
     val unreadTotal = all.orEmpty().count { it.unread }
     // What the people of the newest conversations play now.
-    val listeningUids = remember(all) { all.orEmpty().filter { !it.isGroup && it.other.uid != CLAUDE_BOT_UID }.take(40).map { it.other.uid }.toSet() }
+    val listeningUids = remember(all) { all.orEmpty().filter { !it.isGroup && !isAiBot(it.other.uid) }.take(40).map { it.other.uid }.toSet() }
     val listeningNow = rememberListening("home", listeningUids)
     var found by remember { mutableStateOf<List<ChatController.FoundMessage>>(emptyList()) }
     var foundBusy by remember { mutableStateOf(false) }
@@ -610,7 +610,7 @@ private fun ChatsTab(
                             Box(Modifier.fillMaxWidth().background(BgRoot)) {
                                 ThreadRow(
                                     t, me, s,
-                                    onAvatar = { if (t.other.uid == CLAUDE_BOT_UID) controller.openProfile(t.other) else peek = t.other },
+                                    onAvatar = { if (isAiBot(t.other.uid)) controller.openProfile(t.other) else peek = t.other },
                                     actions = threadActions(controller, s, t, now, onMute = { muteFor = t }, onClear = { clearTargets = listOf(t) }),
                                     now = now,
                                     ring = if (hasStatus) (if (t.other.uid in unseen) RingUnseen else RingSeen) else null,
@@ -1157,7 +1157,7 @@ private fun CallPersonRow(user: ChatUser, s: ChatStrings, onCall: ((ChatUser, Bo
             Text(user.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (user.username.isNotEmpty()) Text("@" + user.username, color = TextSecondary, fontSize = 13.sp, maxLines = 1)
         }
-        if (onCall != null && user.uid != CLAUDE_BOT_UID) {
+        if (onCall != null && !isAiBot(user.uid)) {
             IconButton(onClick = { onCall(user, false) }) { Icon(QMusicIcons.Phone, contentDescription = s.voiceCall, tint = Ink, modifier = Modifier.size(22.dp)) }
             IconButton(onClick = { onCall(user, true) }) { Icon(QMusicIcons.Camera, contentDescription = s.videoCall, tint = Ink, modifier = Modifier.size(22.dp)) }
         }
@@ -1178,7 +1178,7 @@ internal fun NewCallPage(
     var search by remember { mutableStateOf("") }
     val people = remember(friends, threads, group, search) {
         val q = search.trim()
-        val base = if (group) threads.orEmpty().filter { it.isGroup }.map { it.other } else friends.filter { it.uid != CLAUDE_BOT_UID }
+        val base = if (group) threads.orEmpty().filter { it.isGroup }.map { it.other } else friends.filter { !isAiBot(it.uid) }
         base.filter { q.isEmpty() || it.name.contains(q, ignoreCase = true) || it.username.contains(q, ignoreCase = true) }.sortedBy { it.name.lowercase() }
     }
     Column(Modifier.fillMaxSize().background(BgRoot)) {
@@ -1216,7 +1216,7 @@ internal fun CallDetailsPage(controller: ChatController, s: ChatStrings, peer: C
                 Spacer(Modifier.height(18.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     DetailAction(s.message, QMusicIcons.Chat) { controller.openConversation(peer) }
-                    if (call != null && peer.uid != CLAUDE_BOT_UID) {
+                    if (call != null && !isAiBot(peer.uid)) {
                         DetailAction(s.voiceCall, QMusicIcons.Phone) { call(peer, false) }
                         DetailAction(s.videoCall, QMusicIcons.Camera) { call(peer, true) }
                     }
@@ -1255,13 +1255,13 @@ private fun DetailAction(label: String, icon: ImageVector, onClick: () -> Unit) 
  */
 @Composable
 private fun rememberListTick(controller: ChatController, t: ChatThread, me: ChatUser): TickState? {
-    if (t.lastFrom != me.uid || t.other.uid == CLAUDE_BOT_UID) return null
+    if (t.lastFrom != me.uid || isAiBot(t.other.uid)) return null
     if (t.isGroup) {
         // A group: green once every other member read it, two grey once it is on all their phones.
         val group by remember(t.id) { controller.group(t.other) }.collectAsState(initial = null)
         val read by remember(t.id) { controller.readMarks(t.other) }.collectAsState(initial = emptyMap())
         val delivered by remember(t.id) { controller.deliveredMarks(t.other) }.collectAsState(initial = emptyMap())
-        val others = group?.members?.map { it.user.uid }?.filter { it != me.uid && it != CLAUDE_BOT_UID }.orEmpty()
+        val others = group?.members?.map { it.user.uid }?.filter { it != me.uid && !isAiBot(it) }.orEmpty()
         val known = ListTickMemory.group[t.id]?.takeIf { it.first == t.lastAt }?.second
         // The group or its marks not in yet: what it showed before (same last message), not a grey tick.
         if (group == null || (known != null && read.isEmpty())) return known ?: TickState.SENT

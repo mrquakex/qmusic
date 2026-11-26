@@ -155,11 +155,13 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
             snapshots(root.child("adminStats").child("users")),
             snapshots(root.child("badges")),
             snapshots(root.child("claudeAccess")),
+            snapshots(root.child("antigravityAccess")),
         ),
     ) { all ->
         val (users, presence, info, bans, stats) = all
         val badges = all[5]
         val claude = all[6]
+        val antigravity = all[7]
         users?.children?.mapNotNull { u ->
             val uid = u.key ?: return@mapNotNull null
             val name = u.child("name").getValue(String::class.java) ?: return@mapNotNull null
@@ -182,6 +184,7 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
                 ban = bans?.child(uid)?.let(::banOf),
                 developer = badges?.child(uid)?.getValue(String::class.java) == "developer",
                 claude = claude?.child(uid)?.getValue(Boolean::class.java) == true,
+                antigravity = antigravity?.child(uid)?.getValue(Boolean::class.java) == true,
             )
         }.orEmpty()
     }
@@ -436,6 +439,11 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
     override suspend fun setClaude(uid: String, allowed: Boolean): Result<Unit> = runCatching {
         root.child("claudeAccess").child(uid).setValue(if (allowed) true else null).await()
         record("claude", uid, if (allowed) "on" else "off")
+    }
+
+    override suspend fun setAntigravity(uid: String, allowed: Boolean): Result<Unit> = runCatching {
+        root.child("antigravityAccess").child(uid).setValue(if (allowed) true else null).await()
+        record("antigravity", uid, if (allowed) "on" else "off")
     }
 
     override suspend fun deleteCrash(id: String): Result<Unit> = runCatching {

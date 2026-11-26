@@ -891,7 +891,7 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
         val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
         val chatId = conversationId(me.uid, other)
         val messageId = fixedId ?: root.child("chats").child(chatId).child("messages").push().key ?: error("no id")
-        val ttl = if (noExpiry || other.uid == CLAUDE_BOT_UID) 0L else ttlOf(chatId)
+        val ttl = if (noExpiry || isAiBot(other.uid)) 0L else ttlOf(chatId)
         var message: Map<String, Any?> = buildMap<String, Any?> {
             putAll(extra)
             if (ttl > 0) put("expireAt", System.currentTimeMillis() + _serverOffset.value + ttl)
@@ -921,7 +921,7 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
         val plainPreview = shown.take(PREVIEW_LENGTH)
         var preview = plainPreview
         // An encrypted conversation: the content and the preview go sealed (system lines stay readable).
-        if (other.uid != CLAUDE_BOT_UID && !message.containsKey("system")) {
+        if (!isAiBot(other.uid) && !message.containsKey("system")) {
             var version = e2e.versionNow(chatId)
             // New conversations are encrypted from their first message (when everyone's app can take it).
             val now = System.currentTimeMillis()
@@ -1044,7 +1044,7 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
         try {
             val sent = LongArray(images.size)
             val total = images.sumOf { it.jpeg.size.toLong() }.coerceAtLeast(1)
-            val sealed = other.uid != CLAUDE_BOT_UID && e2e.versionNow(chatId) != null
+            val sealed = !isAiBot(other.uid) && e2e.versionNow(chatId) != null
             val entries = kotlinx.coroutines.coroutineScope {
                 images.mapIndexed { i, image ->
                     async {
@@ -1114,7 +1114,7 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
             val size = file.size
             require(size <= MediaUpload.MAX_BYTES) { "max 100 MB" }
             // Encrypted: sealed in the browser first, and the sealed copy goes up.
-            val sealIt = other.uid != CLAUDE_BOT_UID && e2e.versionNow(chatId) != null
+            val sealIt = !isAiBot(other.uid) && e2e.versionNow(chatId) != null
             val (url, key) = WebUpload.blob(token(), chatId, ext, file.mime.ifBlank { "application/octet-stream" }, blobOf(file.location), sealIt) { done ->
                 _uploads.update { it + (messageId to done.toFloat() / size.coerceAtLeast(1)) }
             }
@@ -1419,7 +1419,7 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
         val id = GROUP_PREFIX + (1..20).map { alphabet[random.nextInt(alphabet.size)] }.joinToString("")
         val memberMap = HashMap<String, Any?>()
         memberMap[me.uid] = me.copy(photo = me.publicPhoto()).asMember("admin")
-        members.filter { it.uid != me.uid && !it.isGroup && it.uid != CLAUDE_BOT_UID }.forEach { memberMap[it.uid] = it.asMember("member") }
+        members.filter { it.uid != me.uid && !it.isGroup && !isAiBot(it.uid) }.forEach { memberMap[it.uid] = it.asMember("member") }
         root.child("groups").child(id).setValue(
             mapOf("name" to clean, "createdBy" to me.uid, "createdAt" to ServerValue.TIMESTAMP, "members" to memberMap),
         ).await()
@@ -1431,7 +1431,7 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
 
     override suspend fun addMembers(groupId: String, members: List<ChatUser>): Result<Unit> = runCatching {
         val current = groupInfo(groupId, fresh = true) ?: error("no group")
-        val fresh = members.filter { m -> current.members.none { it.user.uid == m.uid } && !m.isGroup && m.uid != CLAUDE_BOT_UID }
+        val fresh = members.filter { m -> current.members.none { it.user.uid == m.uid } && !m.isGroup && !isAiBot(m.uid) }
         if (fresh.isEmpty()) return@runCatching
         val before = groupInfo(groupId, fresh = true)
         val marks = HashMap<String, Any?>()
@@ -1638,23 +1638,23 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
 
     // ------------------------------------------------------------------ the owner's Claude
 
-    override fun claudeState(): Flow<ClaudeState?> = callbackFlow {
+    override fun claudeState(bot: String): Flow<ClaudeState?> = callbackFlow {
         val uid = me()
         val job = launch {
-            listen(root.child("claudeState").child(uid)).collect { snap ->
+            listen(root.child(aiBotNode(bot, "State")).child(uid)).collect { snap ->
                 val model = snap.child("model").getValue(String::class)
-                trySend(model?.let { ClaudeState(it, snap.child("label").getValue(String::class) ?: "Claude") })
+                trySend(model?.let { ClaudeState(it, snap.child("label").getValue(String::class) ?: aiBotName(bot)) })
             }
         }
         awaitClose { job.cancel() }
     }
 
-    override suspend fun setClaudeModel(model: String) {
-        root.child("claudeSettings").child(me()).child("model").setValue(model)
+    override suspend fun setClaudeModel(model: String, bot: String) {
+        root.child(aiBotNode(bot, "Settings")).child(me()).child("model").setValue(model)
     }
 
-    override suspend fun resetClaude() {
-        root.child("claudeSettings").child(me()).child("reset").setValue(ServerValue.TIMESTAMP)
+    override suspend fun resetClaude(bot: String) {
+        root.child(aiBotNode(bot, "Settings")).child(me()).child("reset").setValue(ServerValue.TIMESTAMP)
     }
 
     /** Photos already fetched: memory first, then the app's cache folder. */
@@ -1821,6 +1821,7 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
                             phase,
                             detail = snap.child("detail").getValue(String::class).orEmpty(),
                             thought = snap.child("thought").getValue(String::class).orEmpty(),
+                            by = snap.child("by").getValue(String::class) ?: CLAUDE_BOT_UID,
                         )
                     } else {
                         null
@@ -1884,7 +1885,7 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
         // The others' lists say "recording a voice message…" in place of "typing…".
         val others = if (isGroupId(chatId)) groups[chatId]?.members?.map { it.user.uid }.orEmpty() else chatId.split("_")
         val updates = HashMap<String, Any?>()
-        others.filter { it != uid && it != CLAUDE_BOT_UID }.forEach { other ->
+        others.filter { it != uid && !isAiBot(it) }.forEach { other ->
             updates["userChats/$other/$chatId/typingAt"] = if (recording) ServerValue.TIMESTAMP else null
             updates["userChats/$other/$chatId/typingName"] = if (recording) name else null
             updates["userChats/$other/$chatId/typingRec"] = if (recording) true else null
@@ -1905,7 +1906,7 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
         // The others' conversation lists say "typing…" too.
         val others = if (isGroupId(chatId)) groups[chatId]?.members?.map { it.user.uid }.orEmpty() else chatId.split("_")
         val updates = HashMap<String, Any?>()
-        others.filter { it != uid && it != CLAUDE_BOT_UID }.forEach { other ->
+        others.filter { it != uid && !isAiBot(it) }.forEach { other ->
             updates["userChats/$other/$chatId/typingAt"] = if (typing) ServerValue.TIMESTAMP else null
             updates["userChats/$other/$chatId/typingName"] = if (typing) name else null
             updates["userChats/$other/$chatId/typingRec"] = null
@@ -1935,7 +1936,7 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
         }
         val updates = hashMapOf<String, Any?>("chats/$chatId/reactions/$messageId/$uid" to emoji)
         // The message's writer hears about it (not for our own messages, nor Claude's).
-        if (author != null && author != uid && author != CLAUDE_BOT_UID) {
+        if (author != null && author != uid && !isAiBot(author)) {
             updates["notify/${root.child("notify").push().key}"] = mapOf(
                 "from" to uid, "to" to author, "chatId" to chatId, "type" to "reaction",
                 "emoji" to emoji,
@@ -2236,7 +2237,7 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
         } else {
             chatId.split("_").takeIf { it.size == 2 } ?: return false
         }
-        if (CLAUDE_BOT_UID in members) return false
+        if (members.any { isAiBot(it) }) return false
         if (E2ePolicy.exempt(members)) return false
         if (!e2e.allHaveKeys(members.filter { it != uid })) return false
         return e2e.enable(chatId, members).isSuccess
@@ -2245,7 +2246,7 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
     override suspend fun enableEncryption(other: ChatUser): Result<Unit> = runCatching {
         val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
         val chatId = conversationId(me.uid, other)
-        require(other.uid != CLAUDE_BOT_UID) { "claude" }
+        require(!isAiBot(other.uid)) { "claude" }
         check(encryptIfPossible(chatId)) { "e2e-nokeys" }
     }
 
@@ -2253,7 +2254,7 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
         val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
         val clean = name.trim().take(50)
         require(clean.isNotEmpty()) { "name" }
-        val people = members.filter { it.uid != me.uid && !it.isGroup && it.uid != CLAUDE_BOT_UID }
+        val people = members.filter { it.uid != me.uid && !it.isGroup && !isAiBot(it.uid) }
         require(people.isNotEmpty()) { "members" }
         val alphabet = ('a'..'z') + ('A'..'Z') + ('0'..'9')
         val random = WebRandom
@@ -2397,7 +2398,7 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
         val uid = me()
         val ref = root.child("broadcasts").child(uid)
         val key = id ?: ref.push().key ?: error("no id")
-        val people = members.filter { !it.isGroup && it.uid != uid && it.uid != CLAUDE_BOT_UID }.associate { it.uid to mapOf("name" to it.name, "username" to it.username, "photo" to it.photo) }
+        val people = members.filter { !it.isGroup && it.uid != uid && !isAiBot(it.uid) }.associate { it.uid to mapOf("name" to it.name, "username" to it.username, "photo" to it.photo) }
         require(people.isNotEmpty()) { "members" }
         ref.child(key).updateChildren(mapOf("name" to name.trim().take(50), "members" to people)).await()
         key
@@ -2574,6 +2575,13 @@ internal class FirebaseChatBackend private constructor() : ChatBackend, ForcesIm
         root.child("claudeAccess").addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 ClaudeAccess.granted.value = snapshot.children.filter { it.getValue(Boolean::class) == true }.mapNotNull { it.key }.toSet()
+            }
+
+            override fun onCancelled(error: DatabaseError) {}
+        })
+        root.child("antigravityAccess").addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                AntigravityAccess.granted.value = snapshot.children.filter { it.getValue(Boolean::class) == true }.mapNotNull { it.key }.toSet()
             }
 
             override fun onCancelled(error: DatabaseError) {}

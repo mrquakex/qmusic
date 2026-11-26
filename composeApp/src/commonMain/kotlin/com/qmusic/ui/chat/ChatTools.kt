@@ -255,7 +255,7 @@ internal fun BroadcastEditPage(controller: ChatController, s: ChatStrings, id: S
     val existing = lists.firstOrNull { it.id == id }
     var name by remember(id) { mutableStateOf(existing?.name.orEmpty()) }
     var picked by remember(id) { mutableStateOf(existing?.members?.map { it.uid }?.toSet().orEmpty()) }
-    val people = remember(friends) { friends.filter { it.uid != CLAUDE_BOT_UID }.sortedBy { it.name.lowercase() } }
+    val people = remember(friends) { friends.filter { !isAiBot(it.uid) }.sortedBy { it.name.lowercase() } }
     Box(Modifier.fillMaxSize().background(BgRoot).imePadding()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 110.dp)) {
             item { TopBar(if (id == null) s.broadcastNew else s.broadcastEdit, { controller.pop() }) }

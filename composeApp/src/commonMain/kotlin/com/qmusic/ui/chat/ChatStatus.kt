@@ -1240,7 +1240,7 @@ internal fun StatusViewerPage(controller: ChatController, s: ChatStrings, me: Ch
                     val likes by remember(item.id) { controller.statusLikes(item) }.collectAsState(initial = emptySet())
                     ViewersDialog(viewers, likes, s, now) { viewersOpen = false }
                 }
-            } else if (item.owner.uid != CLAUDE_BOT_UID) {
+            } else if (!isAiBot(item.owner.uid)) {
                 Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(24.dp)).background(Color(0x991E1E1E)).padding(horizontal = 18.dp, vertical = 13.dp),
@@ -1341,7 +1341,7 @@ private fun ViewersDialog(viewers: List<Pair<ChatUser, Long>>, likes: Set<String
 internal fun StatusPrivacyPage(controller: ChatController, s: ChatStrings) {
     val privacy by controller.statusPrivacy.collectAsState()
     val friends by controller.friends.collectAsState()
-    val people = remember(friends) { friends.filter { it.uid != CLAUDE_BOT_UID }.sortedBy { it.name.lowercase() } }
+    val people = remember(friends) { friends.filter { !isAiBot(it.uid) }.sortedBy { it.name.lowercase() } }
     LazyColumn(Modifier.fillMaxSize().background(BgRoot), contentPadding = PaddingValues(bottom = 32.dp)) {
         item { TopBar(s.statusPrivacyTitle, { controller.pop() }) }
         item { Text(s.statusPrivacyNote, color = TextSecondary, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) }

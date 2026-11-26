@@ -610,7 +610,7 @@ fun QMusicApp(
                     s = chatStrings,
                     onAccept = { video -> askPermissions(video) { granted -> if (granted) callService.accept() else callService.decline() } },
                     modifier = modifier,
-                    people = callFriends.filter { it.uid != com.qmusic.ui.chat.CLAUDE_BOT_UID },
+                    people = callFriends.filter { !com.qmusic.ui.chat.isAiBot(it.uid) },
                     onQuickReply = { peer, text -> chatController?.send(peer, text) },
                 )
                 return@CompositionLocalProvider
@@ -640,7 +640,7 @@ fun QMusicApp(
                     s = chatStrings,
                     me = (chatController.account.value as? com.qmusic.ui.chat.ChatAccount.Ready)?.me,
                     modifier = modifier,
-                    people = groupFriends.filter { it.uid != com.qmusic.ui.chat.CLAUDE_BOT_UID },
+                    people = groupFriends.filter { !com.qmusic.ui.chat.isAiBot(it.uid) },
                 )
                 return@CompositionLocalProvider
             }

@@ -1,0 +1,23 @@
+[Unit]
+Description=QMusic: the owner's Antigravity (Gemini) in the app's messages (Antigravity CLI, sandboxed)
+After=network-online.target qmusic-push.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qmusic-antigravity
+Group=qmusic-antigravity
+SupplementaryGroups=qmusic-push
+Environment=HOME=/var/lib/qmusic-antigravity
+WorkingDirectory=/var/lib/qmusic-antigravity
+ExecStart=/usr/local/bin/node /opt/qmusic-push/antigravity-bot.js
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/qmusic-antigravity
+PrivateTmp=true
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target

@@ -164,7 +164,7 @@ internal fun AdminPage(controller: ChatController, me: ChatUser) {
     var openUser by remember { mutableStateOf<String?>(null) }
     var openGroup by remember { mutableStateOf<String?>(null) }
     val names = remember(users, groups) {
-        users.associate { it.uid to it.name } + groups.associate { it.id to t("grup: ", "group: ") + it.name } + (CLAUDE_BOT_UID to "Claude")
+        users.associate { it.uid to it.name } + groups.associate { it.id to t("grup: ", "group: ") + it.name } + (CLAUDE_BOT_UID to "Claude") + (ANTIGRAVITY_BOT_UID to "Antigravity")
     }
     // The counts (sign-ups, conversations, the disk) are made fresh each time the panel opens.
     LaunchedEffect(console) { console.request("stats") }
@@ -263,7 +263,7 @@ private fun AdminSummary(
 ) {
     val stats by remember(console) { console.stats() }.collectAsState(initial = null)
     val now = nowMs()
-    val people = users.filter { it.uid != CLAUDE_BOT_UID && it.uid != "nuvelo" }
+    val people = users.filter { !isAiBot(it.uid) && it.uid != "nuvelo" }
     val day = people.count { it.online || now - it.lastActive < 24 * 3600_000L }
     val week = people.count { it.online || now - it.lastActive < 7 * 24 * 3600_000L }
     val newWeek = people.count { it.created > 0 && now - it.created < 7 * 24 * 3600_000L }
@@ -483,6 +483,7 @@ private fun AdminPeople(
                     Pill(t("Eski sürüm", "Outdated"), primary = filter == PeopleFilter.OUTDATED) { onFilter(PeopleFilter.OUTDATED) }
                     Pill(t("Geliştirici", "Developer"), primary = filter == PeopleFilter.DEVELOPER) { onFilter(PeopleFilter.DEVELOPER) }
                     Pill("Claude", primary = filter == PeopleFilter.CLAUDE) { onFilter(PeopleFilter.CLAUDE) }
+                    Pill("Antigravity", primary = filter == PeopleFilter.ANTIGRAVITY) { onFilter(PeopleFilter.ANTIGRAVITY) }
                 }
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Pill(t("Son aktif", "Last active"), primary = sort == PeopleSort.ACTIVE) { sort = PeopleSort.ACTIVE }
@@ -556,7 +557,7 @@ private fun AdminUserPage(
     val clipboard = LocalClipboardManager.current
     val now = nowMs()
     val ban = user.ban?.takeIf { it.activeAt(now) }
-    val untouchable = user.uid == me.uid || isFounder(user.uid) || user.uid == CLAUDE_BOT_UID
+    val untouchable = user.uid == me.uid || isFounder(user.uid) || isAiBot(user.uid)
     var banning by remember { mutableStateOf<String?>(null) }
     var confirm by remember { mutableStateOf<Pair<String, suspend () -> Result<Unit>>?>(null) }
     var renaming by remember { mutableStateOf(false) }
@@ -814,7 +815,7 @@ private fun AdminReports(
         }
         if (shown.isEmpty()) item { Text(t("Şikâyet yok.", "No reports."), color = TextSecondary, modifier = Modifier.padding(top = 24.dp)) }
         items(shown, key = { it.id }) { r ->
-            val canQuickMute = !r.target.startsWith("grp") && r.target != me.uid && !isFounder(r.target) && r.target != CLAUDE_BOT_UID
+            val canQuickMute = !r.target.startsWith("grp") && r.target != me.uid && !isFounder(r.target) && !isAiBot(r.target)
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Tag(reasonLabel(r.reason), if (r.handled == null) Warn else TextMuted)
@@ -1025,7 +1026,7 @@ private fun AdminAnnounce(controller: ChatController, console: AdminConsole, use
     val verOk = Regex("^[0-9]{1,3}(\\.[0-9]{1,3}){0,3}$").matches(targetVer)
     val outdatedCount = remember(users, targetVer, verOk) {
         if (!verOk) 0 else users.count { u ->
-            u.uid != CLAUDE_BOT_UID && u.uid != "nuvelo" &&
+            !isAiBot(u.uid) && u.uid != "nuvelo" &&
                 !(u.ban?.isBan == true && u.ban.activeAt(now)) &&
                 u.version != null && versionOlder(u.version, targetVer)
         }
@@ -1258,6 +1259,7 @@ private fun actionLabel(kind: String, value: String): String = when (kind) {
     "autoMute" -> t("Spam koruması susturdu ($value mesaj/dk)", "Spam guard muted ($value messages/min)")
     "badge" -> if (value == "on") t("Geliştirici rozeti verdi", "Gave the developer badge") else t("Rozeti aldı", "Took the badge")
     "claude" -> if (value == "on") t("Claude erişimi verdi", "Gave Claude access") else t("Claude erişimini aldı", "Took Claude access")
+    "antigravity" -> if (value == "on") t("Antigravity erişimi verdi", "Gave Antigravity access") else t("Antigravity erişimini aldı", "Took Antigravity access")
     "message" -> t("Nuvelo adına yazdı: ", "Wrote as Nuvelo: ") + value
     "deleteMedia" -> t("Sohbet dosyalarını sildi", "Deleted a chat's files")
     "deleteAccount" -> t("Hesap sildi", "Deleted an account")

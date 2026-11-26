@@ -71,6 +71,7 @@ interface AdminConsole {
     suspend fun setSpam(on: Boolean, limit: Int): Result<Unit>
     suspend fun setBadge(uid: String, developer: Boolean): Result<Unit>
     suspend fun setClaude(uid: String, allowed: Boolean): Result<Unit>
+    suspend fun setAntigravity(uid: String, allowed: Boolean): Result<Unit> = Result.failure(UnsupportedOperationException())
     suspend fun deleteCrash(id: String): Result<Unit>
     suspend fun deleteAnnouncement(id: String): Result<Unit> = Result.failure(UnsupportedOperationException())
     suspend fun deleteCallDebug(uid: String, callId: String): Result<Unit> = Result.failure(UnsupportedOperationException())
@@ -147,6 +148,8 @@ data class AdminUser(
     /** The "developer" badge, and leave to talk to Claude. */
     val developer: Boolean = false,
     val claude: Boolean = false,
+    /** Leave to talk to Antigravity (Gemini). */
+    val antigravity: Boolean = false,
 ) {
     /** The latest sign of life there is. */
     val lastActive: Long get() = maxOf(lastSeen, lastOpen, lastSignIn)
@@ -218,7 +221,7 @@ object ForcedUpdate {
 internal fun AdminConsole?.featureEnabled(pick: (FeatureFlags) -> Boolean): Boolean =
     this == null || isAdmin.value || pick(features.value)
 
-internal enum class PeopleFilter { ALL, ONLINE, RESTRICTED, OUTDATED, DEVELOPER, CLAUDE }
+internal enum class PeopleFilter { ALL, ONLINE, RESTRICTED, OUTDATED, DEVELOPER, CLAUDE, ANTIGRAVITY }
 
 internal enum class LogCategory { ALL, MODERATION, SPAM, ANNOUNCE, ACCOUNT, SETTINGS }
 
@@ -226,7 +229,7 @@ internal fun logCategoryOf(kind: String): LogCategory = when (kind) {
     "ban", "mute", "unban", "report" -> LogCategory.MODERATION
     "autoMute", "spam" -> LogCategory.SPAM
     "announce", "delAnnounce", "message", "msgOldVer", "testPush" -> LogCategory.ANNOUNCE
-    "closeGroup", "rename", "reset", "badge", "claude", "deleteAccount", "deleteMedia" -> LogCategory.ACCOUNT
+    "closeGroup", "rename", "reset", "badge", "claude", "antigravity", "deleteAccount", "deleteMedia" -> LogCategory.ACCOUNT
     "minVersion", "recVersion", "maintenance", "features", "banName", "backupNow", "gcMedia" -> LogCategory.SETTINGS
     else -> LogCategory.SETTINGS
 }
@@ -262,9 +265,10 @@ internal fun filterAdminUsers(
             PeopleFilter.ALL -> true
             PeopleFilter.ONLINE -> u.online
             PeopleFilter.RESTRICTED -> u.ban?.activeAt(now) == true
-            PeopleFilter.OUTDATED -> u.uid != CLAUDE_BOT_UID && u.uid != "nuvelo" && u.version != null && versionOlder(u.version, latestVersion)
+            PeopleFilter.OUTDATED -> !isAiBot(u.uid) && u.uid != "nuvelo" && u.version != null && versionOlder(u.version, latestVersion)
             PeopleFilter.DEVELOPER -> u.developer
             PeopleFilter.CLAUDE -> u.claude
+            PeopleFilter.ANTIGRAVITY -> u.antigravity
         }
         matchesQuery && matchesVersion && matchesFilter
     }

@@ -814,7 +814,7 @@ class ChatController(
 
     /** People who can be put in a group: friends, and the people of the conversations. */
     val groupCandidates: StateFlow<List<ChatUser>> = combine(friends(), allThreads) { f, t ->
-        (f + t.orEmpty().filter { !it.secret }.map { it.other }.filter { !it.isGroup && it.uid != CLAUDE_BOT_UID })
+        (f + t.orEmpty().filter { !it.secret }.map { it.other }.filter { !it.isGroup && !isAiBot(it.uid) })
             .distinctBy { it.uid }
             .sortedBy { it.name.lowercase() }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
@@ -1141,12 +1141,19 @@ class ChatController(
         .flatMapLatest { uid -> if (uid != null) backend.claudeState().catch { emit(null) } else flowOf(null) }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
-    fun setClaudeModel(model: String) {
-        scope.launch { runCatching { backend.setClaudeModel(model) } }
+    /** The owner's Antigravity: the model answering now. */
+    val antigravityState: StateFlow<ClaudeState?> = ready
+        .combine(AntigravityAccess.granted) { account, granted -> account?.me?.uid?.takeIf { it == CLAUDE_OWNER_UID || it in granted } }
+        .distinctUntilChanged()
+        .flatMapLatest { uid -> if (uid != null) backend.claudeState(ANTIGRAVITY_BOT_UID).catch { emit(null) } else flowOf(null) }
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
+    fun setClaudeModel(model: String, bot: String = CLAUDE_BOT_UID) {
+        scope.launch { runCatching { backend.setClaudeModel(model, bot) } }
     }
 
-    fun resetClaude() {
-        scope.launch { runCatching { backend.resetClaude() } }
+    fun resetClaude(bot: String = CLAUDE_BOT_UID) {
+        scope.launch { runCatching { backend.resetClaude(bot) } }
     }
 
     suspend fun imageBytes(other: ChatUser, image: ChatImage): ByteArray? = chatIdWith(other)?.let { backend.imageBytes(it, image) }

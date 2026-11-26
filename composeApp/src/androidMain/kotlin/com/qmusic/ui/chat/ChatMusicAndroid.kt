@@ -83,6 +83,8 @@ object ChatMusicAndroid {
         Stickers.start = { StickerMaker.start(c) }
         ClaudeAccess.set = { uid, on -> setClaudeAccess(uid, on) }
         watchClaudeAccess()
+        AntigravityAccess.set = { uid, on -> setAntigravityAccess(uid, on) }
+        watchAntigravityAccess()
         watchBadges()
     }
 
@@ -134,6 +136,36 @@ object ChatMusicAndroid {
         }
         claudeListener = listener
         ref.addValueEventListener(listener)
+    }
+
+    private var antigravityListener: ValueEventListener? = null
+
+    /** Who the founder gave Antigravity to (read by everyone signed in, like Claude's). */
+    private fun watchAntigravityAccess() {
+        val ref = root()?.child("antigravityAccess") ?: return
+        if (antigravityListener != null) return
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snap: DataSnapshot) {
+                AntigravityAccess.granted.value = snap.children.filter { it.getValue(Boolean::class.java) == true }.mapNotNull { it.key }.toSet()
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                antigravityListener = null
+                scope.launch {
+                    delay(30_000)
+                    watchAntigravityAccess()
+                }
+            }
+        }
+        antigravityListener = listener
+        ref.addValueEventListener(listener)
+    }
+
+    private suspend fun setAntigravityAccess(uid: String, on: Boolean): Boolean {
+        val ref = root()?.child("antigravityAccess")?.child(uid) ?: return false
+        return withTimeoutOrNull(15_000) {
+            runCatching { if (on) ref.setValue(true).await() else ref.removeValue().await() }.isSuccess
+        } == true
     }
 
     private suspend fun setClaudeAccess(uid: String, on: Boolean): Boolean {
@@ -196,7 +228,7 @@ object ChatMusicAndroid {
     private fun listenTo(uids: Set<String>) {
         val base = root()?.child("listening") ?: return
         val me = uid()
-        val wanted = uids.filter { it != me && it != CLAUDE_BOT_UID && !isGroupId(it) && it.isNotBlank() }.toSet()
+        val wanted = uids.filter { it != me && !isAiBot(it) && !isGroupId(it) && it.isNotBlank() }.toSet()
         (listeners.keys - wanted).forEach { uid ->
             listeners.remove(uid)?.let { base.child(uid).removeEventListener(it) }
             raw.remove(uid)

@@ -95,7 +95,7 @@
         },
         "e2e": {
           ".write": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))",
-          ".validate": "newData.child('v').isNumber() && newData.child('v').val() >= 1 && (!data.exists() || newData.child('v').val() > data.child('v').val()) && newData.child('by').val() === auth.uid && !$chatId.contains('2hxOw0dRcwUwsW7N6ogH4fRcqXo1') && !root.child('claudeAccess').child(auth.uid).exists() && ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) ? !root.child('groups').child($chatId).child('members').child('2hxOw0dRcwUwsW7N6ogH4fRcqXo1').exists() : !root.child('claudeAccess').child($chatId.replace(auth.uid, '').replace('_', '')).exists())"
+          ".validate": "newData.child('v').isNumber() && newData.child('v').val() >= 1 && (!data.exists() || newData.child('v').val() > data.child('v').val()) && newData.child('by').val() === auth.uid && !$chatId.contains('2hxOw0dRcwUwsW7N6ogH4fRcqXo1') && !root.child('claudeAccess').child(auth.uid).exists() && !root.child('antigravityAccess').child(auth.uid).exists() && ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) ? !root.child('groups').child($chatId).child('members').child('2hxOw0dRcwUwsW7N6ogH4fRcqXo1').exists() : !root.child('claudeAccess').child($chatId.replace(auth.uid, '').replace('_', '')).exists() && !root.child('antigravityAccess').child($chatId.replace(auth.uid, '').replace('_', '')).exists())"
         }
       }
     },
@@ -170,6 +170,17 @@
       }
     },
     "claudeState": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid"
+      }
+    },
+    "antigravitySettings": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "antigravityState": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid"
       }
@@ -451,6 +462,13 @@
       }
     },
     "claudeAccess": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && auth.uid === '2hxOw0dRcwUwsW7N6ogH4fRcqXo1'",
+        ".validate": "!newData.exists() || newData.val() === true"
+      }
+    },
+    "antigravityAccess": {
       ".read": "auth != null",
       "$uid": {
         ".write": "auth != null && auth.uid === '2hxOw0dRcwUwsW7N6ogH4fRcqXo1'",

@@ -155,8 +155,8 @@ async function handleGroup(n) {
   if (Date.now() - (Number(n.at) || 0) > MESSAGE_MAX_AGE_MS) return;
   const group = (await db.ref(`groups/${n.chatId}`).get()).val();
   if (!group || !group.members) return;
-  if (n.from !== "claudebot" && !group.members[n.from]) return;
-  const senderName = n.from === "claudebot" ? "Claude" : String((group.members[n.from] || {}).name || "");
+  if (!AI_BOTS[n.from] && !group.members[n.from]) return;
+  const senderName = AI_BOTS[n.from] || String((group.members[n.from] || {}).name || "");
   const data = {
     type: "chat",
     chatId: n.chatId,
@@ -169,8 +169,8 @@ async function handleGroup(n) {
     // Who wrote it: the notification shows each message under its writer's name and picture.
     author: String(n.from),
     authorName: senderName,
-    authorPhoto: n.from === "claudebot" ? "" : String((group.members[n.from] || {}).photo || ""),
-    text: cut(String(n.body || "").replace(/^Claude: /, ""), 280),
+    authorPhoto: AI_BOTS[n.from] ? "" : String((group.members[n.from] || {}).photo || ""),
+    text: cut(String(n.body || "").replace(/^(Claude|Antigravity): /, ""), 280),
   };
   const call = n.type === "groupcall";
   // A secret group (made in the secret space): nothing of it in the notification, not even its name.
@@ -289,7 +289,7 @@ async function handle(n) {
   if (GROUP.test(n.chatId)) return handleGroup(n);
   if (n.from === n.to || !isMember(n.chatId, n.to)) return;
   // The owner's Claude speaks in the owner's conversations without being a member of them.
-  if (n.from !== "claudebot" && !isMember(n.chatId, n.from)) return;
+  if (!AI_BOTS[n.from] && !isMember(n.chatId, n.from)) return;
   const call = n.type === "call";
   const friend = n.type === "friend";
   const age = Date.now() - (Number(n.at) || 0);
@@ -308,14 +308,14 @@ async function handle(n) {
   // so tapping it opens it; the text says it was Claude.
   const [m1, m2] = n.chatId.split("_");
   const partner = n.to === m1 ? m2 : m1;
-  const viaClaude = n.from === "claudebot" && partner !== "claudebot";
+  const viaClaude = !!AI_BOTS[n.from] && partner !== n.from;
   const shownFrom = viaClaude ? partner : n.from;
   const sender = (await db.ref(`users/${shownFrom}`).get()).val() || {};
   // A photo shown to friends only: the notification has it when the one who gets it is a friend.
   if (!sender.photo && sender.privacy && sender.privacy.photo === "FRIENDS" && (await db.ref(`friends/${shownFrom}/${n.to}`).get()).exists()) {
     sender.photo = (await db.ref(`privateProfile/${shownFrom}/photo`).get()).val() || "";
   }
-  if (viaClaude) n.body = "Claude: " + String(n.body || "").replace(/^Claude: /, "");
+  if (viaClaude) n.body = AI_BOTS[n.from] + ": " + String(n.body || "").replace(/^(Claude|Antigravity): /, "");
 
   const data = {
     type: call ? "call" : friend ? "friend" : "chat",
@@ -677,7 +677,7 @@ async function messageOldVersions(threshold, text) {
   const bans = bansSnap.val() || {};
   const now = Date.now();
   const targets = Object.keys(users).filter((uid) => {
-    if (uid === NUVELO || uid === "claudebot") return false;
+    if (uid === NUVELO || AI_BOTS[uid]) return false;
     const b = bans[uid];
     if (b && b.kind === "ban" && Number(b.until || 0) > now) return false;
     const ver = info[uid] && info[uid].v;
@@ -777,6 +777,8 @@ function countMessage() {
 // ------------------------------------------------------------------ admin: Nuvelo's own account
 
 const NUVELO = "nuvelo";
+/** The owner's assistants in the messages (claude-bot.js, antigravity-bot.js): uid → the name people see. */
+const AI_BOTS = { claudebot: "Claude", antigravitybot: "Antigravity" };
 
 /** Nuvelo's account (the one that writes to people for the admins), made once. */
 async function ensureNuvelo() {
@@ -845,7 +847,7 @@ const sentTimes = new Map();
 
 /** Each message counts against its sender for a minute; too many, and they are muted for an hour (the founder hears). */
 async function watchSpam(from) {
-  if (!spamConfig.on || from === "claudebot" || from === NUVELO) return;
+  if (!spamConfig.on || AI_BOTS[from] || from === NUVELO) return;
   const now = Date.now();
   const times = (sentTimes.get(from) || []).filter((t) => now - t < 60000);
   times.push(now);
@@ -867,7 +869,7 @@ async function watchSpam(from) {
 
 /** Removes an account and what is its own (profile, lists, keys, statuses, files); others keep their copies of chats. */
 async function deleteAccount(uid) {
-  if (uid === FOUNDER || uid === NUVELO || uid === "claudebot" || (await isAdmin(uid))) throw new Error("protected");
+  if (uid === FOUNDER || uid === NUVELO || AI_BOTS[uid] || (await isAdmin(uid))) throw new Error("protected");
   const user = (await db.ref(`users/${uid}`).get()).val();
   if (!user) throw new Error("no such user");
   const chats = (await db.ref(`userChats/${uid}`).get()).val() || {};
@@ -883,7 +885,7 @@ async function deleteAccount(uid) {
   for (const node of ["users", "userChats", "friends", "friendRequests", "sentRequests", "presence", "pushTokens", "blocked",
     "privateProfile", "statuses", "statusViews", "statusSeen", "statusPrivacy", "statusMuted", "statusLikes", "publicKeys",
     "keyBackup", "keyLink", "secretSpace", "appInfo", "bans", "callLog", "chatPrefs", "starred", "hidden", "broadcasts",
-    "claudeSettings", "claudeState", "claudeAccess", "badges", "listening", "incomingCall"]) gone[`${node}/${uid}`] = null;
+    "claudeSettings", "claudeState", "claudeAccess", "antigravitySettings", "antigravityState", "antigravityAccess", "badges", "listening", "incomingCall"]) gone[`${node}/${uid}`] = null;
   if (user.username) gone[`usernames/${user.username}`] = null;
   await db.ref().update(gone);
   fs.rmSync(path.join(MEDIA_ROOT, "u_" + uid), { recursive: true, force: true });

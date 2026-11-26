@@ -384,6 +384,7 @@ internal fun TopBar(title: String, onBack: () -> Unit, actions: @Composable () -
 fun ChatAvatar(user: ChatUser, size: androidx.compose.ui.unit.Dp) {
     when {
         user.uid == CLAUDE_BOT_UID -> ClaudeAvatar(size)
+        user.uid == ANTIGRAVITY_BOT_UID -> AntigravityAvatar(size)
         // Nuvelo's own account: the app's mark, not a letter.
         user.uid == NUVELO_UID -> Box(Modifier.size(size).clip(CircleShape).background(Color(0xFF111114)), contentAlignment = Alignment.Center) {
             com.qmusic.ui.theme.QMusicLogo(size = size * 0.62f, tint = Color.White)
@@ -421,6 +422,53 @@ fun ClaudeAvatar(size: androidx.compose.ui.unit.Dp) {
         }
     }
 }
+
+/** Antigravity's colour (its mark's blue), used where Claude's coral would be. */
+internal val AntigravityBlue = Color(0xFF4F8CF7)
+
+/** An assistant's own colour: Claude's coral or Antigravity's blue. */
+internal fun aiBotColor(uid: String): Color = if (uid == ANTIGRAVITY_BOT_UID) AntigravityBlue else ClaudeCoral
+
+/** An assistant's picture by its uid. */
+@Composable
+fun AiBotAvatar(uid: String, size: androidx.compose.ui.unit.Dp) {
+    if (uid == ANTIGRAVITY_BOT_UID) AntigravityAvatar(size) else ClaudeAvatar(size)
+}
+
+/** Antigravity's picture: its arch mark in Google's colours on a dark circle. */
+@Composable
+fun AntigravityAvatar(size: androidx.compose.ui.unit.Dp) {
+    Box(Modifier.size(size).clip(CircleShape).background(Color(0xFF15161A)), contentAlignment = Alignment.Center) {
+        androidx.compose.foundation.Canvas(Modifier.size(size * 0.62f)) {
+            val w = this.size.width
+            val h = this.size.height
+            val stroke = w * 0.2f
+            // An arch: up from the bottom left to a rounded top, down to the bottom right.
+            val arch = androidx.compose.ui.graphics.Path().apply {
+                moveTo(stroke / 2, h - stroke / 2)
+                cubicTo(w * 0.18f, h * 0.35f, w * 0.34f, stroke / 2, w / 2, stroke / 2)
+                cubicTo(w * 0.66f, stroke / 2, w * 0.82f, h * 0.35f, w - stroke / 2, h - stroke / 2)
+            }
+            drawPath(
+                arch,
+                brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                    listOf(Color(0xFF4285F4), Color(0xFFEA4335), Color(0xFFFBBC04), Color(0xFF34A853)),
+                    start = androidx.compose.ui.geometry.Offset(0f, h),
+                    end = androidx.compose.ui.geometry.Offset(w, h),
+                ),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+            )
+        }
+    }
+}
+
+/** "neon" → "Gemini 4 Neon", "flash" → "Gemini 3.8 Flash". */
+internal fun antigravityModelName(model: String): String =
+    if (model == "flash") "Gemini 3.8 Flash" else "Gemini 4 " + model.replaceFirstChar { it.uppercase() }
+
+/** A model's name in the picker: "Claude Opus" or "Gemini 4 Neon". */
+internal fun aiModelTitle(bot: String, model: String): String =
+    if (bot == ANTIGRAVITY_BOT_UID) antigravityModelName(model) else "Claude " + model.replaceFirstChar { it.uppercase() }
 
 /**
  * Google's account pictures come 96 px by default ("…=s96-c"), blurry anywhere bigger than a small dot: the size the
@@ -1067,7 +1115,7 @@ private fun ConversationPage(
     val secretChat = thread?.secret == true
     if (secretChat) SecureScreen()
     LaunchedEffect(other.uid, e2eReady, messages?.isNotEmpty()) {
-        if (e2eReady && other.uid != CLAUDE_BOT_UID && messages?.isNotEmpty() == true && (SecretSpace.encryptNewChats || secretChat)) {
+        if (e2eReady && !isAiBot(other.uid) && messages?.isNotEmpty() == true && (SecretSpace.encryptNewChats || secretChat)) {
             kotlinx.coroutines.delay(1_500)
             if (convId != null && E2e.api.version(convId) == null) controller.enableEncryption(other, quiet = true)
         }
@@ -1202,9 +1250,13 @@ private fun ConversationPage(
     var videoOpen by videoOpenState
     val pendingVideoState = remember(other.uid) { mutableStateOf<PickedFile?>(null) }
     var pendingVideo by pendingVideoState
-    val claudeState by controller.claudeState.collectAsState()
+    val claudeOnly by controller.claudeState.collectAsState()
+    val antigravityState by controller.antigravityState.collectAsState()
     var modelMenu by remember { mutableStateOf(false) }
-    val isClaude = other.uid == CLAUDE_BOT_UID
+    // Either assistant's own conversation (Claude or Antigravity): no calls, polls, games or encryption there.
+    val isClaude = isAiBot(other.uid)
+    val botColor = aiBotColor(other.uid)
+    val claudeState = if (other.uid == ANTIGRAVITY_BOT_UID) antigravityState else claudeOnly
     val quoted: () -> ChatReply? = { replyTo?.let { ChatReply(it.id, it.from, quoteText(it, s.english), replyThumbOf(it)) } }
     // Picked photos are shown first (caption, edits), then sent.
     val sendPhotos: (List<PickedImage>) -> Unit = { photos -> if (photos.isNotEmpty()) pendingPhotos = photos }
@@ -1337,7 +1389,7 @@ private fun ConversationPage(
     val selectedMessages = remember(messages, selected) { messages.orEmpty().filter { it.id in selected } }
     val starredIds = remember(starredList, chatId) { starredList.filter { it.chatId == chatId }.map { it.messageId }.toSet() }
     // In a group a message is read when every other member read it (delivered likewise).
-    val others = remember(group, me.uid) { group?.members?.map { it.user.uid }?.filter { it != me.uid && it != CLAUDE_BOT_UID }.orEmpty() }
+    val others = remember(group, me.uid) { group?.members?.map { it.user.uid }?.filter { it != me.uid && !isAiBot(it) }.orEmpty() }
     fun readByAll(at: Long) = others.isNotEmpty() && others.all { (readMarks[it] ?: 0L) >= at }
     fun deliveredToAll(at: Long) = others.isNotEmpty() && others.all { maxOf(readMarks[it] ?: 0L, deliveredMarks[it] ?: 0L) >= at }
     // A tapped quote: the list goes to the message answered (fetching older ones when needed).
@@ -1441,7 +1493,7 @@ private fun ConversationPage(
                         val seen = presence
                         // A group: how many of the others are here now (as on WhatsApp), else who is in it.
                         val onlineInGroup by remember(group?.joined?.size, group?.id) {
-                            val others = group?.joined?.map { it.user }?.filter { it.uid != me.uid && it.uid != CLAUDE_BOT_UID }.orEmpty()
+                            val others = group?.joined?.map { it.user }?.filter { it.uid != me.uid && !isAiBot(it.uid) }.orEmpty()
                             if (!isGroup || others.isEmpty()) {
                                 kotlinx.coroutines.flow.flowOf(0)
                             } else {
@@ -1464,17 +1516,17 @@ private fun ConversationPage(
                                     modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { modelMenu = true }.padding(vertical = 2.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text(claudeState!!.label, color = ClaudeCoral, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                    Icon(QMusicIcons.ChevronDown, contentDescription = null, tint = ClaudeCoral, modifier = Modifier.size(14.dp))
+                                    Text(claudeState!!.label, color = botColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    Icon(QMusicIcons.ChevronDown, contentDescription = null, tint = botColor, modifier = Modifier.size(14.dp))
                                 }
                                 DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }, containerColor = DarkSurfaceVariant) {
-                                    CLAUDE_MODELS.forEach { model ->
+                                    aiBotModels(other.uid).forEach { model ->
                                         DropdownMenuItem(
                                             text = {
                                                 Column {
                                                     Text(
-                                                        "Claude " + model.replaceFirstChar { it.uppercase() },
-                                                        color = if (claudeState?.model == model) ClaudeCoral else TextPrimary,
+                                                        aiModelTitle(other.uid, model),
+                                                        color = if (claudeState?.model == model) botColor else TextPrimary,
                                                         fontSize = 14.sp,
                                                         fontWeight = FontWeight.SemiBold,
                                                     )
@@ -1483,7 +1535,7 @@ private fun ConversationPage(
                                             },
                                             onClick = {
                                                 modelMenu = false
-                                                controller.setClaudeModel(model)
+                                                controller.setClaudeModel(model, other.uid)
                                             },
                                         )
                                     }
@@ -1748,7 +1800,7 @@ private fun ConversationPage(
                 }
                 // They are writing (or recording): a bubble at the very bottom, as on WhatsApp; seen at once when the
                 // person is at the bottom of the conversation.
-                val typingBubble = (typing || recordingThem) && other.uid != CLAUDE_BOT_UID
+                val typingBubble = (typing || recordingThem) && !isAiBot(other.uid)
                 LaunchedEffect(typingBubble) {
                     if (typingBubble && listState.firstVisibleItemIndex <= 1) listState.animateScrollToItem(0)
                 }
@@ -1847,14 +1899,14 @@ private fun ConversationPage(
                                     s = s,
                                     otherName = title,
                                     names = memberNames,
-                                    senderName = if (isGroup && !mine) (memberNames[row.m.from] ?: if (row.m.from == CLAUDE_BOT_UID) "Claude" else "?") else null,
+                                    senderName = if (isGroup && !mine) (memberNames[row.m.from] ?: if (isAiBot(row.m.from)) aiBotName(row.m.from) else "?") else null,
                                     // In a group, others' messages carry their picture, on the first of a run of theirs
                                     // (the list is newest first: the one above is the next item).
                                     liveNow = if (row.m.location?.live == true) liveHere[row.m.from] else null,
                                     liveSender = if (mine) me else memberUsers[row.m.from] ?: other.takeIf { it.uid == row.m.from },
                                     onOpenLive = { liveMapFocus = it },
                                     onStopLive = { controller.stopLiveLocation(other) },
-                                    avatar = if (isGroup && !mine) (memberUsers[row.m.from] ?: ChatUser(row.m.from, memberNames[row.m.from] ?: if (row.m.from == CLAUDE_BOT_UID) "Claude" else "?", "")) else null,
+                                    avatar = if (isGroup && !mine) (memberUsers[row.m.from] ?: ChatUser(row.m.from, memberNames[row.m.from] ?: if (isAiBot(row.m.from)) aiBotName(row.m.from) else "?", "")) else null,
                                     firstOfRun = (shown.getOrNull(index + 1) as? ListRow.Message)?.m?.let { above -> above.from != row.m.from || above.system } ?: true,
                                     reactions = reactions[row.m.id].orEmpty(),
                                     myUid = me.uid,
@@ -1985,14 +2037,15 @@ private fun ConversationPage(
                 SlashCommands(
                     query = text,
                     current = claudeState?.model,
+                    bot = other.uid,
                     s = s,
                     onNew = {
                         text = ""
-                        controller.resetClaude()
+                        controller.resetClaude(other.uid)
                     },
                     onModel = { model ->
                         text = ""
-                        controller.setClaudeModel(model)
+                        controller.setClaudeModel(model, other.uid)
                     },
                 )
             }
@@ -2013,6 +2066,23 @@ private fun ConversationPage(
                         )
                     },
                 )
+            }
+            if (!isClaude && encrypted && AntigravityAccess.allowed(me.uid) && callsAntigravity(text)) {
+                Text(if (s.english) "Antigravity can't read encrypted chats" else "Antigravity şifreli sohbetleri okuyamaz", color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 6.dp))
+            }
+            if (!isClaude && !encrypted && AntigravityAccess.allowed(me.uid) && callsAntigravity(text)) {
+                Row(
+                    modifier = Modifier
+                        .padding(start = 16.dp, top = 6.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(AntigravityBlue.copy(alpha = 0.18f))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AntigravityAvatar(16.dp)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (s.english) "Antigravity will answer in this chat" else "Antigravity bu sohbette cevap verecek", color = TextPrimary, fontSize = 12.sp)
+                }
             }
             if (!isClaude && encrypted && ClaudeAccess.allowed(me.uid) && callsClaude(text)) {
                 Text(e2eWords.noClaude, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 6.dp))
@@ -2742,6 +2812,7 @@ private fun ConversationDialogs(
         when (uid) {
             me.uid -> s.you
             CLAUDE_BOT_UID -> "Claude"
+            ANTIGRAVITY_BOT_UID -> "Antigravity"
             else -> memberNames[uid] ?: if (uid == other.uid) other.name else "?"
         }
     }
@@ -2982,6 +3053,7 @@ internal fun PhotoCell(image: ChatImage, load: suspend (ChatImage) -> ByteArray?
 }
 
 private val ClaudeBubble: Color get() = if (com.qmusic.ui.theme.lightTheme) Color(0xFFFBEDE7) else Color(0xFF2B201C)
+private val AntigravityBubble: Color get() = if (com.qmusic.ui.theme.lightTheme) Color(0xFFE9F0FE) else Color(0xFF1B2130)
 
 /** Claude reading a photo: a coral band sweeps down and up over it, inside corner marks. */
 @Composable
@@ -3017,16 +3089,16 @@ private fun PhotoScan(modifier: Modifier) {
     }
 }
 
-/** Under the message Claude answers: its spark turning, and what it is doing. */
+/** Under the message Claude (or Antigravity) answers: its mark turning, and what it is doing. */
 @Composable
-private fun ClaudeWorking(label: String) {
+private fun ClaudeWorking(label: String, by: String = CLAUDE_BOT_UID) {
     val t = rememberInfiniteTransition()
     val turn by t.animateFloat(0f, 360f, infiniteRepeatable(tween(2400, easing = androidx.compose.animation.core.LinearEasing)))
     val alpha by t.animateFloat(0.55f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse))
     Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.graphicsLayer { rotationZ = turn }) { ClaudeAvatar(18.dp) }
+        Box(Modifier.graphicsLayer { rotationZ = if (by == ANTIGRAVITY_BOT_UID) 0f else turn; translationY = if (by == ANTIGRAVITY_BOT_UID) (alpha - 0.775f) * -12f else 0f }) { AiBotAvatar(by, 18.dp) }
         Spacer(Modifier.width(8.dp))
-        Text(label, color = ClaudeCoral.copy(alpha = alpha), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = aiBotColor(by).copy(alpha = alpha), fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -3034,6 +3106,7 @@ private fun ClaudeWorking(label: String) {
 internal fun nameOf(uid: String, myUid: String, otherName: String, s: ChatStrings): String = when (uid) {
     myUid -> s.you
     CLAUDE_BOT_UID -> "Claude"
+    ANTIGRAVITY_BOT_UID -> "Antigravity"
     else -> otherName
 }
 
@@ -3418,11 +3491,12 @@ internal fun PhotoViewer(
 
 /** What "/" offers in Claude's conversation: a new conversation, and the models. */
 @Composable
-private fun SlashCommands(query: String, current: String?, s: ChatStrings, onNew: () -> Unit, onModel: (String) -> Unit) {
+private fun SlashCommands(query: String, current: String?, bot: String, s: ChatStrings, onNew: () -> Unit, onModel: (String) -> Unit) {
     val q = query.lowercase().trim()
+    val accent = aiBotColor(bot)
     val rows = buildList {
-        add(Triple("/yeni", s.cmdNew) { onNew() })
-        CLAUDE_MODELS.forEach { model -> add(Triple("/model $model", modelBlurb(model, s)) { onModel(model) }) }
+        add(Triple("/yeni", if (bot == ANTIGRAVITY_BOT_UID) (if (s.english) "Start a new chat (Antigravity forgets the last one)" else "Yeni sohbet başlat (Antigravity öncekini unutur)") else s.cmdNew) { onNew() })
+        aiBotModels(bot).forEach { model -> add(Triple("/model $model", modelBlurb(model, s)) { onModel(model) }) }
     }.filter { (command, _, _) -> command.startsWith(q) || q == "/" || (q.startsWith("/m") && command.startsWith("/model")) }
     if (rows.isEmpty()) return
     Column(
@@ -3439,10 +3513,10 @@ private fun SlashCommands(query: String, current: String?, s: ChatStrings, onNew
                 modifier = Modifier.fillMaxWidth().clickable(onClick = run).padding(horizontal = 14.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(command, color = if (chosen) ClaudeCoral else TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                Text(command, color = if (chosen) accent else TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                 Spacer(Modifier.width(12.dp))
                 Text(blurb, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                if (chosen) Icon(QMusicIcons.Check, contentDescription = null, tint = ClaudeCoral, modifier = Modifier.size(16.dp))
+                if (chosen) Icon(QMusicIcons.Check, contentDescription = null, tint = accent, modifier = Modifier.size(16.dp))
             }
         }
     }
@@ -3451,6 +3525,10 @@ private fun SlashCommands(query: String, current: String?, s: ChatStrings, onNew
 private fun modelBlurb(model: String, s: ChatStrings): String = when (model) {
     "opus" -> s.modelOpus
     "haiku" -> s.modelHaiku
+    "neon" -> if (s.english) "Gemini's strongest: hard questions" else "Gemini'nin en güçlüsü: zor sorular"
+    "carbon" -> if (s.english) "Balanced: fast and capable" else "Dengeli: hızlı ve yetenekli"
+    "argon" -> if (s.english) "Light and quick" else "Hafif ve çabuk"
+    "flash" -> if (s.english) "Fastest, for short questions" else "En hızlısı, kısa sorular için"
     else -> s.modelSonnet
 }
 
@@ -3522,7 +3600,7 @@ internal fun Pill(text: String, primary: Boolean, onClick: () -> Unit) {
 /** Add / requested (tap to take back) / accept / friends, as fits. */
 @Composable
 private fun FriendButton(controller: ChatController, user: ChatUser, s: ChatStrings) {
-    if (user.uid == CLAUDE_BOT_UID) return
+    if (isAiBot(user.uid)) return
     val status by remember(user.uid) { controller.friendStatus(user.uid) }.collectAsState(initial = FriendStatus.NONE)
     when (status) {
         FriendStatus.NONE -> Pill(s.addFriend, primary = true) { controller.requestFriend(user) }
@@ -3593,7 +3671,7 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
     val openFile = rememberAttachmentOpener()
     // Their latest profile (the about line, a new picture).
     val fresh by androidx.compose.runtime.produceState(user, user.uid) { controller.userFresh(user.uid)?.let { value = it } }
-    val isClaude = user.uid == CLAUDE_BOT_UID
+    val isClaude = isAiBot(user.uid)
     val isBlocked = user.uid in blocked
     val friendStatus by remember(user.uid) { controller.friendStatus(user.uid) }.collectAsState(initial = FriendStatus.NONE)
 
@@ -3650,6 +3728,7 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
             // Their own ringtone for Qeyf calls (a song, or one of Qeyf's sounds).
             if (isFounder(me.uid) && !isClaude && user.uid != me.uid) item { DeveloperBadgeSwitch(controller, user) }
             if (isFounder(me.uid) && !isClaude && user.uid != me.uid) item { ClaudeAccessSwitch(controller, user) }
+            if (isFounder(me.uid) && !isClaude && user.uid != me.uid) item { AntigravityAccessSwitch(controller, user) }
             if (!isClaude && user.uid != me.uid) item { PersonRingRow(s, user) }
             // An encrypted conversation: its safety code, to check side by side.
             if (!isClaude && user.uid != me.uid) item {
@@ -3939,7 +4018,7 @@ private fun Bubble(
     val bigEmoji = !m.deleted && m.images.isEmpty() && m.attachment == null && m.share == null && m.replyTo == null && m.poll == null && m.event == null && m.location == null && m.contact == null && m.game == null &&
         (isBigEmoji(m.text) || (m.gif?.sticker == true && m.text.isBlank()))
     val hasCard = m.share != null || m.images.isNotEmpty() || m.attachment != null || m.poll != null || m.event != null || m.location != null || m.contact != null || m.game != null
-    val fromClaude = m.from == CLAUDE_BOT_UID
+    val fromClaude = isAiBot(m.from)
     // Pull a message to the right to answer it.
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val swipe = remember { androidx.compose.animation.core.Animatable(0f) }
@@ -4004,7 +4083,7 @@ private fun Bubble(
         } else {
             RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp)
         }
-        val bubbleColor = if (bigEmoji) Color.Transparent else if (m.deleted) DarkSurface else if (mine) Ink else if (fromClaude) ClaudeBubble else DarkSurfaceVariant
+        val bubbleColor = if (bigEmoji) Color.Transparent else if (m.deleted) DarkSurface else if (mine) Ink else if (fromClaude) (if (m.from == ANTIGRAVITY_BOT_UID) AntigravityBubble else ClaudeBubble) else DarkSurfaceVariant
         Row(Modifier.offset { androidx.compose.ui.unit.IntOffset(swipe.value.roundToInt(), 0) }, verticalAlignment = Alignment.Top) {
         if (avatar != null) {
             if (firstOfRun) ChatAvatar(avatar, 30.dp) else Spacer(Modifier.width(30.dp))
@@ -4065,7 +4144,7 @@ private fun Bubble(
             if (senderName != null && firstOfRun) {
                 Text(
                     senderName,
-                    color = if (m.from == CLAUDE_BOT_UID) ClaudeCoral else memberColor(m.from),
+                    color = if (isAiBot(m.from)) aiBotColor(m.from) else memberColor(m.from),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(start = 10.dp, end = 12.dp, top = if (m.share != null || m.images.isNotEmpty() || m.attachment != null) 4.dp else 8.dp),
@@ -4116,9 +4195,9 @@ private fun Bubble(
             // Claude's answers: who (in other conversations) and which model.
             if (fromClaude && !inClaudeChat) {
                 Row(Modifier.padding(start = 10.dp, end = 12.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ClaudeAvatar(16.dp)
+                    AiBotAvatar(m.from, 16.dp)
                     Spacer(Modifier.width(6.dp))
-                    Text("Claude", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(aiBotName(m.from), color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     if (m.model != null) Text("  ·  " + m.model, color = fgSoft, fontSize = 11.sp)
                 }
             } else if (!mine && m.model != null) {
@@ -4330,6 +4409,7 @@ private fun Bubble(
                         "writing" -> s.claudeWriting
                         else -> s.claudeThinking
                     },
+                    by = assistWork?.by ?: CLAUDE_BOT_UID,
                 )
                 // Its thoughts as they come (the last few lines; a tap shows them all).
                 assistWork?.thought?.takeIf { it.isNotBlank() && assisting != "writing" }?.let { ClaudeThoughts(it) }
@@ -4661,7 +4741,7 @@ private fun ReportDialog(name: String, group: Boolean, s: ChatStrings, onDismiss
     )
 }
 
-private fun fromClaudeId(uid: String) = uid == CLAUDE_BOT_UID
+private fun fromClaudeId(uid: String) = isAiBot(uid)
 
 /** "today 20:00", "tomorrow 09:00", or the date and the time. */
 private fun whenLabel(at: Long, s: ChatStrings): String {
@@ -4804,7 +4884,7 @@ private fun IncomingShareDialog(controller: ChatController, s: ChatStrings) {
     }
 
     val candidates = remember(directTarget, forwardTargets, friends) {
-        (listOfNotNull(directTarget) + forwardTargets + friends.filter { it.uid != CLAUDE_BOT_UID })
+        (listOfNotNull(directTarget) + forwardTargets + friends.filter { !isAiBot(it.uid) })
             .distinctBy { it.uid }
     }
     val shown = remember(candidates, query) {

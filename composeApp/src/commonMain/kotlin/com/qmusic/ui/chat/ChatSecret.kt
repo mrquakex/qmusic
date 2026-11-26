@@ -936,7 +936,7 @@ internal fun SecretNewGroupPage(controller: ChatController) {
     val w = remember(ChatMusic.english) { E2eWords(ChatMusic.english) }
     val decoy by SecretSpace.decoy.collectAsState()
     val all by controller.friends.collectAsState()
-    val friends = if (decoy) emptyList() else all.filter { it.uid != CLAUDE_BOT_UID && !it.isGroup }
+    val friends = if (decoy) emptyList() else all.filter { !isAiBot(it.uid) && !it.isGroup }
     var name by remember { mutableStateOf("") }
     val picked = remember { mutableStateListOf<String>() }
     var busy by remember { mutableStateOf(false) }
@@ -971,7 +971,7 @@ internal fun SecretStartChatPage(controller: ChatController) {
     val w = remember(ChatMusic.english) { E2eWords(ChatMusic.english) }
     val decoy by SecretSpace.decoy.collectAsState()
     val all by controller.friends.collectAsState()
-    val friends = if (decoy) emptyList() else all.filter { it.uid != CLAUDE_BOT_UID && !it.isGroup }
+    val friends = if (decoy) emptyList() else all.filter { !isAiBot(it.uid) && !it.isGroup }
     SecureScreen()
     Column(Modifier.fillMaxSize().background(BgRoot)) {
         TopBar(w.newSecretChat, { controller.pop() })
@@ -990,7 +990,7 @@ internal fun SecretMovePage(controller: ChatController, s: ChatStrings, me: Chat
     val w = remember(ChatMusic.english) { E2eWords(ChatMusic.english) }
     val decoy by SecretSpace.decoy.collectAsState()
     val list by controller.threads.collectAsState()
-    val threads = if (decoy) emptyList() else list.orEmpty().filter { it.other.uid != CLAUDE_BOT_UID }
+    val threads = if (decoy) emptyList() else list.orEmpty().filter { !isAiBot(it.other.uid) }
     var asking by remember { mutableStateOf<ChatThread?>(null) }
     SecureScreen()
     Column(Modifier.fillMaxSize().background(BgRoot)) {
