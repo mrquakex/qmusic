@@ -183,6 +183,7 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
     val pickPhoto = rememberImagePicker { photos -> photos.firstOrNull()?.let { controller.setGroupPhoto(group, it) } }
     var describing by remember { mutableStateOf(false) }
     val messages by remember(group.uid) { controller.messages(group) }.collectAsState(initial = null)
+    val gameStats by remember(group.uid) { controller.gameStats(group) }.collectAsState(initial = com.qmusic.ui.chat.games.ChatGameStats())
     var viewingPhotos by remember { mutableStateOf<Pair<List<ChatImage>, Int>?>(null) }
     var videoOpen by remember { mutableStateOf<String?>(null) }
     val openFile = rememberAttachmentOpener()
@@ -268,6 +269,18 @@ internal fun GroupInfoPage(controller: ChatController, s: ChatStrings, me: ChatU
                 PersonRow(m.user, onClick = { if (m.user.uid != me.uid) memberMenu = m.user }) {
                     Text(e2eWords.invitePending, color = TextSecondary, fontSize = 12.sp)
                 }
+            }
+        }
+        if (gameStats.totalPlayed > 0) {
+            item {
+                val memberNames = remember(g?.members) { g?.members.orEmpty().associate { it.user.uid to it.user.name } }
+                com.qmusic.ui.chat.games.GameScoreboardCard(
+                    stats = gameStats,
+                    names = memberNames,
+                    myUid = me.uid,
+                    s = s,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                )
             }
         }
         if (!messages.isNullOrEmpty()) {

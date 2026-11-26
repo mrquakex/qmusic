@@ -1264,6 +1264,9 @@ private fun ConversationPage(
     }
 
     val togetherState by (controller.together?.active ?: remember { kotlinx.coroutines.flow.MutableStateFlow<TogetherState?>(null) }).collectAsState()
+    val games by remember(other.uid) { controller.games(other) }.collectAsState(initial = emptyMap())
+    var gamePickerOpen by remember(other.uid) { mutableStateOf(false) }
+    var openGameId by remember(other.uid) { mutableStateOf<String?>(null) }
     var searching by remember(other.uid) { mutableStateOf(false) }
     var query by remember(other.uid) { mutableStateOf("") }
     var matchIndex by remember(other.uid) { mutableStateOf(0) }
@@ -1644,6 +1647,9 @@ private fun ConversationPage(
         togetherState?.takeIf { it.chatId == chatId }?.let { state ->
             TogetherBanner(state, s, onOpen = { onOpenShare(state.item) }, onLeave = { controller.together?.leave() })
         }
+        if (!isClaude) {
+            com.qmusic.ui.chat.games.ActiveGameBanner(games, me.uid, controller.serverNow(), s) { openGameId = it }
+        }
         val inThisCall = groupCalls?.state?.collectAsState()?.value?.group?.uid == other.uid
         if (isGroup && groupCalls != null && callPeople.isNotEmpty() && !inThisCall) {
             GroupCallBanner(callPeople, s) {
@@ -1840,6 +1846,10 @@ private fun ConversationPage(
                                     onJoin = { controller.joinTogether(other) },
                                     highlight = current?.id == row.m.id || flash == row.m.id,
                                     quoteDeleted = row.m.replyTo?.id in deletedIds,
+                                    gameSession = row.m.game?.let { games[it.id] },
+                                    gameNowMs = controller.serverNow(),
+                                    onGameJoin = { row.m.game?.let { ref -> controller.joinGame(other, ref.id) { openGameId = ref.id } } },
+                                    onGameOpen = { row.m.game?.let { ref -> openGameId = ref.id } },
                                 )
                             }
                         }
@@ -1934,6 +1944,24 @@ private fun ConversationPage(
                     },
                 )
             }
+            if (!isClaude && text.startsWith("/")) {
+                com.qmusic.ui.chat.games.GameSlashCommands(
+                    query = text,
+                    isGroup = isGroup,
+                    isSelf = other.uid == me.uid,
+                    s = s,
+                    onOpenPicker = { text = ""; gamePickerOpen = true },
+                    onQuickStart = { kind ->
+                        text = ""
+                        com.qmusic.ui.chat.games.handleGameSlashCommand(
+                            com.qmusic.ui.chat.games.GameSlashResult.QuickStart(kind),
+                            controller, other, me, s,
+                            onOpenPicker = { gamePickerOpen = true },
+                            onOpenGame = { openGameId = it },
+                        )
+                    },
+                )
+            }
             if (!isClaude && encrypted && ClaudeAccess.allowed(me.uid) && callsClaude(text)) {
                 Text(e2eWords.noClaude, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 6.dp))
             }
@@ -1977,6 +2005,17 @@ private fun ConversationPage(
             val submit: () -> Unit = submit@{
                 if (text.isBlank()) return@submit
                 val e = editing
+                val gameCmd = if (e == null && !isClaude && text.trim().startsWith("/")) com.qmusic.ui.chat.games.parseGameCommand(text) else null
+                if (gameCmd != null) {
+                    text = ""
+                    controller.stopTyping(other)
+                    com.qmusic.ui.chat.games.handleGameSlashCommand(
+                        gameCmd, controller, other, me, s,
+                        onOpenPicker = { gamePickerOpen = true },
+                        onOpenGame = { openGameId = it },
+                    )
+                    return@submit
+                }
                 if (e != null) {
                     if (text.trim() != e.text) controller.edit(other, e, text)
                     editing = null
@@ -2015,6 +2054,7 @@ private fun ConversationPage(
                 }
                 if (!isClaude) add(AttachAction(s.poll, QMusicIcons.Poll, Color(0xFFFFB300)) { attach = false; pollDialog = true })
                 if (!isClaude) add(AttachAction(if (tr) "Etkinlik" else "Event", QMusicIcons.Timer, Color(0xFFE53958)) { attach = false; eventDialog = true })
+                if (!isClaude) add(AttachAction(s.playGame, QMusicIcons.Dice, Ink) { attach = false; gamePickerOpen = true })
                 // What plays in Nuvelo now: sent as a card.
                 shareables().forEach { item ->
                     val song = item.kind == ShareKind.SONG
@@ -2098,6 +2138,19 @@ private fun ConversationPage(
         ttlDialogState,
         sharedListOpenState,
     )
+    if (!isClaude) {
+        com.qmusic.ui.chat.games.ConversationGameHost(
+            controller = controller,
+            other = other,
+            me = me,
+            s = s,
+            games = games,
+            pickerOpen = gamePickerOpen,
+            openGameId = openGameId,
+            onClosePicker = { gamePickerOpen = false },
+            onOpenGame = { openGameId = it },
+        )
+    }
     liveMapFocus?.let { focus ->
         LiveMapScreen(
             chatId = controller.chatIdWith(other),
@@ -3428,6 +3481,7 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
     val presence by remember(user.uid) { controller.presence(user) }.collectAsState(initial = null)
     val blocked by controller.blocked.collectAsState()
     val messages by remember(user.uid) { controller.messages(user) }.collectAsState(initial = null)
+    val gameStats by remember(user.uid) { controller.gameStats(user) }.collectAsState(initial = com.qmusic.ui.chat.games.ChatGameStats())
     var bigPhoto by remember { mutableStateOf(false) }
     var viewingPhotos by remember { mutableStateOf<Pair<List<ChatImage>, Int>?>(null) }
     var videoOpen by remember { mutableStateOf<String?>(null) }
@@ -3510,6 +3564,17 @@ private fun ProfilePage(controller: ChatController, s: ChatStrings, me: ChatUser
                             Text(w.safetyCode, color = TextSecondary, fontSize = 12.sp)
                         }
                     }
+                }
+            }
+            if (!isClaude && gameStats.totalPlayed > 0) {
+                item {
+                    com.qmusic.ui.chat.games.GameScoreboardCard(
+                        stats = gameStats,
+                        names = mapOf(me.uid to me.name, user.uid to user.name),
+                        myUid = me.uid,
+                        s = s,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
                 }
             }
             if (!messages.isNullOrEmpty()) {
@@ -3758,6 +3823,10 @@ private fun Bubble(
     firstOfRun: Boolean = true,
     /** Whether the message this message replies to is loaded and deleted for everyone. */
     quoteDeleted: Boolean = false,
+    gameSession: com.qmusic.ui.chat.games.GameSession? = null,
+    gameNowMs: Long = 0L,
+    onGameJoin: () -> Unit = {},
+    onGameOpen: () -> Unit = {},
 ) {
     if (m.system) {
         SystemLine(systemLineText(m, mine, otherName, names, s))
@@ -3769,9 +3838,9 @@ private fun Bubble(
     var stickerOpen by remember { mutableStateOf(false) }
     if (stickerOpen) m.gif?.let { g -> StickerSheet(g, s) { stickerOpen = false } }
     // One to three emoji alone: big, without a bubble, as people expect.
-    val bigEmoji = !m.deleted && m.images.isEmpty() && m.attachment == null && m.share == null && m.replyTo == null && m.poll == null && m.event == null && m.location == null && m.contact == null &&
+    val bigEmoji = !m.deleted && m.images.isEmpty() && m.attachment == null && m.share == null && m.replyTo == null && m.poll == null && m.event == null && m.location == null && m.contact == null && m.game == null &&
         (isBigEmoji(m.text) || (m.gif?.sticker == true && m.text.isBlank()))
-    val hasCard = m.share != null || m.images.isNotEmpty() || m.attachment != null || m.poll != null || m.event != null || m.location != null || m.contact != null
+    val hasCard = m.share != null || m.images.isNotEmpty() || m.attachment != null || m.poll != null || m.event != null || m.location != null || m.contact != null || m.game != null
     val fromClaude = m.from == CLAUDE_BOT_UID
     // Pull a message to the right to answer it.
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
@@ -4013,6 +4082,18 @@ private fun Bubble(
                     }
                 }
                 m.contact?.let { c -> ContactCard(c, mine, s) { onSaveContact(c) } }
+                m.game?.let { g ->
+                    com.qmusic.ui.chat.games.GameMessageCard(
+                        ref = g,
+                        session = gameSession,
+                        myUid = myUid,
+                        mine = mine,
+                        nowMs = gameNowMs,
+                        s = s,
+                        onJoin = onGameJoin,
+                        onOpen = onGameOpen,
+                    )
+                }
             }
             m.share?.let { ShareCard(it, mine, s) }
             if (m.together && m.share != null && !mine) {
@@ -4110,7 +4191,7 @@ private fun Bubble(
             }
             if (!m.deleted) DropdownMenuItem(text = { Text(s.reply, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onReply() })
             if (onCopy != null && m.text.isNotEmpty() && !m.deleted) DropdownMenuItem(text = { Text(s.copy, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onCopy() })
-            if (onForward != null && !m.deleted && m.poll == null && m.event == null) DropdownMenuItem(text = { Text(s.forward, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onForward() })
+            if (onForward != null && !m.deleted && m.poll == null && m.event == null && m.game == null) DropdownMenuItem(text = { Text(s.forward, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onForward() })
             if (onTranslate != null && m.text.isNotBlank() && !m.deleted) DropdownMenuItem(text = { Text(s.translate, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onTranslate() })
             if (onSpeak != null && m.text.isNotBlank() && !m.deleted) DropdownMenuItem(text = { Text(s.readAloud, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onSpeak() })
             if (onEdit != null) DropdownMenuItem(text = { Text(s.edit, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onEdit() })
@@ -4189,6 +4270,7 @@ internal fun quoteText(m: ChatMessage, english: Boolean = ChatMusic.english): St
             m.gif != null -> if (m.gif.sticker) (if (english) "Sticker" else "Çıkartma") else "GIF"
             m.event != null -> "📅 " + m.event.title.ifBlank { if (english) "Event" else "Etkinlik" }
             m.poll != null -> "📊 " + m.poll.question
+            m.game != null -> "🎮 " + m.game.title
             m.location != null -> "📍"
             m.contact != null -> "👤 " + m.contact.name.ifBlank { m.contact.phone }
             m.images.isNotEmpty() -> if (m.images.size == 1) "📷" else "📷 ×" + m.images.size

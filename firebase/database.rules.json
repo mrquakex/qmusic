@@ -590,6 +590,21 @@
         ".write": "auth != null && ((!data.exists() && newData.child('uid').val() === auth.uid) || root.child('admins').child(auth.uid).val() === true)",
         ".validate": "!newData.exists() || (newData.child('trace').isString() && newData.child('trace').val().length <= 8000 && newData.child('v').isString() && newData.child('v').val().length <= 20 && newData.child('at').val() === now)"
       }
+    },
+    "games": {
+      "$chatId": {
+        ".read": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))",
+        "$gameId": {
+          ".write": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists())) && !(root.child('bans').child(auth.uid).child('until').isNumber() && root.child('bans').child(auth.uid).child('until').val() > now)",
+          ".validate": "!newData.exists() || (newData.hasChildren(['kind', 'status', 'createdBy', 'version', 'updatedAt']) && newData.child('kind').isString() && newData.child('kind').val().length <= 24 && newData.child('status').isString() && (newData.child('status').val() === 'waiting' || newData.child('status').val() === 'playing' || newData.child('status').val() === 'finished' || newData.child('status').val() === 'cancelled') && (!data.exists() ? newData.child('createdBy').val() === auth.uid : newData.child('createdBy').val() === data.child('createdBy').val()) && newData.child('version').isNumber() && (!data.exists() || newData.child('version').val() >= data.child('version').val()) && (!newData.child('state').exists() || (newData.child('state').isString() && newData.child('state').val().length <= 16000)) && (!newData.child('summary').exists() || (newData.child('summary').isString() && newData.child('summary').val().length <= 160)))"
+        }
+      }
+    },
+    "gameStats": {
+      "$chatId": {
+        ".read": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists()))",
+        ".write": "auth != null && (($chatId.beginsWith(auth.uid + '_') || $chatId.endsWith('_' + auth.uid)) || ($chatId.matches(/^grp[A-Za-z0-9]{20}$/) && root.child('groups').child($chatId).child('members').child(auth.uid).exists())) && !(root.child('bans').child(auth.uid).child('until').isNumber() && root.child('bans').child(auth.uid).child('until').val() > now)"
+      }
     }
   }
 }

@@ -638,6 +638,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                     message.images.isNotEmpty() -> if (message.images.size == 1) "📷" else "📷 ×" + message.images.size
                     message.share != null -> (if (message.share.kind == ShareKind.SONG) "🎵 " else "🎬 ") + message.share.title
                     message.poll != null -> "📊 " + message.poll.question
+                    message.game != null -> "🎮 " + message.game.title
                     message.location != null -> "📍"
                     message.contact != null -> "👤 " + message.contact.name.ifBlank { message.contact.phone }
                     else -> ""
@@ -761,6 +762,222 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     override suspend fun vote(chatId: String, messageId: String, choices: List<Int>) {
         val ref = root.child("chats").child(chatId).child("polls").child(messageId).child(me())
         if (choices.isEmpty()) ref.removeValue() else ref.setValue(choices.distinct().sorted().joinToString(","))
+    }
+
+    // ------------------------------------------------------------------ chat games
+
+    override fun games(chatId: String): Flow<Map<String, com.qmusic.ui.chat.games.GameSession>> = callbackFlow {
+        val job = launch {
+            listen(root.child("games").child(chatId)).collect { snap ->
+                val map = LinkedHashMap<String, com.qmusic.ui.chat.games.GameSession>()
+                snap.children.forEach { child ->
+                    val gid = child.key ?: return@forEach
+                    parseGameMap(gid, chatId, child.value)?.let { map[gid] = it }
+                }
+                trySend(map)
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override fun gameStats(chatId: String): Flow<com.qmusic.ui.chat.games.ChatGameStats> = callbackFlow {
+        val job = launch {
+            listen(root.child("gameStats").child(chatId)).collect { snap ->
+                val total = (snap.child("total").getValue(Long::class.java) ?: 0L).toInt()
+                val wins = LinkedHashMap<String, Int>()
+                snap.child("wins").children.forEach { w ->
+                    val uid = w.key ?: return@forEach
+                    val count = (w.getValue(Long::class.java) ?: 0L).toInt()
+                    if (count > 0) wins[uid] = count
+                }
+                trySend(com.qmusic.ui.chat.games.ChatGameStats(wins = wins, totalPlayed = total))
+            }
+        }
+        awaitClose { job.cancel() }
+    }
+
+    override suspend fun createGame(
+        other: ChatUser,
+        initial: com.qmusic.ui.chat.games.GameSession,
+        preview: String,
+    ): Result<String> = runCatching {
+        val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
+        val chatId = conversationId(me.uid, other)
+        val gameId = initial.id.ifBlank { root.child("games").child(chatId).push().key ?: error("no id") }
+        val session = initial.copy(
+            id = gameId,
+            chatId = chatId,
+            version = initial.version.coerceAtLeast(1L),
+        )
+        root.child("games").child(chatId).child(gameId).setValue(gameToMap(session)).await()
+        val cardTitle = preview.removePrefix("🎮 ").trim().ifBlank { session.kind.wire }.take(60)
+        sendMessage(
+            other = other,
+            text = "",
+            share = null,
+            replyTo = null,
+            images = null,
+            preview = preview.take(PREVIEW_LENGTH),
+            extra = mapOf(
+                "game" to mapOf(
+                    "id" to gameId,
+                    "k" to session.kind.wire,
+                    "t" to cardTitle,
+                ),
+            ),
+        )
+        gameId
+    }
+
+    override suspend fun updateGame(
+        chatId: String,
+        gameId: String,
+        transform: (com.qmusic.ui.chat.games.GameSession) -> com.qmusic.ui.chat.games.GameSession?,
+    ): Result<com.qmusic.ui.chat.games.GameSession> = runCatching {
+        suspendCancellableCoroutine { cont ->
+            root.child("games").child(chatId).child(gameId).runTransaction(
+                object : Transaction.Handler {
+                    override fun doTransaction(currentData: MutableData): Transaction.Result {
+                        val raw = currentData.value ?: return Transaction.success(currentData)
+                        val current = parseGameMap(gameId, chatId, raw) ?: return Transaction.abort()
+                        val next = transform(current) ?: return Transaction.abort()
+                        currentData.value = gameToMap(next.copy(version = current.version + 1L))
+                        return Transaction.success(currentData)
+                    }
+
+                    override fun onComplete(error: DatabaseError?, committed: Boolean, snapshot: DataSnapshot?) {
+                        if (!cont.isActive) return
+                        when {
+                            error != null -> cont.resumeWithException(error.toException())
+                            !committed -> cont.resumeWithException(IllegalStateException("aborted"))
+                            else -> {
+                                val parsed = snapshot?.let { parseGameMap(gameId, chatId, it.value) }
+                                if (parsed != null) cont.resume(parsed)
+                                else cont.resumeWithException(IllegalStateException("missing"))
+                            }
+                        }
+                    }
+                },
+                false,
+            )
+        }
+    }
+
+    override suspend fun recordGameWin(chatId: String, gameId: String, winnerUid: String?): Result<Unit> = runCatching {
+        suspendCancellableCoroutine<Unit> { cont ->
+            root.child("gameStats").child(chatId).runTransaction(
+                object : Transaction.Handler {
+                    override fun doTransaction(currentData: MutableData): Transaction.Result {
+                        val rootMap = (currentData.value as? Map<*, *>) ?: emptyMap<Any?, Any?>()
+                        val counted = ((rootMap["counted"] as? Map<*, *>) ?: emptyMap<Any?, Any?>())
+                            .entries.associate { it.key.toString() to (it.value == true) }.toMutableMap()
+                        if (counted[gameId] == true) return Transaction.abort()
+                        counted[gameId] = true
+                        val total = ((rootMap["total"] as? Number)?.toLong() ?: 0L) + 1L
+                        val wins = ((rootMap["wins"] as? Map<*, *>) ?: emptyMap<Any?, Any?>())
+                            .entries.associate { it.key.toString() to ((it.value as? Number)?.toLong() ?: 0L) }.toMutableMap()
+                        if (!winnerUid.isNullOrBlank() && winnerUid != com.qmusic.ui.chat.games.BOT_UID) {
+                            wins[winnerUid] = (wins[winnerUid] ?: 0L) + 1L
+                        }
+                        currentData.value = buildMap<String, Any?> {
+                            put("counted", counted)
+                            put("total", total)
+                            if (wins.isNotEmpty()) put("wins", wins)
+                        }
+                        return Transaction.success(currentData)
+                    }
+
+                    override fun onComplete(error: DatabaseError?, committed: Boolean, snapshot: DataSnapshot?) {
+                        if (!cont.isActive) return
+                        if (error != null) cont.resumeWithException(error.toException()) else cont.resume(Unit)
+                    }
+                },
+                false,
+            )
+        }
+    }
+
+    private fun gameToMap(s: com.qmusic.ui.chat.games.GameSession): Map<String, Any?> = buildMap {
+        put("kind", s.kind.wire)
+        put("status", s.status.wire)
+        put("createdBy", s.createdBy)
+        put(
+            "players",
+            s.players.mapValues { (_, p) ->
+                mapOf(
+                    "name" to p.name.take(40),
+                    "score" to p.score,
+                    "joinedAt" to p.joinedAt,
+                    "lives" to p.lives,
+                    "ready" to p.ready,
+                )
+            },
+        )
+        put("order", s.order.joinToString(","))
+        if (s.turn != null) put("turn", s.turn)
+        put("round", s.round)
+        put("maxRounds", s.maxRounds)
+        put("turnSeconds", s.turnSeconds)
+        put("turnDeadlineAt", s.turnDeadlineAt)
+        put("version", s.version)
+        put("state", s.stateJson)
+        if (s.commits.isNotEmpty()) put("commits", s.commits)
+        if (s.winnerUid != null) put("winner", s.winnerUid)
+        put("summary", s.summary.take(160))
+        put("createdAt", s.createdAt)
+        put("updatedAt", s.updatedAt)
+        put("expireAt", s.expireAt)
+    }
+
+    private fun parseGameMap(id: String, chatId: String, raw: Any?): com.qmusic.ui.chat.games.GameSession? {
+        val map = raw as? Map<*, *> ?: return null
+        val kind = com.qmusic.ui.chat.games.GameKind.fromWire(map["kind"] as? String) ?: return null
+        val status = com.qmusic.ui.chat.games.GameStatus.fromWire(map["status"] as? String)
+        val createdBy = map["createdBy"] as? String ?: return null
+        val playersRaw = map["players"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val players = LinkedHashMap<String, com.qmusic.ui.chat.games.GamePlayer>()
+        playersRaw.forEach { (k, v) ->
+            val uid = k as? String ?: return@forEach
+            val pm = v as? Map<*, *> ?: return@forEach
+            players[uid] = com.qmusic.ui.chat.games.GamePlayer(
+                uid = uid,
+                name = pm["name"] as? String ?: "",
+                score = (pm["score"] as? Number)?.toInt() ?: 0,
+                joinedAt = (pm["joinedAt"] as? Number)?.toLong() ?: 0L,
+                lives = (pm["lives"] as? Number)?.toInt() ?: 3,
+                ready = pm["ready"] == true,
+            )
+        }
+        val order = (map["order"] as? String).orEmpty().split(',').filter { it.isNotBlank() }
+        val commitsRaw = map["commits"] as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val commits = LinkedHashMap<String, String>()
+        commitsRaw.forEach { (k, v) ->
+            val uid = k as? String ?: return@forEach
+            val hash = v as? String ?: return@forEach
+            commits[uid] = hash
+        }
+        return com.qmusic.ui.chat.games.GameSession(
+            id = id,
+            chatId = chatId,
+            kind = kind,
+            status = status,
+            createdBy = createdBy,
+            players = players,
+            order = order,
+            turn = map["turn"] as? String,
+            round = (map["round"] as? Number)?.toInt() ?: 1,
+            maxRounds = (map["maxRounds"] as? Number)?.toInt() ?: 1,
+            turnSeconds = (map["turnSeconds"] as? Number)?.toInt() ?: 0,
+            turnDeadlineAt = (map["turnDeadlineAt"] as? Number)?.toLong() ?: 0L,
+            version = (map["version"] as? Number)?.toLong() ?: 0L,
+            stateJson = map["state"] as? String ?: "{}",
+            commits = commits,
+            winnerUid = map["winner"] as? String,
+            summary = map["summary"] as? String ?: "",
+            createdAt = (map["createdAt"] as? Number)?.toLong() ?: 0L,
+            updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: 0L,
+            expireAt = (map["expireAt"] as? Number)?.toLong() ?: 0L,
+        )
     }
 
     override suspend fun sendLocation(other: ChatUser, location: ChatLocation): Result<Unit> = runCatching {
@@ -941,6 +1158,11 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             },
             e2e = child("_e2e").getValue(Boolean::class.java) == true,
             locked = locked,
+            game = child("game").takeIf { it.exists() }?.let { g ->
+                val gid = g.child("id").getValue(String::class.java) ?: return@let null
+                val kind = com.qmusic.ui.chat.games.GameKind.fromWire(g.child("k").getValue(String::class.java)) ?: return@let null
+                com.qmusic.ui.chat.games.ChatGameRef(gid, kind, g.child("t").getValue(String::class.java).orEmpty())
+            },
         )
     }
 

@@ -481,3 +481,10 @@ sequenceDiagram
    - Koyu, Açık ve Saf Siyah temada tüm oyun tahtaları/klavyeler yüksek kontrastlı ve %100 tek renkli.
    - `firebase/database.rules.json` yalnızca proje sahibinin onayıyla dağıtılır.
    - Yeni Android izni eklenmez (Play Protect kurallarına tam uyum).
+
+---
+
+## 9. Uygulama Durumu
+- [x] **Faz 1:** Çekirdek motor, Türkçe sözlük, SHA-256 Commit-Reveal, `GameSaltStore`, `/oyna` slash komutları + ek paneli + canlı sohbet kartı + aktif oyun şeridi + tam ekran arena, `ChatBackend`/`ChatController`/`database.rules.json`, Kelime Düellosu, Kelime Zinciri, XOX (Klasik + Sonsuz 3'lü)
+- [x] **Faz 2:** Adam Asmaca, Dörtlü Sıra (7×6), Taş-Kağıt-Makas (Commit-Reveal), İsim-Şehir-Hayvan (60 sn + oylama + `0/5/10/15`), Sayı Tahmin (4 haneli)
+- [x] **Faz 3:** Şarkıyı Bil! (`StatusAudio` + `searchSongs`/`songAudio`), Amiral Battı (8×8 + SHA-256 doğrulama), Tabu (150 kart + otomatik yasaklı kelime filtresi), Bilgi Yarışması (160 soru), Profil & Grup Bilgisi `GameScoreboardCard`

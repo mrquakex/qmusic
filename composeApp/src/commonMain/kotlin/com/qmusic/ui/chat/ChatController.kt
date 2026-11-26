@@ -643,6 +643,106 @@ class ChatController(
         scope.launch { backend.sendContact(other, contact).onFailure { _error.value = it.message } }
     }
 
+    // ------------------------------------------------------------------ chat games
+
+    fun games(other: ChatUser) = chatIdWith(other)?.let { id ->
+        backend.games(id).catch { emit(emptyMap()) }
+    } ?: flowOf(emptyMap())
+
+    fun gameStats(other: ChatUser) = chatIdWith(other)?.let { id ->
+        backend.gameStats(id).catch { emit(com.qmusic.ui.chat.games.ChatGameStats()) }
+    } ?: flowOf(com.qmusic.ui.chat.games.ChatGameStats())
+
+    fun createGame(
+        other: ChatUser,
+        config: com.qmusic.ui.chat.games.GameConfig,
+        s: ChatStrings,
+        onCreated: (String) -> Unit = {},
+    ) {
+        val me = (account.value as? ChatAccount.Ready)?.me ?: return
+        val chatId = chatIdWith(other) ?: return
+        val engine = com.qmusic.ui.chat.games.GameRegistry.of(config.kind) ?: return
+        val solo = other.uid == me.uid
+        val opponent = if (other.isGroup || solo) null else other
+        val now = serverNow()
+        val gameId = "gm" + com.qmusic.ui.chat.games.Sha256.randomSaltHex().take(18)
+        val initial = engine.createInitial(
+            gameId = gameId,
+            chatId = chatId,
+            creator = me,
+            opponent = opponent,
+            solo = solo,
+            config = config,
+            nowMs = now,
+        )
+        val preview = "🎮 " + engine.title(s)
+        scope.launch {
+            backend.createGame(other, initial, preview)
+                .onSuccess { id -> onCreated(id) }
+                .onFailure { _error.value = it.message }
+        }
+    }
+
+    fun joinGame(other: ChatUser, gameId: String, onJoined: () -> Unit = {}) {
+        val me = (account.value as? ChatAccount.Ready)?.me ?: return
+        val chatId = chatIdWith(other) ?: return
+        scope.launch {
+            backend.updateGame(chatId, gameId) { current ->
+                val engine = com.qmusic.ui.chat.games.GameRegistry.of(current.kind) ?: return@updateGame null
+                engine.join(current, me, serverNow())
+            }.onSuccess { onJoined() }
+        }
+    }
+
+    fun submitGameAction(other: ChatUser, gameId: String, action: com.qmusic.ui.chat.games.GameAction) {
+        val me = (account.value as? ChatAccount.Ready)?.me ?: return
+        val chatId = chatIdWith(other) ?: return
+        scope.launch {
+            var becameFinished = false
+            backend.updateGame(chatId, gameId) { current ->
+                val engine = com.qmusic.ui.chat.games.GameRegistry.of(current.kind) ?: return@updateGame null
+                val next = engine.applyAction(current, me.uid, action, serverNow()) ?: return@updateGame null
+                becameFinished = current.status != com.qmusic.ui.chat.games.GameStatus.FINISHED &&
+                    next.status == com.qmusic.ui.chat.games.GameStatus.FINISHED
+                next
+            }.onSuccess { updated ->
+                if (becameFinished) {
+                    launch { runCatching { backend.recordGameWin(chatId, gameId, updated.winnerUid) } }
+                }
+            }
+        }
+    }
+
+    fun forfeitGame(other: ChatUser, gameId: String) =
+        submitGameAction(other, gameId, com.qmusic.ui.chat.games.GameAction("forfeit"))
+
+    fun cancelGame(other: ChatUser, gameId: String) =
+        submitGameAction(other, gameId, com.qmusic.ui.chat.games.GameAction("cancel"))
+
+    fun rematchGame(
+        other: ChatUser,
+        previous: com.qmusic.ui.chat.games.GameSession,
+        s: ChatStrings,
+        onCreated: (String) -> Unit = {},
+    ) {
+        val state = com.qmusic.ui.chat.games.GameJson.parseObject(previous.stateJson)
+        val defaultCfg = com.qmusic.ui.chat.games.GameRegistry.defaultConfig(previous.kind)
+        val mode = (state["mode"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.takeIf { it.isNotBlank() } ?: defaultCfg.mode
+        val extra = (state["category"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.takeIf { it.isNotBlank() } ?: defaultCfg.extra
+        createGame(
+            other = other,
+            config = com.qmusic.ui.chat.games.GameConfig(
+                kind = previous.kind,
+                mode = mode,
+                maxRounds = previous.maxRounds.coerceAtLeast(1),
+                turnSeconds = previous.turnSeconds,
+                extra = extra,
+            ),
+            s = s,
+            onCreated = onCreated,
+        )
+    }
+
     // ------------------------------------------------------------------ the person
 
     val privacy: StateFlow<Privacy> = backend.privacy

@@ -92,6 +92,11 @@ class MainActivity : AppCompatActivity() {
         }
         resolveShareUrisListener = resolveUris
         com.qmusic.ui.chat.IncomingChatShare.resolveUris = resolveUris
+        val gameSalts = app.getSharedPreferences("nuvelo_game_salts", Context.MODE_PRIVATE)
+        com.qmusic.ui.chat.games.GameSaltStore.persistLoad = { key -> gameSalts.getString(key, null) }
+        com.qmusic.ui.chat.games.GameSaltStore.persistSave = { key, value ->
+            gameSalts.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply()
+        }
 
         val container = (application as QMusicApplication).container
         val viewModel = ViewModelProvider(

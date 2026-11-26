@@ -357,6 +357,8 @@ data class ChatMessage(
     /** Sent end-to-end encrypted; [locked]: its key is not on this phone (yet), so it cannot be read. */
     val e2e: Boolean = false,
     val locked: Boolean = false,
+    /** An interactive /oyna chat game card (live state lives under games/{chatId}/{id}). */
+    val game: com.qmusic.ui.chat.games.ChatGameRef? = null,
 )
 
 /** A GIF or a sticker in a message: where it is and its size; a sticker shows without a bubble. */
@@ -667,6 +669,33 @@ interface ChatBackend {
     suspend fun setCallsSeen() {}
 
     suspend fun setFavorite(chatId: String, favorite: Boolean) {}
+
+    // ------------------------------------------------------------------ chat games
+
+    /** Active and recent games in [chatId], keyed by game id. */
+    fun games(chatId: String): Flow<Map<String, com.qmusic.ui.chat.games.GameSession>> =
+        kotlinx.coroutines.flow.flowOf(emptyMap())
+
+    /** Head-to-head game win counts in [chatId]. */
+    fun gameStats(chatId: String): Flow<com.qmusic.ui.chat.games.ChatGameStats> =
+        kotlinx.coroutines.flow.flowOf(com.qmusic.ui.chat.games.ChatGameStats())
+
+    /** Creates a game under games/{chatId}/{gameId} and posts its invitation card in the chat. */
+    suspend fun createGame(
+        other: ChatUser,
+        initial: com.qmusic.ui.chat.games.GameSession,
+        preview: String,
+    ): Result<String> = Result.failure(UnsupportedOperationException())
+
+    /** Atomically updates games/{chatId}/{gameId} via server transaction; returning null aborts. */
+    suspend fun updateGame(
+        chatId: String,
+        gameId: String,
+        transform: (com.qmusic.ui.chat.games.GameSession) -> com.qmusic.ui.chat.games.GameSession?,
+    ): Result<com.qmusic.ui.chat.games.GameSession> = Result.failure(UnsupportedOperationException())
+
+    /** Records a finished game once under gameStats/{chatId} (guarded by counted/{gameId}). */
+    suspend fun recordGameWin(chatId: String, gameId: String, winnerUid: String?): Result<Unit> = Result.success(Unit)
 
     // ------------------------------------------------------------------ status
 
