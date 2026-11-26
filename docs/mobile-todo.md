@@ -31,9 +31,9 @@
 
 ## Paket 3 — Fotoğraf, Video & Sesli Mesaj Deneyimi
 
-- [ ] `ChatScreens.kt` / `ChatAttach.kt` (`PhotoViewer`): Yakınlaştırma/kaydırma (pinch-zoom/pan), aşağı çekerek kapatma, açıklama (caption), paylaşma, albümde "tümünü kaydet"; otomatik indirme kapalıyken sonraki fotoğraflarda sonsuz yükleme bug'ının çözülmesi; tek seferlik (view-once) fotoğraftan indirme butonunun kaldırılması.
-- [ ] `ChatMedia.android.kt`, `ChatScreens.kt`: Video mesajlarda galeriye kaydetme, açıklama ve gelişmiş oynatma kontrolleri; göndermeden önce video kırpma/düzenleme; sohbet içi kamera ile video kaydı ve yuvarlak video notu.
-- [ ] `ChatMedia.android.kt`, `ChatScreens.kt`, `ChatGroupScreens.kt`: Gönderilen sesli mesajlarda `localCopies` yerel önbelleğinin oynatıcıda kullanılması; kayıtta yukarı kilitleme (eller serbest), duraklat/devam et ve göndermeden ön dinleme; oynatmada yakınlık sensörüyle ahizeye geçiş, ardışık otomatik oynatma, dinlendi işareti ve sohbet dışı mini oynatıcı.
+- [x] `ChatScreens.kt` / `ChatAttach.kt` (`PhotoViewer`): Yakınlaştırma/kaydırma (pinch-zoom/pan), aşağı çekerek kapatma, açıklama (caption), paylaşma, albümde "tümünü kaydet"; otomatik indirme kapalıyken sonraki fotoğraflarda sonsuz yükleme bug'ının çözülmesi; tek seferlik (view-once) fotoğraftan indirme butonunun kaldırılması.
+- [x] `ChatMedia.android.kt`, `ChatScreens.kt`: Video mesajlarda galeriye kaydetme, açıklama ve gelişmiş oynatma kontrolleri; göndermeden önce video kırpma/düzenleme; sohbet içi kamera ile video kaydı ve yuvarlak video notu.
+- [x] `ChatMedia.android.kt`, `ChatScreens.kt`, `ChatGroupScreens.kt`: Gönderilen sesli mesajlarda `localCopies` yerel önbelleğinin oynatıcıda kullanılması; kayıtta yukarı kilitleme (eller serbest), duraklat/devam et ve göndermeden ön dinleme; oynatmada yakınlık sensörüyle ahizeye geçiş, ardışık otomatik oynatma, dinlendi işareti ve sohbet dışı mini oynatıcı.
 
 ---
 
@@ -48,17 +48,17 @@
 
 ## Paket 5 — Aramalar & Durumlar (Hikayeler)
 
-- [ ] `CallTelecom.android.kt`: `onSetActive` / `onSetInactive` (çağrı bekletme / ikinci arama) desteği.
-- [ ] `CallService.android.kt`: Android 12 altı Bluetooth SCO, Android 12+ görüntülü aramada kulaklık önceliği, arama ortasında kulaklık tak/çıkar yönlendirmesi, `toggleSpeaker` seçili cihaz temizliği ve hoparlör/kulaklıkta yakınlık sensörü düzeltmesi.
+- [x] `CallTelecom.android.kt`: `onSetActive` / `onSetInactive` (çağrı bekletme / ikinci arama) desteği.
+- [x] `CallService.android.kt`: Android 12 altı Bluetooth SCO, Android 12+ görüntülü aramada kulaklık önceliği, arama ortasında kulaklık tak/çıkar yönlendirmesi, `toggleSpeaker` seçili cihaz temizliği ve hoparlör/kulaklıkta yakınlık sensörü düzeltmesi.
 - [ ] `GroupCall.android.kt`, `CallScreen.kt`, `MainActivity.kt`: Grup aramasında kilit ekranı desteği (`setShowWhenLocked`/`setTurnScreenOn`), küçültme/balon, PiP butonları ve açık tema buton görünürlüğü; 1-1 arama PiP’te arka plan ekran sızıntısı ve video kapatınca PiP korunması.
-- [ ] `ChatStatus.kt`, `PhotoEditor.android.kt`, `VideoCompressor.android.kt`: Video durumlarda yükleme göstergesi, hata yakalama, buffering sırasında ilerleme çubuğunu durdurma, sessize alma, video duruma eklenen müziğin çalması ve etkileşimli video kırpma.
+- [x] `ChatStatus.kt`, `PhotoEditor.android.kt`, `VideoCompressor.android.kt`: Video durumlarda yükleme göstergesi, hata yakalama, buffering sırasında ilerleme çubuğunu durdurma, sessize alma, video duruma eklenen müziğin çalması ve etkileşimli video kırpma.
 
 ---
 
 ## Paket 6 — Müzik, Video Oynatıcı & Açık Tema / Stabilite
 
-- [ ] `MainViewModel.kt`, `OfflineDownloader.kt`: "Tüm indirmeleri kaldır" işleminde veritabanı indirildi işaretlerinin ve yarım kalan indirmelerin tam temizlenmesi; başlangıç ekranı Sohbet/Video iken müzik indirmeleri/listelerinin düzgün yenilenmesi.
+- [x] `MainViewModel.kt`, `OfflineDownloader.kt`: "Tüm indirmeleri kaldır" işleminde veritabanı indirildi işaretlerinin ve yarım kalan indirmelerin tam temizlenmesi; başlangıç ekranı Sohbet/Video iken müzik indirmeleri/listelerinin düzgün yenilenmesi.
 - [ ] `VideoKeepAliveService.kt`, `MainActivity.kt`: Arka plan video oynatmada `MediaSessionService` entegrasyonu (kilit ekranı, sarma çubuğu, Bluetooth/kulaklık tuşları) ve PiP oynat/duraklat/atla aksiyonları.
-- [ ] `StatsScreen.kt`, `LikedSongsScreen.kt`, `CollectionScreen.kt`, `RingtoneEditorScreen.kt`, `QMusicApp.kt`: Açık tema görünürlük hatalarının ve tek renkli (monochrome) sistem dışındaki sabit mor/pembe renklerin düzeltilmesi.
-- [ ] `CollectionScreen.kt`, `ArtistScreen.kt`, `EqualizerDialog.kt`, `SettingsScreen.kt`: Tekrar eden şarkı ID’lerinde `LazyColumn` key çakışmasının giderilmesi, `ArtistScreen` `onShuffle` bağlantısı, toplu "Sıraya ekle" performans düzeltmesi, `EqualizerDialog` aç/kapa anahtarı, açık temada "Saf siyah" ayarı ve küçük ayar düzeltmeleri.
+- [x] `StatsScreen.kt`, `LikedSongsScreen.kt`, `CollectionScreen.kt`, `RingtoneEditorScreen.kt`, `QMusicApp.kt`: Açık tema görünürlük hatalarının ve tek renkli (monochrome) sistem dışındaki sabit mor/pembe renklerin düzeltilmesi.
+- [x] `CollectionScreen.kt`, `ArtistScreen.kt`, `EqualizerDialog.kt`, `SettingsScreen.kt`: Tekrar eden şarkı ID’lerinde `LazyColumn` key çakışmasının giderilmesi, `ArtistScreen` `onShuffle` bağlantısı, toplu "Sıraya ekle" performans düzeltmesi, `EqualizerDialog` aç/kapa anahtarı, açık temada "Saf siyah" ayarı ve küçük ayar düzeltmeleri.
 - [ ] `AndroidManifest.xml`, `AppLinks.kt`, `MainViewModel.kt`: Spotify link host’larının manifeste eklenmesi, `spotify.link` kısa link desteği ve `seekPreview`’da Spotify şarkıları için YouTube ID kullanımı.
