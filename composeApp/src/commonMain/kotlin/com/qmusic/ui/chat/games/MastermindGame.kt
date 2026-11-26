@@ -14,8 +14,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,9 +30,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.qmusic.ui.theme.QMusicIcons
 import com.qmusic.ui.chat.ChatController
 import com.qmusic.ui.chat.ChatStrings
 import com.qmusic.ui.chat.ChatUser
@@ -327,15 +337,11 @@ object MastermindEngine : GameEngine {
                 DigitSlots(code = if (mySet) secrets[me.uid].orEmpty() else draft)
                 Spacer(Modifier.weight(1f))
                 if (!mySet) {
-                    DigitKeypad(
+                    NativeCodeInputBar(
                         draft = draft,
                         tr = tr,
-                        onDigit = { d ->
-                            if (draft.length < 4 && d !in draft && !(draft.isEmpty() && d == '0')) {
-                                draft += d
-                            }
-                        },
-                        onDelete = { if (draft.isNotEmpty()) draft = draft.dropLast(1) },
+                        placeholder = if (tr) "4 farklı rakam yaz (0 ile başlamaz)…" else "Enter 4 unique digits…",
+                        onChange = { draft = filterUniqueDigits(it) },
                         onSubmit = {
                             if (isValidCode(draft)) {
                                 val salt = Sha256.randomSaltHex()
@@ -430,15 +436,11 @@ object MastermindEngine : GameEngine {
                 DigitSlots(code = draft)
                 Spacer(Modifier.height(10.dp))
                 if (myTurn) {
-                    DigitKeypad(
+                    NativeCodeInputBar(
                         draft = draft,
                         tr = tr,
-                        onDigit = { d ->
-                            if (draft.length < 4 && d !in draft && !(draft.isEmpty() && d == '0')) {
-                                draft += d
-                            }
-                        },
-                        onDelete = { if (draft.isNotEmpty()) draft = draft.dropLast(1) },
+                        placeholder = if (tr) "4 haneli tahminin…" else "Your 4-digit guess…",
+                        onChange = { draft = filterUniqueDigits(it) },
                         onSubmit = {
                             if (isValidCode(draft)) {
                                 onAction(GameAction("guess", payload = draft))
@@ -459,6 +461,16 @@ object MastermindEngine : GameEngine {
     }
 }
 
+private fun filterUniqueDigits(raw: String): String = buildString(4) {
+    for (ch in raw) {
+        if (length >= 4) break
+        if (ch !in '0'..'9') continue
+        if (isEmpty() && ch == '0') continue
+        if (ch in this) continue
+        append(ch)
+    }
+}
+
 @Composable
 private fun DigitSlots(code: String) {
     val lime = GameColors.Lime
@@ -467,77 +479,70 @@ private fun DigitSlots(code: String) {
             val ch = code.getOrNull(i)
             Box(
                 modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(13.dp))
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(if (ch != null) lime.copy(alpha = 0.16f) else DarkSurface)
-                    .border(1.6.dp, if (ch != null) lime else BorderSubtle, RoundedCornerShape(13.dp)),
+                    .border(1.6.dp, if (ch != null) lime else BorderSubtle, RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(ch?.toString() ?: "•", color = if (ch != null) lime else TextMuted, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold)
+                Text(ch?.toString() ?: "•", color = if (ch != null) lime else TextMuted, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
             }
         }
     }
 }
 
 @Composable
-private fun DigitKeypad(
+private fun NativeCodeInputBar(
     draft: String,
     tr: Boolean,
-    onDigit: (Char) -> Unit,
-    onDelete: () -> Unit,
+    placeholder: String,
+    onChange: (String) -> Unit,
     onSubmit: () -> Unit,
 ) {
     val lime = GameColors.Lime
-    val rows = listOf(
-        listOf("1", "2", "3", "4", "5"),
-        listOf("6", "7", "8", "9", "0"),
-    )
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-        rows.forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                row.forEach { key ->
-                    val ch = key[0]
-                    val disabled = ch in draft || (draft.isEmpty() && ch == '0') || draft.length >= 4
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (disabled) DarkSurface else DarkSurfaceVariant)
-                            .border(1.dp, if (disabled) BorderSubtle else lime.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
-                            .clickable(enabled = !disabled) { onDigit(ch) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(key, color = if (disabled) TextMuted else TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
+    val ready = MastermindEngine.isValidCode(draft)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(DarkSurfaceVariant)
+            .border(1.2.dp, lime.copy(alpha = 0.60f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.weight(1f)) {
+            if (draft.isEmpty()) {
+                Text(placeholder, color = TextMuted, fontSize = 14.sp)
             }
+            BasicTextField(
+                value = draft,
+                onValueChange = onChange,
+                singleLine = true,
+                textStyle = TextStyle(color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                cursorBrush = SolidColor(lime),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Send,
+                ),
+                keyboardActions = KeyboardActions(onSend = { if (ready) onSubmit() }),
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(44.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(DarkSurface)
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp))
-                    .clickable(enabled = draft.isNotEmpty(), onClick = onDelete),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(if (tr) "Sil" else "Del", color = if (draft.isNotEmpty()) TextPrimary else TextMuted, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            }
-            val ready = MastermindEngine.isValidCode(draft)
-            Box(
-                modifier = Modifier
-                    .weight(2f)
-                    .height(44.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (ready) lime else DarkSurfaceVariant)
-                    .clickable(enabled = ready, onClick = onSubmit),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(if (tr) "Gönder" else "Submit", color = if (ready) GameColors.onAccent(lime) else TextMuted, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            }
+        Spacer(Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(if (ready) lime else DarkSurface)
+                .clickable(enabled = ready, onClick = onSubmit),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                QMusicIcons.Send,
+                contentDescription = if (tr) "Gönder" else "Send",
+                tint = if (ready) GameColors.onAccent(lime) else TextMuted,
+                modifier = Modifier.size(18.dp),
+            )
         }
     }
 }

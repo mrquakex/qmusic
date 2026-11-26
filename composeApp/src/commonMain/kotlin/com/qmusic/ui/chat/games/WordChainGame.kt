@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,7 +33,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -97,21 +100,25 @@ object WordChainEngine : GameEngine {
         return w[idx] to usedSoftG
     }
 
-    data class ChainEntry(val word: String, val uid: String, val name: String)
+    data class ChainEntry(val word: String, val uid: String, val name: String, val meaning: String = "")
 
-    private data class State(val entries: List<ChainEntry>)
+    private data class State(val startLetter: Char, val entries: List<ChainEntry>)
 
     private fun decode(raw: String): State {
         val o = GameJson.parseObject(raw)
         val entries = o.arr("entries").mapNotNull { el ->
             val eo = el as? JsonObject ?: return@mapNotNull null
             val word = eo.str("w").ifBlank { return@mapNotNull null }
-            ChainEntry(word, eo.str("u"), eo.str("n"))
+            ChainEntry(word, eo.str("u"), eo.str("n"), eo.str("m"))
         }
-        return State(entries)
+        val start = o.str("startLetter").firstOrNull()?.let(TurkishText::trUpperChar)
+            ?: entries.firstOrNull()?.word?.firstOrNull()
+            ?: 'K'
+        return State(start, entries)
     }
 
     private fun encode(st: State): String = buildJsonObject {
+        put("startLetter", st.startLetter.toString())
         put(
             "entries",
             buildJsonArray {
@@ -121,12 +128,20 @@ object WordChainEngine : GameEngine {
                             put("w", e.word)
                             put("u", e.uid)
                             put("n", e.name)
+                            if (e.meaning.isNotBlank()) put("m", e.meaning.take(90))
                         },
                     )
                 }
             },
         )
     }.toString()
+
+    /** Returns the required starting letter (and whether the 'Ğ' fallback rule applied) for the current chain state. */
+    fun currentRequirement(session: GameSession): Pair<Char, Boolean> {
+        val st = decode(session.stateJson)
+        val lastWord = st.entries.lastOrNull()?.word.orEmpty()
+        return if (lastWord.isNotEmpty()) requiredStartLetter(lastWord) else (st.startLetter to false)
+    }
 
     override fun createInitial(
         gameId: String,
@@ -137,9 +152,11 @@ object WordChainEngine : GameEngine {
         config: GameConfig,
         nowMs: Long,
     ): GameSession {
-        val starter = TurkishWords.pickStarterWord(gameId)
+        val letters = TurkishText.PLAYABLE_NAME_CITY_LETTERS
+        val explicit = config.extra.trim().firstOrNull()?.let(TurkishText::trUpperChar)?.takeIf { it in letters }
+        val startLetter = explicit ?: letters[Sha256.deterministicIndex("$gameId|$nowMs|${Sha256.randomSaltHex()}", letters.length)]
         val seconds = config.turnSeconds.takeIf { it in 10..60 } ?: 20
-        val st = State(listOf(ChainEntry(starter, "", "Nuvelo")))
+        val st = State(startLetter = startLetter, entries = emptyList())
         return GameSession(
             id = gameId,
             chatId = chatId,
@@ -154,7 +171,7 @@ object WordChainEngine : GameEngine {
             turnSeconds = seconds,
             turnDeadlineAt = 0L,
             stateJson = encode(st),
-            summary = "${creator.name.substringBefore(' ')} davet gönderdi · $starter",
+            summary = "${creator.name.substringBefore(' ')} davet gönderdi · Harf çarkı hazır!",
             createdAt = nowMs,
             updatedAt = nowMs,
             expireAt = nowMs + GAME_TTL_MS,
@@ -167,10 +184,9 @@ object WordChainEngine : GameEngine {
         val updatedPlayers = session.players + (player.uid to GamePlayer(player.uid, player.name, joinedAt = nowMs, lives = START_LIVES, ready = true))
         val updatedOrder = session.order + player.uid
         val firstTurn = if (session.status == GameStatus.WAITING) player.uid else session.turn
-        val deadline = if (session.status == GameStatus.WAITING) nowMs + session.turnSeconds * 1000L else session.turnDeadlineAt
-        val st = decode(session.stateJson)
-        val lastWord = st.entries.lastOrNull()?.word.orEmpty()
-        val req = requiredStartLetter(lastWord).first
+        // +3s grace on turn 1 so the 2.35s horizontal letter roulette animation finishes smoothly
+        val deadline = if (session.status == GameStatus.WAITING) nowMs + (session.turnSeconds + 3) * 1000L else session.turnDeadlineAt
+        val req = currentRequirement(session).first
         return session.copy(
             status = GameStatus.PLAYING,
             players = updatedPlayers,
@@ -183,28 +199,26 @@ object WordChainEngine : GameEngine {
     }
 
     /** Returns null if valid, or a localized error message string if invalid. */
-    fun validateWord(session: GameSession, rawWord: String, english: Boolean): String? {
-        val word = TurkishText.trNormalize(rawWord)
-        if (word.length < 3 || word != TurkishText.trUpper(rawWord.trim())) {
+    fun validateWord(session: GameSession, rawWord: String, english: Boolean, checkLocalDict: Boolean = true): String? {
+        val cleanInput = rawWord.substringBefore('|').trim()
+        val word = TurkishText.trNormalize(cleanInput)
+        if (word.length < 3 || word != TurkishText.trUpper(cleanInput)) {
             return if (english) "Enter at least 3 Turkish letters" else "En az 3 Türkçe harf yaz"
         }
         val st = decode(session.stateJson)
-        val lastWord = st.entries.lastOrNull()?.word.orEmpty()
-        if (lastWord.isNotEmpty()) {
-            val (req, softG) = requiredStartLetter(lastWord)
-            if (word.first() != req) {
-                return if (english) {
-                    "Must start with '$req'" + if (softG) " (ğ rule)" else ""
-                } else {
-                    "'$req' harfiyle başlamalı" + if (softG) " (ğ kuralı)" else ""
-                }
+        val (req, softG) = currentRequirement(session)
+        if (word.first() != req) {
+            return if (english) {
+                "Must start with '$req'" + if (softG) " (ğ rule)" else ""
+            } else {
+                "'$req' harfiyle başlamalı" + if (softG) " (ğ kuralı)" else ""
             }
         }
         if (st.entries.any { it.word == word }) {
             return if (english) "Already used in this game" else "Bu kelime daha önce kullanıldı"
         }
-        if (!TurkishWords.isValidChainWord(word)) {
-            return if (english) "Not in Turkish dictionary" else "Türkçe sözlükte bulunamadı"
+        if (checkLocalDict && !TurkishWords.isValidChainWord(word)) {
+            return if (english) "Not in Turkish dictionary" else "TDK sözlüğünde bulunamadı"
         }
         return null
     }
@@ -217,18 +231,20 @@ object WordChainEngine : GameEngine {
         return when (action.type) {
             "word" -> {
                 if (session.turn != uid) return null
-                if (validateWord(session, action.payload, english = false) != null) return null
-                val word = TurkishText.trNormalize(action.payload)
+                val rawWord = action.payload.substringBefore('|')
+                val meaning = action.payload.substringAfter('|', "").trim().take(90)
+                if (validateWord(session, rawWord, english = false, checkLocalDict = TurkishDictApi.httpGet == null) != null) return null
+                val word = TurkishText.trNormalize(rawWord)
                 val mePlayer = session.players.getValue(uid)
                 val updatedPlayers = session.players + (uid to mePlayer.copy(score = mePlayer.score + 1))
-                val nextEntries = (st.entries + ChainEntry(word, uid, mePlayer.name)).takeLast(120)
+                val nextEntries = (st.entries + ChainEntry(word, uid, mePlayer.name, meaning)).takeLast(120)
                 val nextTurn = GameRulesHelper.nextInOrder(session.order, uid) { (updatedPlayers[it]?.lives ?: 0) > 0 }
                 val (req, _) = requiredStartLetter(word)
                 session.copy(
                     players = updatedPlayers,
                     turn = nextTurn,
                     turnDeadlineAt = nowMs + session.turnSeconds * 1000L,
-                    stateJson = encode(State(nextEntries)),
+                    stateJson = encode(st.copy(entries = nextEntries)),
                     summary = "$word → ${updatedPlayers[nextTurn]?.name?.substringBefore(' ')} ('$req')",
                     updatedAt = nowMs,
                 )
@@ -278,12 +294,14 @@ object WordChainEngine : GameEngine {
     ) {
         val en = s.english
         val st = remember(session.stateJson) { decode(session.stateJson) }
-        val lastWord = st.entries.lastOrNull()?.word.orEmpty()
-        val (reqLetter, usedSoftG) = remember(lastWord) { requiredStartLetter(lastWord) }
+        val (reqLetter, usedSoftG) = remember(session.stateJson) { currentRequirement(session) }
         val myTurn = session.status == GameStatus.PLAYING && session.turn == me.uid
         var input by remember(st.entries.size) { mutableStateOf("") }
         var errorMsg by remember { mutableStateOf<String?>(null) }
+        var checking by remember { mutableStateOf(false) }
+        var reelDone by remember(session.id) { mutableStateOf(st.entries.isNotEmpty() || session.status != GameStatus.PLAYING) }
         val listState = rememberLazyListState()
+        val scope = rememberCoroutineScope()
 
         var nowMs by remember { mutableLongStateOf(controller.serverNow()) }
         var claimedDeadline by remember { mutableLongStateOf(0L) }
@@ -373,46 +391,71 @@ object WordChainEngine : GameEngine {
                 }
             }
 
-            // Current required letter prompt card
+            // Horizontal linear letter roulette on game start, or active next-letter prompt once words flow
             Spacer(Modifier.height(10.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(cyan.copy(alpha = 0.12f))
-                    .border(1.2.dp, if (myTurn) cyan else cyan.copy(alpha = 0.30f), RoundedCornerShape(14.dp))
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(cyan),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(reqLetter.toString(), color = GameColors.onAccent(cyan), fontSize = 22.sp, fontWeight = FontWeight.Black)
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        if (en) "Start with '$reqLetter'" + if (usedSoftG) " (ğ rule)" else ""
-                        else "'$reqLetter' harfiyle başla" + if (usedSoftG) " (ğ kuralı)" else "",
-                        color = TextPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        if (myTurn) (if (en) "Your turn — ${st.entries.size} words" else "Sıra sende · ${st.entries.size} kelime")
-                        else {
+            if (st.entries.isEmpty()) {
+                LetterRouletteStrip(
+                    targetLetter = st.startLetter,
+                    spinKey = session.id,
+                    accent = cyan,
+                    animate = session.status == GameStatus.PLAYING,
+                    onSettled = { reelDone = true },
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    when {
+                        session.status == GameStatus.WAITING -> if (en) "Waiting for player to spin the letter reel…" else "Oyuncu katılınca başlangıç harfi çarkı dönecek…"
+                        !reelDone -> if (en) "Picking a random Turkish letter…" else "Rastgele başlangıç harfi çekiliyor…"
+                        myTurn -> if (en) "'$reqLetter' landed! Write the first word" else "'$reqLetter' geldi! İlk kelimeyi yaz"
+                        else -> {
                             val who = session.players[session.turn]?.name?.substringBefore(' ').orEmpty()
-                            if (en) "$who's turn…" else "Sıra $who oyuncusunda…"
-                        },
-                        color = if (myTurn) cyan else TextSecondary,
-                        fontSize = 12.sp,
-                        fontWeight = if (myTurn) FontWeight.SemiBold else FontWeight.Normal,
-                    )
+                            if (en) "'$reqLetter' landed · $who goes first" else "'$reqLetter' geldi · İlk sıra $who oyuncusunda"
+                        }
+                    },
+                    color = if (reelDone && myTurn) cyan else TextSecondary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(cyan.copy(alpha = 0.12f))
+                        .border(1.2.dp, if (myTurn) cyan else cyan.copy(alpha = 0.30f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(cyan),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(reqLetter.toString(), color = GameColors.onAccent(cyan), fontSize = 22.sp, fontWeight = FontWeight.Black)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (en) "Start with '$reqLetter'" + if (usedSoftG) " (ğ rule)" else ""
+                            else "'$reqLetter' harfiyle başla" + if (usedSoftG) " (ğ kuralı)" else "",
+                            color = TextPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            if (myTurn) (if (en) "Your turn — ${st.entries.size} words · TDK live" else "Sıra sende · ${st.entries.size} kelime · TDK canlı")
+                            else {
+                                val who = session.players[session.turn]?.name?.substringBefore(' ').orEmpty()
+                                if (en) "$who's turn…" else "Sıra $who oyuncusunda…"
+                            },
+                            color = if (myTurn) cyan else TextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = if (myTurn) FontWeight.SemiBold else FontWeight.Normal,
+                        )
+                    }
                 }
             }
 
-            // Word chain history
+            // Word chain history (with live TDK meaning line!)
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -428,7 +471,7 @@ object WordChainEngine : GameEngine {
                         else -> indigo.copy(alpha = 0.18f)
                     }
                     val bubbleFg = if (isMine) GameColors.onAccent(cyan) else TextPrimary
-                    val bubbleSub = if (isMine) GameColors.onAccent(cyan).copy(alpha = 0.72f) else TextSecondary
+                    val bubbleSub = if (isMine) GameColors.onAccent(cyan).copy(alpha = 0.78f) else TextSecondary
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = if (isStarter) Arrangement.Center else if (isMine) Arrangement.End else Arrangement.Start,
@@ -446,10 +489,19 @@ object WordChainEngine : GameEngine {
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                             )
+                            if (entry.meaning.isNotBlank()) {
+                                Text(
+                                    entry.meaning,
+                                    color = bubbleSub,
+                                    fontSize = 11.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                             Text(
                                 if (isStarter) (if (en) "Starter" else "Başlangıç") else if (isMine) (if (en) "You" else "Sen") else entry.name.substringBefore(' '),
                                 color = bubbleSub,
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                             )
                         }
                     }
@@ -460,15 +512,25 @@ object WordChainEngine : GameEngine {
                 Text(msg, color = GameColors.Crimson, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
             }
 
-            // Input bar
-            val submitWord = {
-                if (myTurn && input.isNotBlank()) {
-                    val err = validateWord(session, input, en)
-                    if (err != null) {
-                        errorMsg = err
+            // Input bar with live TDK API verification
+            val submitWord: () -> Unit = {
+                if (myTurn && !checking && input.isNotBlank()) {
+                    val structuralErr = validateWord(session, input, en, checkLocalDict = false)
+                    if (structuralErr != null) {
+                        errorMsg = structuralErr
                     } else {
-                        onAction(GameAction("word", payload = TurkishText.trNormalize(input)))
-                        input = ""
+                        val candidate = TurkishText.trNormalize(input)
+                        checking = true
+                        scope.launch {
+                            val res = TurkishDictApi.lookup(candidate)
+                            checking = false
+                            if (!res.valid) {
+                                errorMsg = if (en) "Not found in TDK Turkish Dictionary" else "TDK sözlüğünde bulunamadı"
+                            } else {
+                                onAction(GameAction("word", payload = "$candidate|${res.meaning}"))
+                                input = ""
+                            }
+                        }
                     }
                 }
             }
@@ -492,8 +554,8 @@ object WordChainEngine : GameEngine {
                     }
                     BasicTextField(
                         value = input,
-                        onValueChange = { if (myTurn) input = it.take(24) },
-                        enabled = myTurn,
+                        onValueChange = { if (myTurn && !checking) input = it.take(24) },
+                        enabled = myTurn && !checking,
                         singleLine = true,
                         textStyle = TextStyle(color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Medium),
                         cursorBrush = SolidColor(cyan),
@@ -507,16 +569,20 @@ object WordChainEngine : GameEngine {
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
-                        .background(if (myTurn && input.trim().length >= 3) cyan else DarkSurface)
-                        .clickable(enabled = myTurn && input.trim().length >= 3, onClick = submitWord),
+                        .background(if (myTurn && input.trim().length >= 3 && !checking) cyan else DarkSurface)
+                        .clickable(enabled = myTurn && input.trim().length >= 3 && !checking, onClick = submitWord),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        QMusicIcons.Send,
-                        contentDescription = null,
-                        tint = if (myTurn && input.trim().length >= 3) GameColors.onAccent(cyan) else TextMuted,
-                        modifier = Modifier.size(18.dp),
-                    )
+                    if (checking) {
+                        CircularProgressIndicator(color = cyan, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                    } else {
+                        Icon(
+                            QMusicIcons.Send,
+                            contentDescription = null,
+                            tint = if (myTurn && input.trim().length >= 3) GameColors.onAccent(cyan) else TextMuted,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
             }
         }

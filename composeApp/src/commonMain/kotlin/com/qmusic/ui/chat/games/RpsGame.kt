@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -308,9 +310,9 @@ object RpsEngine : GameEngine {
         val rivalMove = RpsMove.fromWire(rivalUid?.let { reveals[it] })
 
         Column(
-            modifier = modifier.padding(16.dp),
+            modifier = modifier.verticalScroll(rememberScrollState()).padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             // Scoreboard
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
@@ -352,12 +354,12 @@ object RpsEngine : GameEngine {
                 if (phase == "round_over" && myMove != null && rivalMove != null) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        RevealCard(s.you, myMove, tr, highlight = myMove.beats(rivalMove))
+                        RevealCard(s.you, myMove, tr, highlight = myMove.beats(rivalMove), modifier = Modifier.weight(1f))
                         Text("VS", color = TextMuted, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        RevealCard(rivalUid?.let { session.players[it]?.name?.substringBefore(' ') } ?: "?", rivalMove, tr, highlight = rivalMove.beats(myMove))
+                        RevealCard(rivalUid?.let { session.players[it]?.name?.substringBefore(' ') } ?: "?", rivalMove, tr, highlight = rivalMove.beats(myMove), modifier = Modifier.weight(1f))
                     }
                     Spacer(Modifier.height(14.dp))
                     Text(session.summary, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
@@ -467,13 +469,12 @@ private fun rpsMoveColor(move: RpsMove): androidx.compose.ui.graphics.Color = wh
 }
 
 @Composable
-private fun RevealCard(name: String, move: RpsMove, tr: Boolean, highlight: Boolean) {
+private fun RevealCard(name: String, move: RpsMove, tr: Boolean, highlight: Boolean, modifier: Modifier = Modifier) {
     val mc = rpsMoveColor(move)
     val bg = if (highlight) GameColors.Emerald else mc.copy(alpha = 0.12f)
     val fg = if (highlight) GameColors.onAccent(GameColors.Emerald) else mc
     Column(
-        modifier = Modifier
-            .width(128.dp)
+        modifier = modifier
             .clip(RoundedCornerShape(18.dp))
             .background(bg)
             .border(1.8.dp, if (highlight) GameColors.Emerald else mc.copy(alpha = 0.50f), RoundedCornerShape(18.dp))

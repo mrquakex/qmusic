@@ -97,7 +97,7 @@ object NameCityEngine : GameEngine {
         } else {
             GameStatus.WAITING
         }
-        val letter = pickLetter(gameId, 1, emptyList())
+        val letter = pickLetter(gameId + "|" + Sha256.randomSaltHex(), 1, emptyList())
         return GameSession(
             id = gameId,
             chatId = chatId,
@@ -374,25 +374,21 @@ object NameCityEngine : GameEngine {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Header with huge golden-amber letter stamp + teal timer/scores
+            // Header with horizontal linear letter roulette + teal timer/scores
             val teal = GameColors.Teal
             val amber = GameColors.Amber
             val catColors = listOf(GameColors.Indigo, GameColors.Teal, GameColors.Orange, GameColors.Emerald, GameColors.Violet)
+            LetterRouletteStrip(
+                targetLetter = letter.firstOrNull() ?: 'A',
+                spinKey = "${session.id}|nc|${session.round}",
+                accent = amber,
+                animate = phase == "write" && me.uid !in answers,
+            )
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(60.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(amber),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(letter, color = GameColors.onAccent(amber), fontSize = 32.sp, fontWeight = FontWeight.Black)
-                }
-                Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
                         when (phase) {
-                            "write" -> if (tr) "Kalan süre: ${remainingSec} sn" else "Time left: ${remainingSec}s"
+                            "write" -> if (tr) "Harf: $letter · Kalan süre: ${remainingSec} sn" else "Letter: $letter · Time left: ${remainingSec}s"
                             "vote" -> if (tr) "Cevapları kontrol et ve onayla" else "Review and approve answers"
                             else -> if (tr) "Tur ${session.round} Sonucu" else "Round ${session.round} Result"
                         },

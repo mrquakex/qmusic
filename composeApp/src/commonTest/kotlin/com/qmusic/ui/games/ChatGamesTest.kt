@@ -7,6 +7,7 @@ import com.qmusic.ui.chat.games.GameKind
 import com.qmusic.ui.chat.games.GameStatus
 import com.qmusic.ui.chat.games.KeyMark
 import com.qmusic.ui.chat.games.Sha256
+import com.qmusic.ui.chat.games.TurkishDictApi
 import com.qmusic.ui.chat.games.TurkishText
 import com.qmusic.ui.chat.games.TurkishWords
 import com.qmusic.ui.chat.games.WordChainEngine
@@ -83,21 +84,34 @@ class ChatGamesTest {
     }
 
     @Test
+    fun tdkDictApiEncodesTurkishAndParsesResponses() {
+        assertEquals("a%C4%9Fa%C3%A7", TurkishDictApi.encodeUtf8Query("ağaç"))
+        assertEquals("%C5%9Feker", TurkishDictApi.encodeUtf8Query("şeker"))
+        val ok = TurkishDictApi.parseTdkResponse("""[{"madde":"kitap","anlamlarListe":[{"anlam":"Basılı yaprakların bütünü"}]}]""")
+        assertNotNull(ok)
+        assertTrue(ok.valid)
+        assertEquals("Basılı yaprakların bütünü", ok.meaning)
+        val err = TurkishDictApi.parseTdkResponse("""{"error":"Sonuç bulunamadı"}""")
+        assertNotNull(err)
+        assertFalse(err.valid)
+    }
+
+    @Test
     fun wordChainSoftGRuleDuplicateGuardAndTimeoutElimination() {
         assertEquals('A' to true, WordChainEngine.requiredStartLetter("DAĞ"))
         assertEquals('P' to false, WordChainEngine.requiredStartLetter("KİTAP"))
 
-        val g0 = WordChainEngine.createInitial("g_wc", "ali_veli", ALI, VELI, solo = false, GameConfig(GameKind.WORD_CHAIN, turnSeconds = 15), 1000L)
+        val g0 = WordChainEngine.createInitial("g_wc", "ali_veli", ALI, VELI, solo = false, GameConfig(GameKind.WORD_CHAIN, turnSeconds = 15, extra = "K"), 1000L)
         var g = WordChainEngine.join(g0, VELI, 2000L)!!
         assertEquals(GameStatus.PLAYING, g.status)
         assertEquals(VELI.uid, g.turn)
 
-        // Starter word -> find a valid word matching its last letter
-        val starter = TurkishWords.pickStarterWord("g_wc")
-        val req = WordChainEngine.requiredStartLetter(starter).first
-        val valid = TurkishWords.allChainWords.first { it != starter && it.first() == req && it.length >= 4 }
+        // Start letter 'K' -> find a valid word starting with 'K'
+        val req = WordChainEngine.currentRequirement(g).first
+        assertEquals('K', req)
+        val valid = TurkishWords.allChainWords.first { it.first() == req && it.length >= 4 }
         assertNull(WordChainEngine.validateWord(g, valid, english = false))
-        g = WordChainEngine.applyAction(g, VELI.uid, GameAction("word", valid), 4000L)!!
+        g = WordChainEngine.applyAction(g, VELI.uid, GameAction("word", "$valid|Test anlam"), 4000L)!!
         assertEquals(ALI.uid, g.turn)
         // Repeating the same word is rejected
         assertNotNull(WordChainEngine.validateWord(g, valid, english = false))

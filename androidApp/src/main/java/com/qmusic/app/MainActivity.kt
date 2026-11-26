@@ -97,6 +97,25 @@ class MainActivity : AppCompatActivity() {
         com.qmusic.ui.chat.games.GameSaltStore.persistSave = { key, value ->
             gameSalts.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply()
         }
+        com.qmusic.ui.chat.games.TurkishDictApi.httpGet = { url ->
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val conn = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 5_000
+                        readTimeout = 5_000
+                        setRequestProperty("User-Agent", "Mozilla/5.0 Nuvelo")
+                        setRequestProperty("Accept", "application/json")
+                    }
+                    try {
+                        val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+                        stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    } finally {
+                        conn.disconnect()
+                    }
+                }.getOrNull()
+            }
+        }
 
         val container = (application as QMusicApplication).container
         val viewModel = ViewModelProvider(

@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,7 +19,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -323,11 +326,16 @@ object XoxEngine : GameEngine {
             }
         }
 
-        Column(
-            modifier = modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+        BoxWithConstraints(
+            modifier = modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp),
+            contentAlignment = Alignment.Center,
         ) {
+            val boardSide = minOf(maxWidth, maxHeight - 160.dp).coerceIn(190.dp, 310.dp)
+            Column(
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
             // Mode & Score Header
             Row(
                 modifier = Modifier
@@ -381,9 +389,7 @@ object XoxEngine : GameEngine {
             val winColor = if (st.roundWinner == xUid) xColor else if (st.roundWinner == oUid) oColor else GameColors.Gold
             Box(
                 modifier = Modifier
-                    .widthIn(max = 320.dp)
-                    .fillMaxWidth()
-                    .aspectRatio(1f),
+                    .size(boardSide),
             ) {
                 Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     for (r in 0 until 3) {
@@ -493,6 +499,7 @@ object XoxEngine : GameEngine {
                         fontWeight = FontWeight.Bold,
                     )
                 }
+            }
             }
         }
     }

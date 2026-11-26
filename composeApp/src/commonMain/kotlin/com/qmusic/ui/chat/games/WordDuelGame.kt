@@ -3,8 +3,10 @@ package com.qmusic.ui.chat.games
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,22 +20,35 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.qmusic.ui.theme.QMusicIcons
 import com.qmusic.ui.chat.ChatController
 import com.qmusic.ui.chat.ChatStrings
 import com.qmusic.ui.chat.ChatUser
@@ -213,7 +228,8 @@ object WordDuelEngine : GameEngine {
     ): GameSession {
         val mode = if (solo || opponent == null) "race" else if (config.mode == "duel") "duel" else "race"
         val rounds = if (mode == "duel") config.maxRounds.coerceIn(2, 4).let { if (it % 2 == 0) it else it + 1 } else config.maxRounds.coerceIn(1, 5)
-        val target = if (mode == "race") TurkishWords.pickTarget5("$gameId:1") else ""
+        val explicitTarget = TurkishText.trNormalize(config.extra).takeIf { it.length == WORD_LEN }
+        val target = if (mode == "race") explicitTarget ?: TurkishWords.pickTarget5("$gameId:1") else ""
         val creatorPlayer = GamePlayer(creator.uid, creator.name, score = 0, joinedAt = nowMs, ready = true)
         val state = State(
             mode = mode,
@@ -281,7 +297,8 @@ object WordDuelEngine : GameEngine {
             "set_word" -> {
                 if (st.mode != "duel" || st.setterUid != uid || st.target.isNotEmpty()) return null
                 val word = TurkishText.trNormalize(action.payload)
-                if (!TurkishWords.isValidWord5(word)) return null
+                if (word.length != WORD_LEN || !TurkishText.isTurkishWord(word)) return null
+                if (TurkishDictApi.httpGet == null && !TurkishWords.isValidWord5(word)) return null
                 val guesser = session.order.firstOrNull { it != uid } ?: return null
                 val nextState = st.copy(target = word, roundStartedAt = nowMs)
                 val guesserName = session.players[guesser]?.name?.substringBefore(' ').orEmpty()
@@ -299,7 +316,8 @@ object WordDuelEngine : GameEngine {
                 val board = st.boards[uid] ?: PlayerBoard()
                 if (board.done || board.guesses.size >= MAX_TRIES) return null
                 val guess = TurkishText.trNormalize(action.payload)
-                if (!TurkishWords.isValidWord5(guess)) return null
+                if (guess.length != WORD_LEN || !TurkishText.isTurkishWord(guess)) return null
+                if (TurkishDictApi.httpGet == null && !TurkishWords.isValidWord5(guess)) return null
                 val marks = evaluateGuess(st.target, guess)
                 val solved = marks.all { it == KeyMark.EXACT }
                 val newGuesses = board.guesses + guess
@@ -425,6 +443,8 @@ object WordDuelEngine : GameEngine {
         val myBoard = st.boards[me.uid] ?: PlayerBoard()
         var draft by remember(session.round, myBoard.guesses.size, st.target) { mutableStateOf("") }
         var notice by remember { mutableStateOf<String?>(null) }
+        var checking by remember { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
         LaunchedEffect(notice) {
             if (notice != null) {
                 delay(1800)
@@ -491,42 +511,54 @@ object WordDuelEngine : GameEngine {
             }
 
             if (waitingToSet && iAmSetter) {
-                // Setter enters secret 5-letter word
+                val submitSecret: () -> Unit = {
+                    val clean = TurkishText.trNormalize(draft)
+                    if (!checking && clean.length == WORD_LEN) {
+                        checking = true
+                        scope.launch {
+                            val res = TurkishDictApi.lookup(clean)
+                            checking = false
+                            if (res.valid) {
+                                val salt = Sha256.randomSaltHex()
+                                val hash = Sha256.commitHash(session.id, session.round, me.uid, clean, salt)
+                                onAction(GameAction("set_word", payload = clean, clientHash = hash))
+                                draft = ""
+                            } else {
+                                notice = if (en) "Not found in TDK dictionary" else "TDK sözlüğünde bulunamadı"
+                            }
+                        }
+                    } else if (clean.length != WORD_LEN) {
+                        notice = if (en) "Enter a 5-letter word" else "5 harfli Türkçe kelime gir"
+                    }
+                }
                 Column(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
                     Text(
                         if (en) "Pick a secret 5-letter Turkish word" else "Rakibin için 5 harfli gizli kelime yaz",
                         color = TextPrimary,
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center,
                     )
-                    Spacer(Modifier.height(16.dp))
-                    WordRow(word = draft, marks = null, active = true)
+                    Spacer(Modifier.height(14.dp))
+                    WordRow(word = draft, marks = null, active = true, tileSize = 48.dp)
                     notice?.let { msg ->
                         Spacer(Modifier.height(10.dp))
-                        Text(msg, color = TextSecondary, fontSize = 13.sp)
+                        Text(msg, color = GameColors.Crimson, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     }
                 }
-                TurkishKeyboard(
-                    marks = emptyMap(),
-                    enabled = true,
-                    enterEnabled = draft.length == WORD_LEN,
-                    onLetter = { ch -> if (draft.length < WORD_LEN) draft += ch },
-                    onBackspace = { if (draft.isNotEmpty()) draft = draft.dropLast(1) },
-                    onEnter = {
-                        if (TurkishWords.isValidWord5(draft)) {
-                            val salt = Sha256.randomSaltHex()
-                            val hash = Sha256.commitHash(session.id, session.round, me.uid, draft, salt)
-                            onAction(GameAction("set_word", payload = draft, clientHash = hash))
-                            draft = ""
-                        } else {
-                            notice = if (en) "Word not in Turkish dictionary" else "Sözlükte bulunamadı"
-                        }
-                    },
+                NativeWordInputBar(
+                    value = draft,
+                    placeholder = if (en) "Type 5-letter word…" else "5 harfli kelime yaz…",
+                    enabled = !checking,
+                    ready = draft.length == WORD_LEN && !checking,
+                    busy = checking,
+                    accent = GameColors.Emerald,
+                    onChange = { raw -> draft = TurkishText.trNormalize(raw).take(WORD_LEN) },
+                    onSubmit = submitSecret,
                 )
                 return@Column
             }
@@ -544,92 +576,147 @@ object WordDuelEngine : GameEngine {
                 return@Column
             }
 
-            // Main 6x5 grid (or spectating guesser's grid if I am the setter in duel mode)
+            // Main responsive 6x5 grid (dynamically scales to available width & height even with native keyboard open!)
             val viewedUid = if (iAmSetter) session.order.firstOrNull { it != me.uid } ?: me.uid else me.uid
             val viewedBoard = st.boards[viewedUid] ?: PlayerBoard()
             val canGuess = !iAmSetter && !st.roundOver && !myBoard.done && session.status == GameStatus.PLAYING
 
-            Column(
-                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
+            BoxWithConstraints(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentAlignment = Alignment.Center,
             ) {
-                if (iAmSetter) {
-                    Text(
-                        (if (en) "Your secret word: " else "Gizli kelimen: ") + st.target,
-                        color = TextSecondary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                }
-                for (row in 0 until MAX_TRIES) {
-                    val pastWord = viewedBoard.guesses.getOrNull(row)
-                    val pastPat = viewedBoard.patterns.getOrNull(row)?.let(::decodeMarks)
-                    val isDraftRow = canGuess && row == myBoard.guesses.size
-                    WordRow(
-                        word = pastWord ?: if (isDraftRow) draft else "",
-                        marks = pastPat,
-                        active = isDraftRow,
-                    )
-                    if (row < MAX_TRIES - 1) Spacer(Modifier.height(6.dp))
-                }
-                notice?.let { msg ->
-                    Spacer(Modifier.height(8.dp))
-                    Text(msg, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                }
-                if (st.roundOver) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        (if (en) "Word: " else "Kelime: ") + st.target,
-                        color = TextPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    if (session.status == GameStatus.PLAYING && session.round < session.maxRounds) {
-                        Spacer(Modifier.height(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Ink)
-                                .clickable { onAction(GameAction("next_round")) }
-                                .padding(horizontal = 20.dp, vertical = 10.dp),
-                        ) {
-                            Text(
-                                if (en) "Next round (${session.round + 1}/${session.maxRounds})" else "Sonraki tur (${session.round + 1}/${session.maxRounds})",
-                                color = InkInverse,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
+                val tileSize = minOf(
+                    (maxWidth - 28.dp) / 5f,
+                    (maxHeight - 54.dp) / 6f,
+                ).coerceIn(30.dp, 50.dp)
+                val rowGap = if (tileSize < 38.dp) 4.dp else 6.dp
+                Column(
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    if (iAmSetter) {
+                        Text(
+                            (if (en) "Your secret word: " else "Gizli kelimen: ") + st.target,
+                            color = GameColors.Emerald,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(Modifier.height(6.dp))
                     }
-                } else if (myBoard.done && !iAmSetter) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        if (en) "Waiting for other players to finish…" else "Diğer oyuncuların bitirmesi bekleniyor…",
-                        color = TextSecondary,
-                        fontSize = 13.sp,
-                    )
+                    for (row in 0 until MAX_TRIES) {
+                        val pastWord = viewedBoard.guesses.getOrNull(row)
+                        val pastPat = viewedBoard.patterns.getOrNull(row)?.let(::decodeMarks)
+                        val isDraftRow = canGuess && row == myBoard.guesses.size
+                        WordRow(
+                            word = pastWord ?: if (isDraftRow) draft else "",
+                            marks = pastPat,
+                            active = isDraftRow,
+                            tileSize = tileSize,
+                        )
+                        if (row < MAX_TRIES - 1) Spacer(Modifier.height(rowGap))
+                    }
+                    notice?.let { msg ->
+                        Spacer(Modifier.height(6.dp))
+                        Text(msg, color = GameColors.Crimson, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    if (st.roundOver) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            (if (en) "Word: " else "Kelime: ") + st.target,
+                            color = GameColors.Emerald,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                        if (session.status == GameStatus.PLAYING && session.round < session.maxRounds) {
+                            Spacer(Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(GameColors.Emerald)
+                                    .clickable { onAction(GameAction("next_round")) }
+                                    .padding(horizontal = 20.dp, vertical = 9.dp),
+                            ) {
+                                Text(
+                                    if (en) "Next round (${session.round + 1}/${session.maxRounds})" else "Sonraki tur (${session.round + 1}/${session.maxRounds})",
+                                    color = GameColors.onAccent(GameColors.Emerald),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    } else if (myBoard.done && !iAmSetter) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            if (en) "Waiting for other players to finish…" else "Diğer oyuncuların bitirmesi bekleniyor…",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                        )
+                    }
                 }
             }
 
-            if (!iAmSetter) {
-                Spacer(Modifier.height(8.dp))
-                TurkishKeyboard(
-                    marks = keyMarks,
-                    enabled = canGuess,
-                    enterEnabled = draft.length == WORD_LEN,
-                    onLetter = { ch -> if (canGuess && draft.length < WORD_LEN) draft += ch },
-                    onBackspace = { if (canGuess && draft.isNotEmpty()) draft = draft.dropLast(1) },
-                    onEnter = {
-                        if (!canGuess || draft.length != WORD_LEN) return@TurkishKeyboard
-                        if (TurkishWords.isValidWord5(draft)) {
-                            onAction(GameAction("guess", payload = draft))
-                            draft = ""
-                        } else {
-                            notice = if (en) "Not in Turkish word list" else "Türkçe sözlükte bulunamadı"
+            if (!iAmSetter && session.status == GameStatus.PLAYING) {
+                // Compact used-letters hint strip (no fake on-screen keyboard!)
+                if (keyMarks.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        keyMarks.entries
+                            .sortedByDescending { it.value.priority }
+                            .forEach { (ch, mk) ->
+                                val bg = when (mk) {
+                                    KeyMark.EXACT -> GameColors.Emerald
+                                    KeyMark.PRESENT -> GameColors.Amber
+                                    else -> DarkSurfaceVariant
+                                }
+                                val fg = when (mk) {
+                                    KeyMark.EXACT -> GameColors.onAccent(GameColors.Emerald)
+                                    KeyMark.PRESENT -> GameColors.onAccent(GameColors.Amber)
+                                    else -> TextMuted
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(bg),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(ch.toString(), color = fg, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                val submitGuess: () -> Unit = {
+                    if (canGuess && !checking && draft.length == WORD_LEN) {
+                        val candidate = draft
+                        checking = true
+                        scope.launch {
+                            val res = TurkishDictApi.lookup(candidate)
+                            checking = false
+                            if (res.valid) {
+                                onAction(GameAction("guess", payload = candidate))
+                                draft = ""
+                            } else {
+                                notice = if (en) "Not found in TDK dictionary" else "TDK sözlüğünde bulunamadı"
+                            }
                         }
-                    },
+                    }
+                }
+                NativeWordInputBar(
+                    value = draft,
+                    placeholder = if (canGuess) (if (en) "Type 5-letter guess…" else "5 harfli tahmin yaz…") else (if (en) "Round finished" else "Tur tamamlandı"),
+                    enabled = canGuess && !checking,
+                    ready = canGuess && draft.length == WORD_LEN && !checking,
+                    busy = checking,
+                    accent = GameColors.Emerald,
+                    onChange = { raw -> if (canGuess && !checking) draft = TurkishText.trNormalize(raw).take(WORD_LEN) },
+                    onSubmit = submitGuess,
                 )
             }
         }
@@ -637,10 +724,74 @@ object WordDuelEngine : GameEngine {
 }
 
 @Composable
-private fun WordRow(word: String, marks: List<KeyMark>?, active: Boolean) {
+private fun NativeWordInputBar(
+    value: String,
+    placeholder: String,
+    enabled: Boolean,
+    ready: Boolean,
+    busy: Boolean = false,
+    accent: androidx.compose.ui.graphics.Color,
+    onChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(DarkSurfaceVariant)
+            .border(1.2.dp, if (enabled) accent.copy(alpha = 0.65f) else BorderSubtle, RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.weight(1f)) {
+            if (value.isEmpty()) {
+                Text(placeholder, color = TextMuted, fontSize = 15.sp)
+            }
+            BasicTextField(
+                value = value,
+                onValueChange = onChange,
+                enabled = enabled,
+                singleLine = true,
+                textStyle = TextStyle(color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold),
+                cursorBrush = SolidColor(accent),
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Characters,
+                    autoCorrectEnabled = false,
+                    imeAction = ImeAction.Send,
+                ),
+                keyboardActions = KeyboardActions(onSend = { onSubmit() }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(if (ready) accent else DarkSurface)
+                .clickable(enabled = ready, onClick = onSubmit),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (busy) {
+                CircularProgressIndicator(color = accent, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+            } else {
+                Icon(
+                    QMusicIcons.Send,
+                    contentDescription = null,
+                    tint = if (ready) GameColors.onAccent(accent) else TextMuted,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WordRow(word: String, marks: List<KeyMark>?, active: Boolean, tileSize: Dp = 46.dp) {
     val exact = GameColors.Emerald
     val present = GameColors.Amber
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    val fontSize = if (tileSize < 38.dp) 16.sp else 21.sp
+    Row(horizontalArrangement = Arrangement.spacedBy(if (tileSize < 38.dp) 4.dp else 6.dp)) {
         for (i in 0 until 5) {
             val ch = word.getOrNull(i)
             val mark = marks?.getOrNull(i)
@@ -669,17 +820,17 @@ private fun WordRow(word: String, marks: List<KeyMark>?, active: Boolean) {
             }
             Box(
                 modifier = Modifier
-                    .size(50.dp)
-                    .clip(RoundedCornerShape(11.dp))
+                    .size(tileSize)
+                    .clip(RoundedCornerShape(10.dp))
                     .background(bg)
-                    .border(borderW, borderC, RoundedCornerShape(11.dp)),
+                    .border(borderW, borderC, RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.Center,
             ) {
                 if (ch != null) {
                     Text(
                         text = ch.toString(),
                         color = fg,
-                        fontSize = 22.sp,
+                        fontSize = fontSize,
                         fontWeight = FontWeight.ExtraBold,
                     )
                 }

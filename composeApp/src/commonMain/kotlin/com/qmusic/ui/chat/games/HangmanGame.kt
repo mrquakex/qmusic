@@ -4,8 +4,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,9 +17,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,9 +39,12 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.qmusic.ui.theme.QMusicIcons
 import com.qmusic.ui.chat.ChatController
 import com.qmusic.ui.chat.ChatStrings
 import com.qmusic.ui.chat.ChatUser
@@ -497,93 +506,121 @@ object HangmanEngine : GameEngine {
                 return@Column
             }
 
-            // Gallows canvas + word display
+            // Responsive gallows canvas + auto-sizing word slots
             val amber = GameColors.Amber
             val crimson = GameColors.Crimson
             val emerald = GameColors.Emerald
-            Column(
-                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
+            BoxWithConstraints(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentAlignment = Alignment.Center,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (hint.isNotBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(amber.copy(alpha = 0.16f))
-                                .border(1.dp, amber.copy(alpha = 0.45f), RoundedCornerShape(999.dp))
-                                .padding(horizontal = 10.dp, vertical = 4.dp),
-                        ) {
-                            Text(hint, color = amber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    Text(
-                        if (tr) "Hata: $wrong / $HANGMAN_MAX_WRONG" else "Mistakes: $wrong / $HANGMAN_MAX_WRONG",
-                        color = if (wrong >= 4) crimson else TextSecondary,
-                        fontSize = 12.sp,
-                        fontWeight = if (wrong >= 4) FontWeight.Bold else FontWeight.Medium,
-                    )
-                }
-
-                Spacer(Modifier.height(10.dp))
-                HangmanCanvas(wrong = wrong, modifier = Modifier.size(168.dp))
-                Spacer(Modifier.height(14.dp))
-
-                // Masked word letters
-                val revealAll = phase == "round_over" || session.status == GameStatus.FINISHED || (mode == "custom" && setterUid == me.uid)
-                val displayWord = word.map { ch ->
-                    if (revealAll || guessed.any { it.length == 1 && it[0] == ch }) ch.toString() else "_"
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                val canvasSize = minOf(maxWidth * 0.45f, maxHeight * 0.52f).coerceIn(106.dp, 168.dp)
+                val slotGap = if (word.length > 9) 3.dp else 5.dp
+                val slotW = ((maxWidth - slotGap * (word.length - 1).coerceAtLeast(1)) / word.length.coerceAtLeast(1))
+                    .coerceIn(20.dp, 34.dp)
+                Column(
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
                 ) {
-                    displayWord.forEach { slot ->
-                        val revealed = slot != "_"
-                        Box(
-                            modifier = Modifier
-                                .width(if (word.length > 9) 24.dp else 30.dp)
-                                .height(38.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (revealed) emerald.copy(alpha = 0.16f) else DarkSurface)
-                                .border(1.2.dp, if (revealed) emerald else BorderSubtle, RoundedCornerShape(8.dp)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                slot,
-                                color = if (revealed) emerald else TextMuted,
-                                fontSize = if (word.length > 9) 15.sp else 18.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                            )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (hint.isNotBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(amber.copy(alpha = 0.16f))
+                                    .border(1.dp, amber.copy(alpha = 0.45f), RoundedCornerShape(999.dp))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                            ) {
+                                Text(hint, color = amber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Text(
+                            if (tr) "Hata: $wrong / $HANGMAN_MAX_WRONG" else "Mistakes: $wrong / $HANGMAN_MAX_WRONG",
+                            color = if (wrong >= 4) crimson else TextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = if (wrong >= 4) FontWeight.Bold else FontWeight.Medium,
+                        )
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+                    HangmanCanvas(wrong = wrong, modifier = Modifier.size(canvasSize))
+                    Spacer(Modifier.height(14.dp))
+
+                    val revealAll = phase == "round_over" || session.status == GameStatus.FINISHED || (mode == "custom" && setterUid == me.uid)
+                    val displayWord = word.map { ch ->
+                        if (revealAll || guessed.any { it.length == 1 && it[0] == ch }) ch.toString() else "_"
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(slotGap, Alignment.CenterHorizontally),
+                    ) {
+                        displayWord.forEach { slot ->
+                            val revealed = slot != "_"
+                            Box(
+                                modifier = Modifier
+                                    .width(slotW)
+                                    .height((slotW * 1.25f).coerceIn(30.dp, 40.dp))
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (revealed) emerald.copy(alpha = 0.16f) else DarkSurface)
+                                    .border(1.2.dp, if (revealed) emerald else BorderSubtle, RoundedCornerShape(8.dp)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    slot,
+                                    color = if (revealed) emerald else TextMuted,
+                                    fontSize = if (slotW < 25.dp) 13.sp else 17.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                )
+                            }
                         }
                     }
-                }
 
-                if (phase == "round_over" && session.status == GameStatus.PLAYING) {
-                    Spacer(Modifier.height(16.dp))
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(amber)
-                            .clickable { onAction(GameAction("next_round")) }
-                            .padding(horizontal = 24.dp, vertical = 10.dp),
-                    ) {
-                        Text(if (tr) "Sonraki Tur" else "Next Round", color = GameColors.onAccent(amber), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    if (phase == "round_over" && session.status == GameStatus.PLAYING) {
+                        Spacer(Modifier.height(14.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(amber)
+                                .clickable { onAction(GameAction("next_round")) }
+                                .padding(horizontal = 24.dp, vertical = 10.dp),
+                        ) {
+                            Text(if (tr) "Sonraki Tur" else "Next Round", color = GameColors.onAccent(amber), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
 
             if (phase == "guess" && session.status == GameStatus.PLAYING) {
                 val canGuess = (session.turn == null || session.turn == me.uid) && !(mode == "custom" && setterUid == me.uid)
-                val marks = remember(guessed, word) {
-                    buildMap<Char, KeyMark> {
+                var letterInput by remember(session.round, guessed.size) { mutableStateOf("") }
+                var note by remember(guessed.size) { mutableStateOf<String?>(null) }
+
+                if (guessed.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
                         guessed.forEach { g ->
-                            val c = g.firstOrNull() ?: return@forEach
-                            put(c, if (word.contains(c)) KeyMark.EXACT else KeyMark.ABSENT)
+                            val hit = g.firstOrNull()?.let { word.contains(it) } == true
+                            val c = if (hit) emerald else crimson
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(c.copy(alpha = 0.18f))
+                                    .border(1.dp, c.copy(alpha = 0.55f), RoundedCornerShape(7.dp)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(g, color = c, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
+                note?.let { Text(it, color = crimson, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
                 if (!canGuess) {
                     Text(
                         if (mode == "custom" && setterUid == me.uid) {
@@ -594,19 +631,72 @@ object HangmanEngine : GameEngine {
                         color = TextSecondary,
                         fontSize = 13.sp,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(bottom = 8.dp),
+                        modifier = Modifier.padding(vertical = 8.dp),
                     )
-                }
-                TurkishKeyboard(
-                    marks = marks,
-                    enabled = canGuess,
-                    showEnter = false,
-                    onLetter = { ch ->
-                        if (canGuess && ch.toString() !in guessed) {
-                            onAction(GameAction("guess", ch.toString()))
+                } else {
+                    val submitLetter = {
+                        val ch = TurkishText.trNormalize(letterInput).take(1)
+                        when {
+                            ch.isEmpty() -> Unit
+                            ch in guessed -> note = if (tr) "'$ch' zaten denendi" else "'$ch' already tried"
+                            else -> {
+                                note = null
+                                onAction(GameAction("guess", ch))
+                                letterInput = ""
+                            }
                         }
-                    },
-                )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(DarkSurfaceVariant)
+                            .border(1.2.dp, amber.copy(alpha = 0.65f), RoundedCornerShape(14.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.weight(1f)) {
+                            if (letterInput.isEmpty()) {
+                                Text(if (tr) "Bir harf yaz…" else "Type a letter…", color = TextMuted, fontSize = 15.sp)
+                            }
+                            BasicTextField(
+                                value = letterInput,
+                                onValueChange = { raw ->
+                                    val clean = TurkishText.trNormalize(raw).takeLast(1)
+                                    letterInput = clean
+                                    note = null
+                                },
+                                singleLine = true,
+                                textStyle = TextStyle(color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                                cursorBrush = SolidColor(amber),
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Characters,
+                                    autoCorrectEnabled = false,
+                                    imeAction = ImeAction.Send,
+                                ),
+                                keyboardActions = KeyboardActions(onSend = { submitLetter() }),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(if (letterInput.isNotEmpty()) amber else DarkSurface)
+                                .clickable(enabled = letterInput.isNotEmpty(), onClick = submitLetter),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                QMusicIcons.Send,
+                                contentDescription = null,
+                                tint = if (letterInput.isNotEmpty()) GameColors.onAccent(amber) else TextMuted,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                }
             }
         }
     }

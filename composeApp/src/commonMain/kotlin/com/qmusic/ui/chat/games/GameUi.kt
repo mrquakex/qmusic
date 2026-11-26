@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -512,18 +513,23 @@ fun GamePickerSheet(
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BgRoot)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {},
+            ),
     ) {
-        DialogEdgeToEdge()
         PlatformBackHandler(enabled = true) { onDismiss() }
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(BgRoot)
                 .statusBarsPadding()
-                .navigationBarsPadding(),
+                .navigationBarsPadding()
+                .imePadding(),
         ) {
             Row(
                 modifier = Modifier
@@ -697,6 +703,16 @@ fun GamePickerSheet(
                                             onDismiss()
                                             onStarted(gid)
                                         }
+                                    }
+                                }
+                            } else if (selected == GameKind.WORD_DUEL && config.mode != "duel") {
+                                busy = true
+                                scope.launch {
+                                    val verifiedWord = TurkishDictApi.pickVerifiedTarget5()
+                                    busy = false
+                                    controller.createGame(other, config.copy(extra = verifiedWord), s) { gid ->
+                                        onDismiss()
+                                        onStarted(gid)
                                     }
                                 }
                             } else {
@@ -979,16 +995,20 @@ fun GameArenaDialog(
     var rematchBusy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BgRoot)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {},
+            ),
     ) {
-        DialogEdgeToEdge()
         PlatformBackHandler(enabled = true) { onDismiss() }
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(BgRoot)
                 .statusBarsPadding()
                 .navigationBarsPadding()
                 .imePadding(),

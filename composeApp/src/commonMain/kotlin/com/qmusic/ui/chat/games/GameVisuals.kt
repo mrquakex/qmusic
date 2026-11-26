@@ -1,17 +1,51 @@
 package com.qmusic.ui.chat.games
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.qmusic.ui.theme.BorderSubtle
+import com.qmusic.ui.theme.DarkSurface
+import com.qmusic.ui.theme.DarkSurfaceVariant
+import com.qmusic.ui.theme.TextPrimary
 import com.qmusic.ui.theme.lightTheme
 
 /** Vibrant, theme-aware color tokens crafted specifically for Nuvelo's 12 chat games. */
@@ -221,6 +255,165 @@ fun GameEmblem(
                 }
                 drawPath(star, color = s)
             }
+        }
+    }
+}
+
+/**
+ * Horizontal linear roulette / slot-reel animation ("çark gibi ama düz").
+ * Rapidly scrolls a strip of Turkish letters behind a fixed center pointer with smooth ease-out deceleration,
+ * landing dead-center on [targetLetter] with a celebratory scale lock-in pulse.
+ */
+@Composable
+fun LetterRouletteStrip(
+    targetLetter: Char,
+    spinKey: Any,
+    accent: Color,
+    modifier: Modifier = Modifier,
+    animate: Boolean = true,
+    onSettled: () -> Unit = {},
+) {
+    val target = TurkishText.trUpperChar(targetLetter)
+    val reelCount = 44
+    val targetIndex = 35
+    val reel = remember(spinKey, target) {
+        val letters = TurkishText.PLAYABLE_NAME_CITY_LETTERS
+        List(reelCount) { idx ->
+            if (idx == targetIndex) {
+                target
+            } else {
+                val pick = letters[Sha256.deterministicIndex("reel|$spinKey|$idx|$target", letters.length)]
+                if (idx == targetIndex - 1 && pick == target) letters[(letters.indexOf(pick) + 1) % letters.length] else pick
+            }
+        }
+    }
+
+    val tileDp = 52.dp
+    val gapDp = 6.dp
+    val pitchDp = tileDp + gapDp
+    val progressIndex = remember(spinKey, target) { Animatable(if (animate) 2f else targetIndex.toFloat()) }
+    val pulseScale = remember(spinKey, target) { Animatable(1f) }
+    var settled by remember(spinKey, target) { mutableStateOf(!animate) }
+
+    LaunchedEffect(spinKey, target, animate) {
+        if (!animate) {
+            progressIndex.snapTo(targetIndex.toFloat())
+            settled = true
+            onSettled()
+            return@LaunchedEffect
+        }
+        settled = false
+        progressIndex.snapTo(2f)
+        pulseScale.snapTo(1f)
+        // Realistic linear roulette spin: whip launch -> long suspenseful slowdown -> lock onto targetIndex
+        progressIndex.animateTo(
+            targetValue = targetIndex.toFloat(),
+            animationSpec = tween(
+                durationMillis = 2_350,
+                easing = CubicBezierEasing(0.06f, 0.90f, 0.14f, 1.0f),
+            ),
+        )
+        settled = true
+        pulseScale.animateTo(1.13f, tween(130))
+        pulseScale.animateTo(1.0f, tween(170))
+        onSettled()
+    }
+
+    val density = LocalDensity.current
+    val surfaceColor = DarkSurface
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(78.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(surfaceColor)
+            .border(1.4.dp, accent.copy(alpha = if (settled) 0.75f else 0.35f), RoundedCornerShape(16.dp))
+            .clipToBounds(),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        val viewportPx = with(density) { maxWidth.toPx() }
+        val tilePx = with(density) { tileDp.toPx() }
+        val pitchPx = with(density) { pitchDp.toPx() }
+
+        // Scrolling strip of 44 Turkish letter tiles
+        Row(
+            modifier = Modifier
+                .fillMaxHeight()
+                .graphicsLayer {
+                    val centerOffset = (viewportPx - tilePx) / 2f
+                    translationX = centerOffset - progressIndex.value * pitchPx
+                },
+            horizontalArrangement = Arrangement.spacedBy(gapDp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            reel.forEachIndexed { idx, ch ->
+                val isWinner = settled && idx == targetIndex
+                Box(
+                    modifier = Modifier
+                        .size(tileDp)
+                        .graphicsLayer {
+                            if (isWinner) {
+                                scaleX = pulseScale.value
+                                scaleY = pulseScale.value
+                            }
+                        }
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isWinner) accent else DarkSurfaceVariant)
+                        .border(1.2.dp, if (isWinner) accent else BorderSubtle, RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = ch.toString(),
+                        color = if (isWinner) GameColors.onAccent(accent) else TextPrimary,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Black,
+                    )
+                }
+            }
+        }
+
+        // Left & right soft edge fade
+        Box(
+            Modifier
+                .align(Alignment.CenterStart)
+                .width(44.dp)
+                .fillMaxHeight()
+                .background(Brush.horizontalGradient(listOf(surfaceColor, Color.Transparent))),
+        )
+        Box(
+            Modifier
+                .align(Alignment.CenterEnd)
+                .width(44.dp)
+                .fillMaxHeight()
+                .background(Brush.horizontalGradient(listOf(Color.Transparent, surfaceColor))),
+        )
+
+        // Centered selection reticle + top/bottom pointers
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .size(tileDp + 6.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .border(2.2.dp, accent, RoundedCornerShape(14.dp)),
+        )
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val cx = size.width / 2f
+            val tri = 7.dp.toPx()
+            val topPtr = Path().apply {
+                moveTo(cx, tri + 1.dp.toPx())
+                lineTo(cx - tri, 0f)
+                lineTo(cx + tri, 0f)
+                close()
+            }
+            val botPtr = Path().apply {
+                moveTo(cx, size.height - tri - 1.dp.toPx())
+                lineTo(cx - tri, size.height)
+                lineTo(cx + tri, size.height)
+                close()
+            }
+            drawPath(topPtr, color = accent)
+            drawPath(botPtr, color = accent)
         }
     }
 }
