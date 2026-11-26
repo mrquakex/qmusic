@@ -32,6 +32,8 @@ const CONTEXT_MESSAGES = 30;
 /** After this long without a message, the own conversation starts a new Antigravity conversation. */
 const FRESH_AFTER_MS = 6 * 60 * 60 * 1000;
 const TRIGGER = /^\s*@?(antigravity|gemini)\b[\s,:;.!?-]*/i;
+/** A message calls Antigravity when "antigravity" (or "gemini") is in it anywhere, as a word or a word's start. */
+const CALLS = /(^|[^\p{L}\p{N}])@?(antigravity|gemini)/iu;
 /** The models by their CLI names (`agy models`). */
 const MODELS = {
   neon: "gemini-4-neon-high",
@@ -45,11 +47,14 @@ const DEFAULT_MODEL = "neon";
 const SETTINGS = JSON.stringify({ toolPermission: "always-proceed", allowNonWorkspaceAccess: false });
 
 /** What Antigravity is told about where it is, who it talks with and when it is (sent with every turn). */
-function systemFor(name) {
+function systemFor(name, uid) {
   const now = new Date().toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", dateStyle: "full", timeStyle: "short" });
   return [
     "You are Antigravity (Gemini), inside the messages of Nuvelo, a messaging, music and video app the user's family uses.",
     `You are talking with ${name}. It is now ${now} (Turkey time).`,
+    uid === OWNER_UID
+      ? `${name} is your owner: the founder and developer of Nuvelo, whose own subscription you run on. Treat them as the person you know best here.`
+      : `${name} is one of the people the owner (Nuvelo's founder) gave you to: family or a close friend.`,
     "This is a phone chat: answer in the user's language, conversationally and to the point. Answer the message itself;",
     "do not write plans, implementation documents or files unless the user asks for a file.",
     "If you are not sure of something, say so rather than guess. For homework, work it out step by step and give the final answer clearly.",
@@ -285,7 +290,7 @@ async function promptOf(chatId, message, ownChat, caller, name) {
   }
   const photos = await savePhotos(caller, chatId, [message, ...(replied ? [replied] : [])]);
 
-  let text = `[About this chat, for you: ${systemFor(name)}]\n\n`;
+  let text = `[About this chat, for you: ${systemFor(name, caller)}]\n\n`;
   if (!ownChat) {
     const names = { [BOT_UID]: BOT_NAME, claudebot: "Claude" };
     let where;
@@ -490,7 +495,7 @@ function watch(chatId) {
     .on("child_added", (snap) => {
       const message = snap.val();
       if (!message || !allowed.has(message.from)) return;
-      if (!isOwnChat(chatId) && !TRIGGER.test(String(message.text || ""))) return;
+      if (!isOwnChat(chatId) && !CALLS.test(String(message.text || ""))) return;
       queue = queue.then(() => handle(chatId, snap.key, message, message.from)).catch((e) => log("handle failed:", e.message));
     });
 }
@@ -507,7 +512,7 @@ async function startFor(uid) {
     await say(
       dm,
       "Merhaba! Ben Antigravity (Gemini). Bana buradan yazabilir, fotoğraf gönderebilirsin.\n" +
-        "Başka bir sohbette mesajına \"antigravity\" ya da \"gemini\" diye başlarsan orada da cevap veririm.\n" +
+        "Başka bir sohbette mesajında \"antigravity\" ya da \"gemini\" geçerse orada da cevap veririm.\n" +
         "/yeni → yeni sohbet · /model neon | carbon | argon | flash → model seç",
       uid,
     );

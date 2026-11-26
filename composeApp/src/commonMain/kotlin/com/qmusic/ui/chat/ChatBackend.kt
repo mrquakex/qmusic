@@ -298,11 +298,11 @@ const val NUVELO_UID = "nuvelo"
 /** The one person whose Claude it is: only they can call it into a conversation. */
 const val CLAUDE_OWNER_UID = "2hxOw0dRcwUwsW7N6ogH4fRcqXo1"
 
-/** A message that calls Claude into a conversation: it starts with "claude" or "@claude". */
-fun callsClaude(text: String): Boolean = Regex("^\\s*@?claude\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)
+/** A message that calls Claude into a conversation: "claude" anywhere in it, as a word or its start ("Claude'a sor"). */
+fun callsClaude(text: String): Boolean = Regex("(^|[^A-Za-z0-9ÇĞİÖŞÜçğıöşü])@?claude", RegexOption.IGNORE_CASE).containsMatchIn(text)
 
-/** A message that calls Antigravity into a conversation: it starts with "antigravity" / "@antigravity" (or "gemini"). */
-fun callsAntigravity(text: String): Boolean = Regex("^\\s*@?(antigravity|gemini)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)
+/** A message that calls Antigravity: "antigravity" (or "gemini") anywhere in it, as a word or its start. */
+fun callsAntigravity(text: String): Boolean = Regex("(^|[^A-Za-z0-9ÇĞİÖŞÜçğıöşü])@?(antigravity|gemini)", RegexOption.IGNORE_CASE).containsMatchIn(text)
 
 /** Where two people stand: nothing yet, a request one way or the other, or friends. */
 enum class FriendStatus { NONE, REQUESTED, INCOMING, FRIENDS }

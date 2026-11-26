@@ -32,6 +32,8 @@ const CONTEXT_MESSAGES = 30;
 /** After this long without a message, the own conversation starts a new Claude session (old topics stay behind). */
 const FRESH_AFTER_MS = 6 * 60 * 60 * 1000;
 const TRIGGER = /^\s*@?claude\b[\s,:;.!?-]*/i;
+/** A message calls Claude when its name is in it anywhere, as a word or a word's start ("Claude'a sor", "sence claude?"). */
+const CALLS = /(^|[^\p{L}\p{N}])@?claude/iu;
 /**
  * The models by their full names: the short ones ("sonnet") were taken by the subscription as it liked, and answers
  * picked as Sonnet came from Haiku, the smallest model.
@@ -40,11 +42,14 @@ const MODELS = { opus: "claude-opus-5-5", sonnet: "claude-sonnet-5-5", haiku: "c
 const DEFAULT_MODEL = "opus";
 
 /** What Claude is told about where it is, who it talks with and when it is. */
-function systemFor(name) {
+function systemFor(name, uid) {
   const now = new Date().toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", dateStyle: "full", timeStyle: "short" });
   return [
     "You are Claude, inside the messages of Nuvelo, a messaging, music and video app the user's family uses.",
     `You are talking with ${name}. It is now ${now} (Turkey time).`,
+    uid === OWNER_UID
+      ? `${name} is your owner: the founder and developer of Nuvelo, whose own subscription you run on. Treat them as the person you know best here.`
+      : `${name} is one of the people the owner (Nuvelo's founder) gave you to: family or a close friend.`,
     "This is a phone chat: answer in the user's language, conversationally and to the point.",
     "Think carefully before answering; if you are not sure of something, say so rather than guess.",
     "When the question is homework or an exercise, work it out step by step and give the final answer clearly.",
@@ -116,7 +121,7 @@ function ask(uid, name, content, { session, onPhase, onText, onThought, onTool }
       "--verbose",
       "--model", MODELS[s.model] || MODELS[DEFAULT_MODEL],
       "--permission-mode", "bypassPermissions",
-      "--append-system-prompt", systemFor(name),
+      "--append-system-prompt", systemFor(name, uid),
     ];
     if (session) {
       if (!s.fresh) args.push("--continue");
@@ -536,7 +541,7 @@ function watch(chatId) {
     .on("child_added", (snap) => {
       const message = snap.val();
       if (!message || !allowed.has(message.from)) return;
-      if (!isOwnChat(chatId) && !TRIGGER.test(String(message.text || ""))) return;
+      if (!isOwnChat(chatId) && !CALLS.test(String(message.text || ""))) return;
       queue = queue.then(() => handle(chatId, snap.key, message, message.from)).catch((e) => log("handle failed:", e.message));
     });
 }
@@ -553,7 +558,7 @@ async function startFor(uid) {
     await say(
       dm,
       "Merhaba! Ben Claude. Bana buradan yazabilir, fotoğraf gönderebilirsin.\n" +
-        "Başka bir sohbette mesajına \"claude\" diye başlarsan orada da cevap veririm (bir mesajı yanıtlayarak sorarsan onu da görürüm).\n" +
+        "Başka bir sohbette mesajında \"claude\" geçerse orada da cevap veririm (bir mesajı yanıtlayarak sorarsan onu da görürüm).\n" +
         "/yeni → yeni sohbet · /model sonnet | opus | haiku → model seç",
       uid,
     );
