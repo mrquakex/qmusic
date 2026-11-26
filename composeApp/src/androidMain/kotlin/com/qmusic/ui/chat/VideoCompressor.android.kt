@@ -31,6 +31,9 @@ internal object VideoCompressor {
     private const val TARGET_SHORT_SIDE = 720
     private const val TARGET_LONG_SIDE = 1280
     private const val TARGET_BITRATE = 2_500_000
+    private const val HD_SHORT_SIDE = 1080
+    private const val HD_LONG_SIDE = 1920
+    private const val HD_BITRATE = 6_000_000
 
     /** The smaller (and optionally clipped to [startMs]..[endMs]) copy in the cache, or null when not needed or failed. */
     suspend fun compress(
@@ -39,8 +42,12 @@ internal object VideoCompressor {
         maxMs: Long = 0L,
         startMs: Long = 0L,
         endMs: Long = 0L,
+        hd: Boolean = false,
         onProgress: (Float) -> Unit = {},
     ): File? {
+        val targetShort = if (hd) HD_SHORT_SIDE else TARGET_SHORT_SIDE
+        val targetLong = if (hd) HD_LONG_SIDE else TARGET_LONG_SIDE
+        val targetBitrate = if (hd) HD_BITRATE else TARGET_BITRATE
         val uri = if (location.startsWith("/")) Uri.fromFile(File(location)) else Uri.parse(location)
         val (shortSide, bitrate, durationMs) = withContext(Dispatchers.IO) {
             runCatching {
@@ -51,7 +58,7 @@ internal object VideoCompressor {
                     val h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
                     val b = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull() ?: 0
                     val d = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                    Triple(if (maxOf(w, h) > TARGET_LONG_SIDE) Int.MAX_VALUE else minOf(w, h), b, d)
+                    Triple(if (maxOf(w, h) > targetLong) Int.MAX_VALUE else minOf(w, h), b, d)
                 } finally {
                     runCatching { r.release() }
                 }
@@ -78,7 +85,7 @@ internal object VideoCompressor {
             clipEnd = if (boundedEnd > safeStart && (durationMs <= 0L || boundedEnd < durationMs)) boundedEnd else null
         }
         val needsClip = clipStart > 0L || clipEnd != null
-        if (!needsClip && shortSide in 1..TARGET_SHORT_SIDE && bitrate in 1..(TARGET_BITRATE * 3 / 2)) return null
+        if (!needsClip && shortSide in 1..targetShort && bitrate in 1..(targetBitrate * 3 / 2)) return null
         val out = File(File(context.cacheDir, "video_out").apply { mkdirs() }, "v_${System.currentTimeMillis()}.mp4")
         return withContext(Dispatchers.Main) {
             suspendCancellableCoroutine { cont ->
@@ -89,7 +96,7 @@ internal object VideoCompressor {
                     .setAudioMimeType(MimeTypes.AUDIO_AAC)
                     .setEncoderFactory(
                         DefaultEncoderFactory.Builder(context)
-                            .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(TARGET_BITRATE).build())
+                            .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(targetBitrate).build())
                             .build(),
                     )
                     .addListener(object : Transformer.Listener {
@@ -105,9 +112,9 @@ internal object VideoCompressor {
                         }
                     })
                     .build()
-                // Fits inside 1280×1280: a landscape clip becomes 1280×720, an upright one 720×1280.
-                val effects = if (shortSide > TARGET_SHORT_SIDE || shortSide == 0) {
-                    Effects(emptyList(), listOf(Presentation.createForWidthAndHeight(TARGET_LONG_SIDE, TARGET_LONG_SIDE, Presentation.LAYOUT_SCALE_TO_FIT)))
+                // Fits inside targetLong×targetLong: landscape becomes 1280×720 (or 1920×1080 in HD).
+                val effects = if (shortSide > targetShort || shortSide == 0) {
+                    Effects(emptyList(), listOf(Presentation.createForWidthAndHeight(targetLong, targetLong, Presentation.LAYOUT_SCALE_TO_FIT)))
                 } else {
                     Effects.EMPTY
                 }

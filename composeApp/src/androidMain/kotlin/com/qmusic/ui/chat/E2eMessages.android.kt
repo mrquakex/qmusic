@@ -48,7 +48,7 @@ internal class MsgNode(val key: String?, val value: Any?) {
 
     companion object {
         /** Content keys that stay readable on the servers: who, when, and what they act on. */
-        val ROUTING = setOf("from", "at", "expireAt", "system", "who", "whom", "deleted", "edited", "streaming", "together", "e2e")
+        val ROUTING = setOf("from", "at", "expireAt", "system", "who", "whom", "deleted", "edited", "streaming", "together", "e2e", "pollClosed")
 
         /**
          * The message at [s] in [chatId]: an encrypted one opened (marked "_e2e"), or marked "_locked" when its key is

@@ -99,8 +99,14 @@ data class CallLogEntry(
     val seconds: Long,
 )
 
-/** A poll: a question, its choices (2-12), and whether more than one can be picked. */
-data class ChatPoll(val question: String, val options: List<String>, val multiple: Boolean)
+/** A poll: a question, its choices (2-12), multi-select, optional anonymity, and whether creator closed voting. */
+data class ChatPoll(
+    val question: String,
+    val options: List<String>,
+    val multiple: Boolean,
+    val anonymous: Boolean = false,
+    val closed: Boolean = false,
+)
 
 /** An event sent in a message: what, when (epoch ms) and where; the answers are its votes (0 going, 1 maybe, 2 not). */
 data class ChatEvent(val title: String, val at: Long, val place: String = "")
@@ -367,8 +373,8 @@ data class ChatGif(val url: String, val width: Int, val height: Int, val sticker
 /** One result of a GIF or sticker search: a small moving preview and the one that is sent. */
 data class GifItem(val id: String, val preview: String, val url: String, val width: Int, val height: Int)
 
-/** A message pinned to the top of its conversation. */
-data class PinnedMessage(val messageId: String, val text: String, val from: String, val at: Long)
+/** A message pinned to the top of its conversation ([expireAt] = 0 means permanent). */
+data class PinnedMessage(val messageId: String, val text: String, val from: String, val at: Long, val expireAt: Long = 0L)
 
 /** What a group lets its members do: only admins write, only admins change its name, photo and description. */
 data class GroupSettings(val sendAdmins: Boolean = false, val editAdmins: Boolean = false)
@@ -559,6 +565,10 @@ interface ChatBackend {
     suspend fun sendFile(other: ChatUser, file: PickedFile, caption: String, replyTo: ChatReply?): Result<Unit> =
         Result.failure(UnsupportedOperationException())
 
+    /** Sends a file with optional HD quality preservation for video (delegates to standard sendFile by default). */
+    suspend fun sendFile(other: ChatUser, file: PickedFile, caption: String, replyTo: ChatReply?, hd: Boolean): Result<Unit> =
+        sendFile(other, file, caption, replyTo)
+
     /** Attachments going up from this phone: message id → how much is sent (0-1). */
     val uploads: StateFlow<Map<String, Float>> get() = kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
 
@@ -654,6 +664,9 @@ interface ChatBackend {
     /** The person's choices in a poll (empty takes their vote back). */
     suspend fun vote(chatId: String, messageId: String, choices: List<Int>) {}
 
+    /** Closes voting on a poll created by the signed-in user. */
+    suspend fun closePoll(chatId: String, messageId: String): Result<Unit> = Result.failure(UnsupportedOperationException())
+
     suspend fun sendLocation(other: ChatUser, location: ChatLocation): Result<Unit> = Result.failure(UnsupportedOperationException())
     suspend fun sendContact(other: ChatUser, contact: ChatContact): Result<Unit> = Result.failure(UnsupportedOperationException())
 
@@ -696,6 +709,9 @@ interface ChatBackend {
 
     /** Records a finished game once under gameStats/{chatId} (guarded by counted/{gameId}). */
     suspend fun recordGameWin(chatId: String, gameId: String, winnerUid: String?): Result<Unit> = Result.success(Unit)
+
+    /** Sends a lightweight push notification when a move hands the turn to [toUid]. */
+    suspend fun sendGameTurnNotify(other: ChatUser, toUid: String, gameTitle: String) {}
 
     // ------------------------------------------------------------------ status
 
@@ -766,6 +782,8 @@ interface ChatBackend {
 
     fun pinned(chatId: String): Flow<List<PinnedMessage>> = kotlinx.coroutines.flow.flowOf(emptyList())
     suspend fun pin(chatId: String, message: ChatMessage, preview: String, pinned: Boolean): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun pin(chatId: String, message: ChatMessage, preview: String, pinned: Boolean, expireAt: Long): Result<Unit> =
+        pin(chatId, message, preview, pinned)
 
     /** Who opened each view-once photo: message id to the uids. */
     fun opened(chatId: String): Flow<Map<String, Set<String>>> = kotlinx.coroutines.flow.flowOf(emptyMap())

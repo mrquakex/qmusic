@@ -739,7 +739,19 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val question = poll.question.trim().take(300)
         val options = poll.options.map { it.trim().take(100) }.filter { it.isNotEmpty() }.distinct().take(12)
         require(question.isNotEmpty() && options.size >= 2) { "poll" }
-        sendMessage(other, "", null, null, null, "📊 $question", extra = mapOf("poll" to mapOf("q" to question, "o" to options, "m" to poll.multiple)))
+        val payload = buildMap<String, Any?> {
+            put("q", question)
+            put("o", options)
+            put("m", poll.multiple)
+            if (poll.anonymous) put("a", true)
+        }
+        sendMessage(other, "", null, null, null, "📊 $question", extra = mapOf("poll" to payload))
+    }
+
+    override suspend fun closePoll(chatId: String, messageId: String): Result<Unit> = runCatching {
+        me()
+        root.child("chats").child(chatId).child("messages").child(messageId).child("pollClosed").setValue(true).await()
+        Unit
     }
 
     override fun pollVotes(chatId: String): Flow<Map<String, Map<String, List<Int>>>> = callbackFlow {
@@ -895,6 +907,35 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
                 false,
             )
         }
+    }
+
+    override suspend fun sendGameTurnNotify(other: ChatUser, toUid: String, gameTitle: String) {
+        if (other.isGroup || other.uid == CLAUDE_BOT_UID) return
+        val me = (_account.value as? ChatAccount.Ready)?.me ?: return
+        if (toUid == me.uid || toUid != other.uid) return
+        val chatId = conversationId(me.uid, other)
+        if (chatId in SecretChats.ids) return
+        val tr = app.getSharedPreferences("qmusic_settings", Context.MODE_PRIVATE).getString("language", "tr") != "en"
+        val cleanTitle = gameTitle.trim().take(60)
+        val plain = if (tr) {
+            if (cleanTitle.isNotEmpty()) "🎮 Sıra sende · $cleanTitle" else "🎮 Sıra sende"
+        } else {
+            if (cleanTitle.isNotEmpty()) "🎮 Your turn · $cleanTitle" else "🎮 Your turn"
+        }
+        val body = e2e.versionNow(chatId)?.let { v ->
+            if (e2e.loadKey(chatId, v) != null) e2e.sealText(chatId, v, plain) else null
+        } ?: plain
+        val key = root.child("notify").push().key ?: return
+        root.child("notify").child(key).setValue(
+            mapOf(
+                "from" to me.uid,
+                "to" to toUid,
+                "chatId" to chatId,
+                "type" to "chat",
+                "body" to body,
+                "at" to ServerValue.TIMESTAMP,
+            ),
+        )
     }
 
     private fun gameToMap(s: com.qmusic.ui.chat.games.GameSession): Map<String, Any?> = buildMap {
@@ -1126,7 +1167,17 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             poll = child("poll").takeIf { it.exists() }?.let { p ->
                 val question = p.child("q").getValue(String::class.java) ?: return@let null
                 val options = p.child("o").children.mapNotNull { it.getValue(String::class.java) }
-                if (options.size < 2) null else ChatPoll(question, options, p.child("m").getValue(Boolean::class.java) == true)
+                if (options.size < 2) {
+                    null
+                } else {
+                    ChatPoll(
+                        question = question,
+                        options = options,
+                        multiple = p.child("m").getValue(Boolean::class.java) == true,
+                        anonymous = p.child("a").getValue(Boolean::class.java) == true,
+                        closed = p.child("c").getValue(Boolean::class.java) == true || child("pollClosed").getValue(Boolean::class.java) == true,
+                    )
+                }
             },
             event = child("event").takeIf { it.exists() }?.let { e ->
                 val title = e.child("t").getValue(String::class.java) ?: return@let null
@@ -1455,7 +1506,10 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
 
     private suspend fun token(): String = auth.currentUser?.getIdToken(false)?.await()?.token ?: error("not signed in")
 
-    override suspend fun sendFile(other: ChatUser, file: PickedFile, caption: String, replyTo: ChatReply?): Result<Unit> = runCatching {
+    override suspend fun sendFile(other: ChatUser, file: PickedFile, caption: String, replyTo: ChatReply?): Result<Unit> =
+        sendFile(other, file, caption, replyTo, hd = false)
+
+    override suspend fun sendFile(other: ChatUser, file: PickedFile, caption: String, replyTo: ChatReply?, hd: Boolean): Result<Unit> = runCatching {
         val me = (_account.value as? ChatAccount.Ready)?.me ?: error("not signed in")
         val chatId = conversationId(me.uid, other)
         val messageId = root.child("chats").child(chatId).child("messages").push().key ?: error("no id")
@@ -1467,12 +1521,12 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val localAttachment = ChatAttachment(file.kind, file.location, file.name, file.size, file.mime, file.durationMs, file.width, file.height, file.thumb, file.wave)
         addOutbox(chatId, ChatMessage(id = messageId, from = me.uid, text = caption, attachment = localAttachment, at = System.currentTimeMillis(), pending = true))
         try {
-            // A video goes as 720p H.264 (a phone's 4K clip of 200 MB becomes ~20 MB); the first 40 % of the ring is that.
+            // A video goes as 720p H.264 (or 1080p ~6 Mbit/s when HD is toggled); the first 40 % of the ring is that.
             var source = file.location
             var size = file.size
             var share = 0f
             if (file.kind == AttachmentKind.VIDEO) {
-                VideoCompressor.compress(app, file.location) { p -> _uploads.update { it + (messageId to p * 0.4f) } }?.let { small ->
+                VideoCompressor.compress(app, file.location, hd = hd) { p -> _uploads.update { it + (messageId to p * 0.4f) } }?.let { small ->
                     if (small.length() in 1 until size) {
                         source = small.absolutePath
                         size = small.length()
@@ -1706,13 +1760,22 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val job = launch {
             runCatching {
                 combine(listen(root.child("chats").child(chatId).child("pinned")), e2e.changes) { snap, _ -> snap }.collect { snap ->
+                    val now = System.currentTimeMillis() + _serverOffset.value
                     trySend(
                         snap.children.mapNotNull { p ->
                             val id = p.key ?: return@mapNotNull null
+                            val expireAt = p.child("expireAt").getValue(Long::class.java) ?: 0L
+                            if (expireAt > 0L && expireAt <= now) return@mapNotNull null
                             val pinText = p.child("text").getValue(String::class.java).orEmpty().let { t ->
                                 if (t.startsWith("e2e:")) e2e.openText(chatId, t)?.takeIf { it != E2e.UNREADABLE } ?: "🔒" else t
                             }
-                            PinnedMessage(id, pinText, p.child("from").getValue(String::class.java).orEmpty(), p.child("at").getValue(Long::class.java) ?: 0L)
+                            PinnedMessage(
+                                messageId = id,
+                                text = pinText,
+                                from = p.child("from").getValue(String::class.java).orEmpty(),
+                                at = p.child("at").getValue(Long::class.java) ?: 0L,
+                                expireAt = expireAt,
+                            )
                         }.sortedByDescending { it.at },
                     )
                 }
@@ -1721,7 +1784,10 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         awaitClose { job.cancel() }
     }
 
-    override suspend fun pin(chatId: String, message: ChatMessage, preview: String, pinned: Boolean): Result<Unit> = runCatching {
+    override suspend fun pin(chatId: String, message: ChatMessage, preview: String, pinned: Boolean): Result<Unit> =
+        pin(chatId, message, preview, pinned, 0L)
+
+    override suspend fun pin(chatId: String, message: ChatMessage, preview: String, pinned: Boolean, expireAt: Long): Result<Unit> = runCatching {
         val ref = root.child("chats").child(chatId).child("pinned")
         if (!pinned) {
             ref.child(message.id).removeValue().await()
@@ -1740,7 +1806,12 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             if (message.e2e) error("e2e-key")
             preview.take(300)
         }
-        updates[message.id] = mapOf("text" to pinText, "from" to message.from, "at" to ServerValue.TIMESTAMP)
+        updates[message.id] = buildMap<String, Any?> {
+            put("text", pinText)
+            put("from", message.from)
+            put("at", ServerValue.TIMESTAMP)
+            if (expireAt > 0L) put("expireAt", expireAt)
+        }
         ref.updateChildren(updates).await()
         if (!alreadyPinned) {
             val me = (_account.value as? ChatAccount.Ready)?.me

@@ -68,12 +68,13 @@ import kotlin.math.tan
 
 private const val MAX_POLL_OPTIONS = 12
 
-/** Making a poll: the question, the choices (2-12), one or several answers. */
+/** Making a poll: the question, the choices (2-12), one or several answers, optional anonymous mode. */
 @Composable
 internal fun PollDialog(s: ChatStrings, onSend: (ChatPoll) -> Unit, onDismiss: () -> Unit) {
     var question by remember { mutableStateOf("") }
     val options = remember { mutableStateListOf("", "") }
     var multiple by remember { mutableStateOf(false) }
+    var anonymous by remember { mutableStateOf(false) }
     val filled = options.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
     val ready = question.isNotBlank() && filled.size >= 2
     AlertDialog(
@@ -108,10 +109,18 @@ internal fun PollDialog(s: ChatStrings, onSend: (ChatPoll) -> Unit, onDismiss: (
                         colors = SwitchDefaults.colors(checkedThumbColor = InkInverse, checkedTrackColor = Ink, uncheckedThumbColor = TextSecondary, uncheckedTrackColor = DarkSurface),
                     )
                 }
+                Row(Modifier.fillMaxWidth().clickable { anonymous = !anonymous }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(s.pollAnonymous, color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = anonymous,
+                        onCheckedChange = { anonymous = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = InkInverse, checkedTrackColor = Ink, uncheckedThumbColor = TextSecondary, uncheckedTrackColor = DarkSurface),
+                    )
+                }
             }
         },
         confirmButton = {
-            TextButton(enabled = ready, onClick = { onDismiss(); onSend(ChatPoll(question.trim(), filled, multiple)) }) {
+            TextButton(enabled = ready, onClick = { onDismiss(); onSend(ChatPoll(question.trim(), filled, multiple, anonymous = anonymous)) }) {
                 Text(s.pollCreate, color = if (ready) Ink else TextMuted)
             }
         },
@@ -121,7 +130,7 @@ internal fun PollDialog(s: ChatStrings, onSend: (ChatPoll) -> Unit, onDismiss: (
 
 /**
  * A poll in a message: each choice with how many picked it (a bar across), the person's own picks ticked. A tap picks
- * or takes back; the total opens who voted for what.
+ * or takes back (unless closed); the total opens who voted for what (counts only when anonymous).
  */
 @Composable
 internal fun PollCard(
@@ -132,17 +141,23 @@ internal fun PollCard(
     s: ChatStrings,
     onVote: (List<Int>) -> Unit,
     onShowVoters: () -> Unit,
+    onClosePoll: (() -> Unit)? = null,
 ) {
     val fg = if (mine) InkInverse else TextPrimary
     val soft = if (mine) InkInverse.copy(alpha = 0.55f) else TextSecondary
     val myPicks = votes[myUid].orEmpty()
     val voters = votes.size
+    val metaLine = buildList {
+        add(if (poll.multiple) s.pollPickMany else s.pollPickOne)
+        if (poll.anonymous) add(s.pollAnonymousBadge)
+        if (poll.closed) add(s.pollClosed)
+    }.joinToString(" · ")
     Column(Modifier.width(270.dp).padding(start = 10.dp, end = 10.dp, top = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(QMusicIcons.Poll, contentDescription = null, tint = fg, modifier = Modifier.padding(end = 6.dp).size(18.dp))
             Text(poll.question, color = fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         }
-        Text(if (poll.multiple) s.pollPickMany else s.pollPickOne, color = soft, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp))
+        Text(metaLine, color = soft, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp))
         poll.options.forEachIndexed { i, option ->
             val count = votes.values.count { i in it }
             val share = if (voters > 0) count.toFloat() / voters else 0f
@@ -150,7 +165,7 @@ internal fun PollCard(
             Box(
                 Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(10.dp))
                     .background(if (mine) InkInverse.copy(alpha = 0.06f) else Ink.copy(alpha = 0.06f))
-                    .clickable {
+                    .clickable(enabled = !poll.closed) {
                         val next = when {
                             poll.multiple -> if (picked) myPicks - i else myPicks + i
                             picked -> emptyList()
@@ -167,39 +182,69 @@ internal fun PollCard(
                     Box(
                         Modifier.size(18.dp).clip(if (poll.multiple) RoundedCornerShape(4.dp) else CircleShape)
                             .background(if (picked) TickRead else Color.Transparent)
-                            .then(if (picked) Modifier else Modifier.background(soft.copy(alpha = 0.25f))),
+                            .then(if (picked) Modifier else Modifier.background(soft.copy(alpha = if (poll.closed) 0.12f else 0.25f))),
                         contentAlignment = Alignment.Center,
                     ) { if (picked) Icon(QMusicIcons.Check, null, tint = Ink, modifier = Modifier.size(12.dp)) }
                     Spacer(Modifier.width(10.dp))
-                    Text(option, color = fg, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Text(option, color = if (poll.closed) fg.copy(alpha = 0.8f) else fg, fontSize = 14.sp, modifier = Modifier.weight(1f))
                     Text(count.toString(), color = soft, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
-        Text(
-            "$voters ${s.pollVotes} · ${s.pollVoters}",
-            color = soft,
-            fontSize = 12.sp,
-            modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onShowVoters).padding(vertical = 4.dp),
-        )
+        Row(
+            Modifier.fillMaxWidth().padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (poll.anonymous) "$voters ${s.pollVotes}" else "$voters ${s.pollVotes} · ${s.pollVoters}",
+                color = soft,
+                fontSize = 12.sp,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onShowVoters).padding(vertical = 4.dp),
+            )
+            Spacer(Modifier.weight(1f))
+            if (mine && !poll.closed && onClosePoll != null) {
+                Text(
+                    s.pollClose,
+                    color = fg,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClosePoll).padding(horizontal = 6.dp, vertical = 4.dp),
+                )
+            }
+        }
     }
 }
 
-/** Who voted for each choice. */
+/** Who voted for each choice (when anonymous, shows totals only and hides identities). */
 @Composable
 internal fun VotersDialog(poll: ChatPoll, votes: Map<String, List<Int>>, nameOf: (String) -> String, s: ChatStrings, onDismiss: () -> Unit) {
+    val totalVoters = votes.size.coerceAtLeast(1)
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DarkSurfaceVariant,
         title = { Text(poll.question, color = TextPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis) },
         text = {
             LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                if (poll.anonymous) {
+                    item(key = "anonNote") {
+                        Text(s.pollAnonymousHidden, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    }
+                }
                 poll.options.forEachIndexed { i, option ->
-                    val who = votes.filterValues { i in it }.keys.map(nameOf)
+                    val count = votes.values.count { i in it }
+                    val who = if (poll.anonymous) emptyList() else votes.filterValues { i in it }.keys.map(nameOf)
                     item(key = "o$i") {
                         Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                            Text("$option · ${who.size}", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Text(if (who.isEmpty()) "—" else who.joinToString(", "), color = TextSecondary, fontSize = 13.sp)
+                            val pct = if (votes.isEmpty()) 0 else (count * 100) / totalVoters
+                            Text(
+                                if (poll.anonymous) "$option · $count ($pct%)" else "$option · ${who.size}",
+                                color = TextPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            if (!poll.anonymous) {
+                                Text(if (who.isEmpty()) "—" else who.joinToString(", "), color = TextSecondary, fontSize = 13.sp)
+                            }
                         }
                     }
                 }

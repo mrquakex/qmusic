@@ -620,6 +620,11 @@ class ChatController(
         scope.launch { runCatching { backend.vote(id, message.id, choices) } }
     }
 
+    fun closePoll(other: ChatUser, message: ChatMessage) {
+        val id = chatIdWith(other) ?: return
+        scope.launch { backend.closePoll(id, message.id).onFailure { _error.value = it.message } }
+    }
+
     /**
      * Starts sharing this phone's live location in the conversation with [other] for [durationMs]: a message with
      * the place now (its card follows the sharing), and the phone keeps updating it until then.
@@ -699,7 +704,9 @@ class ChatController(
         val chatId = chatIdWith(other) ?: return
         scope.launch {
             var becameFinished = false
+            var prevTurn: String? = null
             backend.updateGame(chatId, gameId) { current ->
+                prevTurn = current.turn
                 val engine = com.qmusic.ui.chat.games.GameRegistry.of(current.kind) ?: return@updateGame null
                 val next = engine.applyAction(current, me.uid, action, serverNow()) ?: return@updateGame null
                 becameFinished = current.status != com.qmusic.ui.chat.games.GameStatus.FINISHED &&
@@ -708,6 +715,15 @@ class ChatController(
             }.onSuccess { updated ->
                 if (becameFinished) {
                     launch { runCatching { backend.recordGameWin(chatId, gameId, updated.winnerUid) } }
+                } else if (
+                    updated.status == com.qmusic.ui.chat.games.GameStatus.PLAYING &&
+                    updated.turn != null &&
+                    updated.turn != me.uid &&
+                    updated.turn != prevTurn
+                ) {
+                    val s = if (ChatMusic.english) ChatStrings.English else ChatStrings.Turkish
+                    val title = com.qmusic.ui.chat.games.GameRegistry.of(updated.kind)?.title(s).orEmpty()
+                    launch { runCatching { backend.sendGameTurnNotify(other, updated.turn, title) } }
                 }
             }
         }
@@ -1045,9 +1061,9 @@ class ChatController(
 
     fun pinned(other: ChatUser) = chatIdWith(other)?.let { id -> backend.pinned(id).catch { emit(emptyList()) } } ?: flowOf(emptyList())
 
-    fun pin(other: ChatUser, message: ChatMessage, preview: String, pinned: Boolean) {
+    fun pin(other: ChatUser, message: ChatMessage, preview: String, pinned: Boolean, expireAt: Long = 0L) {
         val id = chatIdWith(other) ?: return
-        scope.launch { backend.pin(id, message, preview, pinned).onFailure { _error.value = it.message } }
+        scope.launch { backend.pin(id, message, preview, pinned, expireAt).onFailure { _error.value = it.message } }
     }
 
     /** Unpins a message by id (used from the pinned banner, even when the message is older than the loaded page). */
@@ -1085,13 +1101,13 @@ class ChatController(
         scope.launch { runCatching { backend.likeStatus(item, liked) } }
     }
 
-    fun sendFile(other: ChatUser, file: PickedFile, caption: String = "", replyTo: ChatReply? = null) {
+    fun sendFile(other: ChatUser, file: PickedFile, caption: String = "", replyTo: ChatReply? = null, hd: Boolean = false) {
         if (file.size > MAX_FILE_BYTES) {
             _error.value = "max 100 MB"
             return
         }
         scope.launch {
-            backend.sendFile(other, file, caption.trim(), replyTo).onFailure { e -> if (e !is CancellationException) _error.value = e.message }
+            backend.sendFile(other, file, caption.trim(), replyTo, hd).onFailure { e -> if (e !is CancellationException) _error.value = e.message }
         }
     }
 
