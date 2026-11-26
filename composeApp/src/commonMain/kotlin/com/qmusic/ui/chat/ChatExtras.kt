@@ -48,6 +48,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -367,9 +369,9 @@ internal fun BlockedPeoplePage(controller: ChatController, s: ChatStrings) {
     LaunchedEffect(blocked) {
         val missing = blocked - resolved.keys
         if (missing.isEmpty()) return@LaunchedEffect
-        val loaded = kotlinx.coroutines.coroutineScope {
+        val loaded = coroutineScope {
             missing.map { uid ->
-                kotlinx.coroutines.async {
+                async {
                     uid to (controller.userFresh(uid) ?: ChatUser(uid = uid, name = uid.take(12), username = ""))
                 }
             }.map { it.await() }
