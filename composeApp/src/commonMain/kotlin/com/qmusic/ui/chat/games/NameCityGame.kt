@@ -374,16 +374,19 @@ object NameCityEngine : GameEngine {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Header with huge letter tile + timer/scores
+            // Header with huge golden-amber letter stamp + teal timer/scores
+            val teal = GameColors.Teal
+            val amber = GameColors.Amber
+            val catColors = listOf(GameColors.Indigo, GameColors.Teal, GameColors.Orange, GameColors.Emerald, GameColors.Violet)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(58.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Ink),
+                        .size(60.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(amber),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(letter, color = InkInverse, fontSize = 30.sp, fontWeight = FontWeight.Black)
+                    Text(letter, color = GameColors.onAccent(amber), fontSize = 32.sp, fontWeight = FontWeight.Black)
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
@@ -393,9 +396,9 @@ object NameCityEngine : GameEngine {
                             "vote" -> if (tr) "Cevapları kontrol et ve onayla" else "Review and approve answers"
                             else -> if (tr) "Tur ${session.round} Sonucu" else "Round ${session.round} Result"
                         },
-                        color = TextPrimary,
+                        color = if (phase == "write" && remainingSec <= 10) GameColors.Crimson else teal,
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                     )
                     Text(
                         session.order.joinToString(" · ") { uid ->
@@ -415,27 +418,28 @@ object NameCityEngine : GameEngine {
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(14.dp))
-                            .background(DarkSurface)
-                            .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
+                            .background(teal.copy(alpha = 0.12f))
+                            .border(1.dp, teal.copy(alpha = 0.40f), RoundedCornerShape(14.dp))
                             .padding(20.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             if (tr) "Cevapların kilitlendi (${answers.size}/${session.order.size}). Diğer oyuncular bekleniyor..." else "Answers locked (${answers.size}/${session.order.size}). Waiting for others...",
-                            color = TextSecondary,
+                            color = TextPrimary,
                             fontSize = 14.sp,
                         )
                     }
                 } else {
                     categories.forEachIndexed { idx, label ->
+                        val cAccent = catColors[idx % catColors.size]
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(label, color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            Text(label, color = cAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .clip(RoundedCornerShape(11.dp))
                                     .background(DarkSurface)
-                                    .border(1.dp, BorderHover, RoundedCornerShape(10.dp))
+                                    .border(1.2.dp, cAccent.copy(alpha = 0.45f), RoundedCornerShape(11.dp))
                                     .padding(horizontal = 12.dp, vertical = 11.dp),
                             ) {
                                 if (fields[idx].isEmpty()) {
@@ -446,7 +450,7 @@ object NameCityEngine : GameEngine {
                                     onValueChange = { fields[idx] = it.take(24) },
                                     singleLine = true,
                                     textStyle = TextStyle(color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium),
-                                    cursorBrush = SolidColor(Ink),
+                                    cursorBrush = SolidColor(cAccent),
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                             }
@@ -458,28 +462,29 @@ object NameCityEngine : GameEngine {
                             .fillMaxWidth()
                             .height(46.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Ink)
+                            .background(teal)
                             .clickable {
                                 onAction(GameAction("submit", fields.joinToString("|") { it.replace('|', ' ').trim() }))
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(if (tr) "Cevapları Kilitle" else "Lock Answers", color = InkInverse, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(if (tr) "Cevapları Kilitle" else "Lock Answers", color = GameColors.onAccent(teal), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             } else {
                 // Vote or round_over table
                 categories.forEachIndexed { catIdx, catLabel ->
+                    val cAccent = catColors[catIdx % catColors.size]
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(13.dp))
                             .background(DarkSurface)
-                            .border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
+                            .border(1.dp, cAccent.copy(alpha = 0.35f), RoundedCornerShape(13.dp))
                             .padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Text(catLabel, color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        Text(catLabel, color = cAccent, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
                         session.order.forEach { pid ->
                             val word = answers[pid]?.getOrNull(catIdx).orEmpty().ifBlank { "—" }
                             val key = "$pid:$catIdx"
@@ -493,7 +498,7 @@ object NameCityEngine : GameEngine {
                                 Text(pName, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.width(72.dp))
                                 Text(
                                     word,
-                                    color = if (rejList.isNotEmpty()) TextMuted else TextPrimary,
+                                    color = if (rejList.isNotEmpty()) GameColors.Crimson else TextPrimary,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Medium,
                                     modifier = Modifier.weight(1f),
@@ -502,15 +507,16 @@ object NameCityEngine : GameEngine {
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(8.dp))
-                                            .background(if (rejectedByMe) Ink else DarkSurfaceVariant)
-                                            .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
+                                            .background(if (rejectedByMe) GameColors.Crimson else DarkSurfaceVariant)
+                                            .border(1.dp, if (rejectedByMe) GameColors.Crimson else BorderSubtle, RoundedCornerShape(8.dp))
                                             .clickable { onAction(GameAction("toggle_reject", key)) }
                                             .padding(horizontal = 8.dp, vertical = 4.dp),
                                     ) {
                                         Text(
                                             if (rejectedByMe) (if (tr) "Reddedildi" else "Rejected") else (if (tr) "Reddet" else "Reject"),
-                                            color = if (rejectedByMe) InkInverse else TextSecondary,
+                                            color = if (rejectedByMe) GameColors.onAccent(GameColors.Crimson) else TextSecondary,
                                             fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
                                         )
                                     }
                                 }
@@ -526,7 +532,7 @@ object NameCityEngine : GameEngine {
                             .fillMaxWidth()
                             .height(46.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (approved) DarkSurfaceVariant else Ink)
+                            .background(if (approved) DarkSurfaceVariant else GameColors.Emerald)
                             .clickable(enabled = !approved) { onAction(GameAction("approve")) },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -536,9 +542,9 @@ object NameCityEngine : GameEngine {
                             } else {
                                 if (tr) "Puanlamayı Onayla" else "Approve Scoring"
                             },
-                            color = if (approved) TextSecondary else InkInverse,
+                            color = if (approved) TextSecondary else GameColors.onAccent(GameColors.Emerald),
                             fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Bold,
                         )
                     }
                 } else if (phase == "round_over") {
@@ -548,13 +554,14 @@ object NameCityEngine : GameEngine {
                             Column(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(DarkSurfaceVariant)
+                                    .clip(RoundedCornerShape(11.dp))
+                                    .background(GameColors.Emerald.copy(alpha = 0.14f))
+                                    .border(1.dp, GameColors.Emerald.copy(alpha = 0.40f), RoundedCornerShape(11.dp))
                                     .padding(10.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
                                 Text(if (pid == me.uid) s.you else session.players[pid]?.name?.substringBefore(' ').orEmpty(), color = TextSecondary, fontSize = 11.sp)
-                                Text("+$add", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text("+$add", color = GameColors.Emerald, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
                             }
                         }
                     }
@@ -564,11 +571,11 @@ object NameCityEngine : GameEngine {
                                 .fillMaxWidth()
                                 .height(46.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(Ink)
+                                .background(teal)
                                 .clickable { onAction(GameAction("next_round")) },
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(if (tr) "Sonraki Tur" else "Next Round", color = InkInverse, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text(if (tr) "Sonraki Tur" else "Next Round", color = GameColors.onAccent(teal), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

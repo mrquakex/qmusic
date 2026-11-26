@@ -394,16 +394,17 @@ object RpsEngine : GameEngine {
                 }
             }
 
-            // Choice buttons
+            // Choice buttons — distinct Amber Rock / Sky Paper / Coral Scissors
             if (session.status == GameStatus.PLAYING && phase == "commit" && !myCommitted) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     RpsMove.entries.forEach { move ->
+                        val moveColor = rpsMoveColor(move)
                         Column(
                             modifier = Modifier
                                 .weight(1f)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(DarkSurface)
-                                .border(1.5.dp, BorderHover, RoundedCornerShape(16.dp))
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(moveColor.copy(alpha = 0.13f))
+                                .border(1.6.dp, moveColor.copy(alpha = 0.55f), RoundedCornerShape(18.dp))
                                 .clickable {
                                     val salt = Sha256.randomSaltHex()
                                     val hash = Sha256.commitHash(session.id, session.round, me.uid, move.wire, salt)
@@ -414,8 +415,8 @@ object RpsEngine : GameEngine {
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            RpsIcon(move = move, modifier = Modifier.size(36.dp))
-                            Text(move.label(tr), color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            RpsIcon(move = move, tint = moveColor, modifier = Modifier.size(38.dp))
+                            Text(move.label(tr), color = moveColor, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -431,15 +432,24 @@ object RpsEngine : GameEngine {
                             me.uid -> "✓"
                             else -> "×"
                         }
+                        val bg = when (w) {
+                            me.uid -> GameColors.Emerald
+                            "" -> GameColors.Amber.copy(alpha = 0.22f)
+                            else -> GameColors.Crimson.copy(alpha = 0.22f)
+                        }
+                        val fg = when (w) {
+                            me.uid -> GameColors.onAccent(GameColors.Emerald)
+                            "" -> GameColors.Amber
+                            else -> GameColors.Crimson
+                        }
                         Box(
                             modifier = Modifier
-                                .size(28.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (w == me.uid) Ink else DarkSurfaceVariant)
-                                .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp)),
+                                .size(30.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(bg),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(mark, color = if (w == me.uid) InkInverse else TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(mark, color = fg, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -450,27 +460,35 @@ object RpsEngine : GameEngine {
     }
 }
 
+private fun rpsMoveColor(move: RpsMove): androidx.compose.ui.graphics.Color = when (move) {
+    RpsMove.ROCK -> GameColors.Amber
+    RpsMove.PAPER -> GameColors.Sky
+    RpsMove.SCISSORS -> GameColors.Coral
+}
+
 @Composable
 private fun RevealCard(name: String, move: RpsMove, tr: Boolean, highlight: Boolean) {
+    val mc = rpsMoveColor(move)
+    val bg = if (highlight) GameColors.Emerald else mc.copy(alpha = 0.12f)
+    val fg = if (highlight) GameColors.onAccent(GameColors.Emerald) else mc
     Column(
         modifier = Modifier
-            .width(126.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (highlight) Ink else DarkSurface)
-            .border(1.5.dp, if (highlight) Ink else BorderSubtle, RoundedCornerShape(16.dp))
+            .width(128.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(bg)
+            .border(1.8.dp, if (highlight) GameColors.Emerald else mc.copy(alpha = 0.50f), RoundedCornerShape(18.dp))
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(name, color = if (highlight) InkInverse.copy(alpha = 0.75f) else TextSecondary, fontSize = 12.sp)
-        RpsIcon(move = move, inverse = highlight, modifier = Modifier.size(40.dp))
-        Text(move.label(tr), color = if (highlight) InkInverse else TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text(name, color = if (highlight) fg.copy(alpha = 0.80f) else TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        RpsIcon(move = move, tint = fg, modifier = Modifier.size(42.dp))
+        Text(move.label(tr), color = if (highlight) fg else TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
-private fun RpsIcon(move: RpsMove, inverse: Boolean = false, modifier: Modifier = Modifier) {
-    val tint = if (inverse) InkInverse else Ink
+private fun RpsIcon(move: RpsMove, tint: androidx.compose.ui.graphics.Color = Ink, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val sw = 2.6.dp.toPx()
         val w = size.width

@@ -56,6 +56,7 @@ internal fun TurkishKeyboard(
     enabled: Boolean = true,
     showEnter: Boolean = true,
     enterEnabled: Boolean = true,
+    enterAccent: androidx.compose.ui.graphics.Color = GameColors.Emerald,
     onLetter: (Char) -> Unit,
     onBackspace: () -> Unit = {},
     onEnter: () -> Unit = {},
@@ -73,21 +74,22 @@ internal fun TurkishKeyboard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (showEnter) {
+                val activeEnter = enabled && enterEnabled
                 Box(
                     modifier = Modifier
                         .weight(1.45f)
                         .height(44.dp)
                         .pressScale(0.95f)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(if (enabled && enterEnabled) Ink else DarkSurfaceVariant)
-                        .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
-                        .clickable(enabled = enabled && enterEnabled, onClick = onEnter),
+                        .background(if (activeEnter) enterAccent else DarkSurfaceVariant)
+                        .border(1.dp, if (activeEnter) enterAccent else BorderSubtle, RoundedCornerShape(8.dp))
+                        .clickable(enabled = activeEnter, onClick = onEnter),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         QMusicIcons.Check,
                         contentDescription = null,
-                        tint = if (enabled && enterEnabled) InkInverse else TextMuted,
+                        tint = if (activeEnter) GameColors.onAccent(enterAccent) else TextMuted,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -145,24 +147,30 @@ private fun LetterKey(
     modifier: Modifier,
     onClick: () -> Unit,
 ) {
+    val exact = GameColors.Emerald
+    val present = GameColors.Amber
     val bg = when (mark) {
-        KeyMark.EXACT -> Ink
-        KeyMark.PRESENT -> DarkSurfaceVariant
+        KeyMark.EXACT -> exact
+        KeyMark.PRESENT -> present
         KeyMark.ABSENT -> DarkSurface
         KeyMark.UNUSED -> DarkSurfaceVariant
     }
     val fg = when (mark) {
-        KeyMark.EXACT -> InkInverse
-        KeyMark.PRESENT -> TextPrimary
+        KeyMark.EXACT -> GameColors.onAccent(exact)
+        KeyMark.PRESENT -> GameColors.onAccent(present)
         KeyMark.ABSENT -> TextMuted
         KeyMark.UNUSED -> TextPrimary
     }
-    val borderWidth = if (mark == KeyMark.PRESENT) 1.8.dp else 1.dp
-    val borderColor = if (mark == KeyMark.PRESENT) Ink else BorderSubtle
+    val borderWidth = if (mark == KeyMark.EXACT || mark == KeyMark.PRESENT) 1.dp else 1.dp
+    val borderColor = when (mark) {
+        KeyMark.EXACT -> exact
+        KeyMark.PRESENT -> present
+        else -> BorderSubtle
+    }
     Box(
         modifier = modifier
             .height(44.dp)
-            .alpha(if (mark == KeyMark.ABSENT) 0.42f else 1f)
+            .alpha(if (mark == KeyMark.ABSENT) 0.36f else 1f)
             .pressScale(0.94f)
             .clip(RoundedCornerShape(8.dp))
             .background(bg)

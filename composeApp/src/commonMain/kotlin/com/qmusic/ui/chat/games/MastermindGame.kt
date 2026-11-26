@@ -396,9 +396,9 @@ object MastermindEngine : GameEngine {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(DarkSurface)
-                            .border(1.dp, if (e == 4) Ink else BorderSubtle, RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(11.dp))
+                            .background(if (e == 4) GameColors.Emerald.copy(alpha = 0.16f) else DarkSurface)
+                            .border(1.2.dp, if (e == 4) GameColors.Emerald else BorderSubtle, RoundedCornerShape(11.dp))
                             .padding(horizontal = 12.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -406,21 +406,20 @@ object MastermindEngine : GameEngine {
                         Text(g.toCharArray().joinToString(" "), color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (e > 0) Ink else DarkSurfaceVariant)
+                                .clip(RoundedCornerShape(7.dp))
+                                .background(if (e > 0) GameColors.Emerald else DarkSurfaceVariant)
                                 .padding(horizontal = 8.dp, vertical = 3.dp),
                         ) {
-                            Text("+$e", color = if (e > 0) InkInverse else TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("+$e", color = if (e > 0) GameColors.onAccent(GameColors.Emerald) else TextMuted, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
                         }
                         Spacer(Modifier.width(6.dp))
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(DarkSurfaceVariant)
-                                .border(1.dp, if (m > 0) Ink else BorderSubtle, RoundedCornerShape(6.dp))
+                                .clip(RoundedCornerShape(7.dp))
+                                .background(if (m > 0) GameColors.Amber else DarkSurfaceVariant)
                                 .padding(horizontal = 8.dp, vertical = 3.dp),
                         ) {
-                            Text("-$m", color = if (m > 0) TextPrimary else TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("-$m", color = if (m > 0) GameColors.onAccent(GameColors.Amber) else TextMuted, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
                         }
                     }
                 }
@@ -462,18 +461,19 @@ object MastermindEngine : GameEngine {
 
 @Composable
 private fun DigitSlots(code: String) {
+    val lime = GameColors.Lime
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         for (i in 0 until 4) {
             val ch = code.getOrNull(i)
             Box(
                 modifier = Modifier
-                    .size(50.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (ch != null) DarkSurfaceVariant else DarkSurface)
-                    .border(1.5.dp, if (ch != null) Ink else BorderSubtle, RoundedCornerShape(12.dp)),
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(if (ch != null) lime.copy(alpha = 0.16f) else DarkSurface)
+                    .border(1.6.dp, if (ch != null) lime else BorderSubtle, RoundedCornerShape(13.dp)),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(ch?.toString() ?: "•", color = if (ch != null) TextPrimary else TextMuted, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(ch?.toString() ?: "•", color = if (ch != null) lime else TextMuted, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold)
             }
         }
     }
@@ -487,6 +487,7 @@ private fun DigitKeypad(
     onDelete: () -> Unit,
     onSubmit: () -> Unit,
 ) {
+    val lime = GameColors.Lime
     val rows = listOf(
         listOf("1", "2", "3", "4", "5"),
         listOf("6", "7", "8", "9", "0"),
@@ -503,11 +504,11 @@ private fun DigitKeypad(
                             .height(44.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(if (disabled) DarkSurface else DarkSurfaceVariant)
-                            .border(1.dp, if (disabled) BorderSubtle else BorderHover, RoundedCornerShape(10.dp))
+                            .border(1.dp, if (disabled) BorderSubtle else lime.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
                             .clickable(enabled = !disabled) { onDigit(ch) },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(key, color = if (disabled) TextMuted else TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Text(key, color = if (disabled) TextMuted else TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -531,11 +532,11 @@ private fun DigitKeypad(
                     .weight(2f)
                     .height(44.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(if (ready) Ink else DarkSurfaceVariant)
+                    .background(if (ready) lime else DarkSurfaceVariant)
                     .clickable(enabled = ready, onClick = onSubmit),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(if (tr) "Gönder" else "Submit", color = if (ready) InkInverse else TextMuted, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(if (tr) "Gönder" else "Submit", color = if (ready) GameColors.onAccent(lime) else TextMuted, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
         }
     }

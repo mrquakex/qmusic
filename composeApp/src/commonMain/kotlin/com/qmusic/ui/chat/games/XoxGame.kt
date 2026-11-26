@@ -374,8 +374,11 @@ object XoxEngine : GameEngine {
 
             Spacer(Modifier.height(18.dp))
 
-            // 3x3 Board with monochrome X / O and win strike-through
-            val inkColor = Ink
+            // 3x3 Board with Coral Red X, Sky Blue O, Amber vanishing warning, and glowing win strike
+            val xColor = GameColors.Coral
+            val oColor = GameColors.Sky
+            val vanishColor = GameColors.Amber
+            val winColor = if (st.roundWinner == xUid) xColor else if (st.roundWinner == oUid) oColor else GameColors.Gold
             Box(
                 modifier = Modifier
                     .widthIn(max = 320.dp)
@@ -394,17 +397,30 @@ object XoxEngine : GameEngine {
                                 }
                                 val isVanishing = cell == vanishingCell
                                 val inWin = cell in st.winLine
+                                val markColor = if (mark == 'X') xColor else oColor
+                                val cellBg = when {
+                                    inWin -> winColor.copy(alpha = 0.22f)
+                                    isVanishing -> vanishColor.copy(alpha = 0.12f)
+                                    mark != null -> markColor.copy(alpha = 0.08f)
+                                    else -> DarkSurfaceVariant
+                                }
+                                val cellBorder = when {
+                                    inWin -> winColor
+                                    isVanishing -> vanishColor
+                                    mark != null -> markColor.copy(alpha = 0.35f)
+                                    else -> BorderSubtle
+                                }
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxSize()
                                         .pressScale(0.95f)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(if (inWin) Ink.copy(alpha = 0.14f) else DarkSurfaceVariant)
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .background(cellBg)
                                         .border(
-                                            width = if (inWin) 2.dp else 1.dp,
-                                            color = if (inWin) Ink else BorderSubtle,
-                                            shape = RoundedCornerShape(16.dp),
+                                            width = if (inWin) 2.2.dp else if (isVanishing) 1.6.dp else 1.dp,
+                                            color = cellBorder,
+                                            shape = RoundedCornerShape(18.dp),
                                         )
                                         .clickable(enabled = myTurn && mark == null) {
                                             onAction(GameAction("move", payload = cell.toString()))
@@ -412,22 +428,23 @@ object XoxEngine : GameEngine {
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     if (mark != null) {
+                                        val drawTint = if (isVanishing) vanishColor else markColor
                                         Canvas(
                                             Modifier
                                                 .fillMaxSize()
                                                 .padding(20.dp)
-                                                .alpha(if (isVanishing) 0.35f else 1f),
+                                                .alpha(if (isVanishing) 0.55f else 1f),
                                         ) {
                                             val stroke = Stroke(
-                                                width = 5.dp.toPx(),
+                                                width = 5.5.dp.toPx(),
                                                 cap = StrokeCap.Round,
                                                 pathEffect = if (isVanishing) PathEffect.dashPathEffect(floatArrayOf(12f, 10f)) else null,
                                             )
                                             if (mark == 'X') {
-                                                drawLine(inkColor, Offset(0f, 0f), Offset(size.width, size.height), strokeWidth = stroke.width, cap = StrokeCap.Round, pathEffect = stroke.pathEffect)
-                                                drawLine(inkColor, Offset(size.width, 0f), Offset(0f, size.height), strokeWidth = stroke.width, cap = StrokeCap.Round, pathEffect = stroke.pathEffect)
+                                                drawLine(drawTint, Offset(0f, 0f), Offset(size.width, size.height), strokeWidth = stroke.width, cap = StrokeCap.Round, pathEffect = stroke.pathEffect)
+                                                drawLine(drawTint, Offset(size.width, 0f), Offset(0f, size.height), strokeWidth = stroke.width, cap = StrokeCap.Round, pathEffect = stroke.pathEffect)
                                             } else {
-                                                drawCircle(inkColor, radius = size.minDimension / 2f, style = stroke)
+                                                drawCircle(drawTint, radius = size.minDimension / 2f, style = stroke)
                                             }
                                         }
                                     }
@@ -445,7 +462,7 @@ object XoxEngine : GameEngine {
                             p0.x + (p2.x - p0.x) * strikeProgress.value,
                             p0.y + (p2.y - p0.y) * strikeProgress.value,
                         )
-                        drawLine(inkColor, p0, end, strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round)
+                        drawLine(winColor, p0, end, strokeWidth = 5.dp.toPx(), cap = StrokeCap.Round)
                     }
                 }
             }
@@ -453,9 +470,10 @@ object XoxEngine : GameEngine {
             if (vanishingCell != null) {
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    if (en) "Faded mark disappears on next move" else "Soluk taş bir sonraki hamlede kalkar",
-                    color = TextSecondary,
+                    if (en) "Amber dashed mark disappears on next move" else "Turuncu kesikli taş bir sonraki hamlede kalkar",
+                    color = GameColors.Amber,
                     fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
                 )
             }
 
@@ -464,15 +482,15 @@ object XoxEngine : GameEngine {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Ink)
+                        .background(xColor)
                         .clickable { onAction(GameAction("next_round")) }
                         .padding(horizontal = 24.dp, vertical = 11.dp),
                 ) {
                     Text(
                         if (en) "Next round (${session.round + 1}/${session.maxRounds})" else "Sonraki tur (${session.round + 1}/${session.maxRounds})",
-                        color = InkInverse,
+                        color = GameColors.onAccent(xColor),
                         fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                     )
                 }
             }
@@ -488,15 +506,16 @@ object XoxEngine : GameEngine {
 
 @Composable
 private fun PlayerScoreBadge(symbol: String, player: GamePlayer?, myUid: String, active: Boolean, en: Boolean) {
+    val accent = if (symbol == "X") GameColors.Coral else GameColors.Sky
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
-            .background(if (active) Ink else DarkSurface)
-            .border(1.dp, if (active) Ink else BorderSubtle, RoundedCornerShape(10.dp))
+            .background(if (active) accent else accent.copy(alpha = 0.12f))
+            .border(1.2.dp, if (active) accent else accent.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
-        Text(symbol, color = if (active) InkInverse else TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Black)
+        Text(symbol, color = if (active) GameColors.onAccent(accent) else accent, fontSize = 15.sp, fontWeight = FontWeight.Black)
         Spacer(Modifier.size(6.dp))
         Text(
             when {
@@ -504,7 +523,7 @@ private fun PlayerScoreBadge(symbol: String, player: GamePlayer?, myUid: String,
                 player.uid == myUid -> if (en) "You" else "Sen"
                 else -> player.name.substringBefore(' ')
             },
-            color = if (active) InkInverse else TextSecondary,
+            color = if (active) GameColors.onAccent(accent) else TextPrimary,
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,

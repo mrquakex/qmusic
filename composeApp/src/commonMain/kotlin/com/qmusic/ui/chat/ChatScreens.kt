@@ -2054,7 +2054,7 @@ private fun ConversationPage(
                 }
                 if (!isClaude) add(AttachAction(s.poll, QMusicIcons.Poll, Color(0xFFFFB300)) { attach = false; pollDialog = true })
                 if (!isClaude) add(AttachAction(if (tr) "Etkinlik" else "Event", QMusicIcons.Timer, Color(0xFFE53958)) { attach = false; eventDialog = true })
-                if (!isClaude) add(AttachAction(s.playGame, QMusicIcons.Dice, Ink) { attach = false; gamePickerOpen = true })
+                if (!isClaude) add(AttachAction(s.playGame, QMusicIcons.Dice, Color(0xFF8B5CF6)) { attach = false; gamePickerOpen = true })
                 // What plays in Nuvelo now: sent as a card.
                 shareables().forEach { item ->
                     val song = item.kind == ShareKind.SONG

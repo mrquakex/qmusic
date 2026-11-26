@@ -230,22 +230,29 @@ object Connect4Engine : GameEngine {
         val myTurn = session.status == GameStatus.PLAYING && session.turn == me.uid
         val tr = !s.english
 
+        val p1Color = GameColors.Crimson
+        val p2Color = GameColors.Gold
+        val frameColor = GameColors.Connect4Frame
+        val slotColor = GameColors.Connect4Slot
+        val myDiscColor = if (session.order.firstOrNull() == me.uid) p1Color else p2Color
+
         Column(
             modifier = modifier.padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            // Player disc legend (Filled Ink vs Hollow Ink Ring)
+            // Player disc legend (Crimson Red vs Golden Yellow)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 session.order.take(2).forEachIndexed { idx, uid ->
                     val p = session.players[uid] ?: return@forEachIndexed
                     val active = session.turn == uid && session.status == GameStatus.PLAYING
+                    val accent = if (idx == 0) p1Color else p2Color
                     Row(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (active) DarkSurfaceVariant else DarkSurface)
-                            .border(if (active) 1.5.dp else 1.dp, if (active) Ink else BorderSubtle, RoundedCornerShape(12.dp))
+                            .background(if (active) accent.copy(alpha = 0.16f) else DarkSurface)
+                            .border(if (active) 1.8.dp else 1.dp, if (active) accent else BorderSubtle, RoundedCornerShape(12.dp))
                             .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -266,43 +273,42 @@ object Connect4Engine : GameEngine {
             Text(
                 when {
                     session.status != GameStatus.PLAYING -> session.summary
-                    myTurn -> if (tr) "Bir sütuna dokun ve taşı bırak" else "Tap any column to drop your disc"
+                    myTurn -> if (tr) "Bir sütuna dokun ve taşını bırak" else "Tap any column to drop your disc"
                     else -> if (tr) "Rakibin hamlesi bekleniyor..." else "Waiting for opponent..."
                 },
-                color = if (myTurn) TextPrimary else TextSecondary,
+                color = if (myTurn) myDiscColor else TextSecondary,
                 fontSize = 13.sp,
-                fontWeight = if (myTurn) FontWeight.SemiBold else FontWeight.Normal,
+                fontWeight = if (myTurn) FontWeight.Bold else FontWeight.Normal,
             )
             Spacer(Modifier.height(14.dp))
 
-            // 7x6 Monochrome Board
+            // Iconic Royal-Blue 7x6 Connect Four Board with Red & Yellow Discs
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(DarkSurface)
-                    .border(1.5.dp, BorderHover, RoundedCornerShape(18.dp))
-                    .padding(8.dp),
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(frameColor)
+                    .border(2.dp, GameColors.Cobalt, RoundedCornerShape(20.dp))
+                    .padding(10.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                // Column tap indicators
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     for (c in 0 until C4_COLS) {
                         val canDrop = myTurn && board.getOrNull(c) == '.'
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(22.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (canDrop) DarkSurfaceVariant else DarkSurface)
+                                .height(24.dp)
+                                .clip(RoundedCornerShape(7.dp))
+                                .background(if (canDrop) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f) else androidx.compose.ui.graphics.Color.Transparent)
                                 .clickable(enabled = canDrop) { onAction(GameAction("drop", c.toString())) },
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
-                                "↓",
-                                color = if (canDrop) Ink else TextMuted.copy(alpha = 0.25f),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
+                                "▼",
+                                color = if (canDrop) myDiscColor else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.20f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
                             )
                         }
                     }
@@ -320,14 +326,18 @@ object Connect4Engine : GameEngine {
                                     .weight(1f)
                                     .aspectRatio(1f)
                                     .clip(CircleShape)
-                                    .background(DarkSurfaceVariant)
+                                    .background(slotColor)
                                     .border(
-                                        width = if (isWin) 2.5.dp else if (isLast) 1.5.dp else 1.dp,
-                                        color = if (isWin || isLast) Ink else BorderSubtle,
+                                        width = if (isWin) 2.6.dp else if (isLast) 1.8.dp else 1.dp,
+                                        color = when {
+                                            isWin -> androidx.compose.ui.graphics.Color.White
+                                            isLast -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.75f)
+                                            else -> androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.25f)
+                                        },
                                         shape = CircleShape,
                                     )
                                     .clickable(enabled = canDrop) { onAction(GameAction("drop", c.toString())) }
-                                    .padding(4.dp),
+                                    .padding(3.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 when (ch) {
@@ -336,15 +346,16 @@ object Connect4Engine : GameEngine {
                                             .fillMaxWidth()
                                             .aspectRatio(1f)
                                             .clip(CircleShape)
-                                            .background(Ink),
+                                            .background(p1Color)
+                                            .border(2.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.28f), CircleShape),
                                     )
                                     '2' -> Box(
                                         Modifier
                                             .fillMaxWidth()
                                             .aspectRatio(1f)
                                             .clip(CircleShape)
-                                            .background(DarkSurface)
-                                            .border(3.5.dp, Ink, CircleShape),
+                                            .background(p2Color)
+                                            .border(2.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.35f), CircleShape),
                                     )
                                 }
                             }
@@ -358,9 +369,12 @@ object Connect4Engine : GameEngine {
 
 @Composable
 private fun DiscIcon(isPlayerOne: Boolean, sizeDp: Int) {
-    if (isPlayerOne) {
-        Box(Modifier.size(sizeDp.dp).clip(CircleShape).background(Ink))
-    } else {
-        Box(Modifier.size(sizeDp.dp).clip(CircleShape).background(DarkSurface).border(3.dp, Ink, CircleShape))
-    }
+    val c = if (isPlayerOne) GameColors.Crimson else GameColors.Gold
+    Box(
+        Modifier
+            .size(sizeDp.dp)
+            .clip(CircleShape)
+            .background(c)
+            .border(1.5.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.45f), CircleShape),
+    )
 }

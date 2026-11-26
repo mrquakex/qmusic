@@ -209,6 +209,7 @@ fun GameSlashCommands(
             SlashGameRow(
                 command = slashTagOf(kind),
                 label = engine.title(s),
+                kind = kind,
                 onClick = { onQuickStart(kind) },
             )
         }
@@ -216,7 +217,7 @@ fun GameSlashCommands(
 }
 
 @Composable
-private fun SlashGameRow(command: String, label: String, onClick: () -> Unit) {
+private fun SlashGameRow(command: String, label: String, kind: GameKind? = null, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -224,9 +225,18 @@ private fun SlashGameRow(command: String, label: String, onClick: () -> Unit) {
             .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(QMusicIcons.Dice, contentDescription = null, tint = Ink, modifier = Modifier.size(16.dp))
+        if (kind != null) {
+            GameEmblem(kind, modifier = Modifier.size(18.dp))
+        } else {
+            Icon(QMusicIcons.Dice, contentDescription = null, tint = GameColors.Indigo, modifier = Modifier.size(18.dp))
+        }
         Spacer(Modifier.width(10.dp))
-        Text(command, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            command,
+            color = kind?.palette()?.primary ?: TextPrimary,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
         Spacer(Modifier.width(10.dp))
         Text(label, color = TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
     }
@@ -252,6 +262,7 @@ fun ActiveGameBanner(
     }
     val top = active.firstOrNull() ?: return
     val engine = GameRegistry.of(top.kind)
+    val pal = top.kind.palette()
     val myTurn = top.status == GameStatus.PLAYING && top.turn == myUid
     val canJoin = top.status == GameStatus.WAITING && myUid !in top.players
 
@@ -260,26 +271,23 @@ fun ActiveGameBanner(
             .fillMaxWidth()
             .background(DarkSurface)
             .clickable { onOpen(top.id) }
-            .padding(horizontal = 14.dp, vertical = 9.dp),
+            .padding(end = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Box(Modifier.width(3.5.dp).height(50.dp).background(pal.primary))
+        Spacer(Modifier.width(10.dp))
         Box(
             modifier = Modifier
-                .size(30.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(if (myTurn || canJoin) Ink else DarkSurfaceVariant)
-                .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp)),
+                .size(32.dp)
+                .clip(RoundedCornerShape(9.dp))
+                .background(pal.softBg)
+                .border(1.dp, pal.softBorder, RoundedCornerShape(9.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                QMusicIcons.Dice,
-                contentDescription = null,
-                tint = if (myTurn || canJoin) InkInverse else Ink,
-                modifier = Modifier.size(16.dp),
-            )
+            GameEmblem(top.kind, modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     engine?.title(s) ?: top.kind.wire,
@@ -293,8 +301,9 @@ fun ActiveGameBanner(
                     Spacer(Modifier.width(6.dp))
                     Text(
                         "+${active.size - 1} ${s.gameActiveGames}",
-                        color = TextMuted,
+                        color = pal.primary,
                         fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
                     )
                 }
             }
@@ -304,8 +313,9 @@ fun ActiveGameBanner(
                     myTurn -> s.gameYourTurn + if (top.summary.isNotBlank()) " · ${top.summary}" else ""
                     else -> top.summary.ifBlank { s.gameWaiting }
                 },
-                color = if (myTurn || canJoin) TextPrimary else TextSecondary,
+                color = if (myTurn || canJoin) pal.primary else TextSecondary,
                 fontSize = 12.sp,
+                fontWeight = if (myTurn || canJoin) FontWeight.Medium else FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -314,13 +324,13 @@ fun ActiveGameBanner(
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(999.dp))
-                .background(if (myTurn || canJoin) Ink else DarkSurfaceVariant)
-                .border(1.dp, if (myTurn || canJoin) Ink else BorderHover, RoundedCornerShape(999.dp))
-                .padding(horizontal = 12.dp, vertical = 5.dp),
+                .background(if (myTurn || canJoin) pal.primary else pal.softBg)
+                .border(1.dp, if (myTurn || canJoin) pal.primary else pal.softBorder, RoundedCornerShape(999.dp))
+                .padding(horizontal = 13.dp, vertical = 5.dp),
         ) {
             Text(
                 if (canJoin) s.gameJoin else s.gameOpen,
-                color = if (myTurn || canJoin) InkInverse else TextPrimary,
+                color = if (myTurn || canJoin) pal.onPrimary else pal.primary,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -329,7 +339,7 @@ fun ActiveGameBanner(
     Box(Modifier.fillMaxWidth().height(1.dp).background(BorderSubtle))
 }
 
-/** Monochrome live game card rendered inside a chat bubble (adapts to mine vs received bubble colors). */
+/** Live game card rendered inside a chat bubble with each game's custom emblem and signature accent. */
 @Composable
 fun GameMessageCard(
     ref: ChatGameRef,
@@ -342,13 +352,14 @@ fun GameMessageCard(
     onOpen: () -> Unit,
 ) {
     val engine = GameRegistry.of(ref.kind)
+    val pal = ref.kind.palette()
     val fg = if (mine) InkInverse else TextPrimary
-    val fgSoft = if (mine) InkInverse.copy(alpha = 0.68f) else TextSecondary
-    val cardBg = if (mine) InkInverse.copy(alpha = 0.09f) else DarkSurface
-    val cardBorder = if (mine) InkInverse.copy(alpha = 0.20f) else BorderSubtle
-    val badgeBg = if (mine) InkInverse.copy(alpha = 0.14f) else DarkSurfaceVariant
-    val ctaBg = if (mine) InkInverse else Ink
-    val ctaFg = if (mine) Ink else InkInverse
+    val fgSoft = if (mine) InkInverse.copy(alpha = 0.72f) else TextSecondary
+    val cardBg = if (mine) InkInverse.copy(alpha = 0.08f) else DarkSurface
+    val cardBorder = if (mine) pal.primary.copy(alpha = 0.50f) else pal.softBorder
+    val badgeBg = if (mine) InkInverse.copy(alpha = 0.14f) else pal.softBg
+    val ctaBg = pal.primary
+    val ctaFg = pal.onPrimary
 
     val expired = session?.isExpired(nowMs) == true
     val statusLabel = when {
@@ -368,106 +379,111 @@ fun GameMessageCard(
 
     Column(
         modifier = Modifier
-            .width(262.dp)
+            .width(264.dp)
             .padding(horizontal = 4.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(cardBg)
-            .border(1.dp, cardBorder, RoundedCornerShape(14.dp))
-            .clickable(enabled = session != null) { if (canJoin) onJoin() else onOpen() }
-            .padding(12.dp),
+            .border(1.2.dp, cardBorder, RoundedCornerShape(14.dp))
+            .clickable(enabled = session != null) { if (canJoin) onJoin() else onOpen() },
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(badgeBg),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(QMusicIcons.Dice, contentDescription = null, tint = fg, modifier = Modifier.size(18.dp))
+        // Signature colored top accent bar
+        Box(Modifier.fillMaxWidth().height(4.dp).background(pal.primary))
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(badgeBg)
+                        .border(1.dp, pal.softBorder, RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    GameEmblem(ref.kind, modifier = Modifier.size(22.dp))
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        engine?.title(s) ?: ref.title.ifBlank { ref.kind.wire },
+                        color = fg,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        statusLabel,
+                        color = if (!finished && (session?.turn == myUid || canJoin)) pal.primary else fgSoft,
+                        fontSize = 11.sp,
+                        fontWeight = if (!finished && (session?.turn == myUid || canJoin)) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
+            val summary = session?.summary?.takeIf { it.isNotBlank() }
+            if (summary != null) {
+                Spacer(Modifier.height(8.dp))
                 Text(
-                    engine?.title(s) ?: ref.title.ifBlank { ref.kind.wire },
-                    color = fg,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    statusLabel,
+                    summary,
                     color = fgSoft,
-                    fontSize = 11.sp,
-                    maxLines = 1,
+                    fontSize = 12.sp,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-        }
-        val summary = session?.summary?.takeIf { it.isNotBlank() }
-        if (summary != null) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                summary,
-                color = fgSoft,
-                fontSize = 12.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (session != null && session.players.size >= 2) {
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                session.order.take(3).forEach { uid ->
-                    val p = session.players[uid] ?: return@forEach
-                    val label = if (uid == myUid) s.you else p.name.substringBefore(' ')
-                    val isWinner = session.winnerUid == uid && session.status == GameStatus.FINISHED
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (isWinner) ctaBg else badgeBg)
-                            .padding(horizontal = 6.dp, vertical = 4.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            "$label ${p.score}",
-                            color = if (isWinner) ctaFg else fg,
-                            fontSize = 11.sp,
-                            fontWeight = if (isWinner) FontWeight.Bold else FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+            if (session != null && session.players.size >= 2) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    session.order.take(3).forEach { uid ->
+                        val p = session.players[uid] ?: return@forEach
+                        val label = if (uid == myUid) s.you else p.name.substringBefore(' ')
+                        val isWinner = session.winnerUid == uid && session.status == GameStatus.FINISHED
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isWinner) GameColors.Emerald else badgeBg)
+                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "$label ${p.score}",
+                                color = if (isWinner) GameColors.onAccent(GameColors.Emerald) else fg,
+                                fontSize = 11.sp,
+                                fontWeight = if (isWinner) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }
-        }
-        Spacer(Modifier.height(10.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .background(if (finished) badgeBg else ctaBg)
-                .border(1.dp, if (finished) cardBorder else ctaBg, RoundedCornerShape(10.dp))
-                .clickable(enabled = session != null) { if (canJoin) onJoin() else onOpen() }
-                .padding(vertical = 8.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                when {
-                    session == null -> "..."
-                    canJoin -> s.gameJoin
-                    finished -> s.gameWatch
-                    else -> s.gameOpen
-                },
-                color = if (finished) fg else ctaFg,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
+            Spacer(Modifier.height(10.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (finished) badgeBg else ctaBg)
+                    .border(1.dp, if (finished) cardBorder else ctaBg, RoundedCornerShape(10.dp))
+                    .clickable(enabled = session != null) { if (canJoin) onJoin() else onOpen() }
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    when {
+                        session == null -> "..."
+                        canJoin -> s.gameJoin
+                        finished -> s.gameWatch
+                        else -> s.gameOpen
+                    },
+                    color = if (finished) fg else ctaFg,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }
@@ -569,7 +585,8 @@ fun GamePickerSheet(
                 }
             }
 
-            // 2-column game grid
+            // 2-column distinct colorful game cards
+            val selectedPal = selected.palette()
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -581,34 +598,49 @@ fun GamePickerSheet(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         pair.forEach { kind ->
                             val engine = GameRegistry.of(kind)
+                            val pal = kind.palette()
                             val isSel = selected == kind
                             Column(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(if (isSel) DarkSurfaceVariant else DarkSurface)
-                                    .border(if (isSel) 1.5.dp else 1.dp, if (isSel) Ink else BorderSubtle, RoundedCornerShape(14.dp))
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (isSel) pal.softBg else DarkSurface)
+                                    .border(if (isSel) 1.8.dp else 1.dp, if (isSel) pal.primary else pal.softBorder.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
                                     .clickable { selected = kind }
-                                    .padding(14.dp),
+                                    .padding(13.dp),
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        slashTagOf(kind),
-                                        color = if (isSel) Ink else TextMuted,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    if (isSel) {
-                                        Icon(QMusicIcons.Check, contentDescription = null, tint = Ink, modifier = Modifier.size(15.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(RoundedCornerShape(11.dp))
+                                            .background(pal.softBg)
+                                            .border(1.dp, pal.softBorder, RoundedCornerShape(11.dp)),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        GameEmblem(kind, modifier = Modifier.size(24.dp))
+                                    }
+                                    Spacer(Modifier.weight(1f))
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(999.dp))
+                                            .background(if (isSel) pal.primary else DarkSurfaceVariant)
+                                            .padding(horizontal = 7.dp, vertical = 3.dp),
+                                    ) {
+                                        Text(
+                                            slashTagOf(kind),
+                                            color = if (isSel) pal.onPrimary else pal.primary,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                        )
                                     }
                                 }
-                                Spacer(Modifier.height(6.dp))
+                                Spacer(Modifier.height(10.dp))
                                 Text(
                                     engine?.title(s) ?: kind.wire,
                                     color = TextPrimary,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -616,8 +648,8 @@ fun GamePickerSheet(
                                 Text(
                                     engine?.subtitle(s).orEmpty(),
                                     color = TextSecondary,
-                                    fontSize = 12.sp,
-                                    lineHeight = 16.sp,
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -629,8 +661,8 @@ fun GamePickerSheet(
                 Spacer(Modifier.height(12.dp))
             }
 
-            // Selected game options & Start button
-            Box(Modifier.fillMaxWidth().height(1.dp).background(BorderSubtle))
+            // Selected game options & accented Start button
+            Box(Modifier.fillMaxWidth().height(1.dp).background(selectedPal.softBorder))
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -651,7 +683,7 @@ fun GamePickerSheet(
                         .fillMaxWidth()
                         .height(48.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(if (busy) DarkSurfaceVariant else Ink)
+                        .background(if (busy) DarkSurfaceVariant else selectedPal.primary)
                         .clickable(enabled = !busy) {
                             if (selected == GameKind.SONG_QUIZ) {
                                 busy = true
@@ -678,11 +710,11 @@ fun GamePickerSheet(
                 ) {
                     if (busy) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            CircularProgressIndicator(color = Ink, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                            CircularProgressIndicator(color = selectedPal.primary, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
                             Text(s.gameLoading, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         }
                     } else {
-                        Text(s.gameStart, color = InkInverse, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text(s.gameStart, color = selectedPal.onPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -961,23 +993,35 @@ fun GameArenaDialog(
                 .navigationBarsPadding()
                 .imePadding(),
         ) {
-            // Top bar
+            // Top bar with game emblem & signature accent divider
+            val arenaPal = session.kind.palette()
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp)
+                    .height(58.dp)
                     .padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onDismiss) {
                     Icon(QMusicIcons.Back, contentDescription = s.gameBackToChat, tint = Ink)
                 }
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(arenaPal.softBg)
+                        .border(1.dp, arenaPal.softBorder, RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    GameEmblem(session.kind, modifier = Modifier.size(21.dp))
+                }
+                Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
                         engine.title(s),
                         color = TextPrimary,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -996,12 +1040,12 @@ fun GameArenaDialog(
                     modifier = Modifier
                         .size(34.dp)
                         .clip(CircleShape)
-                        .background(DarkSurface)
-                        .border(1.dp, BorderSubtle, CircleShape)
+                        .background(arenaPal.softBg)
+                        .border(1.dp, arenaPal.softBorder, CircleShape)
                         .clickable { showRules = true },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("?", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text("?", color = arenaPal.primary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.width(2.dp))
                 Box {
@@ -1028,14 +1072,14 @@ fun GameArenaDialog(
                         }
                         if (session.status == GameStatus.PLAYING && me.uid in session.players) {
                             DropdownMenuItem(
-                                text = { Text(s.gameForfeit, color = TextPrimary) },
+                                text = { Text(s.gameForfeit, color = GameColors.Crimson) },
                                 onClick = { showMenu = false; confirmForfeit = true },
                             )
                         }
                     }
                 }
             }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(BorderSubtle))
+            Box(Modifier.fillMaxWidth().height(2.dp).background(arenaPal.primary.copy(alpha = 0.55f)))
 
             // Join strip when opening a WAITING invite we haven't joined yet
             if (session.status == GameStatus.WAITING && me.uid !in session.players) {
@@ -1156,15 +1200,24 @@ private fun GameEndCard(
             if (s.english) "$name won!" else "$name kazandı!"
         }
     }
+    val pal = session.kind.palette()
+    val iWon = session.winnerUid == myUid && session.status == GameStatus.FINISHED
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(BgSurface)
-            .border(BorderStroke(1.dp, BorderSubtle))
+            .border(BorderStroke(1.dp, if (iWon) GameColors.Emerald.copy(alpha = 0.55f) else pal.softBorder))
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(headline, color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        Text(
+            headline,
+            color = if (iWon) GameColors.Emerald else pal.primary,
+            fontSize = 19.sp,
+            fontWeight = FontWeight.ExtraBold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
         if (session.summary.isNotBlank()) {
             Text(session.summary, color = TextSecondary, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         }
@@ -1177,21 +1230,21 @@ private fun GameEndCard(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(10.dp))
-                            .background(if (win) Ink else DarkSurface)
-                            .border(1.dp, if (win) Ink else BorderSubtle, RoundedCornerShape(10.dp))
+                            .background(if (win) GameColors.Emerald else DarkSurface)
+                            .border(1.dp, if (win) GameColors.Emerald else BorderSubtle, RoundedCornerShape(10.dp))
                             .padding(vertical = 8.dp, horizontal = 6.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Text(
                             if (uid == myUid) s.you else p.name.substringBefore(' '),
-                            color = if (win) InkInverse else TextSecondary,
+                            color = if (win) GameColors.onAccent(GameColors.Emerald) else TextSecondary,
                             fontSize = 11.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             p.score.toString(),
-                            color = if (win) InkInverse else TextPrimary,
+                            color = if (win) GameColors.onAccent(GameColors.Emerald) else TextPrimary,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                         )
@@ -1217,14 +1270,14 @@ private fun GameEndCard(
                     .weight(1f)
                     .height(44.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Ink)
+                    .background(pal.primary)
                     .clickable(enabled = !rematchBusy, onClick = onRematch),
                 contentAlignment = Alignment.Center,
             ) {
                 if (rematchBusy) {
-                    CircularProgressIndicator(color = InkInverse, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                    CircularProgressIndicator(color = pal.onPrimary, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
                 } else {
-                    Text(s.gameRematch, color = InkInverse, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(s.gameRematch, color = pal.onPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -1254,26 +1307,28 @@ fun GameScoreboardCard(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(QMusicIcons.Dice, contentDescription = null, tint = Ink, modifier = Modifier.size(18.dp))
+            Icon(QMusicIcons.Dice, contentDescription = null, tint = GameColors.Gold, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text(s.gameScoreboard, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             Text(
                 "${stats.totalPlayed}",
-                color = TextSecondary,
+                color = GameColors.Gold,
                 fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
             )
         }
         if (entries.isEmpty()) {
             Text(s.gameDraw, color = TextSecondary, fontSize = 13.sp)
         } else {
-            entries.take(6).forEach { (uid, wins) ->
+            val barColors = listOf(GameColors.Gold, GameColors.Emerald, GameColors.Sky, GameColors.Violet, GameColors.Coral, GameColors.Teal)
+            entries.take(6).forEachIndexed { idx, (uid, wins) ->
                 val label = if (uid == myUid) s.you else names[uid] ?: "?"
                 val ratio = (wins.toFloat() / topWins.toFloat()).coerceIn(0.08f, 1f)
+                val barColor = barColors[idx % barColors.size]
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(label, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                        Text("$wins ${s.gameWins}", color = TextSecondary, fontSize = 12.sp)
+                        Text("$wins ${s.gameWins}", color = barColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
                     Box(
                         modifier = Modifier
@@ -1287,7 +1342,7 @@ fun GameScoreboardCard(
                                 .fillMaxWidth(ratio)
                                 .height(6.dp)
                                 .clip(RoundedCornerShape(999.dp))
-                                .background(Ink),
+                                .background(barColor),
                         )
                     }
                 }

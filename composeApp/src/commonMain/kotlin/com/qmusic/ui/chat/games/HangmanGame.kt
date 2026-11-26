@@ -498,6 +498,9 @@ object HangmanEngine : GameEngine {
             }
 
             // Gallows canvas + word display
+            val amber = GameColors.Amber
+            val crimson = GameColors.Crimson
+            val emerald = GameColors.Emerald
             Column(
                 modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -508,22 +511,23 @@ object HangmanEngine : GameEngine {
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(999.dp))
-                                .background(DarkSurfaceVariant)
-                                .border(1.dp, BorderSubtle, RoundedCornerShape(999.dp))
+                                .background(amber.copy(alpha = 0.16f))
+                                .border(1.dp, amber.copy(alpha = 0.45f), RoundedCornerShape(999.dp))
                                 .padding(horizontal = 10.dp, vertical = 4.dp),
                         ) {
-                            Text(hint, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            Text(hint, color = amber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                     Text(
                         if (tr) "Hata: $wrong / $HANGMAN_MAX_WRONG" else "Mistakes: $wrong / $HANGMAN_MAX_WRONG",
-                        color = TextSecondary,
+                        color = if (wrong >= 4) crimson else TextSecondary,
                         fontSize = 12.sp,
+                        fontWeight = if (wrong >= 4) FontWeight.Bold else FontWeight.Medium,
                     )
                 }
 
                 Spacer(Modifier.height(10.dp))
-                HangmanCanvas(wrong = wrong, modifier = Modifier.size(164.dp))
+                HangmanCanvas(wrong = wrong, modifier = Modifier.size(168.dp))
                 Spacer(Modifier.height(14.dp))
 
                 // Masked word letters
@@ -536,20 +540,21 @@ object HangmanEngine : GameEngine {
                     horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
                 ) {
                     displayWord.forEach { slot ->
+                        val revealed = slot != "_"
                         Box(
                             modifier = Modifier
                                 .width(if (word.length > 9) 24.dp else 30.dp)
-                                .height(36.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (slot != "_") DarkSurfaceVariant else DarkSurface)
-                                .border(1.dp, if (slot != "_") BorderHover else BorderSubtle, RoundedCornerShape(6.dp)),
+                                .height(38.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (revealed) emerald.copy(alpha = 0.16f) else DarkSurface)
+                                .border(1.2.dp, if (revealed) emerald else BorderSubtle, RoundedCornerShape(8.dp)),
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
                                 slot,
-                                color = if (slot == "_") TextMuted else TextPrimary,
+                                color = if (revealed) emerald else TextMuted,
                                 fontSize = if (word.length > 9) 15.sp else 18.sp,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.ExtraBold,
                             )
                         }
                     }
@@ -560,11 +565,11 @@ object HangmanEngine : GameEngine {
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
-                            .background(Ink)
+                            .background(amber)
                             .clickable { onAction(GameAction("next_round")) }
                             .padding(horizontal = 24.dp, vertical = 10.dp),
                     ) {
-                        Text(if (tr) "Sonraki Tur" else "Next Round", color = InkInverse, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(if (tr) "Sonraki Tur" else "Next Round", color = GameColors.onAccent(amber), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -609,13 +614,13 @@ object HangmanEngine : GameEngine {
 
 @Composable
 private fun HangmanCanvas(wrong: Int, modifier: Modifier = Modifier) {
-    val strokeColor = Ink
-    val frameColor = BorderHover
+    val strokeColor = if (wrong >= 4) GameColors.Crimson else GameColors.Orange
+    val frameColor = GameColors.Amber
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(DarkSurface)
-            .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(18.dp))
+            .background(GameColors.Amber.copy(alpha = 0.08f))
+            .border(1.2.dp, GameColors.Amber.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
             .padding(14.dp),
     ) {
         Canvas(modifier = Modifier.matchParentSize()) {

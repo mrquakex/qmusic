@@ -402,38 +402,40 @@ object BattleshipEngine : GameEngine {
             var viewEnemy by remember { mutableStateOf(true) }
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val sky = GameColors.Sky
+                val orange = GameColors.Orange
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (viewEnemy) Ink else DarkSurface)
-                        .border(1.dp, if (viewEnemy) Ink else BorderSubtle, RoundedCornerShape(10.dp))
+                        .background(if (viewEnemy) orange else DarkSurface)
+                        .border(1.2.dp, if (viewEnemy) orange else BorderSubtle, RoundedCornerShape(10.dp))
                         .clickable { viewEnemy = true }
                         .padding(vertical = 9.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         (if (tr) "Rakip Denizi" else "Enemy Sea") + " ($myHits/${BS_SHIPS.sum()})",
-                        color = if (viewEnemy) InkInverse else TextPrimary,
+                        color = if (viewEnemy) GameColors.onAccent(orange) else TextPrimary,
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                     )
                 }
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (!viewEnemy) Ink else DarkSurface)
-                        .border(1.dp, if (!viewEnemy) Ink else BorderSubtle, RoundedCornerShape(10.dp))
+                        .background(if (!viewEnemy) sky else DarkSurface)
+                        .border(1.2.dp, if (!viewEnemy) sky else BorderSubtle, RoundedCornerShape(10.dp))
                         .clickable { viewEnemy = false }
                         .padding(vertical = 9.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         (if (tr) "Benim Filom" else "My Fleet") + " ($rivalHits/${BS_SHIPS.sum()})",
-                        color = if (!viewEnemy) InkInverse else TextPrimary,
+                        color = if (!viewEnemy) GameColors.onAccent(sky) else TextPrimary,
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                     )
                 }
             }
@@ -444,9 +446,9 @@ object BattleshipEngine : GameEngine {
                     myTurn -> if (tr) "Sıra sende — rakip denizine ateş et!" else "Your turn — tap enemy sea to fire!"
                     else -> if (tr) "Rakibin atışı bekleniyor..." else "Waiting for enemy shot..."
                 },
-                color = if (myTurn) TextPrimary else TextSecondary,
+                color = if (myTurn) GameColors.Orange else TextSecondary,
                 fontSize = 13.sp,
-                fontWeight = if (myTurn) FontWeight.SemiBold else FontWeight.Normal,
+                fontWeight = if (myTurn) FontWeight.Bold else FontWeight.Normal,
             )
 
             if (viewEnemy) {
@@ -476,8 +478,9 @@ object BattleshipEngine : GameEngine {
                     Text(
                         if (ok) (if (tr) "SHA-256 filo doğrulaması: Hilesiz ✓" else "SHA-256 board verification: Valid ✓")
                         else (if (tr) "SHA-256 uyuşmazlığı!" else "SHA-256 mismatch!"),
-                        color = TextSecondary,
+                        color = if (ok) GameColors.Emerald else GameColors.Crimson,
                         fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
                     )
                 }
             }
@@ -487,15 +490,16 @@ object BattleshipEngine : GameEngine {
 
 @Composable
 private fun SmallChip(label: String, onClick: () -> Unit) {
+    val sky = GameColors.Sky
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(DarkSurfaceVariant)
-            .border(1.dp, BorderHover, RoundedCornerShape(8.dp))
+            .background(sky.copy(alpha = 0.14f))
+            .border(1.dp, sky.copy(alpha = 0.42f), RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),
     ) {
-        Text(label, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = sky, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -507,13 +511,19 @@ private fun BattleshipGrid(
     interactive: Boolean,
     onTap: (Int) -> Unit,
 ) {
+    val oceanDeep = GameColors.OceanDeep
+    val oceanCell = GameColors.OceanCell
+    val oceanBorder = GameColors.OceanBorder
+    val hitColor = GameColors.Crimson
+    val shipColor = GameColors.Sky
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(DarkSurface)
-            .border(1.dp, BorderHover, RoundedCornerShape(14.dp))
-            .padding(6.dp),
+            .clip(RoundedCornerShape(16.dp))
+            .background(oceanDeep)
+            .border(1.6.dp, oceanBorder, RoundedCornerShape(16.dp))
+            .padding(7.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         for (r in 0 until BS_SIZE) {
@@ -523,28 +533,29 @@ private fun BattleshipGrid(
                     val hasShip = showShips && board.getOrNull(idx) == 'S'
                     val shot = shots?.getOrNull(idx) ?: '.'
                     val bg = when {
-                        shot == 'H' -> Ink
-                        hasShip -> DarkSurfaceVariant
-                        else -> DarkSurface
+                        shot == 'H' -> hitColor
+                        hasShip -> shipColor.copy(alpha = 0.42f)
+                        else -> oceanCell
                     }
                     val borderC = when {
-                        shot == 'H' || hasShip -> Ink
-                        else -> BorderSubtle
+                        shot == 'H' -> GameColors.Orange
+                        hasShip -> shipColor
+                        else -> oceanBorder.copy(alpha = 0.55f)
                     }
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .aspectRatio(1f)
-                            .clip(RoundedCornerShape(5.dp))
+                            .clip(RoundedCornerShape(6.dp))
                             .background(bg)
-                            .border(if (hasShip || shot == 'H') 1.5.dp else 1.dp, borderC, RoundedCornerShape(5.dp))
+                            .border(if (hasShip || shot == 'H') 1.5.dp else 1.dp, borderC, RoundedCornerShape(6.dp))
                             .clickable(enabled = interactive && shot == '.') { onTap(idx) },
                         contentAlignment = Alignment.Center,
                     ) {
                         when (shot) {
-                            'H' -> Text("×", color = InkInverse, fontSize = 14.sp, fontWeight = FontWeight.Black)
-                            'M' -> Text("·", color = TextMuted, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                            else -> if (hasShip) Box(Modifier.width(8.dp).height(8.dp).clip(RoundedCornerShape(2.dp)).background(Ink))
+                            'H' -> Text("×", color = GameColors.onAccent(hitColor), fontSize = 15.sp, fontWeight = FontWeight.Black)
+                            'M' -> Text("·", color = shipColor, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                            else -> if (hasShip) Box(Modifier.width(10.dp).height(10.dp).clip(RoundedCornerShape(3.dp)).background(shipColor))
                         }
                     }
                 }

@@ -638,37 +638,41 @@ object WordDuelEngine : GameEngine {
 
 @Composable
 private fun WordRow(word: String, marks: List<KeyMark>?, active: Boolean) {
+    val exact = GameColors.Emerald
+    val present = GameColors.Amber
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         for (i in 0 until 5) {
             val ch = word.getOrNull(i)
             val mark = marks?.getOrNull(i)
             val bg = when (mark) {
-                KeyMark.EXACT -> Ink
-                KeyMark.PRESENT -> DarkSurfaceVariant
+                KeyMark.EXACT -> exact
+                KeyMark.PRESENT -> present
                 KeyMark.ABSENT -> DarkSurface
                 KeyMark.UNUSED, null -> if (ch != null) DarkSurfaceVariant else DarkSurface
             }
             val fg = when (mark) {
-                KeyMark.EXACT -> InkInverse
+                KeyMark.EXACT -> GameColors.onAccent(exact)
+                KeyMark.PRESENT -> GameColors.onAccent(present)
                 KeyMark.ABSENT -> TextMuted
                 else -> TextPrimary
             }
             val borderW = when {
-                mark == KeyMark.PRESENT -> 2.dp
-                active && ch != null -> 1.5.dp
+                mark == KeyMark.EXACT || mark == KeyMark.PRESENT -> 1.5.dp
+                active && ch != null -> 1.8.dp
                 else -> 1.dp
             }
             val borderC = when {
-                mark == KeyMark.PRESENT -> Ink
-                active && ch != null -> BorderHover
+                mark == KeyMark.EXACT -> exact
+                mark == KeyMark.PRESENT -> present
+                active && ch != null -> exact.copy(alpha = 0.7f)
                 else -> BorderSubtle
             }
             Box(
                 modifier = Modifier
                     .size(50.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(11.dp))
                     .background(bg)
-                    .border(borderW, borderC, RoundedCornerShape(10.dp)),
+                    .border(borderW, borderC, RoundedCornerShape(11.dp)),
                 contentAlignment = Alignment.Center,
             ) {
                 if (ch != null) {
@@ -676,17 +680,7 @@ private fun WordRow(word: String, marks: List<KeyMark>?, active: Boolean) {
                         text = ch.toString(),
                         color = fg,
                         fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-                if (mark == KeyMark.PRESENT) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(5.dp)
-                            .size(5.dp)
-                            .clip(CircleShape)
-                            .background(Ink),
+                        fontWeight = FontWeight.ExtraBold,
                     )
                 }
             }
@@ -696,16 +690,18 @@ private fun WordRow(word: String, marks: List<KeyMark>?, active: Boolean) {
 
 @Composable
 private fun MiniPatternGrid(patterns: List<String>) {
+    val exact = GameColors.Emerald
+    val present = GameColors.Amber
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         patterns.take(6).forEach { pat ->
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 WordDuelEngine.decodeMarks(pat).forEach { m ->
                     val bg = when (m) {
-                        KeyMark.EXACT -> Ink
-                        KeyMark.PRESENT -> TextSecondary
+                        KeyMark.EXACT -> exact
+                        KeyMark.PRESENT -> present
                         else -> BorderSubtle
                     }
-                    Box(Modifier.size(6.dp).clip(RoundedCornerShape(1.5.dp)).background(bg))
+                    Box(Modifier.size(7.dp).clip(RoundedCornerShape(2.dp)).background(bg))
                 }
             }
         }

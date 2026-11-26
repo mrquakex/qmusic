@@ -510,19 +510,29 @@ object TriviaEngine : GameEngine {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Scores + timer
+            // Quiz-show scores + timer
+            val indigo = GameColors.Indigo
+            val catColor = when (q.category) {
+                "music" -> GameColors.Mint
+                "cinema" -> GameColors.Magenta
+                "science" -> GameColors.Cyan
+                "sport" -> GameColors.Orange
+                else -> indigo
+            }
+            val choiceColors = listOf(GameColors.Sky, GameColors.Magenta, GameColors.Amber, GameColors.Emerald)
+
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (remainingSec <= 5 && phase == "play") Ink else DarkSurfaceVariant)
+                        .background(if (remainingSec <= 5 && phase == "play") GameColors.Crimson else indigo)
                         .padding(horizontal = 12.dp, vertical = 7.dp),
                 ) {
                     Text(
                         "${remainingSec}s",
-                        color = if (remainingSec <= 5 && phase == "play") InkInverse else TextPrimary,
+                        color = GameColors.onAccent(if (remainingSec <= 5 && phase == "play") GameColors.Crimson else indigo),
                         fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.ExtraBold,
                     )
                 }
                 session.order.take(3).forEach { uid ->
@@ -532,59 +542,74 @@ object TriviaEngine : GameEngine {
                             .weight(1f)
                             .clip(RoundedCornerShape(10.dp))
                             .background(DarkSurface)
-                            .border(1.dp, if (uid in answers && phase == "play") Ink else BorderSubtle, RoundedCornerShape(10.dp))
+                            .border(1.2.dp, if (uid in answers && phase == "play") GameColors.Gold else BorderSubtle, RoundedCornerShape(10.dp))
                             .padding(horizontal = 8.dp, vertical = 7.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(if (uid == me.uid) s.you else p.name.substringBefore(' '), color = TextSecondary, fontSize = 11.sp, maxLines = 1)
-                        Text("${p.score}", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text("${p.score}", color = GameColors.Gold, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
                     }
                 }
             }
 
-            // Question card
+            // Quiz-Show Question Stage Card
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(DarkSurface)
-                    .border(1.dp, BorderHover, RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(catColor.copy(alpha = 0.12f))
+                    .border(1.5.dp, catColor.copy(alpha = 0.45f), RoundedCornerShape(18.dp))
                     .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(
-                    categoryLabel(q.category, tr).uppercase() + " · ${session.round}/${session.maxRounds}",
-                    color = TextMuted,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(catColor)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        categoryLabel(q.category, tr).uppercase() + " · ${session.round}/${session.maxRounds}",
+                        color = GameColors.onAccent(catColor),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+                }
                 Text(
                     q.question,
                     color = TextPrimary,
                     fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     lineHeight = 23.sp,
                 )
             }
 
-            // 4 choices
+            // 4 Distinct Colored Quiz Choices (A=Sky, B=Magenta, C=Amber, D=Emerald)
             val tags = listOf("A", "B", "C", "D")
             q.choices.forEachIndexed { idx, label ->
+                val tagColor = choiceColors[idx % choiceColors.size]
                 val isPicked = myChoice == idx
                 val isCorrect = phase == "reveal" && idx == q.correct
                 val isWrong = phase == "reveal" && isPicked && idx != q.correct
                 val bg = when {
-                    isCorrect -> Ink
-                    isPicked -> DarkSurfaceVariant
+                    isCorrect -> GameColors.Emerald
+                    isWrong -> GameColors.Crimson.copy(alpha = 0.22f)
+                    isPicked -> tagColor.copy(alpha = 0.20f)
                     else -> DarkSurface
                 }
-                val fg = if (isCorrect) InkInverse else TextPrimary
+                val fg = if (isCorrect) GameColors.onAccent(GameColors.Emerald) else TextPrimary
+                val borderC = when {
+                    isCorrect -> GameColors.Emerald
+                    isWrong -> GameColors.Crimson
+                    isPicked -> tagColor
+                    else -> tagColor.copy(alpha = 0.32f)
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(13.dp))
                         .background(bg)
-                        .border(if (isCorrect || isPicked) 1.5.dp else 1.dp, if (isCorrect || isPicked) Ink else BorderSubtle, RoundedCornerShape(12.dp))
+                        .border(if (isCorrect || isWrong || isPicked) 1.6.dp else 1.dp, borderC, RoundedCornerShape(13.dp))
                         .clickable(enabled = phase == "play" && myChoice == null && session.status == GameStatus.PLAYING) {
                             val elapsed = (controller.serverNow() - localStartMs).coerceAtLeast(0L)
                             onAction(GameAction("answer", "$idx|$elapsed"))
@@ -594,17 +619,17 @@ object TriviaEngine : GameEngine {
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(26.dp)
-                            .clip(RoundedCornerShape(7.dp))
-                            .background(if (isCorrect) InkInverse.copy(alpha = 0.16f) else DarkSurfaceVariant),
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isCorrect) GameColors.onAccent(GameColors.Emerald).copy(alpha = 0.18f) else tagColor),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(tags.getOrElse(idx) { "" }, color = fg, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(tags.getOrElse(idx) { "" }, color = if (isCorrect) fg else GameColors.onAccent(tagColor), fontSize = 12.sp, fontWeight = FontWeight.Black)
                     }
                     Spacer(Modifier.width(10.dp))
-                    Text(label, color = fg, fontSize = 15.sp, fontWeight = if (isCorrect || isPicked) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.weight(1f))
-                    if (isCorrect) Text("✓", color = InkInverse, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    else if (isWrong) Text("×", color = TextMuted, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(label, color = fg, fontSize = 15.sp, fontWeight = if (isCorrect || isPicked) FontWeight.Bold else FontWeight.Medium, modifier = Modifier.weight(1f))
+                    if (isCorrect) Text("✓", color = fg, fontSize = 17.sp, fontWeight = FontWeight.Black)
+                    else if (isWrong) Text("×", color = GameColors.Crimson, fontSize = 17.sp, fontWeight = FontWeight.Black)
                 }
             }
 
@@ -612,8 +637,9 @@ object TriviaEngine : GameEngine {
                 val myPts = awarded[me.uid] ?: 0
                 Text(
                     if (myPts > 0) (if (tr) "+$myPts puan!" else "+$myPts points!") else (if (tr) "Bu sorudan 0 puan" else "0 points"),
-                    color = TextSecondary,
+                    color = if (myPts > 0) GameColors.Emerald else TextSecondary,
                     fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -623,11 +649,11 @@ object TriviaEngine : GameEngine {
                             .fillMaxWidth()
                             .height(46.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Ink)
+                            .background(indigo)
                             .clickable { onAction(GameAction("next_round")) },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(if (tr) "Sonraki Soru" else "Next Question", color = InkInverse, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(if (tr) "Sonraki Soru" else "Next Question", color = GameColors.onAccent(indigo), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

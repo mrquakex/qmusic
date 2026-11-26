@@ -544,14 +544,16 @@ object TabooEngine : GameEngine {
                 return@Column
             }
 
-            // Describer sees Taboo card; Guesser sees mystery banner
+            // Describer sees authentic Hot-Magenta & Crimson Taboo card
+            val magenta = GameColors.Magenta
+            val crimson = GameColors.Crimson
             if (isDescriber) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(18.dp))
                         .background(DarkSurface)
-                        .border(1.5.dp, Ink, RoundedCornerShape(16.dp))
+                        .border(2.dp, magenta, RoundedCornerShape(18.dp))
                         .padding(14.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -559,14 +561,14 @@ object TabooEngine : GameEngine {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Ink)
-                            .padding(vertical = 10.dp),
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(magenta)
+                            .padding(vertical = 11.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(card.target, color = InkInverse, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                        Text(card.target, color = GameColors.onAccent(magenta), fontSize = 21.sp, fontWeight = FontWeight.Black)
                     }
-                    Text(if (tr) "YASAKLI KELİMELER" else "FORBIDDEN WORDS", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(if (tr) "⊘ YASAKLI KELİMELER" else "⊘ FORBIDDEN WORDS", color = crimson, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)) {
                         card.forbidden.take(3).forEach { f -> ForbiddenPill(f) }
                     }
@@ -581,15 +583,16 @@ object TabooEngine : GameEngine {
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(DarkSurface)
-                        .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
+                        .background(magenta.copy(alpha = 0.12f))
+                        .border(1.dp, magenta.copy(alpha = 0.40f), RoundedCornerShape(14.dp))
                         .padding(14.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         if (tr) "İpuçlarını oku ve gizli kelimeyi tahmin et!" else "Read the clues and guess the secret word!",
-                        color = TextSecondary,
+                        color = TextPrimary,
                         fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
                         textAlign = TextAlign.Center,
                     )
                 }
@@ -619,20 +622,21 @@ object TabooEngine : GameEngine {
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
-                            .background(DarkSurfaceVariant)
-                            .border(1.dp, BorderHover, RoundedCornerShape(10.dp))
+                            .background(magenta.copy(alpha = 0.14f))
+                            .border(1.dp, magenta.copy(alpha = 0.40f), RoundedCornerShape(10.dp))
                             .padding(horizontal = 10.dp, vertical = 7.dp),
                     ) {
                         Text(c, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 guesses.forEach { g ->
-                    Text(g, color = TextSecondary, fontSize = 12.sp)
+                    val hitLine = g.startsWith("✓")
+                    Text(g, color = if (hitLine) GameColors.Emerald else TextSecondary, fontSize = 12.sp, fontWeight = if (hitLine) FontWeight.Bold else FontWeight.Normal)
                 }
             }
 
             warning?.let { w ->
-                Text(w, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(w, color = crimson, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
 
             // Input bar
@@ -643,13 +647,13 @@ object TabooEngine : GameEngine {
                             modifier = Modifier
                                 .height(44.dp)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(DarkSurfaceVariant)
-                                .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp))
+                                .background(GameColors.Amber.copy(alpha = 0.16f))
+                                .border(1.dp, GameColors.Amber.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
                                 .clickable(enabled = passesLeft > 0) { onAction(GameAction("pass")) }
                                 .padding(horizontal = 12.dp),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(if (tr) "Pas ($passesLeft)" else "Pass ($passesLeft)", color = if (passesLeft > 0) TextPrimary else TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(if (tr) "Pas ($passesLeft)" else "Pass ($passesLeft)", color = if (passesLeft > 0) GameColors.Amber else TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                     Box(
@@ -657,7 +661,7 @@ object TabooEngine : GameEngine {
                             .weight(1f)
                             .clip(RoundedCornerShape(10.dp))
                             .background(DarkSurface)
-                            .border(1.dp, BorderHover, RoundedCornerShape(10.dp))
+                            .border(1.2.dp, magenta.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
                             .padding(horizontal = 12.dp, vertical = 11.dp),
                     ) {
                         if (input.isEmpty()) {
@@ -672,7 +676,7 @@ object TabooEngine : GameEngine {
                             onValueChange = { input = it.take(100) },
                             singleLine = true,
                             textStyle = TextStyle(color = TextPrimary, fontSize = 14.sp),
-                            cursorBrush = SolidColor(Ink),
+                            cursorBrush = SolidColor(magenta),
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
@@ -680,7 +684,7 @@ object TabooEngine : GameEngine {
                         modifier = Modifier
                             .height(44.dp)
                             .clip(RoundedCornerShape(10.dp))
-                            .background(if (input.isNotBlank()) Ink else DarkSurfaceVariant)
+                            .background(if (input.isNotBlank()) magenta else DarkSurfaceVariant)
                             .clickable(enabled = input.isNotBlank()) {
                                 val text = input.trim()
                                 if (isDescriber) {
@@ -700,7 +704,7 @@ object TabooEngine : GameEngine {
                             .padding(horizontal = 14.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(if (tr) "Gönder" else "Send", color = if (input.isNotBlank()) InkInverse else TextMuted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(if (tr) "Gönder" else "Send", color = if (input.isNotBlank()) GameColors.onAccent(magenta) else TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -710,13 +714,14 @@ object TabooEngine : GameEngine {
 
 @Composable
 private fun ForbiddenPill(word: String) {
+    val crimson = GameColors.Crimson
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(DarkSurfaceVariant)
-            .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
-            .padding(horizontal = 9.dp, vertical = 4.dp),
+            .clip(RoundedCornerShape(9.dp))
+            .background(crimson.copy(alpha = 0.14f))
+            .border(1.dp, crimson.copy(alpha = 0.45f), RoundedCornerShape(9.dp))
+            .padding(horizontal = 10.dp, vertical = 5.dp),
     ) {
-        Text(word, color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Text(word, color = crimson, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 }

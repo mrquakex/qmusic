@@ -310,14 +310,22 @@ object WordChainEngine : GameEngine {
         val remainingMs = (session.turnDeadlineAt - nowMs).coerceAtLeast(0L)
         val progress = if (session.turnSeconds > 0) (remainingMs.toFloat() / (session.turnSeconds * 1000f)).coerceIn(0f, 1f) else 1f
 
+        val cyan = GameColors.Cyan
+        val indigo = GameColors.Indigo
+        val timerColor = when {
+            remainingMs <= 5_000L -> GameColors.Crimson
+            remainingMs <= 10_000L -> GameColors.Amber
+            else -> cyan
+        }
+
         Column(modifier = modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 8.dp)) {
-            // Players & lives strip
+            // Players & crimson lives strip
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(DarkSurfaceVariant)
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
+                    .background(DarkSurface)
+                    .border(1.dp, cyan.copy(alpha = 0.30f), RoundedCornerShape(12.dp))
                     .padding(horizontal = 10.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
@@ -326,32 +334,26 @@ object WordChainEngine : GameEngine {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (active) Ink else DarkSurfaceVariant)
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (active) cyan.copy(alpha = 0.18f) else DarkSurfaceVariant)
+                            .border(1.dp, if (active) cyan else BorderSubtle, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
                     ) {
                         Text(
                             if (p.uid == me.uid) (if (en) "You" else "Sen") else p.name.substringBefore(' '),
-                            color = if (active) InkInverse else TextPrimary,
+                            color = if (active) cyan else TextPrimary,
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.padding(top = 3.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
                             for (i in 0 until START_LIVES) {
                                 Box(
                                     Modifier
-                                        .size(6.dp)
+                                        .size(7.dp)
                                         .clip(CircleShape)
-                                        .background(
-                                            when {
-                                                i < p.lives && active -> InkInverse
-                                                i < p.lives -> Ink
-                                                active -> InkInverse.copy(alpha = 0.25f)
-                                                else -> BorderSubtle
-                                            },
-                                        ),
+                                        .background(if (i < p.lives) GameColors.Crimson else BorderSubtle),
                                 )
                             }
                         }
@@ -359,15 +361,15 @@ object WordChainEngine : GameEngine {
                 }
             }
 
-            // Thin monochrome countdown bar
+            // Color-shifting countdown bar (Cyan -> Amber -> Crimson)
             if (session.status == GameStatus.PLAYING && session.turnSeconds > 0) {
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Box(Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(DarkSurfaceVariant)) {
-                        Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(Ink))
+                    Box(Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(999.dp)).background(DarkSurfaceVariant)) {
+                        Box(Modifier.fillMaxHeight().fillMaxWidth(progress).clip(RoundedCornerShape(999.dp)).background(timerColor))
                     }
                     Spacer(Modifier.width(8.dp))
-                    Text("${(remainingMs + 999) / 1000}s", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("${(remainingMs + 999) / 1000}s", color = timerColor, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -377,16 +379,16 @@ object WordChainEngine : GameEngine {
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .background(DarkSurface)
-                    .border(1.dp, if (myTurn) BorderHover else BorderSubtle, RoundedCornerShape(14.dp))
+                    .background(cyan.copy(alpha = 0.12f))
+                    .border(1.2.dp, if (myTurn) cyan else cyan.copy(alpha = 0.30f), RoundedCornerShape(14.dp))
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
-                    modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(Ink),
+                    modifier = Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(cyan),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(reqLetter.toString(), color = InkInverse, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text(reqLetter.toString(), color = GameColors.onAccent(cyan), fontSize = 22.sp, fontWeight = FontWeight.Black)
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
@@ -395,7 +397,7 @@ object WordChainEngine : GameEngine {
                         else "'$reqLetter' harfiyle başla" + if (usedSoftG) " (ğ kuralı)" else "",
                         color = TextPrimary,
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                     )
                     Text(
                         if (myTurn) (if (en) "Your turn — ${st.entries.size} words" else "Sıra sende · ${st.entries.size} kelime")
@@ -403,8 +405,9 @@ object WordChainEngine : GameEngine {
                             val who = session.players[session.turn]?.name?.substringBefore(' ').orEmpty()
                             if (en) "$who's turn…" else "Sıra $who oyuncusunda…"
                         },
-                        color = TextSecondary,
+                        color = if (myTurn) cyan else TextSecondary,
                         fontSize = 12.sp,
+                        fontWeight = if (myTurn) FontWeight.SemiBold else FontWeight.Normal,
                     )
                 }
             }
@@ -418,26 +421,34 @@ object WordChainEngine : GameEngine {
             ) {
                 itemsIndexed(st.entries, key = { i, e -> "$i:${e.word}" }) { idx, entry ->
                     val isMine = entry.uid == me.uid
+                    val isStarter = entry.uid.isEmpty()
+                    val bubbleBg = when {
+                        isStarter -> DarkSurface
+                        isMine -> cyan
+                        else -> indigo.copy(alpha = 0.18f)
+                    }
+                    val bubbleFg = if (isMine) GameColors.onAccent(cyan) else TextPrimary
+                    val bubbleSub = if (isMine) GameColors.onAccent(cyan).copy(alpha = 0.72f) else TextSecondary
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = if (entry.uid.isEmpty()) Arrangement.Center else if (isMine) Arrangement.End else Arrangement.Start,
+                        horizontalArrangement = if (isStarter) Arrangement.Center else if (isMine) Arrangement.End else Arrangement.Start,
                     ) {
                         Column(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isMine) Ink else DarkSurfaceVariant)
-                                .border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(13.dp))
+                                .background(bubbleBg)
+                                .border(1.dp, if (isMine) cyan else if (isStarter) BorderSubtle else indigo.copy(alpha = 0.45f), RoundedCornerShape(13.dp))
                                 .padding(horizontal = 12.dp, vertical = 7.dp),
                         ) {
                             Text(
                                 "${idx + 1}. ${entry.word}",
-                                color = if (isMine) InkInverse else TextPrimary,
+                                color = bubbleFg,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                if (entry.uid.isEmpty()) (if (en) "Starter" else "Başlangıç") else if (isMine) (if (en) "You" else "Sen") else entry.name.substringBefore(' '),
-                                color = if (isMine) InkInverse.copy(alpha = 0.65f) else TextSecondary,
+                                if (isStarter) (if (en) "Starter" else "Başlangıç") else if (isMine) (if (en) "You" else "Sen") else entry.name.substringBefore(' '),
+                                color = bubbleSub,
                                 fontSize = 11.sp,
                             )
                         }
@@ -446,7 +457,7 @@ object WordChainEngine : GameEngine {
             }
 
             errorMsg?.let { msg ->
-                Text(msg, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 6.dp))
+                Text(msg, color = GameColors.Crimson, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
             }
 
             // Input bar
@@ -466,7 +477,7 @@ object WordChainEngine : GameEngine {
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
                     .background(DarkSurfaceVariant)
-                    .border(1.dp, if (myTurn) BorderHover else BorderSubtle, RoundedCornerShape(14.dp))
+                    .border(1.2.dp, if (myTurn) cyan else BorderSubtle, RoundedCornerShape(14.dp))
                     .padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -485,7 +496,7 @@ object WordChainEngine : GameEngine {
                         enabled = myTurn,
                         singleLine = true,
                         textStyle = TextStyle(color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Medium),
-                        cursorBrush = SolidColor(Ink),
+                        cursorBrush = SolidColor(cyan),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                         keyboardActions = KeyboardActions(onSend = { submitWord() }),
                         modifier = Modifier.fillMaxWidth(),
@@ -496,14 +507,14 @@ object WordChainEngine : GameEngine {
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
-                        .background(if (myTurn && input.trim().length >= 3) Ink else DarkSurface)
+                        .background(if (myTurn && input.trim().length >= 3) cyan else DarkSurface)
                         .clickable(enabled = myTurn && input.trim().length >= 3, onClick = submitWord),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         QMusicIcons.Send,
                         contentDescription = null,
-                        tint = if (myTurn && input.trim().length >= 3) InkInverse else TextMuted,
+                        tint = if (myTurn && input.trim().length >= 3) GameColors.onAccent(cyan) else TextMuted,
                         modifier = Modifier.size(18.dp),
                     )
                 }

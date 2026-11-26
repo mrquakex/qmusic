@@ -386,33 +386,36 @@ object SongQuizEngine : GameEngine {
                 }
             }
 
-            // Music preview stage
+            // Neon music preview stage
+            val mint = GameColors.Mint
+            val magenta = GameColors.Magenta
+            val choiceColors = listOf(GameColors.Sky, GameColors.Magenta, GameColors.Amber, GameColors.Violet)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(DarkSurface)
-                    .border(1.dp, BorderHover, RoundedCornerShape(18.dp))
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(mint.copy(alpha = 0.12f))
+                    .border(1.5.dp, mint.copy(alpha = 0.48f), RoundedCornerShape(20.dp))
                     .padding(18.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Box(
                     modifier = Modifier
-                        .size(56.dp)
+                        .size(60.dp)
                         .clip(CircleShape)
-                        .background(if (playingNow) Ink else DarkSurfaceVariant)
+                        .background(if (playingNow) mint else DarkSurfaceVariant)
                         .clickable { muted = !muted },
                     contentAlignment = Alignment.Center,
                 ) {
                     if (loadingAudio) {
-                        CircularProgressIndicator(color = Ink, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+                        CircularProgressIndicator(color = mint, strokeWidth = 2.5.dp, modifier = Modifier.size(24.dp))
                     } else {
                         Icon(
                             if (playingNow) QMusicIcons.Waveform else QMusicIcons.Headphones,
                             contentDescription = null,
-                            tint = if (playingNow) InkInverse else Ink,
-                            modifier = Modifier.size(26.dp),
+                            tint = if (playingNow) GameColors.onAccent(mint) else mint,
+                            modifier = Modifier.size(28.dp),
                         )
                     }
                 }
@@ -426,35 +429,39 @@ object SongQuizEngine : GameEngine {
                         audioUrl == null -> if (tr) "Ses yüklenemedi · Şıklardan tahmin et" else "Audio unavailable · Guess from choices"
                         else -> if (tr) "Dinle ve tahmin et · ${remainingSec} sn" else "Listen & guess · ${remainingSec}s"
                     },
-                    color = TextPrimary,
+                    color = if (phase == "play" && remainingSec <= 5) GameColors.Crimson else TextPrimary,
                     fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                 )
             }
 
-            // 4 Choices
+            // 4 Distinct Colored Choices
             val tags = listOf("A", "B", "C", "D")
             choices.forEachIndexed { idx, label ->
+                val tagColor = choiceColors[idx % choiceColors.size]
                 val isPicked = myChoice == idx
                 val isCorrect = phase == "reveal" && idx == correctIdx
                 val isWrongPick = phase == "reveal" && isPicked && idx != correctIdx
                 val bg = when {
-                    isCorrect -> Ink
-                    isPicked -> DarkSurfaceVariant
+                    isCorrect -> GameColors.Emerald
+                    isWrongPick -> GameColors.Crimson.copy(alpha = 0.22f)
+                    isPicked -> tagColor.copy(alpha = 0.20f)
                     else -> DarkSurface
                 }
-                val fg = if (isCorrect) InkInverse else TextPrimary
+                val fg = if (isCorrect) GameColors.onAccent(GameColors.Emerald) else TextPrimary
                 val borderC = when {
-                    isCorrect || isPicked -> Ink
-                    else -> BorderSubtle
+                    isCorrect -> GameColors.Emerald
+                    isWrongPick -> GameColors.Crimson
+                    isPicked -> tagColor
+                    else -> tagColor.copy(alpha = 0.32f)
                 }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(13.dp))
                         .background(bg)
-                        .border(if (isCorrect || isPicked) 1.5.dp else 1.dp, borderC, RoundedCornerShape(12.dp))
+                        .border(if (isCorrect || isWrongPick || isPicked) 1.6.dp else 1.dp, borderC, RoundedCornerShape(13.dp))
                         .clickable(enabled = phase == "play" && myChoice == null && session.status == GameStatus.PLAYING) {
                             val elapsed = (controller.serverNow() - localStartMs).coerceAtLeast(0L)
                             onAction(GameAction("answer", "$idx|$elapsed"))
@@ -464,27 +471,27 @@ object SongQuizEngine : GameEngine {
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(26.dp)
-                            .clip(RoundedCornerShape(7.dp))
-                            .background(if (isCorrect) InkInverse.copy(alpha = 0.16f) else DarkSurfaceVariant),
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isCorrect) GameColors.onAccent(GameColors.Emerald).copy(alpha = 0.18f) else tagColor),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(tags.getOrElse(idx) { "" }, color = fg, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(tags.getOrElse(idx) { "" }, color = if (isCorrect) fg else GameColors.onAccent(tagColor), fontSize = 12.sp, fontWeight = FontWeight.Black)
                     }
                     Spacer(Modifier.width(10.dp))
                     Text(
                         label,
                         color = fg,
                         fontSize = 14.sp,
-                        fontWeight = if (isCorrect || isPicked) FontWeight.SemiBold else FontWeight.Normal,
+                        fontWeight = if (isCorrect || isPicked) FontWeight.Bold else FontWeight.Medium,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
                     if (isCorrect) {
-                        Text("✓", color = InkInverse, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text("✓", color = fg, fontSize = 17.sp, fontWeight = FontWeight.Black)
                     } else if (isWrongPick) {
-                        Text("×", color = TextMuted, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text("×", color = GameColors.Crimson, fontSize = 17.sp, fontWeight = FontWeight.Black)
                     }
                 }
             }
@@ -493,9 +500,9 @@ object SongQuizEngine : GameEngine {
                 val myPts = awarded[me.uid] ?: 0
                 Text(
                     if (myPts > 0) (if (tr) "+$myPts puan kazandın!" else "+$myPts points!") else (if (tr) "Bu turda 0 puan" else "0 points this round"),
-                    color = TextSecondary,
+                    color = if (myPts > 0) GameColors.Emerald else TextSecondary,
                     fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.Bold,
                 )
                 if (session.status == GameStatus.PLAYING) {
                     Box(
@@ -503,11 +510,11 @@ object SongQuizEngine : GameEngine {
                             .fillMaxWidth()
                             .height(46.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Ink)
+                            .background(magenta)
                             .clickable { onAction(GameAction("next_round")) },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(if (tr) "Sonraki Şarkı" else "Next Song", color = InkInverse, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(if (tr) "Sonraki Şarkı" else "Next Song", color = GameColors.onAccent(magenta), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -519,24 +526,24 @@ object SongQuizEngine : GameEngine {
 private fun MonochromeEqualizer() {
     val inf = rememberInfiniteTransition()
     val bars = listOf(
-        inf.animateFloat(0.25f, 1f, infiniteRepeatable(tween(420), RepeatMode.Reverse)).value,
-        inf.animateFloat(0.95f, 0.3f, infiniteRepeatable(tween(520), RepeatMode.Reverse)).value,
-        inf.animateFloat(0.35f, 0.9f, infiniteRepeatable(tween(360), RepeatMode.Reverse)).value,
-        inf.animateFloat(0.85f, 0.2f, infiniteRepeatable(tween(480), RepeatMode.Reverse)).value,
-        inf.animateFloat(0.3f, 0.95f, infiniteRepeatable(tween(400), RepeatMode.Reverse)).value,
+        inf.animateFloat(0.25f, 1f, infiniteRepeatable(tween(420), RepeatMode.Reverse)).value to GameColors.Mint,
+        inf.animateFloat(0.95f, 0.3f, infiniteRepeatable(tween(520), RepeatMode.Reverse)).value to GameColors.Cyan,
+        inf.animateFloat(0.35f, 0.9f, infiniteRepeatable(tween(360), RepeatMode.Reverse)).value to GameColors.Magenta,
+        inf.animateFloat(0.85f, 0.2f, infiniteRepeatable(tween(480), RepeatMode.Reverse)).value to GameColors.Amber,
+        inf.animateFloat(0.3f, 0.95f, infiniteRepeatable(tween(400), RepeatMode.Reverse)).value to GameColors.Violet,
     )
     Row(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalAlignment = Alignment.Bottom,
-        modifier = Modifier.height(22.dp),
+        modifier = Modifier.height(24.dp),
     ) {
-        bars.forEach { f ->
+        bars.forEach { (f, color) ->
             Box(
                 modifier = Modifier
-                    .width(4.dp)
-                    .height((22f * f).dp)
+                    .width(5.dp)
+                    .height((24f * f).dp)
                     .clip(RoundedCornerShape(999.dp))
-                    .background(Ink),
+                    .background(color),
             )
         }
     }
