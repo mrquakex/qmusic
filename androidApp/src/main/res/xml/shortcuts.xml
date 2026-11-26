@@ -37,4 +37,11 @@
             <extra android:name="shortcut" android:value="search" />
         </intent>
     </shortcut>
+    <share-target android:targetClass="com.qmusic.app.MainActivity">
+        <data android:mimeType="text/plain" />
+        <data android:mimeType="image/*" />
+        <data android:mimeType="video/*" />
+        <data android:mimeType="*/*" />
+        <category android:name="android.shortcut.conversation" />
+    </share-target>
 </shortcuts>

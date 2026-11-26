@@ -19,7 +19,16 @@ expect fun PictureInPictureEffect(armed: Boolean)
  * (with a play / pause button) and a service hold the app alive. [onToggle] is that button.
  */
 @Composable
-expect fun VideoBackgroundEffect(active: Boolean, title: String?, onToggle: () -> Unit)
+expect fun VideoBackgroundEffect(
+    active: Boolean,
+    title: String?,
+    onToggle: () -> Unit,
+    artist: String? = null,
+    artworkUrl: String? = null,
+    playing: Boolean = false,
+    onSeekBy: ((Long) -> Unit)? = null,
+    onNext: (() -> Unit)? = null,
+)
 
 /** The device's own brightness and volume, each 0..1. */
 interface DeviceControls {

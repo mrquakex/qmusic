@@ -52,6 +52,15 @@ object VideoPip {
 object VideoBackground {
     var onState: ((active: Boolean, title: String?) -> Unit)? = null
     var toggle: (() -> Unit)? = null
+    val isPlaying = MutableStateFlow(false)
+    @Volatile
+    var player: androidx.media3.exoplayer.ExoPlayer? = null
+    var title: String? = null
+    var artist: String? = null
+    var artworkUrl: String? = null
+    var onSeekBy: ((Long) -> Unit)? = null
+    var onNext: (() -> Unit)? = null
+    var onStateChanged: (() -> Unit)? = null
 }
 
 private class AndroidDeviceControls(private val activity: Activity) : DeviceControls {
@@ -115,14 +124,44 @@ actual fun PictureInPictureEffect(armed: Boolean) {
 }
 
 @Composable
-actual fun VideoBackgroundEffect(active: Boolean, title: String?, onToggle: () -> Unit) {
-    val latest by rememberUpdatedState(onToggle)
+actual fun VideoBackgroundEffect(
+    active: Boolean,
+    title: String?,
+    onToggle: () -> Unit,
+    artist: String?,
+    artworkUrl: String?,
+    playing: Boolean,
+    onSeekBy: ((Long) -> Unit)?,
+    onNext: (() -> Unit)?,
+) {
+    val latestToggle by rememberUpdatedState(onToggle)
+    val latestSeekBy by rememberUpdatedState(onSeekBy)
+    val latestNext by rememberUpdatedState(onNext)
+    val hasSeek = onSeekBy != null
+    val hasNext = onNext != null
     DisposableEffect(Unit) {
-        VideoBackground.toggle = { latest() }
+        VideoBackground.toggle = { latestToggle() }
         onDispose {
             VideoBackground.toggle = null
+            VideoBackground.onSeekBy = null
+            VideoBackground.onNext = null
+            VideoBackground.isPlaying.value = false
+            VideoBackground.title = null
+            VideoBackground.artist = null
+            VideoBackground.artworkUrl = null
             VideoBackground.onState?.invoke(false, null)
+            VideoBackground.onStateChanged?.invoke()
         }
+    }
+    DisposableEffect(active, title, artist, artworkUrl, playing, hasSeek, hasNext) {
+        VideoBackground.title = if (active) title else null
+        VideoBackground.artist = if (active) artist else null
+        VideoBackground.artworkUrl = if (active) artworkUrl else null
+        VideoBackground.isPlaying.value = active && playing
+        VideoBackground.onSeekBy = if (active && hasSeek) ({ delta -> latestSeekBy?.invoke(delta) }) else null
+        VideoBackground.onNext = if (active && hasNext) ({ latestNext?.invoke() }) else null
+        VideoBackground.onStateChanged?.invoke()
+        onDispose { }
     }
     DisposableEffect(active, title) {
         VideoBackground.onState?.invoke(active, title)

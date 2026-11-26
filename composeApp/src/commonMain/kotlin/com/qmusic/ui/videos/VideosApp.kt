@@ -164,12 +164,17 @@ fun VideosApp(
         }
     }
     VideoCastEffect(controller, playback)
+    val playing by (playback?.isPlaying ?: NotPlaying).collectAsState()
     VideoBackgroundEffect(
         active = watch != null,
         title = watch?.details?.title ?: watch?.video?.title,
         onToggle = { playback?.togglePlay() },
+        artist = watch?.details?.channelName ?: watch?.video?.channelName,
+        artworkUrl = watch?.video?.thumbnail,
+        playing = playing,
+        onSeekBy = { delta -> playback?.let { it.seekTo((it.positionMs.value + delta).coerceAtLeast(0L)) } },
+        onNext = if (watch?.let { it.queueIndex + 1 < it.queue.size } == true) { { controller.onEnded() } } else null,
     )
-    val playing by (playback?.isPlaying ?: NotPlaying).collectAsState()
     val ended by (playback?.ended ?: NotPlaying).collectAsState()
     LaunchedEffect(ended) { if (ended) controller.onEnded() }
     // Videos kept on the device.

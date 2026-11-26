@@ -12,7 +12,16 @@ actual fun PictureInPictureEffect(armed: Boolean) = Unit
 actual fun rememberInPictureInPicture(): Boolean = false
 
 @Composable
-actual fun VideoBackgroundEffect(active: Boolean, title: String?, onToggle: () -> Unit) = Unit
+actual fun VideoBackgroundEffect(
+    active: Boolean,
+    title: String?,
+    onToggle: () -> Unit,
+    artist: String?,
+    artworkUrl: String?,
+    playing: Boolean,
+    onSeekBy: ((Long) -> Unit)?,
+    onNext: (() -> Unit)?,
+) = Unit
 
 @Composable
 actual fun rememberDeviceControls(): DeviceControls? = null

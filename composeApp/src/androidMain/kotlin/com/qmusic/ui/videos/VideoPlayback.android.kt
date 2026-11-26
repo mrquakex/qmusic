@@ -116,9 +116,14 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
     private val liveSources = VideoStreaming.network()
 
     init {
+        VideoBackground.player = player
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _isPlaying.value = isPlaying
+                if (VideoBackground.player === player) {
+                    VideoBackground.isPlaying.value = isPlaying
+                    VideoBackground.onStateChanged?.invoke()
+                }
             }
 
             override fun onRenderedFirstFrame() {
@@ -224,6 +229,11 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
 
     override fun release() {
         handler.removeCallbacks(ticker)
+        if (VideoBackground.player === player) {
+            VideoBackground.player = null
+            VideoBackground.isPlaying.value = false
+            VideoBackground.onStateChanged?.invoke()
+        }
         player.release()
     }
 

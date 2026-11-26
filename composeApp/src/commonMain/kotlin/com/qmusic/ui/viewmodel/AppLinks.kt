@@ -35,6 +35,7 @@ object AppLinks {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
     fun parse(text: String): AppLink? {
+        extractSpotifyUri(text)?.let { return it }
         val link = URL.find(text)?.value?.trimEnd('.', ',', ')', '!') ?: return null
         val rest = link.substringAfter("://")
         val host = rest.substringBefore('/').substringBefore('?').lowercase().removePrefix("www.").removePrefix("m.")

@@ -114,20 +114,49 @@
                 <data android:host="m.youtube.com" />
                 <data android:host="youtu.be" />
             </intent-filter>
-            <!-- "Share" from YouTube or YouTube Music: the shared link opens in QMusic. -->
+            <!-- Qeyf / Nuvelo user, group invite, and call links. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="qeyf" />
+                <data android:scheme="nuvelo" />
                 <data android:host="u" />
                 <data android:host="g" />
                 <data android:host="c" />
             </intent-filter>
+            <!-- Spotify web and short links open here. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="open.spotify.com" />
+                <data android:host="spotify.link" />
+                <data android:host="spoti.fi" />
+            </intent-filter>
+            <!-- Spotify URI deep links (spotify:track:..., album, playlist, artist). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="spotify" />
+            </intent-filter>
+            <!-- Share sheet: music/video links open in the player; text, photos, videos and files share into Messages. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
 
