@@ -183,10 +183,22 @@ private fun ChatAppContent(
     }
     val calls = controller.calls
     val onCall: ((ChatUser, Boolean) -> Unit)? = calls?.let { service ->
-        { other, video -> askPermissions(video) { granted -> if (granted) service.call(other, video) else controller.reportError(s.callPermission) } }
+        { other, video ->
+            if (!controller.admin.featureEnabled { it.calls }) {
+                controller.reportInfo(if (s.english) "Calls are temporarily disabled" else "Aramalar geçici olarak kapalı")
+            } else {
+                askPermissions(video) { granted -> if (granted) service.call(other, video) else controller.reportError(s.callPermission) }
+            }
+        }
     }
     val onGroupCall: ((ChatUser, Boolean) -> Unit)? = controller.groupCalls?.let { service ->
-        { group, video -> askPermissions(video) { granted -> if (granted) service.join(group, video) else controller.reportError(s.callPermission) } }
+        { group, video ->
+            if (!controller.admin.featureEnabled { it.calls }) {
+                controller.reportInfo(if (s.english) "Calls are temporarily disabled" else "Aramalar geçici olarak kapalı")
+            } else {
+                askPermissions(video) { granted -> if (granted) service.join(group, video) else controller.reportError(s.callPermission) }
+            }
+        }
     }
 
     Box(modifier.fillMaxSize().background(BgRoot)) {
@@ -1493,7 +1505,9 @@ private fun ConversationPage(
                 }
                 if (isGroup && groupCalls != null) {
                     val startGroupCall: (Boolean) -> Unit = { video ->
-                        if (callPeople.size >= MAX_GROUP_CALL) {
+                        if (!controller.admin.featureEnabled { it.calls }) {
+                            controller.reportInfo(if (s.english) "Calls are temporarily disabled" else "Aramalar geçici olarak kapalı")
+                        } else if (callPeople.size >= MAX_GROUP_CALL) {
                             controller.reportError(s.groupCallFull)
                         } else {
                             askMic(video) { granted -> if (granted) groupCalls.join(other.copy(name = title), video) else controller.reportError(s.callPermission) }
@@ -1982,7 +1996,7 @@ private fun ConversationPage(
                     },
                 )
             }
-            if (!isClaude && text.startsWith("/")) {
+            if (!isClaude && controller.admin.featureEnabled { it.games } && text.startsWith("/")) {
                 com.qmusic.ui.chat.games.GameSlashCommands(
                     query = text,
                     isGroup = isGroup,
@@ -2045,6 +2059,10 @@ private fun ConversationPage(
                 val e = editing
                 val gameCmd = if (e == null && !isClaude && text.trim().startsWith("/")) com.qmusic.ui.chat.games.parseGameCommand(text) else null
                 if (gameCmd != null) {
+                    if (!controller.admin.featureEnabled { it.games }) {
+                        controller.reportInfo(if (s.english) "Games are temporarily disabled" else "Oyunlar geçici olarak kapalı")
+                        return@submit
+                    }
                     text = ""
                     controller.stopTyping(other)
                     com.qmusic.ui.chat.games.handleGameSlashCommand(
@@ -2097,7 +2115,7 @@ private fun ConversationPage(
                 }
                 if (!isClaude) add(AttachAction(s.poll, QMusicIcons.Poll, Color(0xFFFFB300)) { attach = false; pollDialog = true })
                 if (!isClaude) add(AttachAction(if (tr) "Etkinlik" else "Event", QMusicIcons.Timer, Color(0xFFE53958)) { attach = false; eventDialog = true })
-                if (!isClaude) add(AttachAction(s.playGame, QMusicIcons.Dice, Color(0xFF8B5CF6)) { attach = false; gamePickerOpen = true })
+                if (!isClaude && controller.admin.featureEnabled { it.games }) add(AttachAction(s.playGame, QMusicIcons.Dice, Color(0xFF8B5CF6)) { attach = false; gamePickerOpen = true })
                 // What plays in Nuvelo now: sent as a card.
                 shareables().forEach { item ->
                     val song = item.kind == ShareKind.SONG

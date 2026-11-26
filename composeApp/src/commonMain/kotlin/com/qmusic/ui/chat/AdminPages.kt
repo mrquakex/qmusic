@@ -1,6 +1,7 @@
 package com.qmusic.ui.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,6 +49,7 @@ import com.qmusic.ui.theme.BgRoot
 import com.qmusic.ui.theme.DarkSurface
 import com.qmusic.ui.theme.DarkSurfaceVariant
 import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.InkInverse
 import com.qmusic.ui.theme.TextMuted
 import com.qmusic.ui.theme.TextPrimary
 import com.qmusic.ui.theme.TextSecondary
@@ -88,6 +92,41 @@ private fun untilLabel(ban: AdminBan): String = if (ban.forever) t("süresiz", "
 
 private fun gb(bytes: Long): String = ((bytes * 10 / (1024L * 1024 * 1024)) / 10.0).toString().replace('.', ',') + " GB"
 
+private fun sizeShort(bytes: Long): String = when {
+    bytes >= 1024L * 1024 * 1024 -> gb(bytes)
+    bytes >= 1024L * 1024 -> ((bytes * 10 / (1024L * 1024)) / 10.0).toString().replace('.', ',') + " MB"
+    bytes >= 1024L -> "${bytes / 1024} KB"
+    else -> "$bytes B"
+}
+
+private fun uptimeLabel(sec: Long): String {
+    if (sec <= 0L) return "—"
+    val mins = sec / 60
+    val hours = mins / 60
+    val days = hours / 24
+    return when {
+        days > 0 -> t("${days}g ${hours % 24}s", "${days}d ${hours % 24}h")
+        hours > 0 -> t("${hours}s ${mins % 60}dk", "${hours}h ${mins % 60}m")
+        else -> t("${mins.coerceAtLeast(1)} dk", "${mins.coerceAtLeast(1)} m")
+    }
+}
+
+private fun gameKindLabel(kind: String): String = when (kind) {
+    "word_duel" -> t("Kelime Düellosu", "Word Duel")
+    "word_chain" -> t("Kelime Zinciri", "Word Chain")
+    "xox" -> "XOX"
+    "hangman" -> t("Adam Asmaca", "Hangman")
+    "connect4" -> t("Dörtlü", "Connect 4")
+    "rps" -> t("Taş Kağıt Makas", "Rock Paper Scissors")
+    "name_city" -> t("İsim Şehir", "Name City")
+    "mastermind" -> "Mastermind"
+    "song_quiz" -> t("Şarkı Tahmini", "Song Quiz")
+    "battleship" -> t("Amiral Battı", "Battleship")
+    "taboo" -> t("Tabu", "Taboo")
+    "trivia" -> t("Bilgi Yarışması", "Trivia")
+    else -> kind
+}
+
 private enum class AdminTab(val tr: String, val en: String) {
     SUMMARY("Özet", "Summary"),
     PEOPLE("Kişiler", "People"),
@@ -96,6 +135,7 @@ private enum class AdminTab(val tr: String, val en: String) {
     CHARTS("Grafikler", "Charts"),
     STORAGE("Depolama", "Storage"),
     CRASHES("Çökmeler", "Crashes"),
+    CALLS("Aramalar", "Calls"),
     ANNOUNCE("Duyuru", "Announce"),
     SETTINGS("Ayarlar", "Settings"),
     LOG("Kayıt", "Log"),
@@ -116,7 +156,11 @@ internal fun AdminPage(controller: ChatController, me: ChatUser) {
     val users by remember(console) { console.users() }.collectAsState(initial = emptyList())
     val reports by remember(console) { console.reports() }.collectAsState(initial = emptyList())
     val groups by remember(console) { console.groups() }.collectAsState(initial = emptyList())
+    val crashes by remember(console) { console.crashes() }.collectAsState(initial = emptyList())
+    val actions by remember(console) { console.actions() }.collectAsState(initial = emptyList())
     var tab by remember { mutableStateOf(AdminTab.SUMMARY) }
+    var peopleFilter by remember { mutableStateOf(PeopleFilter.ALL) }
+    var versionFilter by remember { mutableStateOf<String?>(null) }
     var openUser by remember { mutableStateOf<String?>(null) }
     var openGroup by remember { mutableStateOf<String?>(null) }
     val names = remember(users, groups) {
@@ -131,7 +175,16 @@ internal fun AdminPage(controller: ChatController, me: ChatUser) {
     openUser?.let { uid ->
         val user = users.firstOrNull { it.uid == uid }
         if (user != null) {
-            AdminUserPage(controller, console, me, user, groups.filter { g -> g.members.any { it.first == uid } }) { openUser = null }
+            AdminUserPage(
+                controller = controller,
+                console = console,
+                me = me,
+                user = user,
+                groups = groups.filter { g -> g.members.any { it.first == uid } },
+                userActions = actions.filter { it.target == uid && it.kind != "stats" }.take(10),
+                userReports = reports.filter { it.target == uid || it.by == uid }.take(5),
+                names = names,
+            ) { openUser = null }
             return
         }
     }
@@ -145,26 +198,50 @@ internal fun AdminPage(controller: ChatController, me: ChatUser) {
 
     Column(Modifier.fillMaxSize().background(BgRoot)) {
         TopBar(t("Yönetim", "Admin"), { controller.pop() })
+        val openReports = reports.count { it.handled == null }
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             AdminTab.entries.forEach { each ->
-                val open = reports.count { it.handled == null }
-                val label = (if (ChatMusic.english) each.en else each.tr) + if (each == AdminTab.REPORTS && open > 0) " ($open)" else ""
+                val badge = when {
+                    each == AdminTab.REPORTS && openReports > 0 -> " ($openReports)"
+                    each == AdminTab.CRASHES && crashes.isNotEmpty() -> " (${crashes.size})"
+                    else -> ""
+                }
+                val label = (if (ChatMusic.english) each.en else each.tr) + badge
                 Pill(label, primary = tab == each) { tab = each }
             }
         }
         Box(Modifier.weight(1f)) {
             when (tab) {
-                AdminTab.SUMMARY -> AdminSummary(console, users, reports, groups) { tab = it }
-                AdminTab.PEOPLE -> AdminPeople(users) { openUser = it }
-                AdminTab.REPORTS -> AdminReports(controller, console, reports, names, onUser = { openUser = it }, onGroup = { openGroup = it })
+                AdminTab.SUMMARY -> AdminSummary(
+                    controller = controller,
+                    console = console,
+                    users = users,
+                    reports = reports,
+                    groups = groups,
+                    go = { tab = it },
+                    goPeople = { f, ver ->
+                        peopleFilter = f
+                        versionFilter = ver
+                        tab = AdminTab.PEOPLE
+                    },
+                )
+                AdminTab.PEOPLE -> AdminPeople(
+                    users = users,
+                    filter = peopleFilter,
+                    onFilter = { peopleFilter = it },
+                    versionFilter = versionFilter,
+                    onClearVersion = { versionFilter = null },
+                ) { openUser = it }
+                AdminTab.REPORTS -> AdminReports(controller, console, me, reports, names, onUser = { openUser = it }, onGroup = { openGroup = it })
                 AdminTab.GROUPS -> AdminGroups(groups, names) { openGroup = it }
                 AdminTab.CHARTS -> AdminCharts(console)
                 AdminTab.STORAGE -> AdminStorage(controller, console, users, groups)
-                AdminTab.CRASHES -> AdminCrashes(console, users)
-                AdminTab.ANNOUNCE -> AdminAnnounce(controller, console)
+                AdminTab.CRASHES -> AdminCrashes(controller, console, users)
+                AdminTab.CALLS -> AdminCallDebug(controller, console, users)
+                AdminTab.ANNOUNCE -> AdminAnnounce(controller, console, users)
                 AdminTab.SETTINGS -> AdminSettings(controller, console)
                 AdminTab.LOG -> AdminLog(console, names)
             }
@@ -175,7 +252,15 @@ internal fun AdminPage(controller: ChatController, me: ChatUser) {
 // ------------------------------------------------------------------ summary
 
 @Composable
-private fun AdminSummary(console: AdminConsole, users: List<AdminUser>, reports: List<AdminReport>, groups: List<AdminGroup>, go: (AdminTab) -> Unit) {
+private fun AdminSummary(
+    controller: ChatController,
+    console: AdminConsole,
+    users: List<AdminUser>,
+    reports: List<AdminReport>,
+    groups: List<AdminGroup>,
+    go: (AdminTab) -> Unit,
+    goPeople: (PeopleFilter, String?) -> Unit,
+) {
     val stats by remember(console) { console.stats() }.collectAsState(initial = null)
     val now = nowMs()
     val people = users.filter { it.uid != CLAUDE_BOT_UID && it.uid != "nuvelo" }
@@ -185,11 +270,12 @@ private fun AdminSummary(console: AdminConsole, users: List<AdminUser>, reports:
     val banned = people.count { it.ban?.isBan == true && it.ban.activeAt(now) }
     val muted = people.count { it.ban?.isBan == false && it.ban.activeAt(now) }
     val scope = rememberCoroutineScope()
+    var confirmAction by remember { mutableStateOf<Triple<String, String, String>?>(null) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                StatTile(t("Hesap", "Accounts"), people.size.toString(), Modifier.weight(1f)) { go(AdminTab.PEOPLE) }
-                StatTile(t("Şu an açık", "Online now"), people.count { it.online }.toString(), Modifier.weight(1f)) { go(AdminTab.PEOPLE) }
+                StatTile(t("Hesap", "Accounts"), people.size.toString(), Modifier.weight(1f)) { goPeople(PeopleFilter.ALL, null) }
+                StatTile(t("Şu an açık", "Online now"), people.count { it.online }.toString(), Modifier.weight(1f)) { goPeople(PeopleFilter.ONLINE, null) }
             }
         }
         item {
@@ -207,24 +293,45 @@ private fun AdminSummary(console: AdminConsole, users: List<AdminUser>, reports:
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatTile(t("Açık şikâyet", "Open reports"), reports.count { it.handled == null }.toString(), Modifier.weight(1f), alert = reports.any { it.handled == null }) { go(AdminTab.REPORTS) }
-                StatTile(t("Banlı / susturulmuş", "Banned / muted"), "$banned / $muted", Modifier.weight(1f))
+                StatTile(t("Banlı / susturulmuş", "Banned / muted"), "$banned / $muted", Modifier.weight(1f)) { goPeople(PeopleFilter.RESTRICTED, null) }
             }
         }
         item { AdminSection(t("Sürümler", "Versions")) }
         item {
-            val versions = people.groupBy { it.version ?: t("bilinmiyor", "unknown") }.mapValues { it.value.size }
-                .entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.key }.thenByDescending { it.value })
+            val versions = people.groupBy { it.version.orEmpty() }.mapValues { it.value.size }
+                .entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.key.isNotEmpty() }.thenByDescending { it.key }.thenByDescending { it.value })
             Card {
-                versions.forEach { (v, n) ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        Text(v, color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                        Text(t("$n kişi", "$n people"), color = TextSecondary, fontSize = 14.sp)
+                versions.forEach { (raw, n) ->
+                    val label = raw.ifEmpty { t("bilinmiyor", "unknown") }
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { goPeople(PeopleFilter.ALL, raw) }.padding(vertical = 5.dp, horizontal = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(label, color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                        Text(t("$n kişi ›", "$n people ›"), color = TextSecondary, fontSize = 14.sp)
                     }
                 }
                 Text(
-                    t("Sürüm, kişi uygulamayı 2.13.8 veya sonrasıyla açınca görünür.", "A version shows once the person opens 2.13.8 or later."),
+                    t("Bir sürüme dokunarak o sürümdeki kişileri listele.", "Tap a version to see who is on it."),
                     color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp),
                 )
+            }
+        }
+        val st = stats
+        if (st != null && (st.gamesTotal > 0 || st.gamesActive > 0)) {
+            item { AdminSection(t("Oyunlar", "Games")) }
+            item {
+                Card {
+                    InfoLine(t("Toplam oyun", "Total games"), st.gamesTotal.toString())
+                    InfoLine(t("Şu an aktif", "Active now"), st.gamesActive.toString(), if (st.gamesActive > 0) Good else TextPrimary)
+                    val topKinds = st.gamesByKind.entries.sortedByDescending { it.value }.take(6)
+                    if (topKinds.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        topKinds.forEach { (k, count) ->
+                            InfoLine(gameKindLabel(k), count.toString())
+                        }
+                    }
+                }
             }
         }
         item { AdminSection(t("Sunucu", "Server")) }
@@ -236,12 +343,68 @@ private fun AdminSummary(console: AdminConsole, users: List<AdminUser>, reports:
                 } else {
                     InfoLine(t("Mesaj dosyaları", "Message files"), gb(s.mediaBytes))
                     if (s.diskTotal > 0) InfoLine(t("Boş alan", "Free space"), gb(s.diskFree) + " / " + gb(s.diskTotal))
+                    if (s.uptimeSec > 0) InfoLine(t("Çalışma süresi", "Uptime"), uptimeLabel(s.uptimeSec))
+                    if (s.memTotalMb > 0) {
+                        InfoLine(
+                            "RAM",
+                            "${s.memUsedMb} / ${s.memTotalMb} MB" + if (s.nodeRssMb > 0) " · Node ${s.nodeRssMb} MB" else "",
+                        )
+                    }
+                    if (s.backupAt > 0) {
+                        val stale = now - s.backupAt > 36 * 3600_000L
+                        val detail = listOfNotNull(
+                            ago(s.backupAt),
+                            s.backupBytes.takeIf { it > 0 }?.let(::sizeShort),
+                            s.backupCount.takeIf { it > 0 }?.let { t("$it kopya", "$it kept") },
+                        ).joinToString(" · ")
+                        InfoLine(t("Son yedek", "Last backup"), detail, if (stale) Warn else TextPrimary)
+                    }
                     InfoLine(t("Güncellendi", "Updated"), ago(s.at))
                 }
-                Spacer(Modifier.height(8.dp))
-                Pill(t("Yenile", "Refresh"), primary = false) { scope.launch { console.request("stats") } }
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill(t("Yenile", "Refresh"), primary = false) {
+                        scope.launch {
+                            console.request("stats")
+                                .onSuccess { controller.reportInfo(t("Yenileniyor…", "Refreshing…")) }
+                                .onFailure { controller.reportError(it.message ?: "") }
+                        }
+                    }
+                    Pill(t("Şimdi yedek al", "Backup now"), primary = false) {
+                        confirmAction = Triple(
+                            "backupNow",
+                            t("Anlık veritabanı ve kasa yedeği alınsın mı?", "Take a database & vault backup now?"),
+                            t("Yedek başlatıldı; sonucu Kayıt sekmesinde", "Backup started; check Log tab"),
+                        )
+                    }
+                    Pill(t("Artık medya temizle", "Clean orphan media"), primary = false) {
+                        confirmAction = Triple(
+                            "gcMedia",
+                            t("Hiçbir mesajın işaret etmediği (2 günden eski) artık dosyalar sunucudan temizlensin mi?", "Clean orphaned media files older than 2 days from the server?"),
+                            t("Medya temizliği başlatıldı; sonucu Kayıt sekmesinde", "Media cleanup started; check Log tab"),
+                        )
+                    }
+                }
             }
         }
+    }
+    confirmAction?.let { (kind, question, okMsg) ->
+        AlertDialog(
+            onDismissRequest = { confirmAction = null },
+            containerColor = DarkSurfaceVariant,
+            text = { Text(question, color = TextPrimary) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmAction = null
+                    scope.launch {
+                        console.request(kind)
+                            .onSuccess { controller.reportInfo(okMsg) }
+                            .onFailure { controller.reportError(it.message ?: "") }
+                    }
+                }) { Text(t("Başlat", "Run"), color = Ink) }
+            },
+            dismissButton = { TextButton(onClick = { confirmAction = null }) { Text(t("Vazgeç", "Cancel"), color = TextPrimary) } },
+        )
     }
 }
 
@@ -282,13 +445,19 @@ private fun InfoLine(label: String, value: String, color: Color = TextPrimary) {
 private enum class PeopleSort { ACTIVE, NEW, NAME }
 
 @Composable
-private fun AdminPeople(users: List<AdminUser>, onOpen: (String) -> Unit) {
+private fun AdminPeople(
+    users: List<AdminUser>,
+    filter: PeopleFilter,
+    onFilter: (PeopleFilter) -> Unit,
+    versionFilter: String?,
+    onClearVersion: () -> Unit,
+    onOpen: (String) -> Unit,
+) {
     var query by remember { mutableStateOf("") }
     var sort by remember { mutableStateOf(PeopleSort.ACTIVE) }
     val now = nowMs()
-    val shown = remember(users, query, sort) {
-        val q = query.trim().lowercase().removePrefix("@")
-        users.filter { q.isEmpty() || it.name.lowercase().contains(q) || it.username.contains(q) }
+    val shown = remember(users, query, sort, filter, versionFilter) {
+        filterAdminUsers(users, query, filter, versionFilter, com.qmusic.ui.AppVersion.NAME, now)
             .let { list ->
                 when (sort) {
                     PeopleSort.ACTIVE -> list.sortedWith(compareByDescending<AdminUser> { it.online }.thenByDescending { it.lastActive })
@@ -299,14 +468,34 @@ private fun AdminPeople(users: List<AdminUser>, onOpen: (String) -> Unit) {
     }
     LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Field(query, { query = it.take(40) }, t("İsim veya kullanıcı adı ara", "Search a name or user name"), capitalize = false)
-                Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Field(query, { query = it.take(40) }, t("İsim, kullanıcı adı veya UID ara", "Search name, username or UID"), capitalize = false)
+                if (versionFilter != null) {
+                    val vLabel = versionFilter.ifEmpty { t("bilinmiyor", "unknown") }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pill(t("Sürüm: $vLabel ×", "Version: $vLabel ×"), primary = true) { onClearVersion() }
+                    }
+                }
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill(t("Tümü", "All"), primary = filter == PeopleFilter.ALL) { onFilter(PeopleFilter.ALL) }
+                    Pill(t("Çevrimiçi", "Online"), primary = filter == PeopleFilter.ONLINE) { onFilter(PeopleFilter.ONLINE) }
+                    Pill(t("Banlı / susturulmuş", "Banned / muted"), primary = filter == PeopleFilter.RESTRICTED) { onFilter(PeopleFilter.RESTRICTED) }
+                    Pill(t("Eski sürüm", "Outdated"), primary = filter == PeopleFilter.OUTDATED) { onFilter(PeopleFilter.OUTDATED) }
+                    Pill(t("Geliştirici", "Developer"), primary = filter == PeopleFilter.DEVELOPER) { onFilter(PeopleFilter.DEVELOPER) }
+                    Pill("Claude", primary = filter == PeopleFilter.CLAUDE) { onFilter(PeopleFilter.CLAUDE) }
+                }
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Pill(t("Son aktif", "Last active"), primary = sort == PeopleSort.ACTIVE) { sort = PeopleSort.ACTIVE }
                     Pill(t("Yeni katılan", "Newest"), primary = sort == PeopleSort.NEW) { sort = PeopleSort.NEW }
                     Pill(t("İsim", "Name"), primary = sort == PeopleSort.NAME) { sort = PeopleSort.NAME }
+                    if (filter != PeopleFilter.ALL || versionFilter != null || query.isNotBlank()) {
+                        Text(t("${shown.size} kişi", "${shown.size} people"), color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp))
+                    }
                 }
             }
+        }
+        if (shown.isEmpty()) {
+            item { Text(t("Eşleşen kişi yok.", "No matching people."), color = TextSecondary, modifier = Modifier.padding(16.dp)) }
         }
         items(shown, key = { it.uid }) { u ->
             Row(
@@ -358,9 +547,13 @@ private fun AdminUserPage(
     me: ChatUser,
     user: AdminUser,
     groups: List<AdminGroup>,
+    userActions: List<AdminActionEntry>,
+    userReports: List<AdminReport>,
+    names: Map<String, String>,
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
     val now = nowMs()
     val ban = user.ban?.takeIf { it.activeAt(now) }
     val untouchable = user.uid == me.uid || isFounder(user.uid) || user.uid == CLAUDE_BOT_UID
@@ -381,6 +574,19 @@ private fun AdminUserPage(
                 Spacer(Modifier.height(10.dp))
                 Text(user.name, color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 Text("@" + user.username, color = TextSecondary, fontSize = 14.sp)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill(t("UID kopyala", "Copy UID"), primary = false) {
+                        clipboard.setText(AnnotatedString(user.uid))
+                        controller.reportInfo(t("UID kopyalandı", "UID copied"))
+                    }
+                    if (user.username.isNotBlank()) {
+                        Pill("@${user.username}", primary = false) {
+                            clipboard.setText(AnnotatedString("@" + user.username))
+                            controller.reportInfo(t("Kullanıcı adı kopyalandı", "Username copied"))
+                        }
+                    }
+                }
                 if (ban != null) {
                     Spacer(Modifier.height(8.dp))
                     Tag((if (ban.isBan) t("BANLI ", "BANNED ") else t("SUSTURULDU ", "MUTED ")) + "· " + untilLabel(ban), if (ban.isBan) Danger else Warn)
@@ -401,6 +607,49 @@ private fun AdminUserPage(
                 }
                 if (groups.isNotEmpty()) {
                     Text(groups.joinToString(", ") { it.name }, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
+                }
+            }
+        }
+        if (userReports.isNotEmpty()) {
+            item { SectionTitle(t("İlgili şikâyetler (${userReports.size})", "Related reports (${userReports.size})")) }
+            item {
+                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    userReports.forEach { r ->
+                        Card {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Tag(reasonLabel(r.reason), if (r.handled == null) Warn else TextMuted)
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (r.target == user.uid) t("şikâyet edilen", "reported") else t("şikâyet eden", "reporter"),
+                                    color = TextSecondary, fontSize = 12.sp, modifier = Modifier.weight(1f),
+                                )
+                                Text(ago(r.at), color = TextMuted, fontSize = 12.sp)
+                            }
+                            reportNote(r.handled)?.let { note ->
+                                Text(t("Not: ", "Note: ") + note, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (userActions.isNotEmpty()) {
+            item { SectionTitle(t("İşlem geçmişi (${userActions.size})", "Moderation history (${userActions.size})")) }
+            item {
+                Column(Modifier.padding(horizontal = 16.dp)) {
+                    Card {
+                        userActions.forEach { a ->
+                            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                Text(actionLabel(a.kind, a.value), color = TextPrimary, fontSize = 13.sp)
+                                Text(
+                                    listOfNotNull(names[a.by]?.let { t("yapan: $it", "by $it") }, dateTime(a.at)).joinToString(" · "),
+                                    color = TextSecondary, fontSize = 11.sp,
+                                )
+                                if (a.result != null) Text(a.result, color = Good, fontSize = 11.sp)
+                                if (a.error != null) Text(t("Hata: ", "Error: ") + a.error, color = Danger, fontSize = 11.sp)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -545,6 +794,7 @@ private fun reasonLabel(reason: String): String = when (reason) {
 private fun AdminReports(
     controller: ChatController,
     console: AdminConsole,
+    me: ChatUser,
     reports: List<AdminReport>,
     names: Map<String, String>,
     onUser: (String) -> Unit,
@@ -552,6 +802,8 @@ private fun AdminReports(
 ) {
     val scope = rememberCoroutineScope()
     var showDone by remember { mutableStateOf(false) }
+    var muteConfirm by remember { mutableStateOf<AdminReport?>(null) }
+    var noteFor by remember { mutableStateOf<AdminReport?>(null) }
     val shown = reports.filter { showDone || it.handled == null }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
@@ -562,12 +814,19 @@ private fun AdminReports(
         }
         if (shown.isEmpty()) item { Text(t("Şikâyet yok.", "No reports."), color = TextSecondary, modifier = Modifier.padding(top = 24.dp)) }
         items(shown, key = { it.id }) { r ->
+            val canQuickMute = !r.target.startsWith("grp") && r.target != me.uid && !isFounder(r.target) && r.target != CLAUDE_BOT_UID
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Tag(reasonLabel(r.reason), if (r.handled == null) Warn else TextMuted)
                     Spacer(Modifier.width(8.dp))
                     Text(ago(r.at), color = TextSecondary, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                    if (r.handled != null) Text(t("çözüldü", "handled"), color = Good, fontSize = 12.sp)
+                    if (r.handled != null) {
+                        val badge = if (r.handled.startsWith("muted")) t("susturuldu", "muted") else t("çözüldü", "handled")
+                        Text(badge, color = Good, fontSize = 12.sp)
+                    }
+                }
+                reportNote(r.handled)?.let { note ->
+                    Text(t("Not: ", "Note: ") + note, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(t("Şikâyet eden: ", "By: ") + (names[r.by] ?: r.by), color = TextSecondary, fontSize = 13.sp)
@@ -584,6 +843,10 @@ private fun AdminReports(
                     if (r.target.startsWith("grp")) Pill(t("Grubu aç", "Open group"), primary = true) { onGroup(r.target) }
                     else Pill(t("Kişiyi aç", "Open person"), primary = true) { onUser(r.target) }
                     if (r.handled == null) {
+                        if (canQuickMute) {
+                            Pill(t("1 gün sustur", "Mute 1d"), primary = false) { muteConfirm = r }
+                        }
+                        Pill(t("Notla çöz", "Handle + note"), primary = false) { noteFor = r }
                         Pill(t("Çözüldü", "Handled"), primary = false) { scope.launch { console.markReport(r.id, "ok").onFailure { controller.reportError(it.message ?: "") } } }
                     } else {
                         Pill(t("Yeniden aç", "Reopen"), primary = false) { scope.launch { console.markReport(r.id, null) } }
@@ -593,15 +856,88 @@ private fun AdminReports(
             }
         }
     }
+    muteConfirm?.let { r ->
+        val who = names[r.target] ?: r.target
+        AlertDialog(
+            onDismissRequest = { muteConfirm = null },
+            containerColor = DarkSurfaceVariant,
+            title = { Text(t("1 gün susturulsun mu?", "Mute for 1 day?"), color = TextPrimary) },
+            text = { Text(t("$who 24 saat susturulur ve şikâyet çözüldü olarak işaretlenir.", "$who will be muted for 24 hours and the report marked handled."), color = TextSecondary) },
+            confirmButton = {
+                TextButton(onClick = {
+                    muteConfirm = null
+                    scope.launch {
+                        console.ban(r.target, "mute", nowMs() + 24 * 3600_000L, reasonLabel(r.reason))
+                            .onSuccess {
+                                console.markReport(r.id, "muted")
+                                controller.reportInfo(t("1 gün susturuldu", "Muted for 1 day"))
+                            }
+                            .onFailure { controller.reportError(it.message ?: "") }
+                    }
+                }) { Text(t("Sustur", "Mute"), color = Danger) }
+            },
+            dismissButton = { TextButton(onClick = { muteConfirm = null }) { Text(t("Vazgeç", "Cancel"), color = TextPrimary) } },
+        )
+    }
+    noteFor?.let { r ->
+        var note by remember(r.id) { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { noteFor = null },
+            containerColor = DarkSurfaceVariant,
+            title = { Text(t("Çözüm notu", "Resolution note"), color = TextPrimary) },
+            text = { Field(note, { note = it.take(120) }, t("Kısa not (isteğe bağlı)", "Short note (optional)")) },
+            confirmButton = {
+                TextButton(onClick = {
+                    noteFor = null
+                    val tag = if (note.isBlank()) "ok" else "ok: ${note.trim()}"
+                    scope.launch {
+                        console.markReport(r.id, tag)
+                            .onSuccess { controller.reportInfo(t("Kaydedildi", "Saved")) }
+                            .onFailure { controller.reportError(it.message ?: "") }
+                    }
+                }) { Text(t("Kaydet", "Save"), color = Ink) }
+            },
+            dismissButton = { TextButton(onClick = { noteFor = null }) { Text(t("Vazgeç", "Cancel"), color = TextPrimary) } },
+        )
+    }
 }
 
 // ------------------------------------------------------------------ groups
 
+private enum class GroupSort { NEW, MEMBERS }
+
 @Composable
 private fun AdminGroups(groups: List<AdminGroup>, names: Map<String, String>, onOpen: (String) -> Unit) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        if (groups.isEmpty()) item { Text(t("Grup yok.", "No groups."), color = TextSecondary, modifier = Modifier.padding(16.dp)) }
-        items(groups, key = { it.id }) { g ->
+    var query by remember { mutableStateOf("") }
+    var onlySecret by remember { mutableStateOf(false) }
+    var sort by remember { mutableStateOf(GroupSort.NEW) }
+    val shown = remember(groups, query, onlySecret, sort, names) {
+        val q = query.trim().lowercase()
+        groups.filter { g ->
+            (!onlySecret || g.secret) && (q.isEmpty() ||
+                g.name.lowercase().contains(q) ||
+                (names[g.createdBy] ?: "").lowercase().contains(q))
+        }.let { list ->
+            when (sort) {
+                GroupSort.NEW -> list.sortedByDescending { it.createdAt }
+                GroupSort.MEMBERS -> list.sortedByDescending { it.members.size }
+            }
+        }
+    }
+    LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(bottom = 24.dp)) {
+        item {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Field(query, { query = it.take(40) }, t("Grup veya kuran kişi ara", "Search group or creator"), capitalize = false)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill(t("Tümü", "All"), primary = !onlySecret) { onlySecret = false }
+                    Pill(t("Gizli", "Secret"), primary = onlySecret) { onlySecret = true }
+                    Pill(t("Yeni", "Newest"), primary = sort == GroupSort.NEW) { sort = GroupSort.NEW }
+                    Pill(t("Üye sayısı", "Members"), primary = sort == GroupSort.MEMBERS) { sort = GroupSort.MEMBERS }
+                }
+            }
+        }
+        if (shown.isEmpty()) item { Text(t("Grup yok.", "No groups."), color = TextSecondary, modifier = Modifier.padding(16.dp)) }
+        items(shown, key = { it.id }) { g ->
             Row(Modifier.fillMaxWidth().clickable { onOpen(g.id) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 ChatAvatar(g.name, g.photo, 46.dp)
                 Spacer(Modifier.width(12.dp))
@@ -676,11 +1012,24 @@ private fun AdminGroupPage(
 // ------------------------------------------------------------------ announcements
 
 @Composable
-private fun AdminAnnounce(controller: ChatController, console: AdminConsole) {
+private fun AdminAnnounce(controller: ChatController, console: AdminConsole, users: List<AdminUser>) {
     val past by remember(console) { console.announcements() }.collectAsState(initial = emptyList())
     var text by remember { mutableStateOf("") }
     var asking by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<Announcement?>(null) }
+    var targetVer by remember { mutableStateOf(com.qmusic.ui.AppVersion.NAME) }
+    var oldVerBody by remember { mutableStateOf("") }
+    var askingOldVer by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val now = nowMs()
+    val verOk = Regex("^[0-9]{1,3}(\\.[0-9]{1,3}){0,3}$").matches(targetVer)
+    val outdatedCount = remember(users, targetVer, verOk) {
+        if (!verOk) 0 else users.count { u ->
+            u.uid != CLAUDE_BOT_UID && u.uid != "nuvelo" &&
+                !(u.ban?.isBan == true && u.ban.activeAt(now)) &&
+                u.version != null && versionOlder(u.version, targetVer)
+        }
+    }
     LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text(
@@ -690,11 +1039,41 @@ private fun AdminAnnounce(controller: ChatController, console: AdminConsole) {
         }
         item { Field(text, { text = it.take(1000) }, t("Duyuru yazısı", "Announcement text")) }
         item { WhiteButton(t("Herkese gönder", "Send to everyone"), enabled = text.isNotBlank()) { asking = true } }
+        item { AdminSection(t("Eski sürümlere Nuvelo mesajı", "Message outdated versions")) }
+        item {
+            Card {
+                Text(
+                    t("Bu sürümden eski bilinen kullanıcılara Nuvelo hesabından sohbet mesajı yollar.", "Sends a chat message from Nuvelo to users known to be on an older version."),
+                    color = TextSecondary, fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Field(targetVer, { targetVer = it.filter { c -> c.isDigit() || c == '.' }.take(15) }, t("hedef sürüm: 2.13.17", "target: 2.13.17"), capitalize = false)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    if (verOk) t("Etkilenecek: $outdatedCount kişi (v$targetVer öncesi)", "Will reach: $outdatedCount people (before v$targetVer)")
+                    else t("Sürüm 2.13.17 gibi yazılmalı", "Write version like 2.13.17"),
+                    color = if (outdatedCount > 0) TextPrimary else TextMuted, fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Field(oldVerBody, { oldVerBody = it.take(1000) }, t("Mesaj (ör. Yeni sürümü yüklemeyi unutma)", "Message (e.g. Please update to the latest version)"))
+                Spacer(Modifier.height(10.dp))
+                WhiteButton(
+                    t("Eski sürümlere gönder ($outdatedCount)", "Send to outdated ($outdatedCount)"),
+                    enabled = verOk && outdatedCount > 0 && oldVerBody.isNotBlank(),
+                ) { askingOldVer = true }
+            }
+        }
         if (past.isNotEmpty()) item { AdminSection(t("Önceki duyurular", "Earlier announcements")) }
         items(past, key = { it.id }) { a ->
             Card {
                 Text(a.text, color = TextPrimary, fontSize = 14.sp)
-                Text(dateTime(a.at), color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(dateTime(a.at), color = TextMuted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    Text(
+                        t("Sil", "Delete"), color = Danger, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { deleting = a }.padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
             }
         }
     }
@@ -717,6 +1096,44 @@ private fun AdminAnnounce(controller: ChatController, console: AdminConsole) {
             dismissButton = { TextButton(onClick = { asking = false }) { Text(t("Vazgeç", "Cancel"), color = TextPrimary) } },
         )
     }
+    if (askingOldVer) {
+        AlertDialog(
+            onDismissRequest = { askingOldVer = false },
+            containerColor = DarkSurfaceVariant,
+            text = { Text(t("v$targetVer öncesi sürümdeki $outdatedCount kişiye Nuvelo mesajı gitsin mi?", "Send a Nuvelo message to $outdatedCount people below v$targetVer?"), color = TextPrimary) },
+            confirmButton = {
+                TextButton(onClick = {
+                    askingOldVer = false
+                    val v = targetVer.trim()
+                    val body = oldVerBody.trim()
+                    scope.launch {
+                        console.request("msgOldVer", v, body)
+                            .onSuccess { oldVerBody = ""; controller.reportInfo(t("Gönderiliyor; sonucu Kayıt sekmesinde", "Sending; see Log tab")) }
+                            .onFailure { controller.reportError(it.message ?: "") }
+                    }
+                }) { Text(t("Gönder", "Send"), color = Ink) }
+            },
+            dismissButton = { TextButton(onClick = { askingOldVer = false }) { Text(t("Vazgeç", "Cancel"), color = TextPrimary) } },
+        )
+    }
+    deleting?.let { a ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            containerColor = DarkSurfaceVariant,
+            text = { Text(t("Bu duyuru kaldırılsın mı? Henüz görmeyenlere artık gösterilmez.", "Retract this announcement? People who haven't seen it won't get the popup."), color = TextPrimary) },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleting = null
+                    scope.launch {
+                        console.deleteAnnouncement(a.id)
+                            .onSuccess { controller.reportInfo(t("Duyuru silindi", "Announcement deleted")) }
+                            .onFailure { controller.reportError(it.message ?: "") }
+                    }
+                }) { Text(t("Sil", "Delete"), color = Danger) }
+            },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text(t("Vazgeç", "Cancel"), color = TextPrimary) } },
+        )
+    }
 }
 
 // ------------------------------------------------------------------ settings
@@ -724,13 +1141,18 @@ private fun AdminAnnounce(controller: ChatController, console: AdminConsole) {
 @Composable
 private fun AdminSettings(controller: ChatController, console: AdminConsole) {
     val least by console.minVersion.collectAsState()
+    val recommended by console.recommendedVersion.collectAsState()
     val barred by remember(console) { console.bannedNames() }.collectAsState(initial = emptyList())
     var version by remember(least) { mutableStateOf(least.orEmpty()) }
+    var recVersion by remember(recommended) { mutableStateOf(recommended.orEmpty()) }
     var name by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
-    val versionOk = version.isEmpty() || Regex("^[0-9]{1,3}(\\.[0-9]{1,3}){0,3}$").matches(version)
+    val versionRegex = remember { Regex("^[0-9]{1,3}(\\.[0-9]{1,3}){0,3}$") }
+    val versionOk = version.isEmpty() || versionRegex.matches(version)
+    val recOk = recVersion.isEmpty() || versionRegex.matches(recVersion)
     LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { MaintenanceAndSpam(controller, console) }
+        item { FeatureFlagsCard(controller, console) }
         item { AdminSection(t("Zorunlu güncelleme", "Required update")) }
         item {
             Text(
@@ -759,6 +1181,33 @@ private fun AdminSettings(controller: ChatController, console: AdminConsole) {
                     }
                 }
                 if (least != null) Pill(t("Kaldır", "Remove"), primary = false) { scope.launch { console.setMinVersion(null) } }
+            }
+        }
+        item { AdminSection(t("Önerilen sürüm (yumuşak uyarı)", "Recommended version (soft banner)")) }
+        item {
+            Text(
+                t(
+                    "Bu sürümden eski olanlar sohbetlerin üstünde kapatılabilir bir \"Yeni sürüm hazır\" şeridi görür; kullanım engellenmez.",
+                    "Anyone older sees a dismissable \"New version ready\" strip at the top of chats without blocking usage.",
+                ),
+                color = TextSecondary, fontSize = 13.sp,
+            )
+        }
+        item { Field(recVersion, { recVersion = it.filter { c -> c.isDigit() || c == '.' }.take(15) }, t("örnek: 2.13.17", "e.g. 2.13.17"), capitalize = false) }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill(t("Kaydet", "Save"), primary = true) {
+                    if (!recOk) {
+                        controller.reportError(t("Sürüm 2.13.17 gibi yazılmalı", "Write the version like 2.13.17"))
+                    } else {
+                        scope.launch {
+                            console.setRecommendedVersion(recVersion.ifEmpty { null })
+                                .onSuccess { controller.reportInfo(t("Kaydedildi", "Saved")) }
+                                .onFailure { controller.reportError(it.message ?: "") }
+                        }
+                    }
+                }
+                if (recommended != null) Pill(t("Kaldır", "Remove"), primary = false) { scope.launch { console.setRecommendedVersion(null) } }
             }
         }
         item { AdminSection(t("Yasaklı kullanıcı adları", "Barred user names")) }
@@ -813,6 +1262,13 @@ private fun actionLabel(kind: String, value: String): String = when (kind) {
     "deleteMedia" -> t("Sohbet dosyalarını sildi", "Deleted a chat's files")
     "deleteAccount" -> t("Hesap sildi", "Deleted an account")
     "minVersion" -> if (value.isEmpty()) t("Zorunlu güncellemeyi kaldırdı", "Removed the required update") else t("En az sürüm: $value", "Least version: $value")
+    "recVersion" -> if (value.isEmpty()) t("Önerilen sürümü kaldırdı", "Removed recommended version") else t("Önerilen sürüm: $value", "Recommended version: $value")
+    "features" -> t("Özellik anahtarları: ", "Feature switches: ") + value
+    "delAnnounce" -> t("Duyuru sildi", "Deleted an announcement")
+    "backupNow" -> t("Anlık yedek aldı", "Took a backup")
+    "gcMedia" -> t("Artık medyayı temizledi", "Cleaned orphan media")
+    "testPush" -> t("Test bildirimi gönderdi", "Sent a test push")
+    "msgOldVer" -> t("Eski sürümlere yazdı: ", "Messaged outdated: ") + value
     "banName" -> t("Kullanıcı adı yasağı", "User name bar")
     "report" -> t("Şikâyeti çözdü", "Handled a report")
     else -> kind
@@ -821,10 +1277,37 @@ private fun actionLabel(kind: String, value: String): String = when (kind) {
 @Composable
 private fun AdminLog(console: AdminConsole, names: Map<String, String>) {
     val all by remember(console) { console.actions() }.collectAsState(initial = emptyList())
+    var category by remember { mutableStateOf(LogCategory.ALL) }
+    var query by remember { mutableStateOf("") }
     // The counts are refreshed each time the panel opens: not worth a line each.
-    val shown = all.filter { it.kind != "stats" }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (shown.isEmpty()) item { Text(t("Henüz bir işlem yok.", "Nothing done yet."), color = TextSecondary) }
+    val shown = remember(all, category, query, names) {
+        val q = query.trim().lowercase()
+        all.filter { it.kind != "stats" }
+            .filter { category == LogCategory.ALL || logCategoryOf(it.kind) == category }
+            .filter { a ->
+                q.isEmpty() ||
+                    actionLabel(a.kind, a.value).lowercase().contains(q) ||
+                    (names[a.target] ?: a.target).lowercase().contains(q) ||
+                    (names[a.by] ?: a.by).lowercase().contains(q) ||
+                    a.value.lowercase().contains(q) ||
+                    (a.result ?: "").lowercase().contains(q)
+            }
+    }
+    LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Field(query, { query = it.take(40) }, t("İşlem, kişi veya sonuç ara", "Search action, person or result"), capitalize = false)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill(t("Tümü", "All"), primary = category == LogCategory.ALL) { category = LogCategory.ALL }
+                    Pill(t("Ban / susturma", "Moderation"), primary = category == LogCategory.MODERATION) { category = LogCategory.MODERATION }
+                    Pill("Spam", primary = category == LogCategory.SPAM) { category = LogCategory.SPAM }
+                    Pill(t("Duyuru / mesaj", "Announce"), primary = category == LogCategory.ANNOUNCE) { category = LogCategory.ANNOUNCE }
+                    Pill(t("Hesap / grup", "Accounts"), primary = category == LogCategory.ACCOUNT) { category = LogCategory.ACCOUNT }
+                    Pill(t("Ayarlar / sunucu", "Settings"), primary = category == LogCategory.SETTINGS) { category = LogCategory.SETTINGS }
+                }
+            }
+        }
+        if (shown.isEmpty()) item { Text(t("Eşleşen işlem yok.", "No matching actions."), color = TextSecondary, modifier = Modifier.padding(top = 12.dp)) }
         items(shown, key = { it.id }) { a ->
             Column(Modifier.fillMaxWidth()) {
                 Text(actionLabel(a.kind, a.value), color = TextPrimary, fontSize = 14.sp)
@@ -833,6 +1316,7 @@ private fun AdminLog(console: AdminConsole, names: Map<String, String>) {
                     listOfNotNull(who, names[a.by]?.let { t("yapan: $it", "by $it") }, dateTime(a.at)).joinToString("  ·  "),
                     color = TextSecondary, fontSize = 12.sp,
                 )
+                if (a.result != null) Text(a.result, color = Good, fontSize = 12.sp)
                 if (a.error != null) Text(t("Hata: ", "Error: ") + a.error, color = Danger, fontSize = 12.sp)
             }
         }
@@ -898,9 +1382,11 @@ internal fun AdminGate(console: AdminConsole?, onExit: () -> Unit, content: @Com
     }
     val ban by console.myBan.collectAsState()
     val least by console.minVersion.collectAsState()
+    val recommended by console.recommendedVersion.collectAsState()
     val news by console.announcement.collectAsState()
     val maintenance by console.maintenance.collectAsState()
     val isAdmin by console.isAdmin.collectAsState()
+    var dismissedRec by remember(recommended) { mutableStateOf(false) }
     // A ban that ends while the app is open: the page goes by itself at that moment.
     var now by remember { mutableStateOf(nowMs()) }
     LaunchedEffect(ban) {
@@ -912,11 +1398,50 @@ internal fun AdminGate(console: AdminConsole?, onExit: () -> Unit, content: @Com
     }
     val active = ban?.takeIf { it.activeAt(now) }
     val oldVersion = least?.let { versionOlder(com.qmusic.ui.AppVersion.NAME, it) } == true
+    val recOlder = !oldVersion && recommended?.let { versionOlder(com.qmusic.ui.AppVersion.NAME, it) } == true
     when {
         oldVersion -> UpdateRequiredPage(least.orEmpty())
         maintenance.on && !isAdmin -> MaintenancePage(maintenance.text, onExit)
         active != null && active.isBan -> BannedPage(active, onExit)
-        else -> content()
+        else -> Box(Modifier.fillMaxSize()) {
+            content()
+            if (recOlder && !dismissedRec) {
+                Row(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(DarkSurfaceVariant)
+                        .border(1.dp, Ink.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        t("Yeni sürüm (${recommended.orEmpty()}) hazır", "New version (${recommended.orEmpty()}) ready"),
+                        color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        t("Güncelle", "Update"),
+                        color = InkInverse, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Ink)
+                            .clickable { ForcedUpdate.requests.tryEmit(Unit) }
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "×",
+                        color = TextSecondary, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { dismissedRec = true }.padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+            }
+        }
     }
     // Muted: said once (per mute), and every send fails while it lasts.
     if (active != null && !active.isBan && !oldVersion) {

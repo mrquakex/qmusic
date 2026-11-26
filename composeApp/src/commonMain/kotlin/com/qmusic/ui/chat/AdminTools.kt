@@ -42,6 +42,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -174,6 +176,7 @@ internal fun AdminStorage(controller: ChatController, console: AdminConsole, use
     val stats by remember(console) { console.stats() }.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
     var deleting by remember { mutableStateOf<StorageEntry?>(null) }
+    var query by remember { mutableStateOf("") }
     val nameOf = remember(users) { users.associate { it.uid to it.name } }
     fun label(id: String): Pair<String, String> = when {
         id.startsWith("u_") -> (nameOf[id.removePrefix("u_")] ?: tt("Bilinmeyen", "Unknown")) to tt("Profil ve durum dosyaları", "Profile and status files")
@@ -181,7 +184,15 @@ internal fun AdminStorage(controller: ChatController, console: AdminConsole, use
         id.contains('_') -> id.split('_').joinToString(" ↔ ") { nameOf[it] ?: if (it == "nuvelo") "Nuvelo" else "?" } to tt("Sohbet", "Chat")
         else -> id to ""
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val shown = remember(stats, query, users, groups) {
+        val q = query.trim().lowercase()
+        val list = stats?.storage.orEmpty()
+        if (q.isEmpty()) list else list.filter { e ->
+            val (name, kind) = label(e.id)
+            name.lowercase().contains(q) || kind.lowercase().contains(q) || e.id.lowercase().contains(q)
+        }
+    }
+    LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         val s = stats
         item {
             ToolCard {
@@ -206,8 +217,9 @@ internal fun AdminStorage(controller: ChatController, console: AdminConsole, use
                 }
             }
         }
+        item { Field(query, { query = it.take(40) }, tt("Sohbet, grup veya kişi ara", "Search chat, group or person"), capitalize = false) }
         item { ToolNote(tt("Sadece boyutlar sayılır, hiçbir dosya açılmaz.", "Only sizes are counted; no file is opened.")) }
-        items(s?.storage.orEmpty(), key = { it.id }) { e ->
+        items(shown, key = { it.id }) { e ->
             val (name, kind) = label(e.id)
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(DarkSurface).padding(horizontal = 14.dp, vertical = 12.dp),
@@ -261,12 +273,19 @@ internal fun AdminStorage(controller: ChatController, console: AdminConsole, use
 
 /** The phones' crashes, the same crash grouped together: how often, on which versions and phones, and its trace. */
 @Composable
-internal fun AdminCrashes(console: AdminConsole, users: List<AdminUser>) {
+internal fun AdminCrashes(controller: ChatController, console: AdminConsole, users: List<AdminUser>) {
     val crashes by remember(console) { console.crashes() }.collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
     val nameOf = remember(users) { users.associate { it.uid to it.name } }
-    val groups = remember(crashes) { crashes.groupBy { it.headline }.entries.sortedByDescending { e -> e.value.maxOf { it.at } } }
+    val versions = remember(crashes) { crashes.map { it.version }.filter { it.isNotBlank() }.distinct().sortedDescending() }
+    var verFilter by remember { mutableStateOf<String?>(null) }
+    val filtered = remember(crashes, verFilter) {
+        if (verFilter == null) crashes else crashes.filter { it.version == verFilter }
+    }
+    val groups = remember(filtered) { filtered.groupBy { it.headline }.entries.sortedByDescending { e -> e.value.maxOf { it.at } } }
     var open by remember { mutableStateOf<String?>(null) }
+    var confirmClear by remember { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             ToolNote(
@@ -275,6 +294,19 @@ internal fun AdminCrashes(console: AdminConsole, users: List<AdminUser>) {
                     "When the app crashes, it comes here at the next start (2.13.9 on, signed-in people). The same error is shown together.",
                 ),
             )
+        }
+        if (versions.isNotEmpty() || filtered.isNotEmpty()) {
+            item {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Pill(tt("Tümü (${crashes.size})", "All (${crashes.size})"), primary = verFilter == null) { verFilter = null }
+                    versions.forEach { v ->
+                        Pill("v$v", primary = verFilter == v) { verFilter = if (verFilter == v) null else v }
+                    }
+                    if (filtered.isNotEmpty()) {
+                        Pill(tt("Tümünü temizle", "Clear all"), primary = false) { confirmClear = true }
+                    }
+                }
+            }
         }
         if (groups.isEmpty()) item { Text(tt("Çökme yok.", "No crashes."), color = TextSecondary, modifier = Modifier.padding(top = 20.dp)) }
         items(groups, key = { it.key }) { (headline, list) ->
@@ -306,13 +338,212 @@ internal fun AdminCrashes(console: AdminConsole, users: List<AdminUser>) {
                         Text(list.first().trace.take(4_000), color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace, lineHeight = 14.sp)
                     }
                     Spacer(Modifier.height(8.dp))
-                    Text(
-                        tt("Hepsini sil", "Delete all of these"), color = ToolDanger, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { scope.launch { list.forEach { console.deleteCrash(it.id) } } }.padding(vertical = 6.dp),
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Pill(tt("Kopyala", "Copy"), primary = false) {
+                            val first = list.first()
+                            val dump = "Nuvelo v${first.version} · ${first.device} · ${whenLabel(first.at)}\n${first.trace}"
+                            clipboard.setText(AnnotatedString(dump))
+                            controller.reportInfo(tt("İz kopyalandı", "Trace copied"))
+                        }
+                        Text(
+                            tt("Hepsini sil", "Delete all of these"), color = ToolDanger, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { scope.launch { list.forEach { console.deleteCrash(it.id) } } }.padding(horizontal = 8.dp, vertical = 6.dp),
+                        )
+                    }
                 }
             }
         }
+    }
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            containerColor = DarkSurfaceVariant,
+            title = { Text(tt("Çökmeler temizlensin mi?", "Clear crashes?"), color = TextPrimary) },
+            text = {
+                Text(
+                    verFilter?.let { tt("v$it sürümüne ait ${filtered.size} çökme kaydı silinir.", "${filtered.size} crash logs for v$it will be deleted.") }
+                        ?: tt("Listedeki ${filtered.size} çökme kaydı silinir.", "All ${filtered.size} crash logs will be deleted."),
+                    color = TextSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val toDelete = filtered.map { it.id }
+                    confirmClear = false
+                    scope.launch {
+                        toDelete.forEach { console.deleteCrash(it) }
+                        controller.reportInfo(tt("${toDelete.size} kayıt silindi", "Deleted ${toDelete.size} logs"))
+                    }
+                }) { Text(tt("Temizle", "Clear"), color = ToolDanger) }
+            },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(tt("Vazgeç", "Cancel"), color = TextPrimary) } },
+        )
+    }
+}
+
+// ==================================================================== call debug trails
+
+/** Diagnostic call trails uploaded by phones to callDebug/{uid}/{call}: lets admins inspect failed/dropped calls. */
+@Composable
+internal fun AdminCallDebug(controller: ChatController, console: AdminConsole, users: List<AdminUser>) {
+    val entries by remember(console) { console.callDebug() }.collectAsState(initial = emptyList())
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    val nameOf = remember(users) { users.associate { it.uid to it.name } }
+    var onlyIssues by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    var open by remember { mutableStateOf<String?>(null) }
+    val shown = remember(entries, onlyIssues, query, nameOf) {
+        val q = query.trim().lowercase()
+        entries.filter { e ->
+            (!onlyIssues || e.hasIssue) && (q.isEmpty() ||
+                (nameOf[e.uid] ?: e.uid).lowercase().contains(q) ||
+                e.peer.lowercase().contains(q) ||
+                e.reason.lowercase().contains(q) ||
+                e.model.lowercase().contains(q))
+        }
+    }
+    LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            ToolNote(
+                tt(
+                    "Telefonların biten aramalardan sonra yüklediği bağlantı izleri. Ses veya içerik içermez; yalnızca aşamalar ve bitiş sebebi tutulur.",
+                    "Connection trails uploaded by phones after calls end. Never holds audio or content; only call phases and end reason.",
+                ),
+            )
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Field(query, { query = it.take(40) }, tt("Kişi, cihaz veya sebep ara", "Search person, device or reason"), capitalize = false)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill(tt("Tümü (${entries.size})", "All (${entries.size})"), primary = !onlyIssues) { onlyIssues = false }
+                    Pill(tt("Sorunlu (${entries.count { it.hasIssue }})", "Issues (${entries.count { it.hasIssue }})"), primary = onlyIssues) { onlyIssues = true }
+                }
+            }
+        }
+        if (shown.isEmpty()) {
+            item {
+                Text(
+                    tt("Arama izi yok.", "No call trails."),
+                    color = TextSecondary,
+                    modifier = Modifier.padding(top = 20.dp),
+                )
+            }
+        }
+        items(shown, key = { "${it.uid}_${it.id}" }) { e ->
+            val key = "${e.uid}_${e.id}"
+            val expanded = open == key
+            val badgeColor = when {
+                e.reason == "FAILED" || e.reason == "UNREACHABLE" -> ToolDanger
+                e.hasIssue -> Color(0xFFF5A524)
+                else -> ChartGreen
+            }
+            val who = nameOf[e.uid] ?: e.uid.take(8)
+            val dir = if (e.caller) "→" else "←"
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(DarkSurface).clickable { open = if (expanded) null else key }
+                    .padding(14.dp).animateContentSize(),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        e.reason.ifBlank { "?" }, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(badgeColor).padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (e.video) tt("Görüntülü", "Video") else tt("Sesli", "Voice"),
+                        color = TextSecondary, fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(whenLabel(e.at), color = TextSecondary, fontSize = 12.sp)
+                }
+                Spacer(Modifier.height(6.dp))
+                Text("$who $dir ${e.peer.ifBlank { "?" }}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    buildString {
+                        append(e.model.ifBlank { "?" })
+                        if (e.androidSdk > 0) append(" · API ${e.androidSdk}")
+                        if (e.phase.isNotBlank()) append(" · ${e.phase}")
+                        append(if (e.connectedOnce) tt(" · bağlandı", " · connected") else tt(" · bağlanamadı", " · never connected"))
+                    },
+                    color = TextMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                if (expanded) {
+                    Spacer(Modifier.height(8.dp))
+                    val traceText = if (e.trail.isEmpty()) tt("(adım kaydı yok)", "(no trail steps)") else e.trail.joinToString("\n")
+                    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(BgRoot).horizontalScroll(rememberScrollState()).padding(10.dp)) {
+                        Text(traceText, color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace, lineHeight = 15.sp)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Pill(tt("Kopyala", "Copy"), primary = false) {
+                            val dump = "$who $dir ${e.peer} | ${e.reason} | ${e.model} API ${e.androidSdk} | ${whenLabel(e.at)}\n$traceText"
+                            clipboard.setText(AnnotatedString(dump))
+                            controller.reportInfo(tt("Arama izi kopyalandı", "Call trail copied"))
+                        }
+                        Text(
+                            tt("Sil", "Delete"), color = ToolDanger, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable {
+                                scope.launch {
+                                    console.deleteCallDebug(e.uid, e.id)
+                                        .onFailure { controller.reportError(it.message ?: "") }
+                                }
+                            }.padding(horizontal = 8.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================================================================== settings: feature flags
+
+/** Emergency kill switches for major chat features (admins always bypass these). */
+@Composable
+internal fun FeatureFlagsCard(controller: ChatController, console: AdminConsole) {
+    val flags by console.features.collectAsState()
+    val scope = rememberCoroutineScope()
+    fun update(next: FeatureFlags) {
+        scope.launch {
+            console.setFeatures(next)
+                .onSuccess { controller.reportInfo(tt("Kaydedildi", "Saved")) }
+                .onFailure { controller.reportError(it.message ?: "") }
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Spacer(Modifier.height(6.dp))
+        Text(tt("Özellik anahtarları", "Feature switches"), color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        ToolCard {
+            Text(
+                tt("Kapalı özellikler yöneticiler dışındaki herkese anında duraklatılır.", "Disabled features pause immediately for everyone except admins."),
+                color = TextSecondary, fontSize = 12.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            CompactFlagRow(tt("Oyunlar", "Games"), tt("/oyna ve oyun ekleme menüsü", "/oyna and game attach picker"), flags.games) {
+                update(flags.copy(games = it))
+            }
+            CompactFlagRow(tt("Sesli ve görüntülü aramalar", "Voice & video calls"), tt("Bire bir ve grup aramaları", "1-on-1 and group calls"), flags.calls) {
+                update(flags.copy(calls = it))
+            }
+            CompactFlagRow(tt("Durum paylaşımı", "Status posting"), tt("Yeni metin, fotoğraf ve video durumları", "New text, photo and video statuses"), flags.statuses) {
+                update(flags.copy(statuses = it))
+            }
+            CompactFlagRow(tt("Yeni sohbet ve grup", "New chats & groups"), tt("Yeni kişiyle sohbet ve grup açma", "Starting new chats and groups"), flags.newChats) {
+                update(flags.copy(newChats = it))
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactFlagRow(title: String, note: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(note, color = TextSecondary, fontSize = 12.sp)
+        }
+        Switch(checked = checked, onCheckedChange = onChange, colors = SwitchDefaults.colors(checkedThumbColor = InkInverse, checkedTrackColor = Ink))
     }
 }
 
@@ -442,6 +673,14 @@ internal fun AdminUserExtras(controller: ChatController, console: AdminConsole, 
         Column(Modifier.fillMaxWidth().clickable { writing = true }.padding(horizontal = 16.dp, vertical = 13.dp)) {
             Text(tt("Nuvelo adına mesaj gönder", "Message from Nuvelo"), color = TextPrimary, fontSize = 15.sp)
             Text(tt("\"Nuvelo\" hesabından sohbetine gelir. Cevap verirse sana Claude sohbetinden iletilir.", "Comes into their chats from the \"Nuvelo\" account. If they answer, it reaches you in your Claude chat."), color = TextSecondary, fontSize = 12.sp)
+        }
+        Column(
+            Modifier.fillMaxWidth().clickable {
+                scope.launch { done(console.request("testPush", user.uid), tt("Test bildirimi istendi; sonucu Kayıt sekmesinde", "Test push requested; see Log tab")) }
+            }.padding(horizontal = 16.dp, vertical = 13.dp),
+        ) {
+            Text(tt("Test bildirimi gönder", "Send test notification"), color = TextPrimary, fontSize = 15.sp)
+            Text(tt("Kayıtlı cihazlarına deneme bildirimi yollar; kaç cihaza ulaştığı Kayıt sekmesinde görünür.", "Sends a test push to their registered phones; delivery count shows in the Log tab."), color = TextSecondary, fontSize = 12.sp)
         }
         SectionTitle(tt("Tehlikeli", "Danger"))
         Column(Modifier.fillMaxWidth().clickable { deleting = true }.padding(horizontal = 16.dp, vertical = 13.dp)) {

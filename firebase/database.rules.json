@@ -383,10 +383,11 @@
       }
     },
     "callDebug": {
+      ".read": "auth != null && root.child('admins').child(auth.uid).val() === true",
       "$uid": {
-        ".read": "auth != null && auth.uid === $uid",
+        ".read": "auth != null && (auth.uid === $uid || root.child('admins').child(auth.uid).val() === true)",
         "$call": {
-          ".write": "auth != null && auth.uid === $uid"
+          ".write": "auth != null && (auth.uid === $uid || (root.child('admins').child(auth.uid).val() === true && !newData.exists()))"
         }
       }
     },
@@ -556,6 +557,12 @@
       },
       "spam": {
         ".validate": "newData.child('on').isBoolean() && newData.child('limit').isNumber() && newData.child('limit').val() >= 10 && newData.child('limit').val() <= 500"
+      },
+      "recommendedVersion": {
+        ".validate": "!newData.exists() || (newData.isString() && newData.val().matches(/^[0-9]{1,3}(\\.[0-9]{1,3}){0,3}$/))"
+      },
+      "features": {
+        ".validate": "!newData.exists() || ((!newData.child('games').exists() || newData.child('games').isBoolean()) && (!newData.child('calls').exists() || newData.child('calls').isBoolean()) && (!newData.child('statuses').exists() || newData.child('statuses').isBoolean()) && (!newData.child('newChats').exists() || newData.child('newChats').isBoolean()))"
       }
     },
     "bannedNames": {

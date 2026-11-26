@@ -213,12 +213,19 @@ internal fun StatusTab(controller: ChatController, s: ChatStrings, me: ChatUser,
             }
         }
         // A small pen for a text status over the camera.
+        val openStatus: (() -> Unit) -> Unit = { action ->
+            if (!controller.admin.featureEnabled { it.statuses }) {
+                controller.reportInfo(if (s.english) "Status posting is temporarily disabled" else "Durum paylaşımı geçici olarak kapalı")
+            } else {
+                action()
+            }
+        }
         Column(Modifier.align(Alignment.BottomEnd), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
-                Modifier.padding(end = 16.dp).size(44.dp).clip(RoundedCornerShape(14.dp)).background(DarkSurfaceVariant).clickable { controller.push(ChatRoute.TextStatus) },
+                Modifier.padding(end = 16.dp).size(44.dp).clip(RoundedCornerShape(14.dp)).background(DarkSurfaceVariant).clickable { openStatus { controller.push(ChatRoute.TextStatus) } },
                 contentAlignment = Alignment.Center,
             ) { Icon(QMusicIcons.Edit, contentDescription = s.statusText, tint = Ink, modifier = Modifier.size(20.dp)) }
-            HomeFab(QMusicIcons.Camera, s.camera) { addMenu = true }
+            HomeFab(QMusicIcons.Camera, s.camera) { openStatus { addMenu = true } }
         }
     }
     if (addMenu) {

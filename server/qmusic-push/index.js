@@ -9,6 +9,7 @@
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const DATABASE_URL = "https://qmusic-2552b-default-rtdb.europe-west1.firebasedatabase.app";
@@ -542,7 +543,7 @@ async function announce(text, by) {
   await admin.messaging().send({ topic: "releases", data: { type: "announce", body }, android: { priority: "high", ttl: 3 * 24 * 3600 * 1000 } });
 }
 
-/** Counts for the panel: each account's sign-up and last sign-in, how many conversations it has, the server's disk. */
+/** Counts for the panel: each account's sign-up and last sign-in, how many conversations it has, the server's disk, health, backup and game totals. */
 async function writeStats() {
   const users = {};
   let page;
@@ -568,6 +569,36 @@ async function writeStats() {
     diskFree = s.bavail * s.bsize;
     diskTotal = s.blocks * s.bsize;
   } catch (_) {}
+  const uptimeSec = Math.floor(os.uptime());
+  const memTotalMb = Math.round(os.totalmem() / 1048576);
+  const memUsedMb = Math.round((os.totalmem() - os.freemem()) / 1048576);
+  const nodeRssMb = Math.round(process.memoryUsage().rss / 1048576);
+  let backupAt = 0, backupBytes = 0, backupCount = 0;
+  try {
+    const bdir = "/var/backups/qeyf";
+    const files = fs.readdirSync(bdir).filter((f) => /^rtdb-\d{4}-\d{2}-\d{2}\.json\.gz$/.test(f)).sort();
+    backupCount = files.length;
+    if (files.length > 0) {
+      const st = fs.statSync(path.join(bdir, files[files.length - 1]));
+      backupAt = Math.round(st.mtimeMs);
+      backupBytes = st.size;
+    }
+  } catch (_) {}
+  // Aggregate game counts only (kind & status): never game state or chat contents.
+  let gamesTotal = 0, gamesActive = 0;
+  const gamesByKind = {};
+  try {
+    const allGames = (await db.ref("games").get()).val() || {};
+    for (const byChat of Object.values(allGames)) {
+      for (const g of Object.values(byChat || {})) {
+        if (!g || typeof g !== "object") continue;
+        gamesTotal++;
+        if (g.status === "waiting" || g.status === "playing") gamesActive++;
+        const k = String(g.kind || "").slice(0, 24);
+        if (k) gamesByKind[k] = (gamesByKind[k] || 0) + 1;
+      }
+    }
+  } catch (_) {}
   await db.ref("adminStats").set({
     at: admin.database.ServerValue.TIMESTAMP,
     users,
@@ -575,8 +606,93 @@ async function writeStats() {
     diskFree,
     diskTotal,
     storage: await storageByChat(),
+    uptimeSec,
+    memUsedMb,
+    memTotalMb,
+    nodeRssMb,
+    backupAt,
+    backupBytes,
+    backupCount,
+    gamesTotal,
+    gamesActive,
+    gamesByKind,
   });
   await writeDaily(users);
+}
+
+/** True when version [a] ("2.13.7") is older than [b] ("2.13.8"), segment by segment. */
+function versionOlder(a, b) {
+  const pa = String(a || "").split(".").map((s) => parseInt(s, 10) || 0);
+  const pb = String(b || "").split(".").map((s) => parseInt(s, 10) || 0);
+  const n = Math.max(pa.length, pb.length);
+  for (let i = 0; i < n; i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x !== y) return x < y;
+  }
+  return false;
+}
+
+/** Runs backup.js right now and refreshes adminStats so the panel shows the fresh backup. */
+async function backupNow() {
+  await new Promise((ok, fail) => {
+    execFile(process.execPath, [path.join(__dirname, "backup.js")], { timeout: 120000 }, (err, _out, stderr) => {
+      if (err) fail(new Error(String(stderr || err.message).trim().slice(0, 180)));
+      else ok();
+    });
+  });
+  await writeStats();
+  return "Yedek alındı";
+}
+
+/** Sends a harmless test push notification to all registered devices of [uid] and reports delivery count. */
+async function testPush(uid) {
+  if (!uid) throw new Error("uid yok");
+  const tokensByKey = (await db.ref(`pushTokens/${uid}`).get()).val() || {};
+  const keys = Object.keys(tokensByKey);
+  if (keys.length === 0) throw new Error("kayıtlı bildirim cihazı yok");
+  const data = { type: "announce", body: "Nuvelo · Test bildirimi ulaştı ✓" };
+  const result = await sendWithRetry({ tokens: keys.map((k) => tokensByKey[k]), data, android: { priority: "high", ttl: 60 * 1000 } });
+  const removals = {};
+  result.responses.forEach((r, i) => {
+    if (!r.success && r.error && DEAD_TOKEN.has(r.error.code)) removals[keys[i]] = null;
+  });
+  if (Object.keys(removals).length > 0) await db.ref(`pushTokens/${uid}`).update(removals);
+  return `${result.successCount}/${keys.length} cihaza ulaştı`;
+}
+
+/** Sends a Nuvelo message to every non-banned user whose known app version is older than [threshold]. */
+async function messageOldVersions(threshold, text) {
+  const v = String(threshold || "").trim();
+  const body = String(text || "").trim().slice(0, 2000);
+  if (!/^[0-9]{1,3}(\.[0-9]{1,3}){0,3}$/.test(v)) throw new Error("geçersiz sürüm");
+  if (!body) throw new Error("boş mesaj");
+  const [usersSnap, infoSnap, bansSnap] = await Promise.all([
+    db.ref("users").get(),
+    db.ref("appInfo").get(),
+    db.ref("bans").get(),
+  ]);
+  const users = usersSnap.val() || {};
+  const info = infoSnap.val() || {};
+  const bans = bansSnap.val() || {};
+  const now = Date.now();
+  const targets = Object.keys(users).filter((uid) => {
+    if (uid === NUVELO || uid === "claudebot") return false;
+    const b = bans[uid];
+    if (b && b.kind === "ban" && Number(b.until || 0) > now) return false;
+    const ver = info[uid] && info[uid].v;
+    return typeof ver === "string" && ver.length > 0 && versionOlder(ver, v);
+  });
+  let sent = 0;
+  for (const uid of targets) {
+    try {
+      await messageFromNuvelo(uid, body);
+      sent++;
+    } catch (e) {
+      log("msgOldVer failed for", uid, e.message);
+    }
+  }
+  return `${sent}/${targets.length} kişiye gönderildi`;
 }
 
 // ------------------------------------------------------------------ admin: storage
@@ -780,11 +896,16 @@ setInterval(() => writeStats().catch((e) => log("stats failed:", e.message)), 36
 db.ref("adminActions").on("child_added", async (snap) => {
   const a = snap.val() || {};
   if (a.done || a.error) return;
-  const finish = (error) => snap.ref.update(error ? { error: String(error).slice(0, 200) } : { done: true }).catch(() => {});
+  const finish = (error, result) => {
+    const patch = error ? { error: String(error).slice(0, 200) } : { done: true };
+    if (!error && result) patch.result = String(result).slice(0, 200);
+    return snap.ref.update(patch).catch(() => {});
+  };
   try {
     if (!(await isAdmin(String(a.by || "")))) return finish("not an admin");
     const target = String(a.target || "");
     const value = String(a.value || "");
+    let result = null;
     switch (a.kind) {
       case "closeGroup": await closeGroup(target); break;
       case "rename": await renameUser(target, value); break;
@@ -794,13 +915,23 @@ db.ref("adminActions").on("child_added", async (snap) => {
       case "message": await messageFromNuvelo(target, value); break;
       case "deleteMedia": await deleteMedia(target); break;
       case "deleteAccount": await deleteAccount(target); break;
+      case "backupNow": result = await backupNow(); break;
+      case "gcMedia": {
+        const r = await sweepMedia(db, { log });
+        await writeStats();
+        result = `${r.files} dosya (${(r.bytes / 1048576).toFixed(1)} MB) temizlendi`;
+        break;
+      }
+      case "testPush": result = await testPush(target); break;
+      case "msgOldVer": result = await messageOldVersions(target, value); break;
       // Written by the app itself; kept here as the record.
-      case "ban": case "mute": case "unban": case "minVersion": case "banName": case "report":
+      case "ban": case "mute": case "unban": case "minVersion": case "recVersion": case "features":
+      case "banName": case "report": case "delAnnounce":
       case "maintenance": case "spam": case "badge": case "claude": case "crash": break;
       default: return finish("unknown");
     }
-    log(`admin ${a.kind} ${target}`);
-    await finish(null);
+    log(`admin ${a.kind} ${target}${result ? " -> " + result : ""}`);
+    await finish(null, result);
   } catch (e) {
     log("admin action failed:", a.kind, e.message);
     await finish(e.message);

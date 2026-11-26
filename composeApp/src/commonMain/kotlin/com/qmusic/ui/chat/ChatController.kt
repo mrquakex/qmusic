@@ -313,6 +313,10 @@ class ChatController(
     val posting: StateFlow<Boolean> = _posting.asStateFlow()
 
     private fun post(block: suspend () -> Result<Unit>) {
+        if (!admin.featureEnabled { it.statuses }) {
+            _info.value = if (ChatMusic.english) "Status posting is temporarily disabled" else "Durum paylaşımı geçici olarak kapalı"
+            return
+        }
         _posting.value = true
         scope.launch {
             block().onFailure { _error.value = it.message }
@@ -796,7 +800,13 @@ class ChatController(
 
     // ------------------------------------------------------------------ groups
 
-    fun openNewGroup() = _routes.update { list -> list.filter { it !is ChatRoute.NewGroup } + ChatRoute.NewGroup }
+    fun openNewGroup() {
+        if (!admin.featureEnabled { it.newChats }) {
+            _info.value = if (ChatMusic.english) "Creating groups is temporarily disabled" else "Yeni grup oluşturma geçici olarak kapalı"
+            return
+        }
+        _routes.update { list -> list.filter { it !is ChatRoute.NewGroup } + ChatRoute.NewGroup }
+    }
 
     fun openGroupInfo(group: ChatUser) = _routes.update { list -> list.filterNot { it is ChatRoute.GroupInfo } + ChatRoute.GroupInfo(group) }
 
@@ -908,7 +918,13 @@ class ChatController(
 
     // ------------------------------------------------------------------ pages
 
-    fun openNewChat() = _routes.update { it + ChatRoute.NewChat }
+    fun openNewChat() {
+        if (!admin.featureEnabled { it.newChats }) {
+            _info.value = if (ChatMusic.english) "Starting new chats is temporarily disabled" else "Yeni sohbet başlatma geçici olarak kapalı"
+            return
+        }
+        _routes.update { it + ChatRoute.NewChat }
+    }
 
     fun openFriends() = _routes.update { list -> list.filter { it !is ChatRoute.Friends } + ChatRoute.Friends }
 
