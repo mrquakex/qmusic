@@ -37,11 +37,12 @@ import com.qmusic.ui.theme.TextSecondary
 /** What a person's Qeyf code holds. */
 internal fun qeyfLink(username: String) = "qeyf://u/$username"
 
-/** The username in a scanned Qeyf code (qeyf://u/name, or a bare @name); null for anything else. */
+/** The username in a scanned Qeyf/Nuvelo code (qeyf://u/name, nuvelo://u/name, or a bare @name); null for anything else. */
 internal fun qeyfUsername(text: String): String? {
     val t = text.trim()
     val name = when {
         t.startsWith("qeyf://u/", ignoreCase = true) -> t.substring(9)
+        t.startsWith("nuvelo://u/", ignoreCase = true) -> t.substring(11)
         t.startsWith("@") -> t.substring(1)
         else -> return null
     }.substringBefore('?').substringBefore('/').lowercase()
@@ -54,13 +55,15 @@ internal fun qeyfGroupLink(code: String) = "qeyf://g/$code"
 /** A call link: opening it shows the person with the voice and video buttons. */
 internal fun qeyfCallLink(username: String) = "qeyf://c/$username"
 
-/** What a qeyf:// link (tapped, or scanned) opens; null for anything else. */
+/** What a qeyf:// or nuvelo:// link (tapped, or scanned) opens; null for anything else. */
 fun qeyfLaunchOf(text: String): ChatLaunchRequest? {
     val t = text.trim()
     fun tail(prefix: String) = t.substring(prefix.length).substringBefore('?').substringBefore('/')
     return when {
         t.startsWith("qeyf://g/", ignoreCase = true) -> tail("qeyf://g/").takeIf { it.matches(Regex("^[A-Za-z0-9]{10,40}$")) }?.let { ChatLaunchRequest(null, invite = it) }
+        t.startsWith("nuvelo://g/", ignoreCase = true) -> tail("nuvelo://g/").takeIf { it.matches(Regex("^[A-Za-z0-9]{10,40}$")) }?.let { ChatLaunchRequest(null, invite = it) }
         t.startsWith("qeyf://c/", ignoreCase = true) -> tail("qeyf://c/").lowercase().takeIf { isValidUsername(it) }?.let { ChatLaunchRequest(null, callUsername = it) }
+        t.startsWith("nuvelo://c/", ignoreCase = true) -> tail("nuvelo://c/").lowercase().takeIf { isValidUsername(it) }?.let { ChatLaunchRequest(null, callUsername = it) }
         else -> qeyfUsername(t)?.let { ChatLaunchRequest(null, username = it) }
     }
 }

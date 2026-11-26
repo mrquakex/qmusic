@@ -196,7 +196,7 @@ private fun ChatAppContent(
             ChatAccount.SignedOut -> SignInPage(controller, s, onExit)
             is ChatAccount.NeedsProfile -> ProfilePage(controller, s, a, onExit)
             // A ban, a version too old, an announcement: over everything else of the messages.
-            is ChatAccount.Ready -> AdminGate(controller.admin, onExit) { if (lock != null && lockOn && !unlocked && lock.available) LockedPage(lock, s, onExit) else WidePanes(
+            is ChatAccount.Ready -> AdminGate(controller.admin, onExit) { if (lock != null && lockOn && !unlocked && lock.available) LockedPage(lock, s, onExit) else { WidePanes(
                 wide = LocalWideLayout.current,
                 list = { ChatHome(controller, s, a.me, onExit, onCall, onGroupCall) },
             ) { wide -> com.qmusic.ui.motion.PageHost(
@@ -239,10 +239,13 @@ private fun ChatAppContent(
                 ChatRoute.Encryption -> EncryptionPage(controller)
                 ChatRoute.LivePeople -> LivePeoplePage(controller, a.me)
                 ChatRoute.Admin -> AdminPage(controller, a.me)
+                ChatRoute.BlockedPeople -> BlockedPeoplePage(controller, s)
                 ChatRoute.Friends -> FriendsPage(controller, s)
                 is ChatRoute.Profile -> ProfilePage(controller, s, a.me, top.user, onCall)
                 null -> if (wide) WideWelcome(s) else ChatHome(controller, s, a.me, onExit, onCall, onGroupCall)
-            } } } } }
+            } } } }
+            IncomingShareDialog(controller, s)
+            } }
         }
         val info by controller.info.collectAsState()
         if (info != null && error == null) {
@@ -701,6 +704,8 @@ internal fun ThreadRow(
     onListening: () -> Unit = {},
     /** The state of our last message, when the last one is ours (sent, on their phone, read). */
     tick: TickState? = null,
+    selected: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -712,10 +717,35 @@ internal fun ThreadRow(
         actions.forEach { (label, run) -> DropdownMenuItem(text = { Text(label, color = TextPrimary) }, onClick = { menu = false; run() }) }
     }
     Row(
-        modifier = Modifier.fillMaxWidth().rightClick { if (actions.isNotEmpty()) menu = true }.hoverLight().combinedClickable(onClick = onClick, onLongClick = { if (actions.isNotEmpty()) menu = true }).padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (selected) Modifier.background(Ink.copy(alpha = 0.08f)) else Modifier)
+            .rightClick { if (actions.isNotEmpty()) menu = true }
+            .hoverLight()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    if (onLongClick != null) onLongClick()
+                    else if (actions.isNotEmpty()) menu = true
+                },
+            )
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.clip(CircleShape).clickable(onClick = onAvatar)) { StatusRinged(ring) { ChatAvatar(t.other, if (ring != null) 46.dp else 52.dp) } }
+        Box {
+            Box(Modifier.clip(CircleShape).clickable(onClick = if (selected) onClick else onAvatar)) {
+                StatusRinged(ring) { ChatAvatar(t.other, if (ring != null) 46.dp else 52.dp) }
+            }
+            if (selected) {
+                Box(
+                    Modifier.align(Alignment.BottomEnd).size(20.dp).clip(CircleShape).background(BgRoot).padding(2.dp)
+                        .clip(CircleShape).background(Ink),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(QMusicIcons.Check, contentDescription = null, tint = InkInverse, modifier = Modifier.size(12.dp))
+                }
+            }
+        }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -733,7 +763,7 @@ internal fun ThreadRow(
                 }
                 if (t.muted(if (now > 0) now else Clock.System.now().toEpochMilliseconds())) Icon(QMusicIcons.VolumeMute, contentDescription = null, tint = TextMuted, modifier = Modifier.padding(end = 6.dp).size(14.dp))
                 if (t.pinned > 0) Icon(QMusicIcons.Pin, contentDescription = null, tint = TextMuted, modifier = Modifier.padding(end = 6.dp).size(14.dp))
-                Text(listTime(t.lastAt, s), color = if (t.unread) TickRead else TextMuted, fontSize = 12.sp)
+                Text(listTime(t.lastAt, s), color = if (t.unread) (if (t.unreadCount <= 0) TextPrimary else TickRead) else TextMuted, fontSize = 12.sp)
             }
             Spacer(Modifier.height(3.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -806,12 +836,18 @@ internal fun ThreadRow(
                     ) { Text("@", color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
                 }
                 if (t.unread) {
-                    val n = t.unreadCount.coerceAtLeast(1)
-                    Box(
-                        Modifier.padding(start = 8.dp).height(20.dp).widthIn(min = 20.dp).clip(CircleShape)
-                            .background(if (t.muted(if (now > 0) now else Clock.System.now().toEpochMilliseconds())) TextMuted else TickRead).padding(horizontal = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) { Text(if (n > 99) "99+" else n.toString(), color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                    if (t.unreadCount <= 0) {
+                        Box(
+                            Modifier.padding(start = 8.dp).size(10.dp).clip(CircleShape).background(Ink),
+                        )
+                    } else {
+                        val n = t.unreadCount
+                        Box(
+                            Modifier.padding(start = 8.dp).height(20.dp).widthIn(min = 20.dp).clip(CircleShape)
+                                .background(if (t.muted(if (now > 0) now else Clock.System.now().toEpochMilliseconds())) TextMuted else TickRead).padding(horizontal = 6.dp),
+                            contentAlignment = Alignment.Center,
+                        ) { Text(if (n > 99) "99+" else n.toString(), color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                    }
                 }
             }
             if (listening != null && !typingNow) ListeningLine(listening, Modifier.padding(top = 2.dp), onListening)
@@ -4515,5 +4551,230 @@ private fun ScheduleDialog(s: ChatStrings, onDismiss: () -> Unit, onPick: (Long)
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel, color = TextSecondary) } },
+    )
+}
+
+/** Content shared from another app into Nuvelo: preview, editable text/caption, and searchable target picker. */
+@Composable
+private fun IncomingShareDialog(controller: ChatController, s: ChatStrings) {
+    val incoming by IncomingChatShare.pending.collectAsState()
+    val share = incoming ?: return
+    val threads by controller.threads.collectAsState()
+    val forwardTargets by controller.forwardTargets.collectAsState()
+    val friends by controller.friends.collectAsState()
+    var resolving by remember(share) { mutableStateOf(share.uris.isNotEmpty()) }
+    var resolvedImages by remember(share) { mutableStateOf<List<PickedImage>>(emptyList()) }
+    var resolvedFiles by remember(share) { mutableStateOf<List<PickedFile>>(emptyList()) }
+    var caption by remember(share) { mutableStateOf(share.text.orEmpty()) }
+    var query by remember(share) { mutableStateOf("") }
+    var picked by remember(share) { mutableStateOf<Set<String>>(emptySet()) }
+    var preselected by remember(share) { mutableStateOf(false) }
+
+    LaunchedEffect(share) {
+        if (share.uris.isEmpty()) {
+            resolving = false
+            return@LaunchedEffect
+        }
+        val resolver = IncomingChatShare.resolveUris
+        if (resolver == null) {
+            resolving = false
+            return@LaunchedEffect
+        }
+        resolving = true
+        resolver(share.uris, share.mimeType) { imgs, files ->
+            resolvedImages = imgs
+            resolvedFiles = files
+            resolving = false
+        }
+    }
+
+    val directTarget = remember(share.targetChatId, threads, forwardTargets) {
+        val chatId = share.targetChatId ?: return@remember null
+        threads?.firstOrNull { it.id == chatId }?.other
+            ?: controller.userForChatId(chatId)
+            ?: forwardTargets.firstOrNull { controller.chatIdWith(it) == chatId }
+    }
+
+    LaunchedEffect(share, directTarget) {
+        if (!preselected && directTarget != null) {
+            picked = setOf(directTarget.uid)
+            preselected = true
+        }
+    }
+
+    val candidates = remember(directTarget, forwardTargets, friends) {
+        (listOfNotNull(directTarget) + forwardTargets + friends.filter { it.uid != CLAUDE_BOT_UID })
+            .distinctBy { it.uid }
+    }
+    val shown = remember(candidates, query) {
+        val q = query.trim()
+        if (q.isEmpty()) candidates
+        else candidates.filter { it.name.contains(q, ignoreCase = true) || it.username.contains(q, ignoreCase = true) }
+    }
+    val hasPayload = resolvedImages.isNotEmpty() || resolvedFiles.isNotEmpty() || caption.isNotBlank()
+    val canSend = !resolving && picked.isNotEmpty() && hasPayload
+
+    AlertDialog(
+        onDismissRequest = { IncomingChatShare.consume() },
+        containerColor = DarkSurfaceVariant,
+        title = { Text(s.shareTo, color = TextPrimary) },
+        text = {
+            Column {
+                if (resolving) {
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(DarkSurface).padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(color = Ink, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text(s.preparingShare, color = TextSecondary, fontSize = 14.sp)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                } else {
+                    if (resolvedImages.isNotEmpty()) {
+                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(DarkSurface).padding(10.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                resolvedImages.take(6).forEach { img ->
+                                    AsyncImage(
+                                        model = img.jpeg,
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.size(52.dp).clip(RoundedCornerShape(8.dp)),
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "${resolvedImages.size} ${if (resolvedImages.size == 1) s.photo else s.photos}",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    if (resolvedFiles.isNotEmpty()) {
+                        Column(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(DarkSurface).padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            resolvedFiles.take(4).forEach { f ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        if (f.kind == AttachmentKind.VIDEO) QMusicIcons.VideoPlay else QMusicIcons.File,
+                                        contentDescription = null,
+                                        tint = Ink,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        f.name.ifBlank { if (f.kind == AttachmentKind.VIDEO) s.video else s.fileAttach },
+                                        color = TextPrimary,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
+                            if (resolvedFiles.size > 4) {
+                                Text("+${resolvedFiles.size - 4}", color = TextSecondary, fontSize = 12.sp)
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    if (share.uris.isNotEmpty() && resolvedImages.isEmpty() && resolvedFiles.isEmpty() && caption.isBlank()) {
+                        Text(s.shareEmpty, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    }
+                }
+
+                Box(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(DarkSurface).padding(horizontal = 14.dp, vertical = 12.dp),
+                ) {
+                    val hint = if (resolvedImages.isNotEmpty() || resolvedFiles.isNotEmpty()) s.addCaption else s.messageHint
+                    if (caption.isEmpty()) Text(hint, color = TextMuted, fontSize = 15.sp)
+                    BasicTextField(
+                        value = caption,
+                        onValueChange = { caption = it.take(ChatController.MAX_LENGTH) },
+                        maxLines = 4,
+                        textStyle = TextStyle(color = TextPrimary, fontSize = 15.sp),
+                        cursorBrush = SolidColor(Ink),
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Field(query, { query = it }, s.search, capitalize = false)
+                Spacer(Modifier.height(8.dp))
+                if (shown.isEmpty()) {
+                    Text(s.noResults, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(vertical = 12.dp))
+                } else {
+                    LazyColumn(Modifier.heightIn(max = 260.dp)) {
+                        items(shown, key = { it.uid }) { user ->
+                            val on = user.uid in picked
+                            Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                                    .clickable { picked = if (on) picked - user.uid else picked + user.uid }
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                ChatAvatar(user, 38.dp)
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(user.name, color = TextPrimary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    if (!user.isGroup && user.username.isNotEmpty()) {
+                                        Text("@" + user.username, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
+                                Box(
+                                    Modifier.size(22.dp).clip(CircleShape).background(if (on) Ink else DarkSurface).border(1.dp, BorderSubtle, CircleShape),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (on) Icon(QMusicIcons.Check, contentDescription = null, tint = InkInverse, modifier = Modifier.size(14.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = canSend,
+                onClick = {
+                    val chosen = candidates.filter { it.uid in picked }
+                    val body = caption.trim()
+                    chosen.forEach { target ->
+                        var captionSent = false
+                        if (resolvedImages.isNotEmpty()) {
+                            resolvedImages.chunked(ChatController.MAX_PHOTOS).forEach { batch ->
+                                controller.sendImages(target, batch, if (!captionSent) body else "")
+                                captionSent = true
+                            }
+                        }
+                        if (resolvedFiles.isNotEmpty()) {
+                            resolvedFiles.forEach { file ->
+                                controller.sendFile(target, file, if (!captionSent) body else "")
+                                captionSent = true
+                            }
+                        }
+                        if (!captionSent && body.isNotEmpty()) {
+                            controller.send(target, body)
+                        }
+                    }
+                    IncomingChatShare.consume()
+                    if (chosen.size == 1) controller.openConversation(chosen.first())
+                },
+            ) {
+                Text(s.send + if (picked.isNotEmpty()) " (${picked.size})" else "", color = if (canSend) Ink else TextMuted)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { IncomingChatShare.consume() }) {
+                Text(s.cancel, color = TextSecondary)
+            }
+        },
     )
 }

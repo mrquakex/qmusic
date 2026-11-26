@@ -326,6 +326,17 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
             VisibilityRow(s.privacyPhoto, null, privacy.photo, all, s) { controller.setPrivacy(privacy.copy(photo = it)) }
             VisibilityRow(s.privacyAbout, null, privacy.about, all, s) { controller.setPrivacy(privacy.copy(about = it)) }
             VisibilityRow(s.privacyGroups, s.privacyGroupsNote, privacy.groupAdd, listOf(Visibility.EVERYONE, Visibility.FRIENDS), s) { controller.setPrivacy(privacy.copy(groupAdd = it)) }
+            val blockedIds by controller.blocked.collectAsState()
+            Row(
+                Modifier.fillMaxWidth().hoverLight().clickable { controller.push(ChatRoute.BlockedPeople) }.padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(s.blockedPeople, color = TextPrimary, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                if (blockedIds.isNotEmpty()) {
+                    Text(blockedIds.size.toString(), color = TextSecondary, fontSize = 14.sp, modifier = Modifier.padding(end = 6.dp))
+                }
+                Icon(QMusicIcons.ChevronRight, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(20.dp))
+            }
             val lock = rememberAppLock()
             if (lock != null) {
                 val lockOn by lock.enabled.collectAsState()
@@ -344,6 +355,63 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
                 }
             }
             Text(s.e2eNote, color = TextMuted, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(16.dp))
+        }
+    }
+}
+
+/** People blocked by this person: resolves their profiles and lets them be unblocked with one tap. */
+@Composable
+internal fun BlockedPeoplePage(controller: ChatController, s: ChatStrings) {
+    val blocked by controller.blocked.collectAsState()
+    var resolved by remember { mutableStateOf<Map<String, ChatUser>>(emptyMap()) }
+    LaunchedEffect(blocked) {
+        val missing = blocked - resolved.keys
+        if (missing.isEmpty()) return@LaunchedEffect
+        val loaded = kotlinx.coroutines.coroutineScope {
+            missing.map { uid ->
+                kotlinx.coroutines.async {
+                    uid to (controller.userFresh(uid) ?: ChatUser(uid = uid, name = uid.take(12), username = ""))
+                }
+            }.map { it.await() }
+        }
+        resolved = resolved + loaded
+    }
+    Column(Modifier.fillMaxSize().background(BgRootColor)) {
+        TopBar(s.blockedPeople, { controller.pop() })
+        if (blocked.isEmpty()) {
+            Centered {
+                Column(Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.size(64.dp).clip(CircleShape).background(DarkSurfaceVariant), contentAlignment = Alignment.Center) {
+                        Icon(QMusicIcons.Blocked, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(28.dp))
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Text(s.blockedPeopleEmpty, color = TextSecondary, fontSize = 15.sp, textAlign = TextAlign.Center)
+                }
+            }
+        } else {
+            val items = remember(blocked, resolved) {
+                blocked.map { uid -> resolved[uid] ?: ChatUser(uid = uid, name = "…", username = "") }
+                    .sortedBy { it.name.lowercase() }
+            }
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                items(items, key = { it.uid }) { user ->
+                    Row(
+                        Modifier.fillMaxWidth().hoverLight().clickable { controller.openProfile(user) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ChatAvatar(user, 48.dp)
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(user.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (user.username.isNotEmpty()) {
+                                Text("@" + user.username, color = TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Pill(s.unblock, primary = false) { controller.setBlocked(user.uid, false) }
+                    }
+                }
+            }
         }
     }
 }
@@ -739,14 +807,11 @@ fun GroupCallScreen(
         val inCall = call.members.map { it.user.uid }.toSet() + listOfNotNull(me?.uid)
         people.filter { it.uid !in inCall }
     }
-    PlatformBackHandler(enabled = true) {}
+    PlatformBackHandler(enabled = true) { GroupCallUi.minimized.value = true }
     // Leaving the app: the call goes on in a floating window with the first picture there is.
     val inWindow = CallPictureInPicture(armed = true)
     if (inWindow) {
-        Box(modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-            val shown = call.members.firstOrNull { it.connected && it.hasVideo && it.cameraOn }
-            if (shown != null) GroupCallVideo(service, shown.user.uid, Modifier.fillMaxSize()) else ChatAvatar(call.group, 72.dp)
-        }
+        GroupCallWindow(service, call, s, modifier.fillMaxSize())
         return
     }
     var now by remember { mutableStateOf(Clock.System.now().toEpochMilliseconds()) }
@@ -757,13 +822,24 @@ fun GroupCallScreen(
         }
     }
     Column(modifier.fillMaxSize().background(Color(0xFF0B0B0B))) {
-        Column(Modifier.fillMaxWidth().statusBarsPadding().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(call.group.name, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                call.startedAt?.let { mmss(now - it) } ?: s.groupCallWaiting,
-                color = Color.White.copy(alpha = 0.65f),
-                fontSize = 14.sp,
-            )
+        Box(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 12.dp)) {
+            IconButton(
+                onClick = { GroupCallUi.minimized.value = true },
+                modifier = Modifier.align(Alignment.CenterStart).size(44.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.12f)),
+            ) {
+                Icon(QMusicIcons.Back, contentDescription = com.qmusic.ui.A11y.minimize, tint = Color.White, modifier = Modifier.size(24.dp))
+            }
+            Column(
+                Modifier.align(Alignment.Center).padding(horizontal = 52.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(call.group.name, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    call.startedAt?.let { mmss(now - it) } ?: s.groupCallWaiting,
+                    color = Color.White.copy(alpha = 0.65f),
+                    fontSize = 14.sp,
+                )
+            }
         }
         // The tiles: two to a row (one big tile when alone with one other).
         val tiles = buildList {
@@ -826,8 +902,8 @@ fun GroupCallScreen(
 
 @Composable
 private fun CallRoundButton(icon: androidx.compose.ui.graphics.vector.ImageVector, on: Boolean, onClick: () -> Unit) {
-    Box(Modifier.size(54.dp).clip(CircleShape).background(if (on) Ink else Ink.copy(alpha = 0.14f)).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        Icon(icon, null, tint = if (on) InkInverse else Ink, modifier = Modifier.size(24.dp))
+    Box(Modifier.size(54.dp).clip(CircleShape).background(if (on) Color.White else Color.White.copy(alpha = 0.16f)).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(icon, null, tint = if (on) Color.Black else Color.White, modifier = Modifier.size(24.dp))
     }
 }
 

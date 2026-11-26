@@ -67,6 +67,8 @@ sealed interface ChatRoute {
     data object LivePeople : ChatRoute
     /** The admin panel (only for admins; the server checks every step again). */
     data object Admin : ChatRoute
+    /** People this person has blocked, with one-tap unblock. */
+    data object BlockedPeople : ChatRoute
 }
 
 /** The routes that belong to the secret space (closed when it locks). */
@@ -532,6 +534,9 @@ class ChatController(
         return allThreads.value?.firstOrNull { it.id == id }
     }
 
+    /** Resolves a non-secret conversation's peer/group from its [chatId] (e.g. Direct Share shortcut). */
+    fun userForChatId(chatId: String): ChatUser? = allThreads.value?.firstOrNull { it.id == chatId && !it.secret }?.other
+
     fun setMuted(other: ChatUser, until: Long) {
         val id = chatIdWith(other) ?: return
         scope.launch { runCatching { backend.setMuted(id, until) } }
@@ -890,6 +895,23 @@ class ChatController(
         scope.launch { runCatching { backend.markRead(id) } }
     }
 
+    fun markRead(thread: ChatThread) {
+        scope.launch { runCatching { backend.markRead(thread.id) } }
+    }
+
+    fun markUnread(thread: ChatThread) {
+        scope.launch { runCatching { backend.markUnread(thread.id) } }
+    }
+
+    fun clearChat(thread: ChatThread) {
+        scope.launch { runCatching { backend.clearChat(thread.id) } }
+    }
+
+    fun clearChat(other: ChatUser) {
+        val id = chatIdWith(other) ?: return
+        scope.launch { runCatching { backend.clearChat(id) } }
+    }
+
     fun send(other: ChatUser, text: String, share: SharedItem? = null, replyTo: ChatReply? = null, mentions: Set<String> = emptySet()): Boolean {
         val body = text.trim()
         if (body.isEmpty() && share == null) return false
@@ -1142,14 +1164,16 @@ class ChatController(
     /** Now on the server's clock (the messages' times are the server's). */
     fun serverNow(): Long = Clock.System.now().toEpochMilliseconds() + backend.serverOffset.value
 
-    fun setBlocked(other: ChatUser, block: Boolean) {
-        if (block && other.uid == CLAUDE_OWNER_UID) {
+    fun setBlocked(uid: String, block: Boolean) {
+        if (block && uid == CLAUDE_OWNER_UID) {
             _info.value = if (ChatMusic.english) "This is Nuvelo's account: it cannot be blocked" else "Bu Nuvelo'nun hesabı: engellenemez"
             return
         }
-        scope.launch { backend.setBlocked(other.uid, block).onFailure { _error.value = it.message } }
-        if (block) _routes.update { list -> list.filterNot { it is ChatRoute.Conversation && it.other.uid == other.uid } }
+        scope.launch { backend.setBlocked(uid, block).onFailure { _error.value = it.message } }
+        if (block) _routes.update { list -> list.filterNot { it is ChatRoute.Conversation && it.other.uid == uid } }
     }
+
+    fun setBlocked(other: ChatUser, block: Boolean) = setBlocked(other.uid, block)
 
     companion object {
         /** How many of each conversation's last messages a search reads. */

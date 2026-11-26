@@ -571,18 +571,26 @@ fun QMusicApp(
             }
             // Shrunk into its bubble (Back or the chevron), the call leaves the app usable; a new call starts full.
             val callMinimized by com.qmusic.ui.chat.CallUi.minimized.collectAsState()
+            val groupCallService = chatController?.groupCalls
+            val groupCall by (groupCallService?.state ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
+            val groupCallMinimized by com.qmusic.ui.chat.GroupCallUi.minimized.collectAsState()
             LaunchedEffect(call?.id) { com.qmusic.ui.chat.CallUi.minimized.value = false }
+            LaunchedEffect(groupCall?.group?.uid) { com.qmusic.ui.chat.GroupCallUi.minimized.value = false }
             androidx.compose.runtime.SideEffect {
+                val activeStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
                 com.qmusic.ui.chat.CallUi.service = callService
-                com.qmusic.ui.chat.CallUi.strings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
+                com.qmusic.ui.chat.CallUi.strings = activeStrings
+                com.qmusic.ui.chat.GroupCallUi.service = groupCallService
+                com.qmusic.ui.chat.GroupCallUi.strings = activeStrings
             }
             val callShrunk = callMinimized && call?.phase != com.qmusic.ui.chat.CallPhase.INCOMING && call?.phase != com.qmusic.ui.chat.CallPhase.ENDED
+            val groupCallShrunk = groupCallMinimized && groupCall != null
             // "Online" only with the messages in front: not in the videos or the music, and not while a call screen
             // (a call ringing in, which opens the app even on the lock screen) covers them.
             androidx.compose.runtime.SideEffect {
                 com.qmusic.ui.chat.ChatPresence.inChats.value = chatOpen && chatController != null &&
                     !(callService != null && call != null && !callShrunk) &&
-                    chatController.groupCalls?.state?.value == null
+                    !(groupCallService != null && groupCall != null && !groupCallShrunk)
             }
             if (callService != null && call != null && !callShrunk) {
                 val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
@@ -607,8 +615,6 @@ fun QMusicApp(
                 )
                 return@CompositionLocalProvider
             }
-            // A group call takes the whole screen too.
-            val groupCallService = chatController?.groupCalls
             // A song or a video sent to conversations from the music or video side.
             val chatSending by com.qmusic.ui.chat.ChatMusic.sending.collectAsState()
             chatSending?.let { item ->
@@ -625,8 +631,8 @@ fun QMusicApp(
                     }
                 }
             }
-            val groupCall by (groupCallService?.state ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
-            if (groupCallService != null && groupCall != null) {
+            // A group call takes the whole screen unless shrunk into its floating bubble.
+            if (groupCallService != null && groupCall != null && !groupCallMinimized) {
                 val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
                 val groupFriends by (chatController?.friends ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsState()
                 com.qmusic.ui.chat.GroupCallScreen(

@@ -546,6 +546,17 @@ data class ChatStrings(
     val voicePreview: String get() = if (english) "Preview" else "Ön dinleme"
     val voiceEarpiece: String get() = if (english) "Earpiece" else "Ahize"
 
+    val blockedPeople: String get() = if (english) "Blocked contacts" else "Engellenen kişiler"
+    val blockedPeopleEmpty: String get() = if (english) "No blocked contacts." else "Engellenen kişi yok."
+    val markUnread: String get() = if (english) "Mark as unread" else "Okunmadı olarak işaretle"
+    val markRead: String get() = if (english) "Mark as read" else "Okundu olarak işaretle"
+    val clearChat: String get() = if (english) "Clear chat" else "Sohbeti temizle"
+    val clearChatConfirm: String get() = if (english) "Clear all messages in this chat for you? Others in the chat will still see them." else "Bu sohbetteki tüm mesajlar senin için temizlensin mi? Karşı taraf mesajları görmeye devam eder."
+    fun clearChatsConfirm(n: Int): String = if (n <= 1) clearChatConfirm else if (english) "Clear all messages in $n chats for you? Others will still see them." else "Seçilen $n sohbetteki mesajlar senin için temizlensin mi? Karşı taraf görmeye devam eder."
+    val shareTo: String get() = if (english) "Send to" else "Şuna gönder"
+    val preparingShare: String get() = if (english) "Preparing…" else "Hazırlanıyor…"
+    val shareEmpty: String get() = if (english) "Could not read shared content" else "Paylaşılan içerik okunamadı"
+
     companion object {
         val Turkish = ChatStrings(
             title = "Mesajlar",

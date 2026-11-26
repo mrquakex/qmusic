@@ -1,4 +1,4 @@
-@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 
 package com.qmusic.ui.chat
 
@@ -39,14 +39,18 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -381,12 +385,23 @@ private fun ChatsTab(
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var muteFor by remember { mutableStateOf<ChatThread?>(null) }
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var multiMuteFor by remember { mutableStateOf<List<ChatThread>?>(null) }
+    var clearTargets by remember { mutableStateOf<List<ChatThread>?>(null) }
+    PlatformBackHandler(enabled = selectedIds.isNotEmpty()) { selectedIds = emptySet() }
     var cameraShot by remember { mutableStateOf<PickedImage?>(null) }
     val camera = rememberCamera { shot -> cameraShot = shot }
     val scan = rememberQrScanner { text -> controller.openQeyfCode(text, s) }
     val now = rememberNow()
     val withStatus = remember(statusGroups) { statusGroups.map { it.owner.uid }.toSet() }
     val source = if (filter == ChatFilter.ARCHIVED) archived else all
+    val knownThreads = remember(all, archived) { (all.orEmpty() + archived).distinctBy { it.id } }
+    val selectedThreads = remember(knownThreads, selectedIds) { knownThreads.filter { it.id in selectedIds } }
+    LaunchedEffect(knownThreads, selectedIds) {
+        if (all != null && selectedIds.isNotEmpty() && selectedThreads.size != selectedIds.size) {
+            selectedIds = selectedThreads.map { it.id }.toSet()
+        }
+    }
     val list = remember(source, filter, search) {
         val q = search.trim()
         source?.filter { t ->
@@ -419,31 +434,44 @@ private fun ChatsTab(
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
             stickyHeader(key = "title") {
-                HomeTitle(s.title, onExit, logo = true, onSecret = { controller.push(ChatRoute.Secret) }) {
-                    val incoming by controller.friendRequests.collectAsState()
-                    IconButton(onClick = { camera() }) { Icon(QMusicIcons.Camera, contentDescription = s.camera, tint = Ink) }
-                    IconButton(onClick = { controller.openFriends() }) {
-                        Box {
-                            Icon(QMusicIcons.Account, contentDescription = s.friends, tint = Ink)
-                            if (incoming.isNotEmpty()) {
-                                Box(
-                                    Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-6).dp).size(16.dp).clip(CircleShape).background(TickRead),
-                                    contentAlignment = Alignment.Center,
-                                ) { Text(incoming.size.coerceAtMost(9).toString(), color = Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                if (selectedIds.isNotEmpty()) {
+                    SelectionTopBar(
+                        selected = selectedThreads,
+                        count = selectedIds.size,
+                        now = now,
+                        s = s,
+                        controller = controller,
+                        onClose = { selectedIds = emptySet() },
+                        onMuteMultiple = { multiMuteFor = selectedThreads },
+                        onClearMultiple = { clearTargets = selectedThreads },
+                    )
+                } else {
+                    HomeTitle(s.title, onExit, logo = true, onSecret = { controller.push(ChatRoute.Secret) }) {
+                        val incoming by controller.friendRequests.collectAsState()
+                        IconButton(onClick = { camera() }) { Icon(QMusicIcons.Camera, contentDescription = s.camera, tint = Ink) }
+                        IconButton(onClick = { controller.openFriends() }) {
+                            Box {
+                                Icon(QMusicIcons.Account, contentDescription = s.friends, tint = Ink)
+                                if (incoming.isNotEmpty()) {
+                                    Box(
+                                        Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-6).dp).size(16.dp).clip(CircleShape).background(TickRead),
+                                        contentAlignment = Alignment.Center,
+                                    ) { Text(incoming.size.coerceAtMost(9).toString(), color = Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                                }
                             }
                         }
-                    }
-                    Box {
-                        IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Ink) }
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
-                            DropdownMenuItem(text = { Text(s.newGroup, color = TextPrimary) }, onClick = { menu = false; controller.openNewGroup() })
-                            DropdownMenuItem(text = { Text(s.broadcastsTitle, color = TextPrimary) }, onClick = { menu = false; controller.push(ChatRoute.Broadcasts) })
-                            DropdownMenuItem(text = { Text(s.starredShort, color = TextPrimary) }, onClick = { menu = false; controller.openStarred() })
-                            DropdownMenuItem(text = { Text(s.lockedChats, color = TextPrimary) }, onClick = { menu = false; controller.push(ChatRoute.LockedFolder) })
-                            if (scan != null) DropdownMenuItem(text = { Text(s.scanQr, color = TextPrimary) }, onClick = { menu = false; scan() })
-                            DropdownMenuItem(text = { Text(s.settings, color = TextPrimary) }, onClick = { menu = false; controller.openSettings() })
-                            DropdownMenuItem(text = { Text(s.signOut, color = TextPrimary) }, onClick = { menu = false; controller.signOut() })
-                            DropdownMenuItem(text = { Text(s.deleteAccount, color = TextPrimary) }, onClick = { menu = false; confirmDelete = true })
+                        Box {
+                            IconButton(onClick = { menu = true }) { Icon(QMusicIcons.More, contentDescription = null, tint = Ink) }
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = DarkSurfaceVariant) {
+                                DropdownMenuItem(text = { Text(s.newGroup, color = TextPrimary) }, onClick = { menu = false; controller.openNewGroup() })
+                                DropdownMenuItem(text = { Text(s.broadcastsTitle, color = TextPrimary) }, onClick = { menu = false; controller.push(ChatRoute.Broadcasts) })
+                                DropdownMenuItem(text = { Text(s.starredShort, color = TextPrimary) }, onClick = { menu = false; controller.openStarred() })
+                                DropdownMenuItem(text = { Text(s.lockedChats, color = TextPrimary) }, onClick = { menu = false; controller.push(ChatRoute.LockedFolder) })
+                                if (scan != null) DropdownMenuItem(text = { Text(s.scanQr, color = TextPrimary) }, onClick = { menu = false; scan() })
+                                DropdownMenuItem(text = { Text(s.settings, color = TextPrimary) }, onClick = { menu = false; controller.openSettings() })
+                                DropdownMenuItem(text = { Text(s.signOut, color = TextPrimary) }, onClick = { menu = false; controller.signOut() })
+                                DropdownMenuItem(text = { Text(s.deleteAccount, color = TextPrimary) }, onClick = { menu = false; confirmDelete = true })
+                            }
                         }
                     }
                 }
@@ -532,24 +560,106 @@ private fun ChatsTab(
                 else -> items(list, key = { it.id }) { t ->
                     // Comes in fading, and slides to its new place when the list changes.
                     androidx.compose.foundation.layout.Box(Modifier.animateItem(fadeInSpec = androidx.compose.animation.core.tween(220, easing = com.qmusic.ui.motion.Motion.EmphasizedDecelerate), placementSpec = androidx.compose.animation.core.spring(stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow), fadeOutSpec = androidx.compose.animation.core.tween(150))) {
-                    val hasStatus = !t.isGroup && t.other.uid in withStatus
-                    ThreadRow(
-                        t, me, s,
-                        onAvatar = { if (t.other.uid == CLAUDE_BOT_UID) controller.openProfile(t.other) else peek = t.other },
-                        actions = threadActions(controller, s, t, now) { muteFor = t },
-                        now = now,
-                        ring = if (hasStatus) (if (t.other.uid in unseen) RingUnseen else RingSeen) else null,
-                        listening = if (t.isGroup) null else listeningNow[t.other.uid],
-                        onListening = { listeningNow[t.other.uid]?.let { controller.openShare(it) } },
-                        tick = rememberListTick(controller, t, me),
-                    ) { controller.openConversation(t.other) }
+                        val hasStatus = !t.isGroup && t.other.uid in withStatus
+                        val isSelected = t.id in selectedIds
+                        val currentThread by rememberUpdatedState(t)
+                        val swipeEnabled = selectedIds.isEmpty()
+                        val dismissState = rememberSwipeToDismissBoxState(
+                            confirmValueChange = { value ->
+                                when (value) {
+                                    SwipeToDismissBoxValue.StartToEnd -> {
+                                        if (currentThread.unread) controller.markRead(currentThread) else controller.markUnread(currentThread)
+                                        false
+                                    }
+                                    SwipeToDismissBoxValue.EndToStart -> {
+                                        controller.setArchived(currentThread, !currentThread.archived)
+                                        false
+                                    }
+                                    SwipeToDismissBoxValue.Settled -> false
+                                }
+                            },
+                        )
+                        SwipeToDismissBox(
+                            state = dismissState,
+                            enableDismissFromStartToEnd = swipeEnabled,
+                            enableDismissFromEndToStart = swipeEnabled,
+                            gesturesEnabled = swipeEnabled,
+                            backgroundContent = {
+                                val direction = dismissState.dismissDirection
+                                Row(
+                                    Modifier.fillMaxSize().background(DarkSurfaceVariant).padding(horizontal = 20.dp),
+                                    horizontalArrangement = if (direction == SwipeToDismissBoxValue.StartToEnd) Arrangement.Start else Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    when (direction) {
+                                        SwipeToDismissBoxValue.StartToEnd -> {
+                                            Icon(QMusicIcons.Chat, contentDescription = null, tint = Ink, modifier = Modifier.size(20.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(if (currentThread.unread) s.markRead else s.markUnread, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                        }
+                                        SwipeToDismissBoxValue.EndToStart -> {
+                                            Text(if (currentThread.archived) s.unarchive else s.archive, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                            Spacer(Modifier.width(8.dp))
+                                            Icon(QMusicIcons.Archive, contentDescription = null, tint = Ink, modifier = Modifier.size(20.dp))
+                                        }
+                                        SwipeToDismissBoxValue.Settled -> {}
+                                    }
+                                }
+                            },
+                        ) {
+                            Box(Modifier.fillMaxWidth().background(BgRoot)) {
+                                ThreadRow(
+                                    t, me, s,
+                                    onAvatar = { if (t.other.uid == CLAUDE_BOT_UID) controller.openProfile(t.other) else peek = t.other },
+                                    actions = threadActions(controller, s, t, now, onMute = { muteFor = t }, onClear = { clearTargets = listOf(t) }),
+                                    now = now,
+                                    ring = if (hasStatus) (if (t.other.uid in unseen) RingUnseen else RingSeen) else null,
+                                    listening = if (t.isGroup) null else listeningNow[t.other.uid],
+                                    onListening = { listeningNow[t.other.uid]?.let { controller.openShare(it) } },
+                                    tick = rememberListTick(controller, t, me),
+                                    selected = isSelected,
+                                    onLongClick = { selectedIds = if (isSelected) selectedIds - t.id else selectedIds + t.id },
+                                ) {
+                                    if (selectedIds.isNotEmpty()) {
+                                        selectedIds = if (isSelected) selectedIds - t.id else selectedIds + t.id
+                                    } else {
+                                        controller.openConversation(t.other)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
-        HomeFab(QMusicIcons.Edit, s.newChat, Modifier.align(Alignment.BottomEnd)) { controller.openNewChat() }
+        if (selectedIds.isEmpty()) {
+            HomeFab(QMusicIcons.Edit, s.newChat, Modifier.align(Alignment.BottomEnd)) { controller.openNewChat() }
+        }
     }
     muteFor?.let { t -> MuteChoice(controller, s, t, now) { muteFor = null } }
+    multiMuteFor?.let { listToMute ->
+        ChoiceDialog(
+            s.mute,
+            listOf(
+                s.mute8h to { listToMute.forEach { controller.setMuted(it.other, now + 8 * 3600_000L) }; selectedIds = emptySet() },
+                s.mute1w to { listToMute.forEach { controller.setMuted(it.other, now + 7 * 24 * 3600_000L) }; selectedIds = emptySet() },
+                s.muteAlways to { listToMute.forEach { controller.setMuted(it.other, -1L) }; selectedIds = emptySet() },
+            ),
+            s,
+        ) { multiMuteFor = null }
+    }
+    clearTargets?.let { targets ->
+        ClearChatsDialog(
+            count = targets.size,
+            s = s,
+            onConfirm = {
+                targets.forEach { controller.clearChat(it) }
+                clearTargets = null
+                selectedIds = emptySet()
+            },
+            onDismiss = { clearTargets = null },
+        )
+    }
     cameraShot?.let { shot ->
         StatusMediaComposer(s, image = shot, video = null, songs = controller.shareables, onCancel = { cameraShot = null }) { caption, edited, extras ->
             controller.postPhotoStatus(edited ?: shot, caption, extras)
@@ -599,13 +709,139 @@ private fun FoundRow(f: ChatController.FoundMessage, query: String, me: ChatUser
     }
 }
 
-/** A conversation's hold menu: pin, favourite, mute, archive. */
-private fun threadActions(controller: ChatController, s: ChatStrings, t: ChatThread, now: Long, onMute: () -> Unit): List<Pair<String, () -> Unit>> = listOf(
+/** Contextual monochrome top bar while one or more chats are selected in [ChatsTab]. */
+@Composable
+private fun SelectionTopBar(
+    selected: List<ChatThread>,
+    count: Int,
+    now: Long,
+    s: ChatStrings,
+    controller: ChatController,
+    onClose: () -> Unit,
+    onMuteMultiple: () -> Unit,
+    onClearMultiple: () -> Unit,
+) {
+    var overflow by remember { mutableStateOf(false) }
+    val allPinned = selected.isNotEmpty() && selected.all { it.pinned > 0 }
+    val allMuted = selected.isNotEmpty() && selected.all { it.muted(now) }
+    val allArchived = selected.isNotEmpty() && selected.all { it.archived }
+    val allUnread = selected.isNotEmpty() && selected.all { it.unread }
+    val allFavorite = selected.isNotEmpty() && selected.all { it.favorite }
+
+    Row(
+        Modifier.fillMaxWidth().background(DarkSurface).statusBarsPadding().height(60.dp).padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onClose) {
+            Icon(QMusicIcons.Close, contentDescription = s.closeLabel, tint = Ink)
+        }
+        Text(
+            count.toString(),
+            color = TextPrimary,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f).padding(start = 8.dp),
+        )
+        IconButton(
+            enabled = selected.isNotEmpty(),
+            onClick = {
+                selected.forEach { controller.setPinned(it, !allPinned) }
+                onClose()
+            },
+        ) {
+            Icon(QMusicIcons.Pin, contentDescription = if (allPinned) s.unpin else s.pin, tint = Ink)
+        }
+        IconButton(
+            enabled = selected.isNotEmpty(),
+            onClick = {
+                if (allMuted) {
+                    selected.forEach { controller.setMuted(it.other, 0L) }
+                    onClose()
+                } else {
+                    onMuteMultiple()
+                }
+            },
+        ) {
+            Icon(if (allMuted) QMusicIcons.Volume else QMusicIcons.VolumeMute, contentDescription = if (allMuted) s.unmute else s.mute, tint = Ink)
+        }
+        IconButton(
+            enabled = selected.isNotEmpty(),
+            onClick = {
+                selected.forEach { controller.setArchived(it, !allArchived) }
+                onClose()
+            },
+        ) {
+            Icon(QMusicIcons.Archive, contentDescription = if (allArchived) s.unarchive else s.archive, tint = Ink)
+        }
+        Box {
+            IconButton(enabled = selected.isNotEmpty(), onClick = { overflow = true }) {
+                Icon(QMusicIcons.More, contentDescription = null, tint = Ink)
+            }
+            DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }, containerColor = DarkSurfaceVariant) {
+                DropdownMenuItem(
+                    text = { Text(if (allUnread) s.markRead else s.markUnread, color = TextPrimary) },
+                    onClick = {
+                        overflow = false
+                        selected.forEach { if (allUnread) controller.markRead(it) else controller.markUnread(it) }
+                        onClose()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(if (allFavorite) s.removeFavorite else s.addFavorite, color = TextPrimary) },
+                    onClick = {
+                        overflow = false
+                        selected.forEach { controller.setFavorite(it, !allFavorite) }
+                        onClose()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(s.lockChat, color = TextPrimary) },
+                    onClick = {
+                        overflow = false
+                        selected.forEach { controller.setLocked(it, true) }
+                        onClose()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(s.clearChat, color = TextPrimary) },
+                    onClick = {
+                        overflow = false
+                        onClearMultiple()
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClearChatsDialog(count: Int, s: ChatStrings, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurfaceVariant,
+        title = { Text(s.clearChat, color = TextPrimary) },
+        text = { Text(s.clearChatsConfirm(count), color = TextSecondary) },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(s.mediaClear, color = Ink) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel, color = TextSecondary) } },
+    )
+}
+
+/** A conversation's hold / right-click menu: mark unread/read, pin, favourite, mute, archive, lock, clear. */
+private fun threadActions(
+    controller: ChatController,
+    s: ChatStrings,
+    t: ChatThread,
+    now: Long,
+    onMute: () -> Unit,
+    onClear: () -> Unit,
+): List<Pair<String, () -> Unit>> = listOf(
+    (if (t.unread) s.markRead else s.markUnread) to { if (t.unread) controller.markRead(t) else controller.markUnread(t) },
     (if (t.pinned > 0) s.unpin else s.pin) to { controller.setPinned(t, t.pinned == 0L) },
     (if (t.favorite) s.removeFavorite else s.addFavorite) to { controller.setFavorite(t, !t.favorite) },
     (if (t.muted(now)) s.unmute else s.mute) to { if (t.muted(now)) controller.setMuted(t.other, 0L) else onMute() },
     (if (t.archived) s.unarchive else s.archive) to { controller.setArchived(t, !t.archived) },
     s.lockChat to { controller.setLocked(t, true) },
+    s.clearChat to onClear,
 )
 
 @Composable
@@ -641,6 +877,7 @@ private fun GroupsTab(controller: ChatController, s: ChatStrings, me: ChatUser, 
     val archived by controller.archived.collectAsState()
     var search by remember { mutableStateOf("") }
     var muteFor by remember { mutableStateOf<ChatThread?>(null) }
+    var clearFor by remember { mutableStateOf<ChatThread?>(null) }
     val now = rememberNow()
     val groups = remember(all, archived, search) {
         val q = search.trim()
@@ -673,7 +910,7 @@ private fun GroupsTab(controller: ChatController, s: ChatStrings, me: ChatUser, 
                 ThreadRow(
                     t, me, s,
                     onAvatar = { peek = t.other },
-                    actions = threadActions(controller, s, t, now) { muteFor = t },
+                    actions = threadActions(controller, s, t, now, onMute = { muteFor = t }, onClear = { clearFor = t }),
                     now = now,
                     tick = rememberListTick(controller, t, me),
                 ) { controller.openConversation(t.other) }
@@ -683,6 +920,17 @@ private fun GroupsTab(controller: ChatController, s: ChatStrings, me: ChatUser, 
         HomeFab(QMusicIcons.Group, s.newGroup, Modifier.align(Alignment.BottomEnd)) { controller.openNewGroup() }
     }
     muteFor?.let { t -> MuteChoice(controller, s, t, now) { muteFor = null } }
+    clearFor?.let { t ->
+        ClearChatsDialog(
+            count = 1,
+            s = s,
+            onConfirm = {
+                controller.clearChat(t)
+                clearFor = null
+            },
+            onDismiss = { clearFor = null },
+        )
+    }
 }
 
 // ------------------------------------------------------------------ calls

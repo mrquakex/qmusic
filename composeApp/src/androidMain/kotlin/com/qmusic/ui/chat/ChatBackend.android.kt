@@ -401,6 +401,7 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         val lastAt = child("lastAt").getValue(Long::class.java) ?: return null
         val lastFrom = child("lastFrom").getValue(String::class.java)
         val read = child("read").getValue(Long::class.java) ?: 0L
+        val markedUnread = child("markedUnread").getValue(Boolean::class.java) == true
         return ChatThread(
             id = chatId,
             other = ChatUser(
@@ -419,8 +420,8 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             },
             lastAt = lastAt,
             lastFrom = lastFrom,
-            // From them, or from Claude speaking in this conversation: anything not ours that came after our last look.
-            unread = lastFrom != null && lastFrom != auth.currentUser?.uid && lastAt > read,
+            // From them, or from Claude speaking in this conversation: anything not ours that came after our last look, or manually marked unread.
+            unread = markedUnread || (lastFrom != null && lastFrom != auth.currentUser?.uid && lastAt > read),
             otherReadAt = 0L,
             pinned = child("pinned").getValue(Long::class.java) ?: 0L,
             archived = child("archived").getValue(Boolean::class.java) == true,
@@ -446,12 +447,34 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
         ref.keepSynced(true)
         val query = ref.orderByChild("at").limitToLast(limit)
         e2e.watch(chatId)
-        return combine(listen(query), pendingIds, outbox, _uploads, combine(hidden(chatId), e2e.changes) { h, _ -> h }) { snap, pending, out, progress, hidden ->
+        return combine(
+            listen(query),
+            pendingIds,
+            outbox,
+            _uploads,
+            combine(hidden(chatId), clearedAt(chatId), e2e.changes) { h, cleared, _ -> h to cleared },
+        ) { snap, pending, out, progress, (hidden, cleared) ->
             val now = System.currentTimeMillis() + _serverOffset.value
-            val sent = snap.children.mapNotNull { MsgNode.of(chatId, it).toMessage(pending) }.filter { it.id !in hidden && (it.expireAt == 0L || it.expireAt > now) }
+            val sent = snap.children.mapNotNull { MsgNode.of(chatId, it).toMessage(pending) }
+                .filter { it.id !in hidden && it.at > cleared && (it.expireAt == 0L || it.expireAt > now) }
             val ids = sent.mapTo(HashSet()) { it.id }
-            sent + out[chatId].orEmpty().filter { it.id !in ids }.map { it.copy(progress = progress[it.id] ?: 0f) }
+            sent + out[chatId].orEmpty().filter { it.id !in ids && it.at > cleared }.map { it.copy(progress = progress[it.id] ?: 0f) }
         }
+    }
+
+    private fun clearedAt(chatId: String): Flow<Long> = callbackFlow {
+        val uid = auth.currentUser?.uid
+        if (uid == null) {
+            trySend(0L)
+            awaitClose {}
+            return@callbackFlow
+        }
+        val job = launch {
+            listen(root.child("chatPrefs").child(uid).child("cleared").child(chatId)).collect { snap ->
+                trySend(snap.getValue(Long::class.java) ?: 0L)
+            }
+        }
+        awaitClose { job.cancel() }
     }
 
     override fun hidden(chatId: String): Flow<Set<String>> = callbackFlow {
@@ -2066,9 +2089,28 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
             "userChats/$uid/$chatId/read" to ServerValue.TIMESTAMP,
             "userChats/$uid/$chatId/unread" to 0,
             "userChats/$uid/$chatId/mention" to null,
+            "userChats/$uid/$chatId/markedUnread" to null,
         )
         // Who hides their read marks only marks it for themselves.
         if (!_privacy.value.hideReadReceipts) updates["chats/$chatId/read/$uid"] = ServerValue.TIMESTAMP
+        root.updateChildren(updates)
+    }
+
+    override suspend fun markUnread(chatId: String) {
+        val uid = auth.currentUser?.uid ?: return
+        root.child("userChats").child(uid).child(chatId).child("markedUnread").setValue(true)
+    }
+
+    override suspend fun clearChat(chatId: String) {
+        val uid = auth.currentUser?.uid ?: return
+        val updates = hashMapOf<String, Any?>(
+            "chatPrefs/$uid/cleared/$chatId" to ServerValue.TIMESTAMP,
+            "userChats/$uid/$chatId/lastText" to "",
+            "userChats/$uid/$chatId/read" to ServerValue.TIMESTAMP,
+            "userChats/$uid/$chatId/unread" to 0,
+            "userChats/$uid/$chatId/mention" to null,
+            "userChats/$uid/$chatId/markedUnread" to null,
+        )
         root.updateChildren(updates)
     }
 
@@ -2804,13 +2846,29 @@ internal class FirebaseChatBackend private constructor(private val app: Context)
     }
 
     override suspend fun recentMessages(chatId: String, limit: Int): List<ChatMessage> = runCatching {
+        val uid = auth.currentUser?.uid
+        val cleared = if (uid != null) {
+            runCatching { root.child("chatPrefs").child(uid).child("cleared").child(chatId).get().await().getValue(Long::class.java) }.getOrNull() ?: 0L
+        } else 0L
+        val hiddenIds = if (uid != null) {
+            runCatching { root.child("hidden").child(uid).child(chatId).get().await().children.mapNotNull { it.key }.toSet() }.getOrDefault(emptySet())
+        } else emptySet()
         root.child("chats").child(chatId).child("messages").orderByChild("at").limitToLast(limit).get().await()
             .children.mapNotNull { MsgNode.of(chatId, it).toMessage(emptySet()) }
+            .filter { it.at > cleared && it.id !in hiddenIds }
     }.getOrDefault(emptyList())
 
     override suspend fun allMessages(chatId: String): List<ChatMessage> {
+        val uid = auth.currentUser?.uid
+        val cleared = if (uid != null) {
+            runCatching { root.child("chatPrefs").child(uid).child("cleared").child(chatId).get().await().getValue(Long::class.java) }.getOrNull() ?: 0L
+        } else 0L
+        val hiddenIds = if (uid != null) {
+            runCatching { root.child("hidden").child(uid).child(chatId).get().await().children.mapNotNull { it.key }.toSet() }.getOrDefault(emptySet())
+        } else emptySet()
         val snap = root.child("chats").child(chatId).child("messages").orderByChild("at").get().await()
         return snap.children.mapNotNull { MsgNode.of(chatId, it).toMessage(emptySet()) }
+            .filter { it.at > cleared && it.id !in hiddenIds }
     }
 
     override suspend fun setStatusPrivacy(privacy: StatusPrivacy) {

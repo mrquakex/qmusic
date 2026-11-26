@@ -463,6 +463,8 @@ interface ChatBackend {
 
     suspend fun send(other: ChatUser, text: String, share: SharedItem?, replyTo: ChatReply?): Result<Unit>
     suspend fun markRead(chatId: String)
+    suspend fun markUnread(chatId: String) {}
+    suspend fun clearChat(chatId: String) {}
     suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit>
 
     /** The people this person blocked: their messages do not reach them. */
