@@ -171,6 +171,15 @@ class YouTubeVideos(
     override suspend fun captions(videoId: String): Result<List<VideoCaption>> =
         runCatching { extractor?.videoCaptions(videoId).orEmpty() }
 
+    override suspend fun audioTracks(videoId: String): Result<List<VideoAudioTrack>> =
+        runCatching { extractor?.videoAudioTracks(videoId).orEmpty() }
+
+    override suspend fun liveChat(continuation: String): Result<VideoLiveChatPage> =
+        call("live_chat/get_live_chat", continuation = continuation, parse = VideoParser::liveChat)
+
+    override suspend fun channelSearch(channelId: String, query: String): Result<VideoFeed> =
+        call("browse", browseId = channelId, params = SEARCH_TAB, query = query, parse = VideoParser::feed)
+
     override suspend fun postComment(createToken: String, text: String): Result<Unit> =
         signedIn {
             action("comment/create_comment", buildJsonObject {
@@ -352,5 +361,8 @@ class YouTubeVideos(
 
         /** The "Videos" tab of a channel. */
         const val VIDEOS_TAB = "EgZ2aWRlb3PyBgQKAjoA"
+
+        /** The in-channel "Search" tab of a channel. */
+        const val SEARCH_TAB = "EgZzZWFyY2jyBgQKAjoA"
     }
 }

@@ -51,6 +51,31 @@ class QMusicApplication : Application() {
             }.getOrDefault(emptyMap()),
         )
         com.qmusic.ui.chat.ChatDrafts.onChanged = { all -> draftPrefs.edit().putString("all", org.json.JSONObject(all).toString()).apply() }
+        // Custom global & per-chat wallpapers (solid color overrides or local gallery photos).
+        val wallPrefs = getSharedPreferences("nuvelo_wallpapers", MODE_PRIVATE)
+        val wallDir = java.io.File(filesDir, "chat_wallpapers").apply { mkdirs() }
+        com.qmusic.ui.chat.ChatWallpaperStore.hydrate(
+            runCatching {
+                val o = org.json.JSONObject(wallPrefs.getString("all", "{}") ?: "{}")
+                o.keys().asSequence().associateWith { o.getString(it) }
+            }.getOrDefault(emptyMap()),
+        )
+        com.qmusic.ui.chat.ChatWallpaperStore.onSave = { all ->
+            wallPrefs.edit().putString("all", org.json.JSONObject(all).toString()).apply()
+        }
+        com.qmusic.ui.chat.ChatWallpaperStore.savePhotoFile = { scopeKey, jpeg ->
+            runCatching {
+                val file = java.io.File(wallDir, "${scopeKey}_${System.currentTimeMillis()}.jpg")
+                file.writeBytes(jpeg)
+                file.absolutePath
+            }.getOrNull()
+        }
+        com.qmusic.ui.chat.ChatWallpaperStore.deletePhotoFile = { path ->
+            runCatching {
+                val f = java.io.File(path)
+                if (f.parentFile?.canonicalPath == wallDir.canonicalPath) f.delete()
+            }
+        }
         com.qmusic.ui.chat.CallHooks.onGroupJoined = { groupId -> GroupCallNotifications.inCall(app, groupId) }
         // How the message notifications behave (Settings → Notifications), kept on the phone.
         val notifPrefs = getSharedPreferences("qmusic_settings", MODE_PRIVATE)

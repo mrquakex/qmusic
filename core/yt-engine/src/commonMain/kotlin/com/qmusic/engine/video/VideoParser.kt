@@ -384,6 +384,12 @@ internal object VideoParser {
             section.path("itemSectionRenderer").obj()?.takeIf { it["sectionIdentifier"].str() == "comment-item-section" }
         }
         val secondaryResults = root.path("contents", "twoColumnWatchNextResults", "secondaryResults", "secondaryResults")
+        val liveChatToken = root.path("contents", "twoColumnWatchNextResults", "conversationBar", "liveChatRenderer", "continuations")
+            .arr().orEmpty().firstNotNullOfOrNull { c ->
+                c.path("reloadContinuationData", "continuation").str()
+                    ?: c.path("invalidationContinuationData", "continuation").str()
+                    ?: c.path("timedContinuationData", "continuation").str()
+            }
         return VideoDetails(
             id = videoId,
             title = title,
@@ -400,7 +406,53 @@ internal object VideoParser {
             related = feed(secondaryResults),
             commentsToken = commentsSection?.let(::continuation),
             isLive = viewCount.path("isLive").let { (it as? JsonPrimitive)?.booleanOrNull } == true,
+            liveChatToken = liveChatToken,
         )
+    }
+
+    // ------------------------------------------------------------------ live chat
+
+    /** Parses a batch of live chat messages and its polling continuation from `live_chat/get_live_chat`. */
+    fun liveChat(root: JsonObject): VideoLiveChatPage {
+        val lc = root.path("continuationContents", "liveChatContinuation")
+        val messages = lc.path("actions").arr().orEmpty().mapNotNull { action ->
+            val item = action.path("addChatItemAction", "item")
+            val renderer = item.path("liveChatTextMessageRenderer").obj()
+                ?: item.path("liveChatPaidMessageRenderer").obj()
+                ?: return@mapNotNull null
+            val id = renderer["id"].str() ?: return@mapNotNull null
+            val author = renderer["authorName"].text()?.ifBlank { null } ?: return@mapNotNull null
+            val text = liveChatRuns(renderer["message"]).trim()
+            val amount = renderer["purchaseAmountText"].text()
+            if (text.isEmpty() && amount.isNullOrBlank()) return@mapNotNull null
+            val badge = renderer["authorBadges"].arr().orEmpty()
+                .firstNotNullOfOrNull { it.path("liveChatAuthorBadgeRenderer", "tooltip").str() }
+            VideoLiveChatMessage(
+                id = id,
+                author = author,
+                avatar = renderer.path("authorPhoto", "thumbnails").lastImage(),
+                text = text,
+                badge = badge,
+                amount = amount,
+            )
+        }
+        val contNode = lc.path("continuations").arr().orEmpty().firstNotNullOfOrNull { c ->
+            c.path("invalidationContinuationData").obj()
+                ?: c.path("timedContinuationData").obj()
+                ?: c.path("reloadContinuationData").obj()
+        }
+        val next = contNode?.get("continuation").str()
+        val waitMs = (contNode?.get("timeoutMs").str()?.toLongOrNull() ?: 4_000L).coerceIn(2_500L, 12_000L)
+        return VideoLiveChatPage(messages = messages, continuation = next, timeoutMs = waitMs)
+    }
+
+    private fun liveChatRuns(node: JsonElement?): String {
+        val runs = node.path("runs").arr() ?: return node.text().orEmpty()
+        return runs.joinToString("") { run ->
+            run.path("text").str()
+                ?: run.path("emoji", "shortcuts", "0").str()
+                ?: run.path("emoji", "emojiId").str().orEmpty()
+        }
     }
 
     // ------------------------------------------------------------------ comments

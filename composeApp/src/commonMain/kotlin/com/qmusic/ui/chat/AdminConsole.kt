@@ -2,7 +2,9 @@ package com.qmusic.ui.chat
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOf
 
 /**
  * Running the app: bans and mutes, reports, closing groups, setting profiles right, announcements, the least version
@@ -20,6 +22,12 @@ interface AdminConsole {
 
     /** The least version that may be used (older ones are asked to update before going on); null: any. */
     val minVersion: StateFlow<String?>
+
+    /** Soft recommended version (older ones see a dismissable banner, never blocked); null: none. */
+    val recommendedVersion: StateFlow<String?> get() = MutableStateFlow(null)
+
+    /** Emergency feature kill switches (admins bypass these so they can still test). */
+    val features: StateFlow<FeatureFlags> get() = MutableStateFlow(FeatureFlags())
 
     /** "Under maintenance": while on, the messages show a maintenance page to everyone but the admins. */
     val maintenance: StateFlow<Maintenance>
@@ -45,27 +53,57 @@ interface AdminConsole {
     /** The last 30 days, oldest first. */
     fun daily(): Flow<List<DayStat>>
     fun crashes(): Flow<List<CrashEntry>>
+    fun callDebug(): Flow<List<CallDebugEntry>> = flowOf(emptyList())
 
     /** [kind]: "ban" (the app is closed to them) or "mute" (they can read, not write); [until]: [AdminBan.FOREVER] for good. */
     suspend fun ban(uid: String, kind: String, until: Long, reason: String): Result<Unit>
     suspend fun unban(uid: String): Result<Unit>
 
-    /** What the server does: "closeGroup", "rename" (value: the new name), "reset" (value: photo/name/about/status), "announce", "stats". */
+    /** What the server does: "closeGroup", "rename" (value: the new name), "reset" (value: photo/name/about/status), "announce", "stats", "backupNow", "gcMedia", "testPush", "msgOldVer". */
     suspend fun request(kind: String, target: String = "", value: String = ""): Result<Unit>
     suspend fun markReport(id: String, handled: String?): Result<Unit>
     suspend fun deleteReport(id: String): Result<Unit>
     suspend fun setMinVersion(version: String?): Result<Unit>
+    suspend fun setRecommendedVersion(version: String?): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun setFeatures(features: FeatureFlags): Result<Unit> = Result.failure(UnsupportedOperationException())
     suspend fun banName(name: String, banned: Boolean): Result<Unit>
     suspend fun setMaintenance(on: Boolean, text: String): Result<Unit>
     suspend fun setSpam(on: Boolean, limit: Int): Result<Unit>
     suspend fun setBadge(uid: String, developer: Boolean): Result<Unit>
     suspend fun setClaude(uid: String, allowed: Boolean): Result<Unit>
     suspend fun deleteCrash(id: String): Result<Unit>
+    suspend fun deleteAnnouncement(id: String): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun deleteCallDebug(uid: String, callId: String): Result<Unit> = Result.failure(UnsupportedOperationException())
 }
 
 data class Maintenance(val on: Boolean = false, val text: String = "")
 
 data class SpamGuard(val on: Boolean = true, val limit: Int = 40)
+
+data class FeatureFlags(
+    val games: Boolean = true,
+    val calls: Boolean = true,
+    val statuses: Boolean = true,
+    val newChats: Boolean = true,
+)
+
+/** Diagnostic trail of a finished call uploaded by a phone to callDebug/{uid}/{call}. */
+data class CallDebugEntry(
+    val id: String,
+    val uid: String,
+    val at: Long,
+    val peer: String,
+    val caller: Boolean,
+    val video: Boolean,
+    val reason: String,
+    val phase: String,
+    val connectedOnce: Boolean,
+    val model: String,
+    val androidSdk: Int,
+    val trail: List<String>,
+) {
+    val hasIssue: Boolean get() = reason == "FAILED" || reason == "UNREACHABLE" || reason == "NO_ANSWER" || !connectedOnce
+}
 
 /** One day of [AdminConsole.daily]: who showed up, who joined, how many accounts there were, how many messages went. */
 data class DayStat(val day: String, val active: Int, val newUsers: Int, val total: Int, val messages: Int)
@@ -148,15 +186,88 @@ data class AdminActionEntry(
     val at: Long,
     val done: Boolean,
     val error: String?,
+    val result: String? = null,
 )
 
-data class AdminStats(val at: Long, val mediaBytes: Long, val diskFree: Long, val diskTotal: Long, val storage: List<StorageEntry> = emptyList())
+data class AdminStats(
+    val at: Long,
+    val mediaBytes: Long,
+    val diskFree: Long,
+    val diskTotal: Long,
+    val storage: List<StorageEntry> = emptyList(),
+    val uptimeSec: Long = 0L,
+    val memUsedMb: Long = 0L,
+    val memTotalMb: Long = 0L,
+    val nodeRssMb: Long = 0L,
+    val backupAt: Long = 0L,
+    val backupBytes: Long = 0L,
+    val backupCount: Int = 0,
+    val gamesTotal: Long = 0L,
+    val gamesActive: Int = 0,
+    val gamesByKind: Map<String, Int> = emptyMap(),
+)
 
 data class Announcement(val id: String, val text: String, val at: Long)
 
 /** A tap on "update" on the page that asks for a newer version: the app (which has the updater) listens. */
 object ForcedUpdate {
     val requests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+}
+
+/** True when [pick] is enabled (or there is no admin console, or the signed-in user is an admin). */
+internal fun AdminConsole?.featureEnabled(pick: (FeatureFlags) -> Boolean): Boolean =
+    this == null || isAdmin.value || pick(features.value)
+
+internal enum class PeopleFilter { ALL, ONLINE, RESTRICTED, OUTDATED, DEVELOPER, CLAUDE }
+
+internal enum class LogCategory { ALL, MODERATION, SPAM, ANNOUNCE, ACCOUNT, SETTINGS }
+
+internal fun logCategoryOf(kind: String): LogCategory = when (kind) {
+    "ban", "mute", "unban", "report" -> LogCategory.MODERATION
+    "autoMute", "spam" -> LogCategory.SPAM
+    "announce", "delAnnounce", "message", "msgOldVer", "testPush" -> LogCategory.ANNOUNCE
+    "closeGroup", "rename", "reset", "badge", "claude", "deleteAccount", "deleteMedia" -> LogCategory.ACCOUNT
+    "minVersion", "recVersion", "maintenance", "features", "banName", "backupNow", "gcMedia" -> LogCategory.SETTINGS
+    else -> LogCategory.SETTINGS
+}
+
+/** Optional admin note written on a handled report ("ok: <note>" or "muted: <note>"). */
+internal fun reportNote(handled: String?): String? {
+    val idx = handled?.indexOf(':') ?: return null
+    if (idx < 0) return null
+    return handled.substring(idx + 1).trim().takeIf { it.isNotEmpty() }
+}
+
+/** Filters people in the admin panel by search query, quick category filter, and optional clicked version. */
+internal fun filterAdminUsers(
+    users: List<AdminUser>,
+    query: String,
+    filter: PeopleFilter,
+    versionFilter: String?,
+    latestVersion: String,
+    now: Long,
+): List<AdminUser> {
+    val q = query.trim().lowercase().removePrefix("@")
+    return users.filter { u ->
+        val matchesQuery = q.isEmpty() ||
+            u.name.lowercase().contains(q) ||
+            u.username.lowercase().contains(q) ||
+            u.uid.lowercase().contains(q)
+        val matchesVersion = when (versionFilter) {
+            null -> true
+            "" -> u.version == null
+            else -> u.version == versionFilter
+        }
+        val matchesFilter = when (filter) {
+            PeopleFilter.ALL -> true
+            PeopleFilter.ONLINE -> u.online
+            PeopleFilter.RESTRICTED -> u.ban?.activeAt(now) == true
+            PeopleFilter.OUTDATED -> u.uid != CLAUDE_BOT_UID && u.uid != "nuvelo" && u.version != null && versionOlder(u.version, latestVersion)
+            PeopleFilter.DEVELOPER -> u.developer
+            PeopleFilter.CLAUDE -> u.claude
+        }
+        matchesQuery && matchesVersion && matchesFilter
+    }
 }
 
 /** True when [version] ("2.13.7") is older than [least] ("2.13.8"), number by number. */

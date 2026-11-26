@@ -136,6 +136,18 @@ fun VideosApp(
         loadedId = w.video.id
         onPauseMusic()
         p.load(q, start, caption = w.caption)
+        p.setSpeed(if (w.isLive()) 1f else controller.playbackSpeed.value)
+        p.setLooping(!w.isLive() && controller.looping.value)
+    }
+    val looping by controller.looping.collectAsState()
+    val playbackSpeed by controller.playbackSpeed.collectAsState()
+    LaunchedEffect(looping, watch?.video?.id, playback) {
+        val w = watch ?: return@LaunchedEffect
+        playback?.setLooping(!w.isLive() && looping)
+    }
+    LaunchedEffect(playbackSpeed, watch?.video?.id, playback) {
+        val w = watch ?: return@LaunchedEffect
+        playback?.setSpeed(if (w.isLive()) 1f else playbackSpeed)
     }
     // Where the video is, kept every few seconds so it can be picked up again.
     LaunchedEffect(watch?.video?.id, playback) {
@@ -190,7 +202,7 @@ fun VideosApp(
             val hit = segments.firstOrNull { pos >= it.startMs && pos < it.endMs - 400 && it !in skipped } ?: return@collect
             skipped += hit
             p.seekTo(hit.endMs)
-            controller.noteSkipped()
+            controller.noteSkipped(hit)
         }
     }
     // The sleep timer pauses the video when its minutes are up.
@@ -299,7 +311,21 @@ fun VideosApp(
             }
         }
         if (searching) SearchBox(controller, s)
-        VideoSheets(controller, s, onShare, onSignIn)
+        VideoSheets(controller, playback, s, onShare, onSignIn)
+        val toast by controller.toast.collectAsState()
+        toast?.let { msg ->
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 72.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.84f))
+                    .padding(horizontal = 18.dp, vertical = 10.dp),
+            ) {
+                Text(msg, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            }
+        }
         if (accountDialog) {
             AlertDialog(
                 onDismissRequest = { accountDialog = false },
@@ -789,15 +815,49 @@ private fun SearchResultsPage(controller: VideosController, s: VideoStrings, onS
         })
         val current = loader
         val searchState = current?.state?.collectAsState()?.value
+        val x = s.extras()
+        var moreFilters by remember { mutableStateOf(false) }
+        val advancedFilters = remember(x) {
+            listOf(
+                com.qmusic.engine.video.VideoSearchFilter.SORT_UPLOAD_DATE to x.sortNewest,
+                com.qmusic.engine.video.VideoSearchFilter.SORT_VIEW_COUNT to x.sortMostViewed,
+                com.qmusic.engine.video.VideoSearchFilter.DATE_TODAY to x.dateToday,
+                com.qmusic.engine.video.VideoSearchFilter.DATE_WEEK to x.dateWeek,
+                com.qmusic.engine.video.VideoSearchFilter.DATE_MONTH to x.dateMonth,
+                com.qmusic.engine.video.VideoSearchFilter.DURATION_SHORT to x.durShort,
+                com.qmusic.engine.video.VideoSearchFilter.DURATION_MEDIUM to x.durMedium,
+                com.qmusic.engine.video.VideoSearchFilter.DURATION_LONG to x.durLong,
+            )
+        }
+        val activeAdvanced = advancedFilters.any { it.first == filter }
         // The search's own chips when it has them ("All", "Shorts", "Unwatched", "Watched", "Recently uploaded"...),
-        // else the fixed filters.
+        // else the fixed filters; plus expandable sort / upload-date / duration filters.
         val searchChips = searchState?.chips.orEmpty()
-        if (searchChips.isNotEmpty() && filter == null) {
-            ChipRow(searchChips) { current?.selectChip(it) }
-        } else {
-            LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(VideosController.FILTERS) { (params, key) ->
-                    LabelChip(s.filter(key), filter == params) { controller.setFilter(params) }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Box(Modifier.weight(1f)) {
+                if (searchChips.isNotEmpty() && filter == null) {
+                    ChipRow(searchChips) { current?.selectChip(it) }
+                } else {
+                    LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(VideosController.FILTERS) { (params, key) ->
+                            LabelChip(s.filter(key), filter == params) { controller.setFilter(params) }
+                        }
+                    }
+                }
+            }
+            Box(Modifier.padding(end = 10.dp)) {
+                LabelChip(x.searchFiltersLabel, moreFilters || activeAdvanced) { moreFilters = !moreFilters }
+            }
+        }
+        if (moreFilters || activeAdvanced) {
+            LazyRow(
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(advancedFilters) { (params, label) ->
+                    LabelChip(label, filter == params) {
+                        controller.setFilter(if (filter == params) null else params)
+                    }
                 }
             }
         }
@@ -826,8 +886,67 @@ private fun ChannelPage(controller: VideosController, s: VideoStrings, onSignIn:
     val channel by controller.channel.collectAsState()
     val c = channel ?: return
     val page = c.page
+    val x = s.extras()
+    var searchOpen by remember(c.id) { mutableStateOf(c.searchActive) }
+    var searchText by remember(c.id) { mutableStateOf(c.searchQuery) }
     Column(modifier = Modifier.fillMaxSize()) {
-        PageBar(title = page?.name ?: "", onBack = { controller.pop() })
+        PageBar(
+            title = page?.name ?: "",
+            onBack = {
+                if (searchOpen || c.searchActive) {
+                    searchOpen = false
+                    searchText = ""
+                    controller.clearChannelSearch()
+                } else {
+                    controller.pop()
+                }
+            },
+            trailing = {
+                IconButton(
+                    onClick = {
+                        if (searchOpen) {
+                            searchOpen = false
+                            searchText = ""
+                            controller.clearChannelSearch()
+                        } else {
+                            searchOpen = true
+                        }
+                    },
+                ) {
+                    Icon(if (searchOpen) QMusicIcons.Close else QMusicIcons.Search, x.searchInChannel, tint = VideoColors.Text)
+                }
+            },
+        )
+        if (searchOpen) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(VideoColors.Chip)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    if (searchText.isEmpty()) Text(x.searchInChannel, color = VideoColors.TextSecondary, fontSize = 14.sp)
+                    BasicTextField(
+                        value = searchText,
+                        onValueChange = { searchText = it },
+                        singleLine = true,
+                        textStyle = TextStyle(color = VideoColors.Text, fontSize = 14.sp),
+                        cursorBrush = SolidColor(VideoColors.Text),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { controller.searchChannel(searchText) }),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (searchText.isNotBlank()) {
+                    IconButton(onClick = { controller.searchChannel(searchText) }, modifier = Modifier.size(30.dp)) {
+                        Icon(QMusicIcons.Search, x.searchInChannel, tint = VideoColors.Text, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
         FeedColumn(
             state = c.feed, s = s,
             onVideo = { controller.open(it) },
@@ -921,6 +1040,15 @@ private fun SettingsBody(controller: VideosController, s: VideoStrings, signedIn
         if (!signedIn) Text(s.signInBody, color = VideoColors.TextSecondary, fontSize = 14.sp)
         SwitchRow(x.autoplay, null, autoplay != "0") { controller.setAutoplay(it) }
         SwitchRow(x.sponsorBlock, x.sponsorBlockHint, sponsor != "0") { controller.setSponsorBlock(it) }
+        if (sponsor != "0") {
+            val sponsorCats by controller.sponsorCategories.collectAsState()
+            Text(x.sponsorCategoriesTitle, color = VideoColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(ALL_SPONSOR_CATEGORIES) { cat ->
+                    LabelChip(x.sponsorCategoryLabel(cat), cat in sponsorCats) { controller.toggleSponsorCategory(cat) }
+                }
+            }
+        }
         val feedPreview by controller.feedPreviewSetting.collectAsState()
         Text(x.feedPreview, color = VideoColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         Text(x.feedPreviewHint, color = VideoColors.TextSecondary, fontSize = 13.sp)
@@ -958,15 +1086,25 @@ internal fun SwitchRow(label: String, hint: String?, checked: Boolean, onChange:
 /** The bottom sheets: a card's ⋮ menu, "save to a playlist", and the comments of a Short. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun VideoSheets(controller: VideosController, s: VideoStrings, onShare: (String) -> Unit, onSignIn: () -> Unit) {
+private fun VideoSheets(controller: VideosController, playback: VideoPlayback?, s: VideoStrings, onShare: (String) -> Unit, onSignIn: () -> Unit) {
     val menu by controller.menu.collectAsState()
     val save by controller.saveSheet.collectAsState()
     val comments by controller.shortComments.collectAsState()
+    val signedIn by controller.signedIn.collectAsState()
+    val x = s.extras()
 
     menu?.let { item ->
         androidx.compose.material3.ModalBottomSheet(onDismissRequest = { controller.closeMenu() }, containerColor = VideoColors.Surface) {
             Column(modifier = Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
                 Text(item.title, color = VideoColors.TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                SheetRow(QMusicIcons.Play, x.playNext) {
+                    controller.closeMenu()
+                    controller.playNextInQueue(item, x.playingNext)
+                }
+                SheetRow(QMusicIcons.Queue, x.addToQueue) {
+                    controller.closeMenu()
+                    controller.addToQueue(item, x.addedToQueue)
+                }
                 SheetRow(QMusicIcons.History, s.menuWatchLater) {
                     controller.closeMenu()
                     if (!controller.saveForLater(item)) onSignIn()
@@ -1007,24 +1145,112 @@ private fun VideoSheets(controller: VideosController, s: VideoStrings, onShare: 
     }
 
     comments?.let { state ->
+        var draft by remember(state.video.id) { mutableStateOf("") }
         androidx.compose.material3.ModalBottomSheet(onDismissRequest = { controller.closeShortComments() }, containerColor = VideoColors.Surface) {
-            Column(modifier = Modifier.navigationBarsPadding().fillMaxHeight(0.7f)) {
-                Text(s.comments, color = VideoColors.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+            Column(modifier = Modifier.navigationBarsPadding().fillMaxHeight(0.75f)) {
+                Text(
+                    if (state.total != null) "${s.comments} · ${state.total}" else s.comments,
+                    color = VideoColors.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                )
+                if (state.createToken != null || !signedIn) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp).clip(RoundedCornerShape(22.dp)).background(VideoColors.Chip).padding(start = 14.dp, end = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier.weight(1f).padding(vertical = 10.dp).then(if (signedIn) Modifier else Modifier.clickable(onClick = onSignIn)),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            if (draft.isEmpty()) Text(s.writeComment, color = VideoColors.TextSecondary, fontSize = 14.sp)
+                            if (signedIn) {
+                                BasicTextField(
+                                    value = draft,
+                                    onValueChange = { draft = it },
+                                    textStyle = TextStyle(color = VideoColors.Text, fontSize = 14.sp),
+                                    cursorBrush = SolidColor(VideoColors.Text),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+                        if (signedIn && draft.isNotBlank()) {
+                            Text(
+                                if (state.posting) "…" else s.post,
+                                color = VideoColors.Link, fontWeight = FontWeight.Bold, fontSize = 14.sp,
+                                modifier = Modifier.clip(RoundedCornerShape(50)).clickable(enabled = !state.posting) { if (controller.postShortComment(draft)) draft = "" }.padding(horizontal = 12.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
+                }
                 if (state.loading) Loading()
                 if (!state.loading && state.comments.isEmpty()) Text(s.noComments, color = VideoColors.TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(20.dp))
-                LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f)) {
                     items(state.comments, key = { it.id }) { c ->
-                        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                            Avatar(c.avatar, 32.dp)
-                            Spacer(Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(listOfNotNull(c.author, c.published).joinToString(" · "), color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(c.text, color = VideoColors.Text, fontSize = 14.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 2.dp))
-                            }
+                        ShortCommentRow(c, state, controller, playback, s, small = false)
+                    }
+                    if (state.continuation != null) {
+                        item(key = "short-comments-more") {
+                            Text(
+                                if (state.loadingMore) "…" else s.loadMore,
+                                color = VideoColors.Text,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.fillMaxWidth().clickable { controller.loadMoreShortComments() }.padding(16.dp),
+                            )
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ShortCommentRow(
+    c: com.qmusic.engine.video.VideoComment,
+    state: ShortCommentsState,
+    controller: VideosController,
+    playback: VideoPlayback?,
+    s: VideoStrings,
+    small: Boolean,
+) {
+    Row(modifier = Modifier.fillMaxWidth().padding(start = if (small) 54.dp else 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)) {
+        Avatar(c.avatar, if (small) 24.dp else 32.dp)
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(listOfNotNull(c.author, c.published).joinToString(" · "), color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val linked = remember(c.text) { linkedDescription(c.text, VideoColors.Link) }
+            @Suppress("DEPRECATION")
+            androidx.compose.foundation.text.ClickableText(
+                text = linked,
+                style = TextStyle(color = VideoColors.Text, fontSize = 14.sp, lineHeight = 19.sp),
+                modifier = Modifier.padding(top = 2.dp),
+                onClick = { offset -> linked.timeAt(offset)?.let { playback?.seekTo(it) } },
+            )
+            Row(modifier = Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                c.likes?.let { Text("♥ $it", color = VideoColors.TextSecondary, fontSize = 12.sp) }
+                val opened = state.replies.containsKey(c.id)
+                if (!small && c.replies != null && c.repliesToken != null) {
+                    Text(
+                        text = when {
+                            c.id in state.repliesLoading -> "…"
+                            opened -> s.hideReplies
+                            else -> "↳ " + s.repliesLabel(c.replies!!)
+                        },
+                        color = VideoColors.Link, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clickable { if (opened) controller.hideShortReplies(c.id) else controller.loadShortReplies(c) },
+                    )
+                }
+            }
+        }
+    }
+    if (!small) {
+        state.replies[c.id]?.forEach { reply -> ShortCommentRow(reply, state, controller, playback, s, small = true) }
+        if (state.replies.containsKey(c.id) && state.repliesNext[c.id] != null) {
+            Text(
+                if (c.id in state.repliesLoading) "…" else s.loadMore,
+                color = VideoColors.Link, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 54.dp, bottom = 8.dp).clickable { controller.loadShortReplies(c) },
+            )
         }
     }
 }

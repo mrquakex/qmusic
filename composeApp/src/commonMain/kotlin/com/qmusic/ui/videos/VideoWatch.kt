@@ -602,10 +602,14 @@ private fun WatchDetails(
 ) {
     var descriptionOpen by remember { mutableStateOf(false) }
     var commentsOpen by remember { mutableStateOf(false) }
+    var downloadPicker by remember(w.video.id) { mutableStateOf(false) }
+    var deleteDownloadConfirm by remember(w.video.id) { mutableStateOf(false) }
+    var shareDialogPos by remember(w.video.id) { mutableStateOf<Long?>(null) }
     val listState = rememberLazyListState()
     val details = w.details
     val title = details?.title ?: w.video.title
     val signedIn by controller.signedIn.collectAsState()
+    val x = s.extras()
 
     if (showRelated) {
         LaunchedEffect(listState, w.relatedContinuation) {
@@ -695,7 +699,10 @@ private fun WatchDetails(
                 ActionPill(label = if (w.saved) s.saved else s.save, icon = QMusicIcons.PlaylistAdd, active = w.saved) {
                     if (!controller.openSaveSheet(w.video.id)) onSignIn()
                 }
-                ActionPill(label = s.share, icon = QMusicIcons.Share, active = false) { onShare("https://youtu.be/${w.video.id}") }
+                ActionPill(label = s.share, icon = QMusicIcons.Share, active = false) {
+                    val at = com.qmusic.ui.chat.TogetherVideo.playback?.positionMs?.value ?: 0L
+                    if (!w.isLive() && at >= 5_000L) shareDialogPos = at else onShare("https://youtu.be/${w.video.id}")
+                }
                 // To a conversation, at the second it is at (they open it there).
                 ActionPill(label = com.qmusic.ui.chat.ChatMusic.words().sendToChat, icon = QMusicIcons.Chat, active = false) {
                     val at = com.qmusic.ui.chat.TogetherVideo.playback?.positionMs?.value ?: 0L
@@ -707,7 +714,6 @@ private fun WatchDetails(
                     )
                 }
                 if (controller.canDownload && !w.isLive()) {
-                    val x = s.extras()
                     val downloads by controller.downloads.collectAsState()
                     val dl = downloads.firstOrNull { it.item.id == w.video.id }
                     ActionPill(
@@ -722,9 +728,11 @@ private fun WatchDetails(
                         active = dl?.state == DownloadState.DONE,
                     ) {
                         when (dl?.state) {
-                            null, DownloadState.FAILED -> controller.downloadCurrent()
+                            null, DownloadState.FAILED -> {
+                                if (w.qualities.count { !it.isLive } > 1) downloadPicker = true else controller.downloadCurrent()
+                            }
                             DownloadState.DOWNLOADING, DownloadState.QUEUED -> controller.removeDownload(w.video.id)
-                            DownloadState.DONE -> Unit
+                            DownloadState.DONE -> deleteDownloadConfirm = true
                         }
                     }
                 }
@@ -739,6 +747,24 @@ private fun WatchDetails(
                         controller.dismissSignInPrompt()
                         onSignIn()
                     })
+                }
+            }
+        }
+        if (w.isLive() && details?.liveChatToken != null) {
+            item(key = "live-chat-header") {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(12.dp)).background(VideoColors.Surface).clickable { controller.toggleLiveChat() }.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(8.dp).clip(androidx.compose.foundation.shape.CircleShape).background(VideoColors.Red))
+                    Spacer(Modifier.width(8.dp))
+                    Text(x.liveChat, color = VideoColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Icon(if (w.liveChatOpen) QMusicIcons.ChevronUp else QMusicIcons.ChevronDown, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp))
+                }
+            }
+            if (w.liveChatOpen) {
+                item(key = "live-chat-box") {
+                    LiveChatPanel(w.liveChatMessages, w.liveChatLoading, x.liveChatEmpty)
                 }
             }
         }
@@ -760,7 +786,7 @@ private fun WatchDetails(
             if (w.comments.isEmpty() && w.commentsLoaded && !w.commentsLoading) {
                 item(key = "comments-none") { Text(s.noComments, color = VideoColors.TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(16.dp)) }
             }
-            items(w.comments, key = { "c" + it.id }) { c -> CommentRow(c, w, controller, s, small = false) }
+            items(w.comments, key = { "c" + it.id }) { c -> CommentRow(c, w, controller, s, onSeek = onSeek, small = false) }
             if (w.commentsContinuation != null) {
                 item(key = "comments-more") {
                     Text(
@@ -773,6 +799,140 @@ private fun WatchDetails(
             }
         } else if (showRelated) {
             relatedItems(controller, w, s)
+        }
+    }
+    if (downloadPicker) {
+        val choices = w.qualities.filter { !it.isLive }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { downloadPicker = false },
+            containerColor = VideoColors.Surface,
+            title = { Text(x.downloadQualityTitle, color = VideoColors.Text) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    choices.forEach { q ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable {
+                                downloadPicker = false
+                                controller.downloadCurrent(q)
+                            }.padding(horizontal = 12.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(q.label, color = VideoColors.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            if (q == w.quality) Icon(QMusicIcons.Check, null, tint = VideoColors.Red, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { downloadPicker = false }) { Text(x.cancelLabel, color = VideoColors.TextSecondary) }
+            },
+        )
+    }
+    if (deleteDownloadConfirm) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { deleteDownloadConfirm = false },
+            containerColor = VideoColors.Surface,
+            title = { Text(x.deleteDownloadTitle, color = VideoColors.Text) },
+            text = { Text(x.deleteDownloadConfirm, color = VideoColors.TextSecondary) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    deleteDownloadConfirm = false
+                    controller.removeDownload(w.video.id)
+                }) { Text(x.removeDownload, color = VideoColors.Red) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { deleteDownloadConfirm = false }) { Text(x.cancelLabel, color = VideoColors.Text) }
+            },
+        )
+    }
+    shareDialogPos?.let { atMs ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { shareDialogPos = null },
+            containerColor = VideoColors.Surface,
+            title = { Text(s.share, color = VideoColors.Text) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        x.shareVideoPlain,
+                        color = VideoColors.Text,
+                        fontSize = 15.sp,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable {
+                            shareDialogPos = null
+                            onShare("https://youtu.be/${w.video.id}")
+                        }.padding(horizontal = 12.dp, vertical = 12.dp),
+                    )
+                    Text(
+                        x.shareFromTime(clock(atMs)),
+                        color = VideoColors.Text,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable {
+                            shareDialogPos = null
+                            onShare("https://youtu.be/${w.video.id}?t=${atMs / 1000}")
+                        }.padding(horizontal = 12.dp, vertical = 12.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { shareDialogPos = null }) { Text(x.cancelLabel, color = VideoColors.TextSecondary) }
+            },
+        )
+    }
+}
+
+/** Expandable real-time chat box for live streams. */
+@Composable
+private fun LiveChatPanel(
+    messages: List<com.qmusic.engine.video.VideoLiveChatMessage>,
+    loading: Boolean,
+    emptyText: String,
+) {
+    val chatState = rememberLazyListState()
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) chatState.animateScrollToItem(messages.lastIndex)
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .height(260.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(VideoColors.Surface),
+    ) {
+        when {
+            loading && messages.isEmpty() -> Box(Modifier.fillMaxSize(), Alignment.Center) { Loading() }
+            messages.isEmpty() -> Box(Modifier.fillMaxSize().padding(16.dp), Alignment.Center) {
+                Text(emptyText, color = VideoColors.TextSecondary, fontSize = 13.sp)
+            }
+            else -> LazyColumn(
+                state = chatState,
+                modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(messages, key = { it.id }) { m ->
+                    Row(verticalAlignment = Alignment.Top, modifier = Modifier.fillMaxWidth()) {
+                        Avatar(m.avatar, 24.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(m.author, color = VideoColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                m.amount?.let { amt ->
+                                    Text(
+                                        amt,
+                                        color = Color.Black,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(VideoColors.Sponsor).padding(horizontal = 5.dp, vertical = 1.dp),
+                                    )
+                                }
+                            }
+                            if (m.text.isNotEmpty()) {
+                                Text(m.text, color = VideoColors.Text, fontSize = 13.sp, lineHeight = 18.sp)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -862,15 +1022,22 @@ private fun CommentInput(w: WatchState, s: VideoStrings, signedIn: Boolean, onSi
     }
 }
 
-/** One comment, with its replies opened under it when they were asked for. */
+/** One comment, with clickable timestamps and its replies opened under it when asked for. */
 @Composable
-private fun CommentRow(c: VideoComment, w: WatchState, controller: VideosController, s: VideoStrings, small: Boolean) {
+private fun CommentRow(c: VideoComment, w: WatchState, controller: VideosController, s: VideoStrings, onSeek: (Long) -> Unit, small: Boolean) {
     Row(modifier = Modifier.fillMaxWidth().padding(start = if (small) 56.dp else 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)) {
         Avatar(c.avatar, if (small) 24.dp else 32.dp)
         Spacer(Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(listOfNotNull(c.author, c.published).joinToString(" · "), color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(c.text, color = VideoColors.Text, fontSize = 14.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 2.dp))
+            val linked = remember(c.text) { linkedDescription(c.text, VideoColors.Link) }
+            @Suppress("DEPRECATION")
+            androidx.compose.foundation.text.ClickableText(
+                text = linked,
+                style = androidx.compose.ui.text.TextStyle(color = VideoColors.Text, fontSize = 14.sp, lineHeight = 19.sp),
+                modifier = Modifier.padding(top = 2.dp),
+                onClick = { offset -> linked.timeAt(offset)?.let(onSeek) },
+            )
             Row(modifier = Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 c.likes?.let { Text("♥ $it", color = VideoColors.TextSecondary, fontSize = 12.sp) }
                 val opened = w.replies.containsKey(c.id)
@@ -888,7 +1055,7 @@ private fun CommentRow(c: VideoComment, w: WatchState, controller: VideosControl
             }
         }
     }
-    w.replies[c.id]?.forEach { reply -> CommentRow(reply, w, controller, s, small = true) }
+    w.replies[c.id]?.forEach { reply -> CommentRow(reply, w, controller, s, onSeek = onSeek, small = true) }
     if (w.replies.containsKey(c.id) && w.repliesNext[c.id] != null) {
         Text(
             if (c.id in w.repliesLoading) "…" else s.loadMore,

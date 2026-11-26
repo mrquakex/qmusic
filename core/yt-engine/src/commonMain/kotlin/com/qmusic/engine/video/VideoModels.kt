@@ -80,6 +80,8 @@ data class VideoDetails(
     /** Asks for the comments; null when they are off. */
     val commentsToken: String? = null,
     val isLive: Boolean = false,
+    /** Continuation token for a live stream's chat (null when unavailable or chat is disabled). */
+    val liveChatToken: String? = null,
 )
 
 /** A channel page: its header and the first page of its videos. */
@@ -144,3 +146,28 @@ data class VideoQuality(
 ) {
     val label: String get() = if (isLive) "Auto" else if (fps > 30) "${height}p$fps" else "${height}p"
 }
+
+/** One dubbed/original audio track offered alongside a video's separate picture streams. */
+data class VideoAudioTrack(
+    val id: String,
+    val label: String,
+    val url: String,
+    val isOriginal: Boolean = false,
+)
+
+/** One message in a live stream's chat. */
+data class VideoLiveChatMessage(
+    val id: String,
+    val author: String,
+    val avatar: String?,
+    val text: String,
+    val badge: String? = null,
+    val amount: String? = null,
+)
+
+/** One polled batch of live chat messages and how long to wait before asking again. */
+data class VideoLiveChatPage(
+    val messages: List<VideoLiveChatMessage> = emptyList(),
+    val continuation: String? = null,
+    val timeoutMs: Long = 4_000L,
+)

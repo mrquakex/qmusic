@@ -183,10 +183,22 @@ private fun ChatAppContent(
     }
     val calls = controller.calls
     val onCall: ((ChatUser, Boolean) -> Unit)? = calls?.let { service ->
-        { other, video -> askPermissions(video) { granted -> if (granted) service.call(other, video) else controller.reportError(s.callPermission) } }
+        { other, video ->
+            if (!controller.admin.featureEnabled { it.calls }) {
+                controller.reportInfo(if (s.english) "Calls are temporarily disabled" else "Aramalar geçici olarak kapalı")
+            } else {
+                askPermissions(video) { granted -> if (granted) service.call(other, video) else controller.reportError(s.callPermission) }
+            }
+        }
     }
     val onGroupCall: ((ChatUser, Boolean) -> Unit)? = controller.groupCalls?.let { service ->
-        { group, video -> askPermissions(video) { granted -> if (granted) service.join(group, video) else controller.reportError(s.callPermission) } }
+        { group, video ->
+            if (!controller.admin.featureEnabled { it.calls }) {
+                controller.reportInfo(if (s.english) "Calls are temporarily disabled" else "Aramalar geçici olarak kapalı")
+            } else {
+                askPermissions(video) { granted -> if (granted) service.join(group, video) else controller.reportError(s.callPermission) }
+            }
+        }
     }
 
     Box(modifier.fillMaxSize().background(BgRoot)) {
@@ -1132,7 +1144,8 @@ private fun ConversationPage(
     val title = group?.name ?: other.name
     val blocked by controller.blocked.collectAsState()
     val isBlocked = !isGroup && other.uid in blocked
-    val pins by rememberLastKnown("pins/" + other.uid, emptyList()) { controller.pinned(other) }
+    val rawPins by rememberLastKnown("pins/" + other.uid, emptyList()) { controller.pinned(other) }
+    val pins = rawPins.filter { it.expireAt == 0L || it.expireAt > controller.serverNow() }
     val openedMap by remember(other.uid) { controller.opened(other) }.collectAsState(initial = emptyMap())
     val iAmAdmin = group?.members?.any { it.user.uid == me.uid && it.admin } == true
     // A group where only admins write: the box gives way to a note for everyone else.
@@ -1167,6 +1180,8 @@ private fun ConversationPage(
         androidx.compose.runtime.snapshotFlow { text }.collect { typed: String -> if (editing == null) ChatDrafts.set(draftId, typed) }
     }
     var menu by remember { mutableStateOf(false) }
+    var wallpaperDialog by remember { mutableStateOf(false) }
+    var pinTarget by remember { mutableStateOf<ChatMessage?>(null) }
     val attachState = remember { mutableStateOf(false) }
     var attach by attachState
     val replyToState = remember(other.uid) { mutableStateOf<ChatMessage?>(null) }
@@ -1490,7 +1505,9 @@ private fun ConversationPage(
                 }
                 if (isGroup && groupCalls != null) {
                     val startGroupCall: (Boolean) -> Unit = { video ->
-                        if (callPeople.size >= MAX_GROUP_CALL) {
+                        if (!controller.admin.featureEnabled { it.calls }) {
+                            controller.reportInfo(if (s.english) "Calls are temporarily disabled" else "Aramalar geçici olarak kapalı")
+                        } else if (callPeople.size >= MAX_GROUP_CALL) {
                             controller.reportError(s.groupCallFull)
                         } else {
                             askMic(video) { granted -> if (granted) groupCalls.join(other.copy(name = title), video) else controller.reportError(s.callPermission) }
@@ -1525,6 +1542,13 @@ private fun ConversationPage(
                                 leadingIcon = { Icon(QMusicIcons.Timer, null, tint = Ink) },
                                 text = { Text(s.disappearing + if (ttl > 0) " · " + ttlLabel(ttl, s) else "", color = TextPrimary) },
                                 onClick = { menu = false; ttlDialog = true },
+                            )
+                        }
+                        if (chatId != null) {
+                            DropdownMenuItem(
+                                leadingIcon = { Icon(QMusicIcons.Samples, null, tint = Ink) },
+                                text = { Text(s.chatWallpaper, color = TextPrimary) },
+                                onClick = { menu = false; wallpaperDialog = true },
                             )
                         }
                         if (!isClaude) {
@@ -1691,6 +1715,8 @@ private fun ConversationPage(
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
+            val wallpaperIndex by controller.wallpaper.collectAsState()
+            ChatWallpaperBackdrop(chatId, wallpaperIndex)
             val list = messages
             val shown = rows
             if (list == null || shown == null) {
@@ -1720,7 +1746,6 @@ private fun ConversationPage(
                     val line = shown.indexOfFirst { it is ListRow.Unread }
                     if (line > 3) listState.scrollToItem(line, -200)
                 }
-                val wallpaperIndex by controller.wallpaper.collectAsState()
                 // They are writing (or recording): a bubble at the very bottom, as on WhatsApp; seen at once when the
                 // person is at the bottom of the conversation.
                 val typingBubble = (typing || recordingThem) && other.uid != CLAUDE_BOT_UID
@@ -1729,7 +1754,7 @@ private fun ConversationPage(
                 }
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize().background(ChatWallpapers.getOrNull(wallpaperIndex) ?: Color.Transparent),
+                    modifier = Modifier.fillMaxSize(),
                     reverseLayout = true,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -1790,7 +1815,10 @@ private fun ConversationPage(
                                     },
                                     onForward = if (m.viewOnce || secretChat || m.locked) null else ({ forwarding = listOf(m) }),
                                     pinned = pins.any { it.messageId == m.id },
-                                    onPin = if (canPin && !m.deleted && !m.pending) ({ controller.pin(other, m, quoteText(m, s.english), pins.none { it.messageId == m.id }) }) else null,
+                                    onPin = if (canPin && !m.deleted && !m.pending) ({
+                                        if (pins.any { it.messageId == m.id }) controller.pin(other, m, quoteText(m, s.english), false)
+                                        else pinTarget = m
+                                    }) else null,
                                     openedOnce = if (mine) openedMap[m.id].orEmpty().any { it != me.uid } else me.uid in openedMap[m.id].orEmpty(),
                                     onOpenOnce = { viewOnceOpen = m },
                                     mentionsMe = me.uid in m.mentions,
@@ -1813,6 +1841,7 @@ private fun ConversationPage(
                                     pollVotes = pollVotes[m.id].orEmpty(),
                                     onVote = { picks -> controller.vote(other, m, picks) },
                                     onShowVoters = { votersFor = m },
+                                    onClosePoll = if (mine && m.poll != null && !m.poll.closed) ({ controller.closePoll(other, m) }) else null,
                                     onSaveContact = { c -> saveContact(c) },
                                     onShowReactions = { reactionsFor = m },
                                     s = s,
@@ -1882,12 +1911,35 @@ private fun ConversationPage(
         } else if (writeLocked) {
             Text(s.onlyAdminsCanSend, color = TextSecondary, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp))
         } else {
-            // "@" at the end of the box in a group: its members to name.
+            // "@" at the end of the box in a group: @herkes / @everyone and individual members.
             val typedMention = if (isGroup) Regex("(^|\\s)@([^\\s@]*)$").find(text)?.groupValues?.get(2) else null
             if (typedMention != null) {
+                val allTag = s.everyoneTag
+                val showEveryone = others.isNotEmpty() && (
+                    allTag.startsWith(typedMention, ignoreCase = true) ||
+                        "herkes".startsWith(typedMention, ignoreCase = true) ||
+                        "everyone".startsWith(typedMention, ignoreCase = true)
+                    )
                 val people = group?.joined.orEmpty().map { it.user }.filter { it.uid != me.uid && it.name.contains(typedMention, ignoreCase = true) }.take(6)
-                if (people.isNotEmpty()) {
+                if (showEveryone || people.isNotEmpty()) {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(14.dp)).background(DarkSurfaceVariant)) {
+                        if (showEveryone) {
+                            Row(
+                                Modifier.fillMaxWidth().clickable {
+                                    text = text.dropLast(typedMention.length) + allTag + " "
+                                }.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(Modifier.size(30.dp).clip(CircleShape).background(Ink.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
+                                    Icon(QMusicIcons.Group, contentDescription = null, tint = Ink, modifier = Modifier.size(16.dp))
+                                }
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("@$allTag", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    Text(s.everyoneNote, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
                         people.forEach { person ->
                             Row(
                                 Modifier.fillMaxWidth().clickable {
@@ -1944,7 +1996,7 @@ private fun ConversationPage(
                     },
                 )
             }
-            if (!isClaude && text.startsWith("/")) {
+            if (!isClaude && controller.admin.featureEnabled { it.games } && text.startsWith("/")) {
                 com.qmusic.ui.chat.games.GameSlashCommands(
                     query = text,
                     isGroup = isGroup,
@@ -2007,6 +2059,10 @@ private fun ConversationPage(
                 val e = editing
                 val gameCmd = if (e == null && !isClaude && text.trim().startsWith("/")) com.qmusic.ui.chat.games.parseGameCommand(text) else null
                 if (gameCmd != null) {
+                    if (!controller.admin.featureEnabled { it.games }) {
+                        controller.reportInfo(if (s.english) "Games are temporarily disabled" else "Oyunlar geçici olarak kapalı")
+                        return@submit
+                    }
                     text = ""
                     controller.stopTyping(other)
                     com.qmusic.ui.chat.games.handleGameSlashCommand(
@@ -2020,12 +2076,17 @@ private fun ConversationPage(
                     if (text.trim() != e.text) controller.edit(other, e, text)
                     editing = null
                     text = ""
-                } else if (controller.send(other, text, replyTo = quoted(), mentions = mentionNames.filter { (_, name) -> text.contains("@$name") }.keys)) {
-                    text = ""
-                    unreadLineOn = false
-                    mentionNames = emptyMap()
-                    replyTo = null
-                    controller.stopTyping(other)
+                } else {
+                    val everyoneTagged = isGroup && Regex("(^|\\s)@(herkes|everyone)(\\s|$|[.,!?:;])", RegexOption.IGNORE_CASE).containsMatchIn(text)
+                    val taggedUids = mentionNames.filter { (_, name) -> text.contains("@$name") }.keys +
+                        if (everyoneTagged) others.toSet() else emptySet()
+                    if (controller.send(other, text, replyTo = quoted(), mentions = taggedUids)) {
+                        text = ""
+                        unreadLineOn = false
+                        mentionNames = emptyMap()
+                        replyTo = null
+                        controller.stopTyping(other)
+                    }
                 }
             }
             ConversationInputRow(
@@ -2054,7 +2115,7 @@ private fun ConversationPage(
                 }
                 if (!isClaude) add(AttachAction(s.poll, QMusicIcons.Poll, Color(0xFFFFB300)) { attach = false; pollDialog = true })
                 if (!isClaude) add(AttachAction(if (tr) "Etkinlik" else "Event", QMusicIcons.Timer, Color(0xFFE53958)) { attach = false; eventDialog = true })
-                if (!isClaude) add(AttachAction(s.playGame, QMusicIcons.Dice, Color(0xFF8B5CF6)) { attach = false; gamePickerOpen = true })
+                if (!isClaude && controller.admin.featureEnabled { it.games }) add(AttachAction(s.playGame, QMusicIcons.Dice, Color(0xFF8B5CF6)) { attach = false; gamePickerOpen = true })
                 // What plays in Nuvelo now: sent as a card.
                 shareables().forEach { item ->
                     val song = item.kind == ShareKind.SONG
@@ -2150,6 +2211,13 @@ private fun ConversationPage(
             onClosePicker = { gamePickerOpen = false },
             onOpenGame = { openGameId = it },
         )
+    }
+    pinTarget?.let { m ->
+        PinDurationDialog(m, other, s, controller) { pinTarget = null }
+    }
+    if (wallpaperDialog && chatId != null) {
+        val wallIdx by controller.wallpaper.collectAsState()
+        ChatWallpaperDialog(chatId, wallIdx, s) { wallpaperDialog = false }
     }
     liveMapFocus?.let { focus ->
         LiveMapScreen(
@@ -2539,8 +2607,8 @@ private fun ConversationDialogs(
             file = file,
             s = s,
             caption = text,
-            onSend = { caption ->
-                controller.sendFile(other, file, caption, quoted())
+            onSend = { caption, hd ->
+                controller.sendFile(other, file, caption, quoted(), hd = hd)
                 text = ""
                 replyTo = null
                 pendingVideo = null
@@ -2719,6 +2787,29 @@ private fun ConversationDialogs(
     if (sharedListOpen && chatId != null) {
         SharedListPage(controller, s, me, chatId, title) { sharedListOpen = false }
     }
+}
+
+@Composable
+private fun PinDurationDialog(
+    message: ChatMessage,
+    other: ChatUser,
+    s: ChatStrings,
+    controller: ChatController,
+    onDismiss: () -> Unit,
+) {
+    val preview = quoteText(message, s.english)
+    val now = controller.serverNow()
+    ChoiceDialog(
+        title = s.pinDurationTitle,
+        choices = listOf(
+            s.pin24h to { controller.pin(other, message, preview, true, now + 24L * 3600_000L) },
+            s.pin7d to { controller.pin(other, message, preview, true, now + 7L * 24 * 3600_000L) },
+            s.pin30d to { controller.pin(other, message, preview, true, now + 30L * 24 * 3600_000L) },
+            s.pinForever to { controller.pin(other, message, preview, true, 0L) },
+        ),
+        s = s,
+        onDismiss = onDismiss,
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -3063,17 +3154,18 @@ private fun VoicePreviewBar(
     }
 }
 
-/** Previewing a picked or camera-captured video before sending, with an optional caption. */
+/** Previewing a picked or camera-captured video before sending, with optional HD toggle and caption. */
 @Composable
 private fun SendVideoPage(
     file: PickedFile,
     s: ChatStrings,
     caption: String,
-    onSend: (String) -> Unit,
+    onSend: (String, Boolean) -> Unit,
     onCancel: () -> Unit,
 ) {
     PlatformBackHandler(enabled = true) { onCancel() }
     var text by remember(file.location) { mutableStateOf(caption) }
+    var hd by remember(file.location) { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         Column(Modifier.fillMaxSize().imePadding()) {
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -3084,8 +3176,21 @@ private fun SendVideoPage(
                     if (file.size > 0) sizeLabel(file.size) else "",
                 ).filter { it.isNotBlank() }.joinToString(" · ")
                 if (meta.isNotEmpty()) {
-                    Text(meta, color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp, modifier = Modifier.padding(end = 12.dp))
+                    Text(meta, color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp, modifier = Modifier.padding(end = 10.dp))
                 }
+                Text(
+                    "HD",
+                    color = if (hd) Color.Black else Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .padding(end = 10.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (hd) Color.White else Color.Transparent)
+                        .border(1.5.dp, Color.White, RoundedCornerShape(8.dp))
+                        .clickable { hd = !hd }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
             }
             VideoMessagePlayer(file.location, Modifier.weight(1f).fillMaxWidth())
             Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(8.dp), verticalAlignment = Alignment.Bottom) {
@@ -3103,7 +3208,7 @@ private fun SendVideoPage(
                 }
                 Spacer(Modifier.width(6.dp))
                 Box(
-                    Modifier.size(44.dp).clip(CircleShape).background(Color.White).clickable { onSend(text) },
+                    Modifier.size(44.dp).clip(CircleShape).background(Color.White).clickable { onSend(text, hd) },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(QMusicIcons.Send, contentDescription = s.send, tint = Color.Black, modifier = Modifier.size(20.dp))
@@ -3656,45 +3761,28 @@ private fun withDays(list: List<ChatMessage>, unreadAfter: Long = Long.MAX_VALUE
     return out
 }
 
-/** A message's text with its links tappable. */
+/** A message's text with inline formatting (*bold*, _italic_, ~strike~, `code`, ||spoiler||) and clickable links. */
 @Composable
 private fun LinkedText(text: String, color: Color, linkColor: Color, modifier: Modifier) {
-    val found = links(text)
-    if (found.isEmpty()) {
-        // Calls logged in the conversation ("📞 Missed call"): a drawn phone in front, not the emoji.
-        val parts = ChatPreview.split(text, false)
-        if (parts.kind == PreviewKind.CALL || parts.kind == PreviewKind.MISSED_CALL || parts.kind == PreviewKind.VIDEO_CALL) {
-            Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    ChatPreview.icon(parts.kind),
-                    contentDescription = null,
-                    tint = if (parts.kind == PreviewKind.MISSED_CALL) Color(0xFFFF5A5F) else color,
-                    modifier = Modifier.padding(end = 8.dp).size(18.dp),
-                )
-                Text(text = parts.text, color = color, fontSize = 16.sp, lineHeight = 21.sp)
-            }
-            return
+    // Calls logged in the conversation ("📞 Missed call"): a drawn phone in front, not the emoji.
+    val parts = ChatPreview.split(text, false)
+    if (parts.kind == PreviewKind.CALL || parts.kind == PreviewKind.MISSED_CALL || parts.kind == PreviewKind.VIDEO_CALL) {
+        Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                ChatPreview.icon(parts.kind),
+                contentDescription = null,
+                tint = if (parts.kind == PreviewKind.MISSED_CALL) Color(0xFFFF5A5F) else color,
+                modifier = Modifier.padding(end = 8.dp).size(18.dp),
+            )
+            Text(text = parts.text, color = color, fontSize = 16.sp, lineHeight = 21.sp)
         }
+        return
+    }
+    if (!ChatTextFormat.hasFormatting(text)) {
         Text(text = emojiFitted(text), color = color, fontSize = 16.sp, lineHeight = 21.sp, style = androidx.compose.ui.text.TextStyle(lineHeightStyle = EvenLines), modifier = modifier)
         return
     }
-    val annotated = androidx.compose.ui.text.buildAnnotatedString {
-        var at = 0
-        for (link in found) {
-            val start = text.indexOf(link, at)
-            if (start < 0) continue
-            append(text.substring(at, start))
-            withLink(
-                androidx.compose.ui.text.LinkAnnotation.Url(
-                    link,
-                    androidx.compose.ui.text.TextLinkStyles(androidx.compose.ui.text.SpanStyle(color = linkColor, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)),
-                ),
-            ) { append(link) }
-            at = start + link.length
-        }
-        append(text.substring(at))
-    }
-    Text(text = annotated, color = color, fontSize = 16.sp, lineHeight = 21.sp, modifier = modifier)
+    FormattedMessageText(text = text, color = color, linkColor = linkColor, modifier = modifier)
 }
 
 /**
@@ -3804,6 +3892,7 @@ private fun Bubble(
     pollVotes: Map<String, List<Int>> = emptyMap(),
     onVote: (List<Int>) -> Unit = {},
     onShowVoters: () -> Unit = {},
+    onClosePoll: (() -> Unit)? = null,
     onSaveContact: (ChatContact) -> Unit = {},
     onShowReactions: () -> Unit = {},
     pinned: Boolean = false,
@@ -3833,7 +3922,16 @@ private fun Bubble(
         return
     }
     var menu by remember { mutableStateOf(false) }
+    var reactPickerOpen by remember { mutableStateOf(false) }
     LaunchedEffect(showMenu) { if (showMenu) menu = true }
+    if (reactPickerOpen) {
+        ReactionEmojiPickerDialog(
+            currentEmoji = reactions[myUid],
+            s = s,
+            onPick = { emoji -> onReact(if (reactions[myUid] == emoji) null else emoji) },
+            onDismiss = { reactPickerOpen = false },
+        )
+    }
     // A tap on a sticker: shown big, and kept among the person's own with a tap (as on WhatsApp).
     var stickerOpen by remember { mutableStateOf(false) }
     if (stickerOpen) m.gif?.let { g -> StickerSheet(g, s) { stickerOpen = false } }
@@ -4065,7 +4163,7 @@ private fun Bubble(
                 }
             }
             if (!m.deleted) {
-                m.poll?.let { poll -> PollCard(poll, pollVotes, myUid, mine, s, onVote = onVote, onShowVoters = onShowVoters) }
+                m.poll?.let { poll -> PollCard(poll, pollVotes, myUid, mine, s, onVote = onVote, onShowVoters = onShowVoters, onClosePoll = onClosePoll) }
                 m.event?.let { event -> EventCard(event, pollVotes, myUid, mine, onVote = onVote) }
                 m.location?.let { place ->
                     if (place.live) {
@@ -4156,6 +4254,7 @@ private fun Bubble(
                 Row(
                     Modifier.padding(horizontal = 8.dp).then(Modifier.shadow(6.dp, RoundedCornerShape(24.dp))).clip(RoundedCornerShape(24.dp))
                         .background(DarkSurfaceVariant).padding(horizontal = 6.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     REACTIONS.forEach { emoji ->
                         val chosen = reactions[myUid] == emoji
@@ -4168,11 +4267,19 @@ private fun Bubble(
                             contentAlignment = Alignment.Center,
                         ) { Text(emoji, fontSize = 22.sp) }
                     }
+                    Box(
+                        Modifier.size(34.dp).clip(CircleShape).background(Ink.copy(alpha = 0.10f))
+                            .clickable {
+                                onToggleSelect()
+                                reactPickerOpen = true
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(QMusicIcons.Add, contentDescription = s.moreReactions, tint = Ink, modifier = Modifier.size(18.dp)) }
                 }
             }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false; if (showMenu) onMenuClosed() }, containerColor = DarkSurfaceVariant) {
-            Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+            Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 REACTIONS.forEach { emoji ->
                     val chosen = reactions[myUid] == emoji
                     Box(
@@ -4188,6 +4295,18 @@ private fun Bubble(
                         contentAlignment = Alignment.Center,
                     ) { Text(emoji, fontSize = 22.sp) }
                 }
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(Ink.copy(alpha = 0.10f))
+                        .clickable {
+                            menu = false
+                            if (showMenu) onMenuClosed()
+                            reactPickerOpen = true
+                        },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(QMusicIcons.Add, contentDescription = s.moreReactions, tint = Ink, modifier = Modifier.size(18.dp)) }
             }
             if (!m.deleted) DropdownMenuItem(text = { Text(s.reply, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onReply() })
             if (onCopy != null && m.text.isNotEmpty() && !m.deleted) DropdownMenuItem(text = { Text(s.copy, color = TextPrimary) }, onClick = { menu = false; if (showMenu) onMenuClosed(); onCopy() })

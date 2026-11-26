@@ -111,6 +111,12 @@ private object PipePipeStreamResolver : ExtractorStreamResolver {
             }
         }
 
+    override suspend fun videoAudioTracks(videoId: String): List<com.qmusic.engine.video.VideoAudioTrack> =
+        withContext(Dispatchers.IO) {
+            check(initialised)
+            audioTracksOf(info(videoId))
+        }
+
     override suspend fun previewFrames(videoId: String): PreviewFrames? =
         withContext(Dispatchers.IO) {
             check(initialised)
@@ -308,4 +314,37 @@ private fun dev.maxrave.pipepipe.extractor.stream.AudioStream.trackRank(): Int {
 private fun List<dev.maxrave.pipepipe.extractor.stream.AudioStream>.originalSound(): List<dev.maxrave.pipepipe.extractor.stream.AudioStream> {
     val best = minOfOrNull { it.trackRank() } ?: return this
     return filter { it.trackRank() == best }
+}
+
+/** Distinct audio language/dub tracks for a video, original track first, highest bitrate stream per track. */
+private fun audioTracksOf(info: StreamInfo): List<com.qmusic.engine.video.VideoAudioTrack> {
+    val streams: List<dev.maxrave.pipepipe.extractor.stream.AudioStream> = info.audioStreams.orEmpty().filter { it.isUrl }
+    if (streams.isEmpty()) return emptyList()
+    val grouped: Map<String, List<dev.maxrave.pipepipe.extractor.stream.AudioStream>> = streams.groupBy { s ->
+        s.audioTrackId?.takeIf { it.isNotBlank() }
+            ?: s.audioTrackName?.takeIf { it.isNotBlank() }
+            ?: "default"
+    }
+    if (grouped.size <= 1) return emptyList()
+    val minRank = streams.minOf { it.trackRank() }
+    return grouped.entries.map { (key, list) ->
+        val best = list.sortedWith(
+            compareByDescending<dev.maxrave.pipepipe.extractor.stream.AudioStream> { anyAudioFormat || it.format?.mimeType == "audio/mp4" }
+                .thenByDescending { it.averageBitrate },
+        ).first()
+        val rawLabel = best.audioTrackName?.takeIf { it.isNotBlank() } ?: key
+        val original = best.trackRank() == minRank
+        Triple(
+            best.trackRank(),
+            rawLabel.lowercase(),
+            com.qmusic.engine.video.VideoAudioTrack(
+                id = key,
+                label = rawLabel,
+                url = best.content,
+                isOriginal = original,
+            ),
+        )
+    }.sortedWith(compareBy<Triple<Int, String, com.qmusic.engine.video.VideoAudioTrack>> { it.first }.thenBy { it.second })
+        .map { it.third }
+        .distinctBy { it.label.lowercase() }
 }

@@ -182,7 +182,8 @@ private fun readableAccent(c: Color): Color {
 internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStrings, controller: VideosController, fullscreen: Boolean, starting: Boolean = false) {
     var visible by remember { mutableStateOf(true) }
     var sheet by remember { mutableStateOf(false) }
-    var speed by remember { mutableStateOf(1f) }
+    val speed by controller.playbackSpeed.collectAsState()
+    val looping by controller.looping.collectAsState()
     var fast by remember { mutableStateOf(false) }
     var scrubbing by remember { mutableStateOf<Float?>(null) }
     var locked by remember { mutableStateOf(false) }
@@ -203,6 +204,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
     val autoplay by controller.autoplay.collectAsState()
     val sleep by controller.sleep.collectAsState()
     val skipTick by controller.skipTick.collectAsState()
+    val lastSkipped by controller.lastSkipped.collectAsState()
     val preview by controller.preview.collectAsState()
     // The preview pictures over the seek bar: the sheets of where it is now and the next ones are fetched ahead, so
     // a held bar shows its picture at once rather than a black box while the sheet comes.
@@ -223,8 +225,9 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
     LaunchedEffect(skipTick) {
         if (skipTick > 0) {
             note = x.sponsorSkipped
-            delay(1_800)
+            delay(4_000)
             note = null
+            controller.clearLastSkipped()
         }
     }
     val device = rememberDeviceControls()
@@ -467,7 +470,40 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
         ) {
             FastPill(x.holdToSeekHint)
         }
-        if (!fast) (zoomNote ?: note)?.let { Pill(it, Modifier.align(Alignment.TopCenter).padding(top = 12.dp), small = true) }
+        if (!fast) {
+            if (zoomNote != null) {
+                Pill(zoomNote!!, Modifier.align(Alignment.TopCenter).padding(top = 12.dp), small = true)
+            } else if (note != null) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 12.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.Black.copy(alpha = 0.68f))
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(note!!, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    lastSkipped?.let { seg ->
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            x.sponsorUndo,
+                            color = VideoColors.Sponsor,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable {
+                                    note = null
+                                    controller.clearLastSkipped()
+                                    playback.seekTo(seg.startMs)
+                                }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+            }
+        }
         hud?.let { (label, value) -> Pill("$label  ${(value * 100).toInt()}%", Modifier.align(Alignment.Center)) }
 
         if ((visible || ended) && swipeTarget == null) {
@@ -601,26 +637,48 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                 Box(Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
                     SwitchRow(x.autoplay, null, autoplay != "0") { controller.setAutoplay(it) }
                 }
+                if (!live) {
+                    Box(Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+                        SwitchRow(x.loopVideo, null, looping) { controller.setLooping(it) }
+                    }
+                }
                 if (w.qualities.size > 1) {
                     SheetSection(s.quality) {
                         items(w.qualities) { q -> LabelChip(q.label, q == w.quality) { controller.selectQuality(q) } }
+                    }
+                }
+                if (!live && w.audioTracks.size > 1) {
+                    SheetSection(x.audioTrack) {
+                        items(w.audioTracks, key = { it.id + it.label }) { track ->
+                            val label = if (track.isOriginal && !track.label.contains(x.originalAudio, ignoreCase = true) && !track.label.contains("original", ignoreCase = true)) {
+                                "${track.label} (${x.originalAudio})"
+                            } else {
+                                track.label
+                            }
+                            LabelChip(label, track == w.audioTrack) { controller.selectAudioTrack(track) }
+                        }
                     }
                 }
                 if (!live) {
                     SheetSection(s.speed) {
                         items(SPEEDS) { value ->
                             LabelChip(speedLabel(value), value == speed) {
-                                speed = value
+                                controller.setPlaybackSpeed(value)
                                 playback.setSpeed(value)
                             }
                         }
                     }
                 }
                 if (w.captions.isNotEmpty()) {
+                    val translated = w.captions.filter { it.language.endsWith("-auto-tlang") }
+                    val manual = w.captions.filter { !it.auto && !it.language.endsWith("-auto-tlang") }.take(6)
+                    val auto = w.captions.filter { it.auto && !it.language.endsWith("-auto-tlang") }.take(2)
                     SheetSection(s.captions) {
                         item { LabelChip(s.captionsOff, w.caption == null) { controller.selectCaption(null) } }
-                        // The person's own words first, then the machine's, a handful of each.
-                        items(w.captions.filter { !it.auto }.take(6) + w.captions.filter { it.auto }.take(2)) { track ->
+                        items(translated) { track ->
+                            LabelChip(track.label, track == w.caption) { controller.selectCaption(track) }
+                        }
+                        items(manual + auto) { track ->
                             LabelChip(if (track.auto) "${track.label} (auto)" else track.label, track == w.caption) { controller.selectCaption(track) }
                         }
                     }

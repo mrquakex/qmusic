@@ -32,6 +32,10 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
     override val myBan: StateFlow<AdminBan?> = _myBan.asStateFlow()
     private val _minVersion = MutableStateFlow<String?>(null)
     override val minVersion: StateFlow<String?> = _minVersion.asStateFlow()
+    private val _recommendedVersion = MutableStateFlow<String?>(null)
+    override val recommendedVersion: StateFlow<String?> = _recommendedVersion.asStateFlow()
+    private val _features = MutableStateFlow(FeatureFlags())
+    override val features: StateFlow<FeatureFlags> = _features.asStateFlow()
     private val _maintenance = MutableStateFlow(Maintenance())
     override val maintenance: StateFlow<Maintenance> = _maintenance.asStateFlow()
     private val _spam = MutableStateFlow(SpamGuard())
@@ -43,8 +47,17 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
     private val attached = mutableListOf<Pair<Query, ValueEventListener>>()
 
     init {
-        // The least version is for everyone, signed in or not.
+        // The least version, recommended version and feature switches are for everyone, signed in or not.
         root.child("appConfig").child("minVersion").addValueEventListener(listener { _minVersion.value = it?.getValue(String::class.java) })
+        root.child("appConfig").child("recommendedVersion").addValueEventListener(listener { _recommendedVersion.value = it?.getValue(String::class.java) })
+        root.child("appConfig").child("features").addValueEventListener(listener { s ->
+            _features.value = FeatureFlags(
+                games = s?.child("games")?.getValue(Boolean::class.java) != false,
+                calls = s?.child("calls")?.getValue(Boolean::class.java) != false,
+                statuses = s?.child("statuses")?.getValue(Boolean::class.java) != false,
+                newChats = s?.child("newChats")?.getValue(Boolean::class.java) != false,
+            )
+        })
         root.child("appConfig").child("maintenance").addValueEventListener(listener { s ->
             _maintenance.value = Maintenance(
                 on = s?.child("on")?.getValue(Boolean::class.java) == true,
@@ -219,6 +232,7 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
                 at = a.child("at").getValue(Long::class.java) ?: 0L,
                 done = a.child("done").getValue(Boolean::class.java) == true,
                 error = a.child("error").getValue(String::class.java),
+                result = a.child("result").getValue(String::class.java),
             )
         }.orEmpty().sortedByDescending { it.at }
     }
@@ -247,6 +261,20 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
                         files = e.child("files").getValue(Int::class.java) ?: 0,
                     )
                 },
+                uptimeSec = it.child("uptimeSec").getValue(Long::class.java) ?: 0L,
+                memUsedMb = it.child("memUsedMb").getValue(Long::class.java) ?: 0L,
+                memTotalMb = it.child("memTotalMb").getValue(Long::class.java) ?: 0L,
+                nodeRssMb = it.child("nodeRssMb").getValue(Long::class.java) ?: 0L,
+                backupAt = it.child("backupAt").getValue(Long::class.java) ?: 0L,
+                backupBytes = it.child("backupBytes").getValue(Long::class.java) ?: 0L,
+                backupCount = it.child("backupCount").getValue(Int::class.java) ?: 0,
+                gamesTotal = it.child("gamesTotal").getValue(Long::class.java) ?: 0L,
+                gamesActive = it.child("gamesActive").getValue(Int::class.java) ?: 0,
+                gamesByKind = it.child("gamesByKind").children.mapNotNull { g ->
+                    val k = g.key ?: return@mapNotNull null
+                    val v = g.getValue(Int::class.java) ?: return@mapNotNull null
+                    k to v
+                }.toMap(),
             )
         }
     }
@@ -269,6 +297,33 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
                 trace = c.child("trace").getValue(String::class.java).orEmpty(),
             )
         }.orEmpty().sortedByDescending { it.at }
+    }
+
+    override fun callDebug(): Flow<List<CallDebugEntry>> = snapshots(root.child("callDebug")).map { snap ->
+        buildList {
+            snap?.children?.forEach { userSnap ->
+                val uid = userSnap.key ?: return@forEach
+                userSnap.children.forEach { c ->
+                    val id = c.key ?: return@forEach
+                    add(
+                        CallDebugEntry(
+                            id = id,
+                            uid = uid,
+                            at = c.child("at").getValue(Long::class.java) ?: 0L,
+                            peer = c.child("peer").getValue(String::class.java).orEmpty(),
+                            caller = c.child("caller").getValue(Boolean::class.java) == true,
+                            video = c.child("video").getValue(Boolean::class.java) == true,
+                            reason = c.child("reason").getValue(String::class.java).orEmpty(),
+                            phase = c.child("phase").getValue(String::class.java).orEmpty(),
+                            connectedOnce = c.child("connectedOnce").getValue(Boolean::class.java) == true,
+                            model = c.child("model").getValue(String::class.java).orEmpty(),
+                            androidSdk = c.child("android").getValue(Int::class.java) ?: 0,
+                            trail = c.child("trail").children.mapNotNull { it.getValue(String::class.java) },
+                        ),
+                    )
+                }
+            }
+        }.sortedByDescending { it.at }.take(120)
     }
 
     // ------------------------------------------------------------------ the crash of this phone
@@ -302,7 +357,7 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
     /** Every step is kept in adminActions (the server does the ones the rules leave to it, and marks them done). */
     private suspend fun record(kind: String, target: String, value: String) {
         root.child("adminActions").push().setValue(
-            mapOf("kind" to kind, "target" to target, "value" to value.take(300), "by" to me(), "at" to ServerValue.TIMESTAMP),
+            mapOf("kind" to kind, "target" to target, "value" to value.take(2000), "by" to me(), "at" to ServerValue.TIMESTAMP),
         ).await()
     }
 
@@ -339,6 +394,30 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
         record("minVersion", "", v.orEmpty())
     }
 
+    override suspend fun setRecommendedVersion(version: String?): Result<Unit> = runCatching {
+        val v = version?.trim()?.takeIf { it.isNotEmpty() }
+        root.child("appConfig").child("recommendedVersion").setValue(v).await()
+        record("recVersion", "", v.orEmpty())
+    }
+
+    override suspend fun setFeatures(features: FeatureFlags): Result<Unit> = runCatching {
+        root.child("appConfig").child("features").setValue(
+            mapOf(
+                "games" to features.games,
+                "calls" to features.calls,
+                "statuses" to features.statuses,
+                "newChats" to features.newChats,
+            ),
+        ).await()
+        val off = buildList {
+            if (!features.games) add("games")
+            if (!features.calls) add("calls")
+            if (!features.statuses) add("statuses")
+            if (!features.newChats) add("newChats")
+        }
+        record("features", "", if (off.isEmpty()) "all on" else "off: " + off.joinToString(","))
+    }
+
     override suspend fun setMaintenance(on: Boolean, text: String): Result<Unit> = runCatching {
         root.child("appConfig").child("maintenance").setValue(mapOf("on" to on, "text" to text.trim().take(300))).await()
         record("maintenance", "", if (on) "on" else "off")
@@ -361,6 +440,17 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
 
     override suspend fun deleteCrash(id: String): Result<Unit> = runCatching {
         root.child("crashes").child(id).removeValue().await()
+    }
+
+    override suspend fun deleteAnnouncement(id: String): Result<Unit> = runCatching {
+        require(id.isNotBlank())
+        root.child("announcements").child(id).removeValue().await()
+        record("delAnnounce", id, "")
+    }
+
+    override suspend fun deleteCallDebug(uid: String, callId: String): Result<Unit> = runCatching {
+        require(uid.isNotBlank() && callId.isNotBlank())
+        root.child("callDebug").child(uid).child(callId).removeValue().await()
     }
 
     override suspend fun banName(name: String, banned: Boolean): Result<Unit> = runCatching {

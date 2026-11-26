@@ -78,7 +78,7 @@ internal val TickRead = Color(0xFF1DAA61)
 
 // ------------------------------------------------------------------ emoji
 
-private val EmojiCategories: List<Pair<String, List<String>>> = listOf(
+internal val ChatEmojiCategories: List<Pair<String, List<String>>> = listOf(
     "😀" to "😀 😃 😄 😁 😆 😅 🤣 😂 🙂 🙃 😉 😊 😇 🥰 😍 🤩 😘 😗 😚 😙 😋 😛 😜 🤪 😝 🤑 🤗 🤭 🤫 🤔 🤐 🤨 😐 😑 😶 😏 😒 🙄 😬 😮‍💨 🤥 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🥵 🥶 🥴 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 😟 🙁 😮 😯 😲 😳 🥺 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 👿 💀 💩 🤡 👻 👽 🤖 😺 😸 😹 😻 😼 😽 🙀 😿 😾".split(" "),
     "👍" to "👍 👎 👌 🤌 🤏 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 ☝️ ✋ 🤚 🖐️ 🖖 👋 🤝 🙏 👏 🙌 👐 🤲 💪 🦾 ✍️ 💅 🤳 👀 👁️ 👅 👄 🧠 🫶 🫡 🫠 🫢 🫣 🫤 🥹".split(" "),
     "❤️" to "❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❣️ 💕 💞 💓 💗 💖 💘 💝 💟 ♥️ 💋 💯 💢 💥 💫 💦 💨 🔥 ✨ ⭐ 🌟 💤".split(" "),
@@ -96,7 +96,7 @@ internal fun EmojiPanel(onEmoji: (String) -> Unit, modifier: Modifier = Modifier
     var category by remember { mutableStateOf(0) }
     Column(modifier.fillMaxWidth().heightIn(min = 240.dp).background(DarkSurface)) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp)) {
-            EmojiCategories.forEachIndexed { i, (icon, _) ->
+            ChatEmojiCategories.forEachIndexed { i, (icon, _) ->
                 Box(
                     Modifier.size(42.dp).clip(RoundedCornerShape(10.dp)).background(if (i == category) DarkSurfaceVariant else Color.Transparent).clickable { category = i },
                     contentAlignment = Alignment.Center,
@@ -104,7 +104,7 @@ internal fun EmojiPanel(onEmoji: (String) -> Unit, modifier: Modifier = Modifier
             }
         }
         LazyVerticalGrid(columns = GridCells.Adaptive(44.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(6.dp)) {
-            items(EmojiCategories[category].second.filter { it.isNotBlank() }) { e ->
+            items(ChatEmojiCategories[category].second.filter { it.isNotBlank() }) { e ->
                 Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).clickable { onEmoji(e) }, contentAlignment = Alignment.Center) {
                     Text(e, fontSize = 26.sp)
                 }
@@ -298,19 +298,54 @@ internal fun SettingsPage(controller: ChatController, s: ChatStrings, me: ChatUs
         item { SectionTitle(s.wallpaper) }
         item {
             val current by controller.wallpaper.collectAsState()
+            val wallEntries by ChatWallpaperStore.entries.collectAsState()
+            val customPhoto = ChatWallpaperStore.globalPhotoPath(wallEntries)
+            val pickWallPhoto = rememberImagePicker { photos ->
+                photos.firstOrNull()?.let { ChatWallpaperStore.setGlobalPhoto(it.jpeg) }
+            }
             Text(s.wallpaperNote, color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                if (ChatWallpaperStore.savePhotoFile != null) {
+                    Box(
+                        Modifier.size(width = 56.dp, height = 84.dp).clip(RoundedCornerShape(12.dp)).background(DarkSurfaceVariant)
+                            .border(2.dp, if (customPhoto != null) Ink else BorderLine, RoundedCornerShape(12.dp))
+                            .clickable { pickWallPhoto() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (customPhoto != null) {
+                            AsyncImage(model = customPhoto, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        } else {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(QMusicIcons.Samples, contentDescription = null, tint = Ink, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.height(4.dp))
+                                Text(s.galleryShort, color = TextSecondary, fontSize = 10.sp)
+                            }
+                        }
+                    }
+                }
                 ChatWallpapers.forEachIndexed { i, colour ->
                     Box(
                         Modifier.size(width = 56.dp, height = 84.dp).clip(RoundedCornerShape(12.dp)).background(colour ?: BgRootColor)
-                            .border(2.dp, if (i == current) Ink else BorderLine, RoundedCornerShape(12.dp))
-                            .clickable { controller.setWallpaper(i) },
+                            .border(2.dp, if (customPhoto == null && i == current) Ink else BorderLine, RoundedCornerShape(12.dp))
+                            .clickable {
+                                ChatWallpaperStore.clearGlobalPhoto()
+                                controller.setWallpaper(i)
+                            },
                         contentAlignment = Alignment.Center,
                     ) { if (colour == null) Text(s.wallpaperNone, color = TextSecondary, fontSize = 11.sp) }
                 }
+            }
+            if (customPhoto != null) {
+                Text(
+                    s.clearPhoto,
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp).clip(RoundedCornerShape(8.dp))
+                        .clickable { ChatWallpaperStore.clearGlobalPhoto() }.padding(vertical = 4.dp),
+                )
             }
         }
         item { SectionTitle(s.privacyTitle) }

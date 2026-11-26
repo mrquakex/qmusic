@@ -5,4 +5,4 @@ import androidx.compose.runtime.Composable
 @Composable
 actual fun rememberVideoDownloads(): VideoDownloads? = null
 
-actual suspend fun fetchSponsorSegments(videoId: String): List<SkipSegment> = emptyList()
+actual suspend fun fetchSponsorSegments(videoId: String, categories: Set<String>): List<SkipSegment> = emptyList()

@@ -207,4 +207,53 @@ class VideoParserTest {
         // A card without an id or a title is left out, not shown half-empty.
         assertTrue(VideoParser.entries(parse("""{"a":[{"videoRenderer":{"title":{"simpleText":"x"}}},{"lockupViewModel":{"contentType":"LOCKUP_CONTENT_TYPE_VIDEO"}}]}""")).isEmpty())
     }
+
+    @Test
+    fun liveChatParserReadsTextPaidMessagesAndContinuation() {
+        val raw = """
+        {
+          "continuationContents": {
+            "liveChatContinuation": {
+              "continuations": [
+                {"timedContinuationData": {"timeoutMs": 5000, "continuation": "next-lc-tok"}}
+              ],
+              "actions": [
+                {
+                  "addChatItemAction": {
+                    "item": {
+                      "liveChatTextMessageRenderer": {
+                        "id": "m1",
+                        "authorName": {"simpleText": "Kerem"},
+                        "authorPhoto": {"thumbnails": [{"url": "https://img/a.jpg"}]},
+                        "message": {"runs": [{"text": "Selam "}, {"emoji": {"shortcuts": [":wave:"]}}]}
+                      }
+                    }
+                  }
+                },
+                {
+                  "addChatItemAction": {
+                    "item": {
+                      "liveChatPaidMessageRenderer": {
+                        "id": "m2",
+                        "authorName": {"simpleText": "Deniz"},
+                        "purchaseAmountText": {"simpleText": "₺100"},
+                        "message": {"runs": [{"text": "Başarılar!"}]}
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+        """.trimIndent()
+        val page = VideoParser.liveChat(parse(raw))
+        assertEquals(2, page.messages.size)
+        assertEquals("Kerem", page.messages[0].author)
+        assertEquals("Selam :wave:", page.messages[0].text)
+        assertEquals("₺100", page.messages[1].amount)
+        assertEquals("Başarılar!", page.messages[1].text)
+        assertEquals("next-lc-tok", page.continuation)
+        assertEquals(5_000L, page.timeoutMs)
+    }
 }

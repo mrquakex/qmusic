@@ -994,6 +994,29 @@ fun GameArenaDialog(
     var confirmForfeit by remember { mutableStateOf(false) }
     var rematchBusy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val sounds = com.qmusic.ui.chat.rememberChatSounds()
+    var lastTurn by remember(session.id) { mutableStateOf(session.turn) }
+    var lastStatus by remember(session.id) { mutableStateOf(session.status) }
+    LaunchedEffect(session.turn, session.status) {
+        if (session.status != lastStatus) {
+            if (session.status == GameStatus.FINISHED) {
+                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                sounds?.playSmall(
+                    if (session.winnerUid == me.uid) com.qmusic.ui.chat.SmallSound.CONNECTED
+                    else com.qmusic.ui.chat.SmallSound.ENDED,
+                )
+            }
+            lastStatus = session.status
+            lastTurn = session.turn
+        } else if (session.turn != lastTurn) {
+            if (session.status == GameStatus.PLAYING && session.turn == me.uid) {
+                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                sounds?.play(com.qmusic.ui.chat.SoundKind.RECEIVE)
+            }
+            lastTurn = session.turn
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -1132,7 +1155,11 @@ fun GameArenaDialog(
                     other = other,
                     controller = controller,
                     s = s,
-                    onAction = { action -> controller.submitGameAction(other, session.id, action) },
+                    onAction = { action ->
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                        sounds?.play(com.qmusic.ui.chat.SoundKind.SEND)
+                        controller.submitGameAction(other, session.id, action)
+                    },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
