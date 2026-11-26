@@ -2074,6 +2074,7 @@ private fun ConversationPage(
 }
 
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ConversationInputRow(
     controller: ChatController,
@@ -2631,6 +2632,7 @@ private fun ConversationDialogs(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PinnedBar(
     pins: List<PinnedMessage>,
