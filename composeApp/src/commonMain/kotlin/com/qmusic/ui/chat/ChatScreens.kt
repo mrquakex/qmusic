@@ -5,12 +5,14 @@ import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
@@ -435,9 +437,21 @@ fun AiBotAvatar(uid: String, size: androidx.compose.ui.unit.Dp) {
     if (uid == ANTIGRAVITY_BOT_UID) AntigravityAvatar(size) else ClaudeAvatar(size)
 }
 
-/** Antigravity's picture: its arch mark in Google's colours on a dark circle. */
+/** Google's four colours, the way Antigravity's mark carries them. */
+internal val AntigravityColors = listOf(Color(0xFF4285F4), Color(0xFFEA4335), Color(0xFFFBBC04), Color(0xFF34A853))
+
+/** Claude's coral in three tones, for its flowing edges and shimmer. */
+internal val ClaudeTones = listOf(Color(0xFFD97757), Color(0xFFF3C4AC), Color(0xFFB8593A))
+
+/** An assistant's colours, for what flows while it works. */
+internal fun aiBotTones(uid: String): List<Color> = if (uid == ANTIGRAVITY_BOT_UID) AntigravityColors else ClaudeTones
+
+/**
+ * Antigravity's picture: its arch mark in Google's colours on a dark circle. [flow] (0..1, animated) moves the colours
+ * along the arch while it works; null keeps them still.
+ */
 @Composable
-fun AntigravityAvatar(size: androidx.compose.ui.unit.Dp) {
+fun AntigravityAvatar(size: androidx.compose.ui.unit.Dp, flow: Float? = null) {
     Box(Modifier.size(size).clip(CircleShape).background(Color(0xFF15161A)), contentAlignment = Alignment.Center) {
         androidx.compose.foundation.Canvas(Modifier.size(size * 0.62f)) {
             val w = this.size.width
@@ -449,12 +463,14 @@ fun AntigravityAvatar(size: androidx.compose.ui.unit.Dp) {
                 cubicTo(w * 0.18f, h * 0.35f, w * 0.34f, stroke / 2, w / 2, stroke / 2)
                 cubicTo(w * 0.66f, stroke / 2, w * 0.82f, h * 0.35f, w - stroke / 2, h - stroke / 2)
             }
+            val shift = (flow ?: 0f) * w * 2f
             drawPath(
                 arch,
                 brush = androidx.compose.ui.graphics.Brush.linearGradient(
-                    listOf(Color(0xFF4285F4), Color(0xFFEA4335), Color(0xFFFBBC04), Color(0xFF34A853)),
-                    start = androidx.compose.ui.geometry.Offset(0f, h),
-                    end = androidx.compose.ui.geometry.Offset(w, h),
+                    AntigravityColors,
+                    start = androidx.compose.ui.geometry.Offset(shift, h),
+                    end = androidx.compose.ui.geometry.Offset(shift + w, h),
+                    tileMode = if (flow != null) androidx.compose.ui.graphics.TileMode.Mirror else androidx.compose.ui.graphics.TileMode.Clamp,
                 ),
                 style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round),
             )
@@ -2982,11 +2998,11 @@ private fun ttlLabel(ttl: Long, s: ChatStrings): String = when (ttl) {
 /** A photo in a message: its blurred preview at once, the photo itself when it has come; a tap opens it full. */
 @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
 @Composable
-private fun ChatAlbum(images: List<ChatImage>, load: suspend (ChatImage) -> ByteArray?, onOpen: (Int) -> Unit, scanning: Boolean) {
+private fun ChatAlbum(images: List<ChatImage>, load: suspend (ChatImage) -> ByteArray?, onOpen: (Int) -> Unit, scanning: Boolean, scanColor: Color = ClaudeCoral) {
     if (images.size == 1) {
         val image = images[0]
         val ratio = if (image.width > 0 && image.height > 0) (image.width.toFloat() / image.height).coerceIn(0.56f, 1.9f) else 1f
-        PhotoCell(image, load, { onOpen(0) }, scanning, Modifier.width(260.dp).aspectRatio(ratio).clip(RoundedCornerShape(14.dp)))
+        PhotoCell(image, load, { onOpen(0) }, scanning, Modifier.width(260.dp).aspectRatio(ratio).clip(RoundedCornerShape(14.dp)), scanColor)
         return
     }
     // An album: two columns of squares; past four, the last square says how many more.
@@ -2998,7 +3014,7 @@ private fun ChatAlbum(images: List<ChatImage>, load: suspend (ChatImage) -> Byte
                     val index = row * 2 + col
                     val wide = pair.size == 1
                     Box(Modifier.weight(1f).aspectRatio(if (wide) 2f else 1f)) {
-                        PhotoCell(image, load, { onOpen(index) }, scanning, Modifier.fillMaxSize())
+                        PhotoCell(image, load, { onOpen(index) }, scanning, Modifier.fillMaxSize(), scanColor)
                         if (index == 3 && images.size > 4) {
                             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)).clickable { onOpen(3) }, contentAlignment = Alignment.Center) {
                                 Text("+" + (images.size - 4), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -3014,7 +3030,7 @@ private fun ChatAlbum(images: List<ChatImage>, load: suspend (ChatImage) -> Byte
 /** One photo: its blurred preview at once, the photo itself when it has come. */
 @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
 @Composable
-internal fun PhotoCell(image: ChatImage, load: suspend (ChatImage) -> ByteArray?, onOpen: () -> Unit, scanning: Boolean, modifier: Modifier) {
+internal fun PhotoCell(image: ChatImage, load: suspend (ChatImage) -> ByteArray?, onOpen: () -> Unit, scanning: Boolean, modifier: Modifier, scanColor: Color = ClaudeCoral) {
     var bytes by remember(image.id, image.url) { mutableStateOf<ByteArray?>(null) }
     // Not loaded by itself (the auto-download setting): a tap loads it.
     var waiting by remember(image.id, image.url) { mutableStateOf(true) }
@@ -3048,32 +3064,32 @@ internal fun PhotoCell(image: ChatImage, load: suspend (ChatImage) -> ByteArray?
                 ) { Icon(QMusicIcons.Download, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp)) }
             }
         }
-        if (scanning) PhotoScan(Modifier.matchParentSize())
+        if (scanning) PhotoScan(Modifier.matchParentSize(), scanColor)
     }
 }
 
 private val ClaudeBubble: Color get() = if (com.qmusic.ui.theme.lightTheme) Color(0xFFFBEDE7) else Color(0xFF2B201C)
 private val AntigravityBubble: Color get() = if (com.qmusic.ui.theme.lightTheme) Color(0xFFE9F0FE) else Color(0xFF1B2130)
 
-/** Claude reading a photo: a coral band sweeps down and up over it, inside corner marks. */
+/** An assistant reading a photo: a band in its colour sweeps down and up over it, inside corner marks. */
 @Composable
-private fun PhotoScan(modifier: Modifier) {
+private fun PhotoScan(modifier: Modifier, color: Color = color) {
     val t = rememberInfiniteTransition()
-    val y by t.animateFloat(0f, 1f, infiniteRepeatable(tween(1600, easing = androidx.compose.animation.core.LinearEasing), RepeatMode.Reverse))
+    val y by t.animateFloat(0f, 1f, infiniteRepeatable(tween(1700, easing = androidx.compose.animation.core.FastOutSlowInEasing), RepeatMode.Reverse))
     androidx.compose.foundation.Canvas(modifier) {
-        drawRect(ClaudeCoral.copy(alpha = 0.10f))
+        drawRect(color.copy(alpha = 0.10f))
         val lineY = size.height * y
         val band = size.height * 0.18f
         drawRect(
             brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                listOf(Color.Transparent, ClaudeCoral.copy(alpha = 0.35f), Color.Transparent),
+                listOf(Color.Transparent, color.copy(alpha = 0.35f), Color.Transparent),
                 startY = lineY - band,
                 endY = lineY + band,
             ),
             topLeft = androidx.compose.ui.geometry.Offset(0f, lineY - band),
             size = androidx.compose.ui.geometry.Size(size.width, band * 2),
         )
-        drawLine(ClaudeCoral, androidx.compose.ui.geometry.Offset(0f, lineY), androidx.compose.ui.geometry.Offset(size.width, lineY), strokeWidth = 3f)
+        drawLine(color, androidx.compose.ui.geometry.Offset(0f, lineY), androidx.compose.ui.geometry.Offset(size.width, lineY), strokeWidth = 3f)
         val m = 14f
         val l = size.minDimension * 0.12f
         val w = 4f
@@ -3089,16 +3105,93 @@ private fun PhotoScan(modifier: Modifier) {
     }
 }
 
-/** Under the message Claude (or Antigravity) answers: its mark turning, and what it is doing. */
+/** Under the message an assistant answers: its own mark at work, and what it does in shimmering words. */
 @Composable
 private fun ClaudeWorking(label: String, by: String = CLAUDE_BOT_UID) {
-    val t = rememberInfiniteTransition()
-    val turn by t.animateFloat(0f, 360f, infiniteRepeatable(tween(2400, easing = androidx.compose.animation.core.LinearEasing)))
-    val alpha by t.animateFloat(0.55f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse))
     Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.graphicsLayer { rotationZ = if (by == ANTIGRAVITY_BOT_UID) 0f else turn; translationY = if (by == ANTIGRAVITY_BOT_UID) (alpha - 0.775f) * -12f else 0f }) { AiBotAvatar(by, 18.dp) }
+        if (by == ANTIGRAVITY_BOT_UID) AntigravityWorkingMark(18.dp) else ClaudeWorkingMark(18.dp)
         Spacer(Modifier.width(8.dp))
-        Text(label, color = aiBotColor(by).copy(alpha = alpha), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        ShimmerText(label, base = aiBotColor(by), highlight = if (by == ANTIGRAVITY_BOT_UID) Color(0xFFB9D3FF) else Color(0xFFFFE0D1), fontSize = 13.sp)
+    }
+}
+
+/** Claude's spark at work: its rays breathe one after another as it turns slowly, as in Claude's own apps. */
+@Composable
+private fun ClaudeWorkingMark(size: androidx.compose.ui.unit.Dp) {
+    val t = rememberInfiniteTransition()
+    val phase by t.animateFloat(0f, 1f, infiniteRepeatable(tween(1400, easing = androidx.compose.animation.core.LinearEasing)))
+    val turn by t.animateFloat(0f, 360f, infiniteRepeatable(tween(12000, easing = androidx.compose.animation.core.LinearEasing)))
+    Box(Modifier.size(size).clip(CircleShape).background(ClaudeCoral), contentAlignment = Alignment.Center) {
+        androidx.compose.foundation.Canvas(Modifier.size(size * 0.6f)) {
+            val c = center
+            val r = this.size.minDimension / 2
+            for (i in 0 until 8) {
+                val angle = (i * 45.0 + 22.5 + turn) * kotlin.math.PI / 180.0
+                val wave = 0.5f + 0.5f * kotlin.math.sin(2.0 * kotlin.math.PI * (phase - i / 8.0)).toFloat()
+                val long = (if (i % 2 == 0) r else r * 0.72f) * (0.55f + 0.45f * wave)
+                drawLine(
+                    color = Color.White,
+                    start = c,
+                    end = androidx.compose.ui.geometry.Offset(
+                        c.x + (kotlin.math.cos(angle) * long).toFloat(),
+                        c.y + (kotlin.math.sin(angle) * long).toFloat(),
+                    ),
+                    strokeWidth = r * 0.24f,
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                )
+            }
+        }
+    }
+}
+
+/** Antigravity's arch at work: Google's colours flow along it while it floats a little, weightless. */
+@Composable
+private fun AntigravityWorkingMark(size: androidx.compose.ui.unit.Dp) {
+    val t = rememberInfiniteTransition()
+    val flow by t.animateFloat(0f, 1f, infiniteRepeatable(tween(2200, easing = androidx.compose.animation.core.LinearEasing)))
+    val lift by t.animateFloat(-1f, 1f, infiniteRepeatable(tween(1800, easing = androidx.compose.animation.core.FastOutSlowInEasing), RepeatMode.Reverse))
+    Box(Modifier.graphicsLayer { translationY = lift * size.toPx() * 0.08f }) { AntigravityAvatar(size, flow) }
+}
+
+/** Words with light passing over them, left to right (no blinking): what an assistant is doing now. */
+@Composable
+private fun ShimmerText(text: String, base: Color, highlight: Color, fontSize: androidx.compose.ui.unit.TextUnit, weight: FontWeight = FontWeight.Medium) {
+    val t = rememberInfiniteTransition()
+    val x by t.animateFloat(-0.6f, 1.6f, infiniteRepeatable(tween(1900, easing = androidx.compose.animation.core.LinearEasing)))
+    var width by remember { mutableStateOf(200f) }
+    Text(
+        text,
+        style = TextStyle(
+            brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                listOf(base, highlight, base),
+                start = androidx.compose.ui.geometry.Offset(width * (x - 0.35f), 0f),
+                end = androidx.compose.ui.geometry.Offset(width * (x + 0.35f), 0f),
+            ),
+            fontSize = fontSize,
+            fontWeight = weight,
+        ),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        onTextLayout = { width = it.size.width.toFloat().coerceAtLeast(1f) },
+    )
+}
+
+/** A thin edge whose colours flow around the message an assistant is answering (in place of a blinking one). */
+@Composable
+private fun flowingEdge(colors: List<Color>): androidx.compose.ui.graphics.Brush {
+    val t = rememberInfiniteTransition()
+    val shift by t.animateFloat(0f, 1f, infiniteRepeatable(tween(2600, easing = androidx.compose.animation.core.LinearEasing)))
+    return object : androidx.compose.ui.graphics.ShaderBrush() {
+        override fun createShader(size: androidx.compose.ui.geometry.Size): androidx.compose.ui.graphics.Shader {
+            val w = size.width.coerceAtLeast(1f)
+            val start = w * 2f * shift
+            return androidx.compose.ui.graphics.LinearGradientShader(
+                from = androidx.compose.ui.geometry.Offset(start, 0f),
+                to = androidx.compose.ui.geometry.Offset(start + w, size.height),
+                colors = colors,
+                tileMode = androidx.compose.ui.graphics.TileMode.Mirror,
+            )
+        }
     }
 }
 
@@ -4025,12 +4118,8 @@ private fun Bubble(
     val swipeScope = androidx.compose.runtime.rememberCoroutineScope()
     val density = androidx.compose.ui.platform.LocalDensity.current
     val threshold = with(density) { 64.dp.toPx() }
-    // Claude at work: the glow pulses.
-    val pulse = if (assisting != null) {
-        rememberInfiniteTransition().animateFloat(0.25f, 0.9f, infiniteRepeatable(tween(850), RepeatMode.Reverse)).value
-    } else {
-        0f
-    }
+    // An assistant at work on it: its colours flow around the edge.
+    val workingEdge = if (assisting != null) flowingEdge(aiBotTones(assistWork?.by ?: CLAUDE_BOT_UID)) else null
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -4112,8 +4201,8 @@ private fun Bubble(
                 .then(
                     if (highlight) {
                         Modifier.border(2.dp, ClaudeCoral, bubbleShape)
-                    } else if (assisting != null) {
-                        Modifier.border(2.dp, ClaudeCoral.copy(alpha = pulse), bubbleShape)
+                    } else if (workingEdge != null) {
+                        Modifier.border(1.5.dp, workingEdge, bubbleShape)
                     } else {
                         Modifier
                     },
@@ -4207,7 +4296,7 @@ private fun Bubble(
             if (m.images.isNotEmpty() && m.viewOnce && !m.deleted) {
                 ViewOnceCard(mine, openedOnce, s, onOpenOnce)
             } else if (m.images.isNotEmpty()) {
-                ChatAlbum(m.images, loadImage, { index -> onOpenImages(m.images, index) }, scanning = assisting != null)
+                ChatAlbum(m.images, loadImage, { index -> onOpenImages(m.images, index) }, scanning = assisting != null, scanColor = aiBotColor(assistWork?.by ?: CLAUDE_BOT_UID))
                 m.progress?.let { p ->
                     androidx.compose.material3.LinearProgressIndicator(
                         progress = { p },
@@ -4412,7 +4501,7 @@ private fun Bubble(
                     by = assistWork?.by ?: CLAUDE_BOT_UID,
                 )
                 // Its thoughts as they come (the last few lines; a tap shows them all).
-                assistWork?.thought?.takeIf { it.isNotBlank() && assisting != "writing" }?.let { ClaudeThoughts(it) }
+                assistWork?.thought?.takeIf { it.isNotBlank() && assisting != "writing" }?.let { ClaudeThoughts(it, assistWork?.by ?: CLAUDE_BOT_UID) }
             }
         }
     }
@@ -4681,23 +4770,36 @@ internal fun listTime(ms: Long, s: ChatStrings): String = when (daysAgo(ms)) {
 
 /** Claude's thoughts while it works: soft, in italics, the last lines; a tap opens them all. */
 @Composable
-private fun ClaudeThoughts(thought: String) {
+private fun ClaudeThoughts(thought: String, by: String = CLAUDE_BOT_UID) {
     var open by remember { mutableStateOf(false) }
-    Column(
-        Modifier.padding(horizontal = 8.dp, vertical = 2.dp).widthIn(max = 300.dp).clip(RoundedCornerShape(12.dp))
-            .background(ClaudeCoral.copy(alpha = 0.08f)).clickable { open = !open }.padding(horizontal = 12.dp, vertical = 8.dp),
+    val accent = aiBotColor(by)
+    Row(
+        Modifier.padding(horizontal = 12.dp, vertical = 2.dp).widthIn(max = 300.dp).clip(RoundedCornerShape(12.dp))
+            .background(DarkSurfaceVariant).clickable { open = !open }
+            .animateContentSize(),
     ) {
-        Text(if (ChatMusic.english) "Thinking" else "Düşünüyor", color = ClaudeCoral, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(2.dp))
-        Text(
-            if (open) thought.trim() else thought.trim().takeLast(260),
-            color = TextSecondary,
-            fontSize = 12.sp,
-            lineHeight = 16.sp,
-            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-            maxLines = if (open) 40 else 4,
-            overflow = TextOverflow.Ellipsis,
-        )
+        // A quiet line in its colour on the left, like a quote.
+        val tones = aiBotTones(by)
+        Column(
+            Modifier
+                .drawBehind { drawRect(androidx.compose.ui.graphics.Brush.verticalGradient(tones), size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height)) }
+                .padding(start = 13.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ShimmerText(if (ChatMusic.english) "Thinking" else "Düşünüyor", base = accent, highlight = TextPrimary, fontSize = 11.sp, weight = FontWeight.SemiBold)
+                Spacer(Modifier.width(4.dp))
+                Icon(QMusicIcons.ChevronDown, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(14.dp).graphicsLayer { rotationZ = if (open) 180f else 0f })
+            }
+            Spacer(Modifier.height(3.dp))
+            Text(
+                if (open) thought.trim() else thought.trim().takeLast(260),
+                color = TextSecondary,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                maxLines = if (open) 40 else 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
