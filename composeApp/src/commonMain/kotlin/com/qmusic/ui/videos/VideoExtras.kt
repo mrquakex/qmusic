@@ -1,12 +1,24 @@
 package com.qmusic.ui.videos
 
 import androidx.compose.runtime.Composable
+import com.qmusic.engine.video.VideoCaption
 import com.qmusic.engine.video.VideoItem
 import com.qmusic.engine.video.VideoQuality
 import kotlinx.coroutines.flow.StateFlow
 
 /** A stretch of a video that SponsorBlock's community marked as something to skip (a sponsor, a plug, "like and subscribe"). */
 data class SkipSegment(val startMs: Long, val endMs: Long, val category: String)
+
+internal val DEFAULT_SPONSOR_CATEGORIES: Set<String> = setOf("sponsor", "selfpromo", "interaction")
+internal val ALL_SPONSOR_CATEGORIES: List<String> = listOf(
+    "sponsor",
+    "selfpromo",
+    "interaction",
+    "intro",
+    "outro",
+    "music_offtopic",
+    "filler",
+)
 
 /** What the sleep timer waits for: a number of minutes, or the end of the video that is playing. */
 enum class SleepMode { OFF, TIMER, VIDEO_END }
@@ -23,6 +35,7 @@ data class DownloadedVideo(
     val state: DownloadState,
     val bytes: Long = 0,
     val total: Long = 0,
+    val caption: VideoCaption? = null,
 ) {
     val percent: Int get() = if (total > 0) ((bytes * 100) / total).toInt().coerceIn(0, 100) else 0
 }
@@ -31,8 +44,8 @@ data class DownloadedVideo(
 interface VideoDownloads {
     val items: StateFlow<List<DownloadedVideo>>
 
-    /** Starts keeping [quality] of [item] (again, after a failure). */
-    fun start(item: VideoItem, quality: VideoQuality)
+    /** Starts keeping [quality] of [item] (and optional [caption] for offline subtitles). */
+    fun start(item: VideoItem, quality: VideoQuality, caption: VideoCaption? = null)
 
     /** Stops a download on its way, and forgets what it had read. */
     fun cancel(id: String)
@@ -46,7 +59,10 @@ interface VideoDownloads {
 expect fun rememberVideoDownloads(): VideoDownloads?
 
 /** The parts of [videoId] to skip, from SponsorBlock (empty when there are none or it cannot be reached). */
-expect suspend fun fetchSponsorSegments(videoId: String): List<SkipSegment>
+expect suspend fun fetchSponsorSegments(
+    videoId: String,
+    categories: Set<String> = DEFAULT_SPONSOR_CATEGORIES,
+): List<SkipSegment>
 
 /** The words of the features added to the player later: kept apart so [VideoStrings] stays as it is. */
 data class VideoExtraStrings(
@@ -161,6 +177,47 @@ internal val VideoExtraStrings.previewWifi: String get() = if (this == VideoExtr
 internal val VideoExtraStrings.previewOff: String get() = if (this == VideoExtraStrings.English) "Off" else "Kapalı"
 internal val VideoExtraStrings.previewSoundOn: String get() = if (this == VideoExtraStrings.English) "Turn sound on" else "Sesi aç"
 internal val VideoExtraStrings.previewSoundOff: String get() = if (this == VideoExtraStrings.English) "Mute" else "Sesi kapat"
+
+internal val VideoExtraStrings.loopVideo: String get() = if (this == VideoExtraStrings.English) "Loop video" else "Videoyu tekrarla"
+internal val VideoExtraStrings.audioTrack: String get() = if (this == VideoExtraStrings.English) "Audio track" else "Ses dili"
+internal val VideoExtraStrings.originalAudio: String get() = if (this == VideoExtraStrings.English) "Original" else "Orijinal"
+internal val VideoExtraStrings.autoTranslateCaption: String get() = if (this == VideoExtraStrings.English) "English (auto-translate)" else "Türkçe (otomatik çeviri)"
+internal val VideoExtraStrings.sponsorUndo: String get() = if (this == VideoExtraStrings.English) "Undo" else "Geri al"
+internal val VideoExtraStrings.sponsorCategoriesTitle: String get() = if (this == VideoExtraStrings.English) "Categories to skip" else "Atlanacak bölümler"
+internal fun VideoExtraStrings.sponsorCategoryLabel(cat: String): String {
+    val en = this == VideoExtraStrings.English
+    return when (cat) {
+        "sponsor" -> if (en) "Sponsor" else "Sponsor"
+        "selfpromo" -> if (en) "Self-promo" else "Kendi tanıtımı"
+        "interaction" -> if (en) "Like & sub" else "Beğen/abone"
+        "intro" -> if (en) "Intro" else "Giriş"
+        "outro" -> if (en) "Outro" else "Kapanış"
+        "music_offtopic" -> if (en) "Non-music" else "Müzik dışı"
+        "filler" -> if (en) "Filler" else "Gereksiz sohbet"
+        else -> cat
+    }
+}
+internal val VideoExtraStrings.playNext: String get() = if (this == VideoExtraStrings.English) "Play next" else "Sıradaki oynat"
+internal val VideoExtraStrings.addToQueue: String get() = if (this == VideoExtraStrings.English) "Add to queue" else "Sıraya ekle"
+internal val VideoExtraStrings.addedToQueue: String get() = if (this == VideoExtraStrings.English) "Added to queue" else "Sıraya eklendi"
+internal val VideoExtraStrings.playingNext: String get() = if (this == VideoExtraStrings.English) "Playing next" else "Sıradaki olarak eklendi"
+internal val VideoExtraStrings.downloadQualityTitle: String get() = if (this == VideoExtraStrings.English) "Download quality" else "İndirme kalitesi"
+internal val VideoExtraStrings.deleteDownloadTitle: String get() = if (this == VideoExtraStrings.English) "Remove download?" else "İndirilen video silinsin mi?"
+internal val VideoExtraStrings.deleteDownloadConfirm: String get() = if (this == VideoExtraStrings.English) "This video will be deleted from your device." else "Bu video cihazdan silinecek."
+internal val VideoExtraStrings.shareVideoPlain: String get() = if (this == VideoExtraStrings.English) "Share from start" else "Baştan paylaş"
+internal fun VideoExtraStrings.shareFromTime(time: String): String = if (this == VideoExtraStrings.English) "Share from $time" else "$time anından itibaren paylaş"
+internal val VideoExtraStrings.searchInChannel: String get() = if (this == VideoExtraStrings.English) "Search in channel" else "Kanalda ara"
+internal val VideoExtraStrings.searchFiltersLabel: String get() = if (this == VideoExtraStrings.English) "Filters" else "Filtreler"
+internal val VideoExtraStrings.sortNewest: String get() = if (this == VideoExtraStrings.English) "Newest" else "En yeni"
+internal val VideoExtraStrings.sortMostViewed: String get() = if (this == VideoExtraStrings.English) "Most viewed" else "En çok izlenen"
+internal val VideoExtraStrings.dateToday: String get() = if (this == VideoExtraStrings.English) "Today" else "Bugün"
+internal val VideoExtraStrings.dateWeek: String get() = if (this == VideoExtraStrings.English) "This week" else "Bu hafta"
+internal val VideoExtraStrings.dateMonth: String get() = if (this == VideoExtraStrings.English) "This month" else "Bu ay"
+internal val VideoExtraStrings.durShort: String get() = if (this == VideoExtraStrings.English) "Short (<4m)" else "Kısa (<4 dk)"
+internal val VideoExtraStrings.durMedium: String get() = if (this == VideoExtraStrings.English) "4–20 min" else "4–20 dk"
+internal val VideoExtraStrings.durLong: String get() = if (this == VideoExtraStrings.English) "Long (>20m)" else "Uzun (>20 dk)"
+internal val VideoExtraStrings.liveChat: String get() = if (this == VideoExtraStrings.English) "Live chat" else "Canlı sohbet"
+internal val VideoExtraStrings.liveChatEmpty: String get() = if (this == VideoExtraStrings.English) "Waiting for chat messages…" else "Sohbet mesajları bekleniyor…"
 
 /** The extra words that go with these strings' language. */
 internal fun VideoStrings.extras(): VideoExtraStrings =

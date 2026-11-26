@@ -1,6 +1,7 @@
 package com.qmusic.ui.videos
 
 import com.qmusic.engine.auth.YouTubeAuth
+import com.qmusic.engine.video.VideoAudioTrack
 import com.qmusic.engine.video.VideoChannelPage
 import com.qmusic.engine.video.VideoCaption
 import com.qmusic.engine.video.VideoChip
@@ -10,6 +11,7 @@ import com.qmusic.engine.video.VideoDetails
 import com.qmusic.engine.video.VideoEntry
 import com.qmusic.engine.video.VideoFeed
 import com.qmusic.engine.video.VideoItem
+import com.qmusic.engine.video.VideoLiveChatMessage
 import com.qmusic.engine.video.VideoQuality
 import com.qmusic.engine.video.VideoSearchFilter
 import com.qmusic.engine.video.VideoService
@@ -179,6 +181,11 @@ data class WatchState(
     val replies: Map<String, List<VideoComment>> = emptyMap(),
     val repliesNext: Map<String, String?> = emptyMap(),
     val repliesLoading: Set<String> = emptySet(),
+    val audioTracks: List<VideoAudioTrack> = emptyList(),
+    val audioTrack: VideoAudioTrack? = null,
+    val liveChatOpen: Boolean = false,
+    val liveChatMessages: List<VideoLiveChatMessage> = emptyList(),
+    val liveChatLoading: Boolean = false,
 )
 
 /** The "save to" sheet: the account's playlists, with the ones this video is already in ticked. */
@@ -189,8 +196,20 @@ data class SaveSheetState(
     val saved: Set<String> = emptySet(),
 )
 
-/** The comments of a Short, in the sheet over it. */
-data class ShortCommentsState(val video: VideoItem, val comments: List<VideoComment> = emptyList(), val loading: Boolean = true)
+/** The comments of a Short, in the sheet over it (with pagination, replies, and posting). */
+data class ShortCommentsState(
+    val video: VideoItem,
+    val total: String? = null,
+    val comments: List<VideoComment> = emptyList(),
+    val continuation: String? = null,
+    val createToken: String? = null,
+    val loading: Boolean = true,
+    val loadingMore: Boolean = false,
+    val posting: Boolean = false,
+    val replies: Map<String, List<VideoComment>> = emptyMap(),
+    val repliesNext: Map<String, String?> = emptyMap(),
+    val repliesLoading: Set<String> = emptySet(),
+)
 
 /** The upright clips being swiped through, and the one on screen. */
 data class ShortsState(val items: List<VideoItem> = emptyList(), val index: Int = 0, val loading: Boolean = false)
@@ -202,6 +221,8 @@ data class ChannelState(
     val feed: FeedState = FeedState(loading = true),
     val error: Boolean = false,
     val subscribed: Boolean = false,
+    val searchQuery: String = "",
+    val searchActive: Boolean = false,
 )
 
 /**
@@ -570,12 +591,15 @@ class VideosController(
 
     private fun startWatching(video: VideoItem, queue: List<VideoItem> = emptyList(), queueIndex: Int = 0) {
         watchJob?.cancel()
+        liveChatJob?.cancel()
+        _lastSkipped.value = null
         FeedPreview.stopAll()
         _watch.value = WatchState(video = video, queue = queue, queueIndex = queueIndex)
         val id = video.id
         watchJob = scope.launch {
             // The stream and the page load side by side: the picture should not wait for the comments' address.
             launch { loadStream(id) }
+            launch { loadAudioTracks(id) }
             launch { loadCaptions(id) }
             launch { loadSegments(id) }
             launch { loadPreview(id) }
@@ -690,11 +714,125 @@ class VideosController(
     }
 
     fun selectQuality(quality: VideoQuality) {
-        _watch.update { it?.copy(quality = quality) }
+        _watch.update { cur ->
+            if (cur == null) null else {
+                val trackUrl = cur.audioTrack?.url
+                val chosen = if (trackUrl != null && !quality.isLive && quality.audioUrl != null) quality.copy(audioUrl = trackUrl) else quality
+                cur.copy(quality = chosen)
+            }
+        }
+    }
+
+    private suspend fun loadAudioTracks(id: String) {
+        service.audioTracks(id).onSuccess { tracks ->
+            if (tracks.size <= 1) return@onSuccess
+            _watch.update { w ->
+                if (w?.video?.id != id) w else {
+                    val initial = w.audioTrack ?: tracks.firstOrNull { it.isOriginal } ?: tracks.first()
+                    w.copy(audioTracks = tracks, audioTrack = initial)
+                }
+            }
+        }
+    }
+
+    fun selectAudioTrack(track: VideoAudioTrack) {
+        _watch.update { w ->
+            if (w == null) null else {
+                val updatedList = w.qualities.map { q -> if (!q.isLive && q.audioUrl != null) q.copy(audioUrl = track.url) else q }
+                val cur = w.quality
+                val updatedCur = when {
+                    cur == null || cur.isLive -> cur
+                    cur.audioUrl != null -> cur.copy(audioUrl = track.url)
+                    else -> updatedList.firstOrNull { !it.isLive && it.audioUrl != null } ?: cur
+                }
+                w.copy(audioTrack = track, qualities = updatedList, quality = updatedCur)
+            }
+        }
+    }
+
+    /** Inserts [item] right after the currently playing video (or opens it if nothing is playing). */
+    fun playNextInQueue(item: VideoItem, toastText: String? = null) {
+        val w = _watch.value
+        if (w == null) {
+            open(item)
+            return
+        }
+        val base = if (w.queue.isEmpty()) listOf(w.video) else w.queue
+        val idx = w.queueIndex.coerceIn(0, base.lastIndex)
+        val head = base.take(idx + 1)
+        val tail = base.drop(idx + 1).filterNot { it.id == item.id }
+        _watch.value = w.copy(queue = head + item + tail, queueIndex = idx)
+        toastText?.let(::showToast)
+    }
+
+    /** Appends [item] to the end of the playing queue (or opens it if nothing is playing). */
+    fun addToQueue(item: VideoItem, toastText: String? = null) {
+        val w = _watch.value
+        if (w == null) {
+            open(item)
+            return
+        }
+        val base = if (w.queue.isEmpty()) listOf(w.video) else w.queue
+        val idx = w.queueIndex.coerceIn(0, base.lastIndex)
+        val next = if (base.any { it.id == item.id }) base else base + item
+        _watch.value = w.copy(queue = next, queueIndex = idx)
+        toastText?.let(::showToast)
+    }
+
+    private val _toast = MutableStateFlow<String?>(null)
+    val toast: StateFlow<String?> = _toast.asStateFlow()
+    private var toastJob: Job? = null
+
+    fun showToast(message: String) {
+        toastJob?.cancel()
+        _toast.value = message
+        toastJob = scope.launch {
+            delay(2_200)
+            _toast.value = null
+        }
+    }
+
+    private var liveChatJob: Job? = null
+
+    fun toggleLiveChat() {
+        val w = _watch.value ?: return
+        val nextOpen = !w.liveChatOpen
+        liveChatJob?.cancel()
+        _watch.update { cur ->
+            if (cur?.video?.id != w.video.id) cur
+            else cur.copy(liveChatOpen = nextOpen, liveChatLoading = nextOpen && cur.liveChatMessages.isEmpty())
+        }
+        if (!nextOpen) return
+        val videoId = w.video.id
+        var token = w.details?.liveChatToken ?: return
+        liveChatJob = scope.launch {
+            val seen = HashSet<String>()
+            while (true) {
+                val page = service.liveChat(token).getOrNull()
+                if (_watch.value?.video?.id != videoId || _watch.value?.liveChatOpen != true) break
+                if (page != null) {
+                    val fresh = page.messages.filter { seen.add(it.id) }
+                    _watch.update { cur ->
+                        if (cur?.video?.id != videoId) cur
+                        else cur.copy(
+                            liveChatMessages = (cur.liveChatMessages + fresh).takeLast(150),
+                            liveChatLoading = false,
+                        )
+                    }
+                    token = page.continuation ?: break
+                    delay(page.timeoutMs.coerceIn(2_500L, 12_000L))
+                } else {
+                    _watch.update { cur -> if (cur?.video?.id != videoId) cur else cur.copy(liveChatLoading = false) }
+                    delay(5_000L)
+                }
+            }
+        }
     }
 
     private fun stopWatching() {
         watchJob?.cancel()
+        liveChatJob?.cancel()
+        _lastSkipped.value = null
         _watch.value = null
         _fullscreen.value = false
     }
@@ -839,6 +977,46 @@ class VideosController(
     fun openChannelTab(params: String) {
         val id = _channel.value?.id ?: return
         loadChannel(id, params)
+    }
+
+    /** Searches inside the currently opened channel. */
+    fun searchChannel(query: String) {
+        val c = _channel.value ?: return
+        val q = query.trim()
+        if (q.isEmpty()) {
+            clearChannelSearch()
+            return
+        }
+        channelJob?.cancel()
+        channelMore?.cancel()
+        _channel.value = c.copy(
+            searchQuery = q,
+            searchActive = true,
+            feed = FeedState(loading = true),
+        )
+        channelJob = scope.launch {
+            service.channelSearch(c.id, q).fold(
+                onSuccess = { feed ->
+                    _channel.update { cur ->
+                        if (cur?.id != c.id) cur else cur.copy(
+                            feed = FeedState(entries = feed.entries, continuation = feed.continuation, loaded = true),
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    if (e is CancellationException) throw e
+                    _channel.update { cur ->
+                        if (cur?.id != c.id) cur else cur.copy(feed = FeedState(loaded = true, error = true))
+                    }
+                },
+            )
+        }
+    }
+
+    fun clearChannelSearch() {
+        val c = _channel.value ?: return
+        if (!c.searchActive && c.searchQuery.isEmpty()) return
+        loadChannel(c.id, c.tabParams)
     }
 
     /** A sort chip of the channel's videos ("Latest", "Popular", "Oldest"): its list in place of the shown one. */
@@ -1223,8 +1401,26 @@ class VideosController(
 
     fun setAutoplay(on: Boolean) = settings.setString(KEY_AUTOPLAY, if (on) "1" else "0")
 
-    /** A video ended: the sleep timer that waits for this stops here, otherwise autoplay goes on to the next one. */
+    private val _looping = MutableStateFlow(false)
+    val looping: StateFlow<Boolean> = _looping.asStateFlow()
+
+    fun setLooping(on: Boolean) {
+        _looping.value = on
+    }
+
+    private val speedSetting = settings.string(KEY_SPEED, "1.0")
+    private val _playbackSpeed = MutableStateFlow(speedSetting.value.toFloatOrNull()?.coerceIn(0.25f, 2f) ?: 1f)
+    val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
+
+    fun setPlaybackSpeed(speed: Float) {
+        val clamped = speed.coerceIn(0.25f, 2f)
+        _playbackSpeed.value = clamped
+        settings.setString(KEY_SPEED, clamped.toString())
+    }
+
+    /** A video ended: looping repeats it, sleep timer stops here, otherwise autoplay goes on to the next one. */
     fun onEnded() {
+        if (_looping.value) return
         if (_sleep.value.mode == SleepMode.VIDEO_END) {
             _sleep.value = SleepTimer()
             return
@@ -1285,10 +1481,25 @@ class VideosController(
     /** "1" while the stretches SponsorBlock marked are skipped. */
     val sponsorBlock = settings.string(KEY_SPONSOR, "1")
 
+    private val sponsorCatsSetting = settings.string(KEY_SPONSOR_CATS, DEFAULT_SPONSOR_CATEGORIES.joinToString(","))
+    private val _sponsorCategories = MutableStateFlow(
+        sponsorCatsSetting.value.split(',').map { it.trim() }.filter { it in ALL_SPONSOR_CATEGORIES }.toSet().ifEmpty { DEFAULT_SPONSOR_CATEGORIES },
+    )
+    val sponsorCategories: StateFlow<Set<String>> = _sponsorCategories.asStateFlow()
+
+    fun toggleSponsorCategory(category: String) {
+        if (category !in ALL_SPONSOR_CATEGORIES) return
+        val next = if (category in _sponsorCategories.value) _sponsorCategories.value - category else _sponsorCategories.value + category
+        _sponsorCategories.value = next
+        settings.setString(KEY_SPONSOR_CATS, next.joinToString(","))
+        val id = _watch.value?.video?.id
+        if (sponsorBlock.value != "0" && id != null) scope.launch { loadSegments(id) }
+    }
+
     fun setSponsorBlock(on: Boolean) {
         settings.setString(KEY_SPONSOR, if (on) "1" else "0")
         val id = _watch.value?.video?.id
-        if (on && id != null && _segments.value.isEmpty()) scope.launch { loadSegments(id) }
+        if (on && id != null) scope.launch { loadSegments(id) } else if (!on) _segments.value = emptyList()
     }
 
     private val _segments = MutableStateFlow<List<SkipSegment>>(emptyList())
@@ -1301,12 +1512,24 @@ class VideosController(
     /** Counts the parts skipped, so the player can tell the person each time. */
     val skipTick: StateFlow<Int> = _skipTick.asStateFlow()
 
-    fun noteSkipped() = _skipTick.update { it + 1 }
+    private val _lastSkipped = MutableStateFlow<SkipSegment?>(null)
+    val lastSkipped: StateFlow<SkipSegment?> = _lastSkipped.asStateFlow()
+
+    fun noteSkipped(segment: SkipSegment? = null) {
+        _lastSkipped.value = segment
+        _skipTick.update { it + 1 }
+    }
+
+    fun clearLastSkipped() {
+        _lastSkipped.value = null
+    }
 
     private suspend fun loadSegments(id: String) {
         _segments.value = emptyList()
         if (sponsorBlock.value == "0") return
-        val found = fetchSponsorSegments(id)
+        val cats = _sponsorCategories.value
+        if (cats.isEmpty()) return
+        val found = fetchSponsorSegments(id, cats)
         if (_watch.value?.video?.id == id) _segments.value = found
     }
 
@@ -1328,11 +1551,11 @@ class VideosController(
         downloadsJob = service?.let { s -> scope.launch { s.items.collect { _downloads.value = it } } }
     }
 
-    /** Keeps the video that is open, in the quality it plays in. */
-    fun downloadCurrent() {
+    /** Keeps the video that is open, in [selectedQuality] (or the currently active quality) plus active subtitles. */
+    fun downloadCurrent(selectedQuality: VideoQuality? = null) {
         val w = _watch.value ?: return
-        val quality = w.quality?.takeIf { !it.isLive } ?: return
-        downloadService?.start(w.video, quality)
+        val quality = (selectedQuality ?: w.quality)?.takeIf { !it.isLive } ?: return
+        downloadService?.start(w.video, quality, w.caption)
     }
 
     fun removeDownload(id: String) {
@@ -1408,10 +1631,18 @@ class VideosController(
     // ------------------------------------------------------------------ subtitles
 
     private suspend fun loadCaptions(id: String) {
-        service.captions(id).onSuccess { list ->
-            val preferred = if (captionsSetting.value == "1") pickCaption(list) else null
-            _watch.update { w -> if (w?.video?.id != id) w else w.copy(captions = list, caption = preferred) }
+        val downloadedCap = _downloads.value.firstOrNull { it.item.id == id && it.state == DownloadState.DONE }?.caption
+        val fetched = service.captions(id).getOrNull().orEmpty()
+        val lang = service.locale.hl.substringBefore('-').ifBlank { "tr" }
+        val trLabel = if (lang.equals("en", ignoreCase = true)) "English (auto-translate)" else "Türkçe (otomatik çeviri)"
+        val translated = buildTranslatedCaption(fetched, lang, trLabel)
+        val combined = buildList {
+            if (downloadedCap != null && fetched.none { it.url == downloadedCap.url }) add(downloadedCap)
+            addAll(fetched)
+            if (translated != null) add(translated)
         }
+        val preferred = if (captionsSetting.value == "1") pickCaption(combined) else null
+        _watch.update { w -> if (w?.video?.id != id) w else w.copy(captions = combined, caption = preferred) }
     }
 
     /** The track in the language of the app, the person's own words before the machine's. */
@@ -1572,8 +1803,88 @@ class VideosController(
         scope.launch {
             val token = service.watch(item.id).getOrNull()?.commentsToken
             val page = token?.let { service.comments(it).getOrNull() }
-            _shortComments.update { cur -> cur?.takeIf { it.video.id == item.id }?.copy(comments = page?.comments.orEmpty(), loading = false) }
+            _shortComments.update { cur ->
+                cur?.takeIf { it.video.id == item.id }?.copy(
+                    total = page?.total,
+                    comments = page?.comments.orEmpty(),
+                    continuation = page?.continuation,
+                    createToken = page?.createToken,
+                    loading = false,
+                )
+            }
         }
+    }
+
+    fun loadMoreShortComments() {
+        val st = _shortComments.value ?: return
+        val token = st.continuation ?: return
+        if (st.loadingMore) return
+        _shortComments.update { it?.copy(loadingMore = true) }
+        scope.launch {
+            service.comments(token).fold(
+                onSuccess = { page ->
+                    _shortComments.update { cur ->
+                        if (cur?.video?.id != st.video.id) cur else cur.copy(
+                            comments = cur.comments + page.comments.filter { c -> cur.comments.none { it.id == c.id } },
+                            continuation = page.continuation,
+                            createToken = page.createToken ?: cur.createToken,
+                            loadingMore = false,
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    if (e is CancellationException) throw e
+                    _shortComments.update { it?.copy(loadingMore = false) }
+                },
+            )
+        }
+    }
+
+    fun loadShortReplies(comment: VideoComment) {
+        val st = _shortComments.value ?: return
+        val id = comment.id
+        val token = if (st.replies.containsKey(id)) st.repliesNext[id] else comment.repliesToken
+        if (token == null || id in st.repliesLoading) return
+        _shortComments.update { it?.copy(repliesLoading = it.repliesLoading + id) }
+        scope.launch {
+            service.comments(token).fold(
+                onSuccess = { page ->
+                    _shortComments.update { cur ->
+                        if (cur?.video?.id != st.video.id) cur else cur.copy(
+                            replies = cur.replies + (id to (cur.replies[id].orEmpty() + page.comments)),
+                            repliesNext = cur.repliesNext + (id to page.continuation),
+                            repliesLoading = cur.repliesLoading - id,
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    if (e is CancellationException) throw e
+                    _shortComments.update { it?.copy(repliesLoading = it.repliesLoading - id) }
+                },
+            )
+        }
+    }
+
+    fun hideShortReplies(commentId: String) {
+        _shortComments.update { it?.copy(replies = it.replies - commentId, repliesNext = it.repliesNext - commentId) }
+    }
+
+    fun postShortComment(text: String): Boolean {
+        val st = _shortComments.value ?: return false
+        if (!service.isSignedIn) return false
+        val token = st.createToken ?: return false
+        if (text.isBlank() || st.posting) return false
+        _shortComments.update { it?.copy(posting = true) }
+        scope.launch {
+            service.postComment(token, text.trim()).fold(
+                onSuccess = { openShortComments(st.video) },
+                onFailure = { e ->
+                    if (e is CancellationException) throw e
+                    _shortComments.update { it?.copy(posting = false) }
+                },
+            )
+        }
+        return true
     }
 
     fun closeShortComments() {
@@ -1598,6 +1909,8 @@ class VideosController(
         const val KEY_SEEN = "video_seen"
         const val KEY_AUTOPLAY = "video_autoplay"
         const val KEY_SPONSOR = "video_sponsorblock"
+        const val KEY_SPONSOR_CATS = "video_sponsor_categories"
+        const val KEY_SPEED = "video_speed"
         private const val SEEN_KEPT = 600
         private const val FRESH_MIN = 8
         private const val RECENT_SEARCHES_USED = 6
@@ -1658,3 +1971,31 @@ internal fun List<VideoQuality>.pickDefault(maxHeight: Int = 720): VideoQuality?
     firstOrNull { it.isLive }
         ?: filter { it.height in 1..maxHeight }.maxByOrNull { it.height * 100 + it.fps }
         ?: minByOrNull { it.height }
+
+/**
+ * Builds an instant YouTube auto-translated subtitle track (`&tlang=<lang>`) when the video offers subtitles
+ * in another language and does not already include a native [targetLang] track.
+ */
+internal fun buildTranslatedCaption(
+    captions: List<VideoCaption>,
+    targetLang: String,
+    label: String,
+): VideoCaption? {
+    val lang = targetLang.substringBefore('-').lowercase().ifBlank { return null }
+    if (captions.isEmpty()) return null
+    if (captions.any { it.language.substringBefore('-').equals(lang, ignoreCase = true) }) return null
+    val source = captions.firstOrNull { !it.auto && "timedtext" in it.url }
+        ?: captions.firstOrNull { "timedtext" in it.url }
+        ?: return null
+    val cleaned = source.url.replace(Regex("""([?&])tlang=[^&]*""")) { m ->
+        if (m.groupValues[1] == "?") "?" else ""
+    }.replace("?&", "?").trimEnd('?', '&')
+    val sep = if ('?' in cleaned) '&' else '?'
+    return VideoCaption(
+        language = "$lang-auto-tlang",
+        label = label,
+        url = "$cleaned${sep}tlang=$lang",
+        auto = true,
+        mimeType = source.mimeType,
+    )
+}

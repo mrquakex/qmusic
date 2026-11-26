@@ -3,7 +3,7 @@ package com.qmusic.engine.video
 import com.qmusic.engine.auth.YouTubeAuth
 import com.qmusic.engine.models.YouTubeLocale
 
-/** What search can be narrowed to. */
+/** What search can be narrowed or sorted to (Innertube base64 protobuf `sp` values). */
 object VideoSearchFilter {
     const val VIDEOS = "EgIQAQ%3D%3D"
     const val CHANNELS = "EgIQAg%3D%3D"
@@ -11,6 +11,22 @@ object VideoSearchFilter {
     const val LIVE = "EgJAAQ%3D%3D"
     /** Shorts only. */
     const val SHORTS = "EgIQCQ%3D%3D"
+    /** Sort by upload date (newest first). */
+    const val SORT_UPLOAD_DATE = "CAI%3D"
+    /** Sort by view count (most viewed first). */
+    const val SORT_VIEW_COUNT = "CAM%3D"
+    /** Uploaded today. */
+    const val DATE_TODAY = "EgIIAg%3D%3D"
+    /** Uploaded this week. */
+    const val DATE_WEEK = "EgIIAw%3D%3D"
+    /** Uploaded this month. */
+    const val DATE_MONTH = "EgIIBA%3D%3D"
+    /** Under 4 minutes. */
+    const val DURATION_SHORT = "EgIYAQ%3D%3D"
+    /** 4 to 20 minutes. */
+    const val DURATION_MEDIUM = "EgIYAw%3D%3D"
+    /** Over 20 minutes. */
+    const val DURATION_LONG = "EgIYAg%3D%3D"
 }
 
 /**
@@ -95,4 +111,13 @@ interface VideoService {
      */
     suspend fun shortsSequence(seedId: String?, continuation: String? = null): Result<ShortsSequence> =
         Result.failure(UnsupportedOperationException("no Shorts sequence"))
+
+    /** Distinct audio language/dub tracks for [videoId] (empty or 1 item when single-language). */
+    suspend fun audioTracks(videoId: String): Result<List<VideoAudioTrack>> = Result.success(emptyList())
+
+    /** Polls the next batch of live chat messages for [continuation]. */
+    suspend fun liveChat(continuation: String): Result<VideoLiveChatPage> = Result.success(VideoLiveChatPage())
+
+    /** Searches inside a single channel [channelId] for [query]. */
+    suspend fun channelSearch(channelId: String, query: String): Result<VideoFeed> = search(query, null)
 }

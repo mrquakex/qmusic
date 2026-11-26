@@ -7,8 +7,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.cache.CacheWriter
+import com.qmusic.engine.video.VideoCaption
 import com.qmusic.engine.video.VideoItem
 import com.qmusic.engine.video.VideoQuality
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,13 +31,16 @@ import java.util.concurrent.Executors
  * SponsorBlock answers for the first four letters of the video id's SHA-256, so it never learns which video is watched,
  * and the segments of every video that starts that way come back; the one wanted is picked here.
  */
-actual suspend fun fetchSponsorSegments(videoId: String): List<SkipSegment> = withContext(Dispatchers.IO) {
+actual suspend fun fetchSponsorSegments(videoId: String, categories: Set<String>): List<SkipSegment> = withContext(Dispatchers.IO) {
+    val active = categories.filter { it in ALL_SPONSOR_CATEGORIES }
+    if (active.isEmpty()) return@withContext emptyList()
     runCatching {
         val prefix = MessageDigest.getInstance("SHA-256").digest(videoId.toByteArray())
             .joinToString("") { "%02x".format(it) }.take(4)
-        val categories = URLEncoder.encode("[\"sponsor\",\"selfpromo\",\"interaction\"]", "UTF-8")
+        val catsJson = active.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
+        val encodedCats = URLEncoder.encode(catsJson, "UTF-8")
         val actions = URLEncoder.encode("[\"skip\"]", "UTF-8")
-        val connection = URL("https://sponsor.ajay.app/api/skipSegments/$prefix?categories=$categories&actionTypes=$actions")
+        val connection = URL("https://sponsor.ajay.app/api/skipSegments/$prefix?categories=$encodedCats&actionTypes=$actions")
             .openConnection() as HttpURLConnection
         connection.connectTimeout = 6_000
         connection.readTimeout = 6_000
@@ -112,9 +117,9 @@ internal object VideoDownloadManager : VideoDownloads {
         _items.value.filter { it.state == DownloadState.QUEUED }.forEach(::run)
     }
 
-    override fun start(item: VideoItem, quality: VideoQuality) {
+    override fun start(item: VideoItem, quality: VideoQuality, caption: VideoCaption?) {
         if (quality.isLive) return
-        val entry = DownloadedVideo(item, quality, DownloadState.QUEUED)
+        val entry = DownloadedVideo(item, quality, DownloadState.QUEUED, caption = caption)
         cancelled.remove(item.id)
         _items.value = _items.value.filter { it.item.id != item.id } + entry
         save()
@@ -132,9 +137,13 @@ internal object VideoDownloadManager : VideoDownloads {
         executor.execute {
             val cache = VideoStreaming.downloadCache(appContext)
             keysOf(entry.quality).forEach { runCatching { cache.removeResource(it) } }
+            runCatching { captionFile(id).delete() }
             hook(force = true)
         }
     }
+
+    private fun captionFile(videoId: String): File =
+        File(File(appContext.filesDir, "video_captions").apply { mkdirs() }, "${videoId.filter { it.isLetterOrDigit() || it == '_' || it == '-' }}.vtt")
 
     private fun keysOf(quality: VideoQuality) = listOfNotNull(quality.videoUrl, quality.audioUrl)
         .map { VideoStreaming.cacheKeyOf(Uri.parse(it)) }
@@ -164,7 +173,28 @@ internal object VideoDownloadManager : VideoDownloads {
                     writers.getOrPut(id) { java.util.Collections.synchronizedList(ArrayList()) }.add(writer)
                     writer.cache()
                 }
-                update(id) { it.copy(state = DownloadState.DONE, bytes = done.sum(), total = done.sum()) }
+                // Best-effort offline copy of selected subtitles alongside the video.
+                val localCaption = entry.caption?.let { cap ->
+                    runCatching {
+                        val conn = URL(cap.url).openConnection() as HttpURLConnection
+                        conn.connectTimeout = 8_000
+                        conn.readTimeout = 8_000
+                        conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+                        try {
+                            if (conn.responseCode in 200..299) {
+                                val bytes = conn.inputStream.readBytes()
+                                if (bytes.isNotEmpty()) {
+                                    val file = captionFile(id)
+                                    file.writeBytes(bytes)
+                                    cap.copy(url = Uri.fromFile(file).toString())
+                                } else null
+                            } else null
+                        } finally {
+                            conn.disconnect()
+                        }
+                    }.getOrNull()
+                }
+                update(id) { it.copy(state = DownloadState.DONE, bytes = done.sum(), total = done.sum(), caption = localCaption ?: it.caption) }
             } catch (e: Throwable) {
                 if (id !in cancelled) update(id) { it.copy(state = DownloadState.FAILED) }
             } finally {
@@ -207,7 +237,16 @@ internal object VideoDownloadManager : VideoDownloads {
                     .put("thumb", d.item.thumbnail ?: "").put("duration", d.item.duration ?: "")
                     .put("height", d.quality.height).put("fps", d.quality.fps)
                     .put("videoUrl", d.quality.videoUrl).put("audioUrl", d.quality.audioUrl ?: "")
-                    .put("state", d.state.name).put("bytes", d.bytes).put("total", d.total),
+                    .put("state", d.state.name).put("bytes", d.bytes).put("total", d.total)
+                    .apply {
+                        d.caption?.let { c ->
+                            put("capLang", c.language)
+                            put("capLabel", c.label)
+                            put("capUrl", c.url)
+                            put("capAuto", c.auto)
+                            put("capMime", c.mimeType)
+                        }
+                    },
             )
         }
         prefs.edit().putString("list", array.toString()).apply()
@@ -217,6 +256,16 @@ internal object VideoDownloadManager : VideoDownloads {
         val array = JSONArray(prefs.getString("list", "[]"))
         (0 until array.length()).map { i ->
             val o = array.getJSONObject(i)
+            val capUrl = o.optString("capUrl").ifBlank { null }
+            val caption = capUrl?.let {
+                VideoCaption(
+                    language = o.optString("capLang"),
+                    label = o.optString("capLabel"),
+                    url = it,
+                    auto = o.optBoolean("capAuto", false),
+                    mimeType = o.optString("capMime", "text/vtt"),
+                )
+            }
             DownloadedVideo(
                 item = VideoItem(
                     id = o.getString("id"),
@@ -235,6 +284,7 @@ internal object VideoDownloadManager : VideoDownloads {
                 state = runCatching { DownloadState.valueOf(o.getString("state")) }.getOrDefault(DownloadState.FAILED),
                 bytes = o.optLong("bytes"),
                 total = o.optLong("total"),
+                caption = caption,
             )
         }
     }.getOrDefault(emptyList())

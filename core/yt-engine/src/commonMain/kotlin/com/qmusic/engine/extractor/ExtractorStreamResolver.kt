@@ -21,6 +21,9 @@ interface ExtractorStreamResolver {
     /** The subtitle tracks of [videoId] (empty when it has none). */
     suspend fun videoCaptions(videoId: String): List<com.qmusic.engine.video.VideoCaption> = emptyList()
 
+    /** Distinct audio language / dubbed tracks for [videoId]. */
+    suspend fun videoAudioTracks(videoId: String): List<com.qmusic.engine.video.VideoAudioTrack> = emptyList()
+
     /** The video's preview frames (for the seek bar), or null when YouTube has none. */
     suspend fun previewFrames(videoId: String): com.qmusic.engine.models.PreviewFrames? = null
 

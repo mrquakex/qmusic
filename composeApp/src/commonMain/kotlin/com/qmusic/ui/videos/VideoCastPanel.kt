@@ -128,7 +128,7 @@ internal fun CastPanel(w: WatchState, state: VideoCastState?, s: VideoStrings, c
             val hit = segments.firstOrNull { pos >= it.startMs && pos < it.endMs - 1_500 && it !in skipped } ?: return@collect
             skipped += hit
             VideoCast.seekTo?.invoke(hit.endMs)
-            controller.noteSkipped()
+            controller.noteSkipped(hit)
         }
     }
 }
