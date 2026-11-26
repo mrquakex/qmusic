@@ -3073,7 +3073,7 @@ private val AntigravityBubble: Color get() = if (com.qmusic.ui.theme.lightTheme)
 
 /** An assistant reading a photo: a band in its colour sweeps down and up over it, inside corner marks. */
 @Composable
-private fun PhotoScan(modifier: Modifier, color: Color = color) {
+private fun PhotoScan(modifier: Modifier, color: Color = ClaudeCoral) {
     val t = rememberInfiniteTransition()
     val y by t.animateFloat(0f, 1f, infiniteRepeatable(tween(1700, easing = androidx.compose.animation.core.FastOutSlowInEasing), RepeatMode.Reverse))
     androidx.compose.foundation.Canvas(modifier) {
