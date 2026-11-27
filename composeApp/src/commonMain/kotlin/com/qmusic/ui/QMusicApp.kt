@@ -631,6 +631,21 @@ fun QMusicApp(
                     }
                 }
             }
+            val chatTogetherOffer by com.qmusic.ui.chat.ChatMusic.togetherOffer.collectAsState()
+            chatTogetherOffer?.let { item ->
+                if (chatController == null) {
+                    com.qmusic.ui.chat.ChatMusic.togetherOffer.value = null
+                } else {
+                    com.qmusic.ui.chat.ChatTogetherDialog(
+                        controller = chatController,
+                        s = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish,
+                        item = item,
+                    ) { done ->
+                        com.qmusic.ui.chat.ChatMusic.togetherOffer.value = null
+                        done?.let { viewModel.showMessage(it) }
+                    }
+                }
+            }
             // A group call takes the whole screen unless shrunk into its floating bubble.
             if (groupCallService != null && groupCall != null && !groupCallMinimized) {
                 val chatStrings = if (language == "en") com.qmusic.ui.chat.ChatStrings.English else com.qmusic.ui.chat.ChatStrings.Turkish
@@ -727,6 +742,7 @@ fun QMusicApp(
                 val shareVideo = rememberShare()
                 Box(modifier = sectionModifier.fillMaxSize()) {
                     val videoStrings = if (language == "en") com.qmusic.ui.videos.VideoStrings.English else com.qmusic.ui.videos.VideoStrings.Turkish
+                    val movieSources by (chatController?.admin?.movieSources ?: remember { kotlinx.coroutines.flow.MutableStateFlow(emptyList()) }).collectAsState()
                     com.qmusic.ui.videos.VideosApp(
                         controller = videosController,
                         s = videoStrings,
@@ -736,6 +752,7 @@ fun QMusicApp(
                             chatOpen = true
                         }) else null,
                         chatUnread = chatUnread,
+                        movieSources = movieSources,
                         onExit = {
                             videosOpen = false
                             if (videoFromChat) {

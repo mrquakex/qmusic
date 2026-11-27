@@ -60,6 +60,15 @@ internal object VideoStreaming {
     fun network(): DataSource.Factory =
         ChunkedDataSource.Factory(OkHttpDataSource.Factory(client).setUserAgent(USER_AGENT), CHUNK_BYTES)
 
+    /** Network source with custom HTTP headers (e.g. Referer / User-Agent for scraped HLS/MP4 streams). */
+    fun networkWithHeaders(headers: Map<String, String>): DataSource.Factory {
+        val ua = headers.entries.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }?.value ?: USER_AGENT
+        val props = headers.filterKeys { !it.equals("User-Agent", ignoreCase = true) }
+        return OkHttpDataSource.Factory(client)
+            .setUserAgent(ua)
+            .setDefaultRequestProperties(props)
+    }
+
     /**
      * A YouTube file's address changes with every lookup, but the file does not: it is kept under the video's own id,
      * its format and its size.

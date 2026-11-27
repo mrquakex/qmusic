@@ -254,6 +254,15 @@ internal val VideoExtraStrings.showHeatmap: String get() = if (this == VideoExtr
 internal val VideoExtraStrings.showHeatmapHint: String get() = if (this == VideoExtraStrings.English) "Draws the replay intensity wave above the progress bar" else "İlerleme çubuğunun üstünde en çok tekrar izlenen anları gösterir"
 internal val VideoExtraStrings.dislikeLabel: String get() = if (this == VideoExtraStrings.English) "Dislikes" else "Beğenmeme"
 internal val VideoExtraStrings.chatShort: String get() = if (this == VideoExtraStrings.English) "Chat" else "Sohbet"
+internal val VideoExtraStrings.tabMovies: String get() = if (this == VideoExtraStrings.English) "Movies" else "Film"
+internal val VideoExtraStrings.watchTogether: String get() = if (this == VideoExtraStrings.English) "Watch together" else "Birlikte izle"
+internal val VideoExtraStrings.movieLinkTitle: String get() = if (this == VideoExtraStrings.English) "Play from link" else "Linkten izle"
+internal val VideoExtraStrings.movieLinkHint: String get() = if (this == VideoExtraStrings.English) "Paste .m3u8, .mp4, YouTube or film page URL…" else ".m3u8, .mp4, YouTube veya film sayfası URL'si yapıştır…"
+internal val VideoExtraStrings.moviePlaySolo: String get() = if (this == VideoExtraStrings.English) "Watch" else "İzle"
+internal val VideoExtraStrings.movieSearchHint: String get() = if (this == VideoExtraStrings.English) "Search in source…" else "Kaynakta film ara…"
+internal val VideoExtraStrings.movieNoSources: String get() = if (this == VideoExtraStrings.English) "No film sources added yet. Admins can add domains from Admin Panel › Settings › Film sources, or paste a direct link above." else "Henüz film kaynağı eklenmemiş. Yönetim ekibi Yönetici Paneli › Ayarlar › Film kaynakları bölümünden domain ekleyebilir ya da yukarıya direkt link yapıştırabilirsin."
+internal val VideoExtraStrings.movieNoResults: String get() = if (this == VideoExtraStrings.English) "No movies found on this source." else "Bu kaynakta film bulunamadı."
+internal val VideoExtraStrings.movieInvalidUrl: String get() = if (this == VideoExtraStrings.English) "Enter a valid https:// link." else "Geçerli bir https:// bağlantısı gir."
 
 /** The extra words that go with these strings' language. */
 internal fun VideoStrings.extras(): VideoExtraStrings =

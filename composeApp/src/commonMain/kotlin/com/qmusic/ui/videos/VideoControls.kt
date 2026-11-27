@@ -112,6 +112,11 @@ object VideoIcons {
         "M17 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-3z",
         "M17 14l-4 7a1.8 1.8 0 0 1-3-1.4L11 14H5.2a2 2 0 0 1-1.95-2.45l1.35-6A2 2 0 0 1 6.55 4H17",
     )
+    val Film: ImageVector = stroked(
+        "Film",
+        "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z",
+        "M8 5v14M16 5v14M3 9.5h5M3 14.5h5M16 9.5h5M16 14.5h5",
+    )
 }
 
 private val SPEEDS = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)

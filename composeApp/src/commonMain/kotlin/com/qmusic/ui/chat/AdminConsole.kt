@@ -29,6 +29,9 @@ interface AdminConsole {
     /** Emergency feature kill switches (admins bypass these so they can still test). */
     val features: StateFlow<FeatureFlags> get() = MutableStateFlow(FeatureFlags())
 
+    /** Admin-managed film/video catalog sources (live domain updates without an APK rebuild). */
+    val movieSources: StateFlow<List<MovieSource>> get() = MutableStateFlow(emptyList())
+
     /** "Under maintenance": while on, the messages show a maintenance page to everyone but the admins. */
     val maintenance: StateFlow<Maintenance>
 
@@ -66,6 +69,8 @@ interface AdminConsole {
     suspend fun setMinVersion(version: String?): Result<Unit>
     suspend fun setRecommendedVersion(version: String?): Result<Unit> = Result.failure(UnsupportedOperationException())
     suspend fun setFeatures(features: FeatureFlags): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun saveMovieSource(source: MovieSource): Result<Unit> = Result.failure(UnsupportedOperationException())
+    suspend fun deleteMovieSource(id: String): Result<Unit> = Result.failure(UnsupportedOperationException())
     suspend fun banName(name: String, banned: Boolean): Result<Unit>
     suspend fun setMaintenance(on: Boolean, text: String): Result<Unit>
     suspend fun setSpam(on: Boolean, limit: Int): Result<Unit>
@@ -87,6 +92,21 @@ data class FeatureFlags(
     val statuses: Boolean = true,
     val newChats: Boolean = true,
 )
+
+/** One admin-configured film/video source whose domain can be updated live from the Admin Panel. */
+data class MovieSource(
+    val id: String,
+    val name: String,
+    val baseUrl: String,
+    val searchPath: String = "/?s={query}",
+    val catalogPath: String = "/",
+    val headers: String = "",
+    val enabled: Boolean = true,
+    val order: Int = 0,
+) {
+    /** Normalized base URL with no trailing slash. */
+    val normalizedBaseUrl: String get() = baseUrl.trim().trimEnd('/')
+}
 
 /** Diagnostic trail of a finished call uploaded by a phone to callDebug/{uid}/{call}. */
 data class CallDebugEntry(
@@ -230,7 +250,7 @@ internal fun logCategoryOf(kind: String): LogCategory = when (kind) {
     "autoMute", "spam" -> LogCategory.SPAM
     "announce", "delAnnounce", "message", "msgOldVer", "testPush" -> LogCategory.ANNOUNCE
     "closeGroup", "rename", "reset", "badge", "claude", "antigravity", "deleteAccount", "deleteMedia" -> LogCategory.ACCOUNT
-    "minVersion", "recVersion", "maintenance", "features", "banName", "backupNow", "gcMedia" -> LogCategory.SETTINGS
+    "minVersion", "recVersion", "maintenance", "features", "movieSource", "delMovieSrc", "banName", "backupNow", "gcMedia" -> LogCategory.SETTINGS
     else -> LogCategory.SETTINGS
 }
 

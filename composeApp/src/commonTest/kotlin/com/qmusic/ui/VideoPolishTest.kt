@@ -322,4 +322,126 @@ class VideoPolishTest {
         assertEquals("0", settings.string(VideosController.KEY_DISLIKES, "1").value)
         assertEquals("0", settings.string(VideosController.KEY_HEATMAP, "1").value)
     }
+
+    @Test
+    fun movieScraperParserAndExternalUrlHelpersWork() {
+        val p = com.qmusic.ui.videos.MovieHtmlParser
+        // Direct media URL detection
+        assertTrue(p.isDirectMediaUrl("https://cdn.example.com/movie/master.m3u8?token=abc"))
+        assertTrue(p.isDirectMediaUrl("https://cdn.example.com/clip.mp4"))
+        assertFalse(p.isDirectMediaUrl("https://cinema.example.com/watch/matrix"))
+
+        // Source URL building (catalog + search)
+        val src = com.qmusic.ui.chat.MovieSource(
+            id = "cinema",
+            name = "Ev Sineması",
+            baseUrl = "https://cinema.example.com/",
+            searchPath = "/ara?q={query}",
+            catalogPath = "/filmler",
+            headers = "Referer: https://cinema.example.com/\nX-Test: 1",
+        )
+        assertEquals("https://cinema.example.com/filmler", p.buildSourceUrl(src, ""))
+        assertEquals("https://cinema.example.com/ara?q=sci+fi", p.buildSourceUrl(src, "sci fi"))
+        assertEquals(mapOf("Referer" to "https://cinema.example.com/", "X-Test" to "1"), p.parseHeaders(src.headers))
+
+        // HTML stream, iframe, subtitle, title, poster extraction
+        val html = """
+            <html>
+              <head>
+                <meta property="og:title" content="Interstellar &amp; Beyond" />
+                <meta property="og:image" content="/posters/inter.jpg" />
+              </head>
+              <body>
+                <video>
+                  <source src="https://cdn.example.com/video_720p.mp4" />
+                  <track kind="subtitles" srclang="tr" label="Türkçe" src="/subs/tr.vtt" />
+                </video>
+                <script>var cfg = { file: "https:\/\/cdn.example.com\/master_1080p.m3u8?sig=1" };</script>
+                <iframe src="https://embed.example.com/e/123"></iframe>
+              </body>
+            </html>
+        """.trimIndent()
+        val streams = p.extractStreams(html, "https://cinema.example.com/watch/inter")
+        assertEquals(2, streams.size)
+        assertTrue(streams.first().videoUrl.endsWith("master_1080p.m3u8?sig=1"))
+        assertEquals("https://cinema.example.com/", streams.first().headers["Referer"])
+        assertEquals("Interstellar & Beyond", p.extractTitle(html))
+        assertEquals("https://cinema.example.com/posters/inter.jpg", p.extractPoster(html, "https://cinema.example.com/watch/inter"))
+        assertEquals(listOf("https://embed.example.com/e/123"), p.extractEmbedIframes(html, "https://cinema.example.com/watch/inter"))
+        val subs = p.extractCaptions(html, "https://cinema.example.com/watch/inter")
+        assertEquals(1, subs.size)
+        assertEquals("https://cinema.example.com/subs/tr.vtt", subs.first().url)
+
+        // Catalog scraping (full page with badges, pagination & genre links)
+        val catalogHtml = """
+            <html>
+              <body>
+                <nav>
+                  <a href="/tur/aksiyon">Aksiyon</a>
+                  <a href="/tur/bilim-kurgu">Bilim Kurgu</a>
+                </nav>
+                <div class="grid">
+                  <a href="/film/dune" title="Dune: Part Two"><img data-src="/img/dune.jpg" alt="Dune" /><span>8.6</span><span>2024</span><span>1080p</span></a>
+                  <a href="/film/inception"><img src="https://img.example.com/inc.jpg" /><h3>Inception</h3><span>8.8</span><span>2010</span></a>
+                </div>
+                <a rel="next" href="/sayfa/2">Sonraki</a>
+              </body>
+            </html>
+        """.trimIndent()
+        val page = p.extractCatalogPage(catalogHtml, "https://cinema.example.com/", "Ev Sineması")
+        assertEquals(2, page.items.size)
+        assertEquals("Dune: Part Two", page.items[0].title)
+        assertEquals("https://cinema.example.com/img/dune.jpg", page.items[0].poster)
+        assertEquals("8.6", page.items[0].rating)
+        assertEquals("2024", page.items[0].year)
+        assertEquals("1080P", page.items[0].qualityBadge)
+        assertEquals("Inception", page.items[1].title)
+        assertEquals("https://cinema.example.com/sayfa/2", page.nextPageUrl)
+        assertEquals(listOf("Aksiyon", "Bilim Kurgu"), page.genres.map { it.first })
+
+        // Dean Edwards p,a,c,k,e,d JS unpacker + Base64 atob() stream decoder
+        val packedHtml = """
+            <script>
+            eval(function(p,a,c,k,e,d){while(c--)if(k[c])p=p.replace(new RegExp('\\b'+c.toString(a)+'\\b','g'),k[c]);return p}('0 1={2:"3://4.5.6/7/8.9"};',10,10,'var|cfg|file|https|cdn|cinema|org|hls|master|m3u8'.split('|'),0,{}))
+            var backup = atob("aHR0cHM6Ly9jZG4uY2luZW1hLm9yZy9maWxtXzcyMHAubXA0");
+            </script>
+        """.trimIndent()
+        val unpackedStreams = p.extractStreams(packedHtml, "https://cinema.example.com/watch/1")
+        assertEquals(2, unpackedStreams.size)
+        assertEquals("https://cdn.cinema.org/hls/master.m3u8", unpackedStreams[0].videoUrl)
+        assertEquals("https://cdn.cinema.org/film_720p.mp4", unpackedStreams[1].videoUrl)
+
+        // JSON-LD metadata extraction (synopsis, year, rating)
+        val ldHtml = """
+            <script type="application/ld+json">
+            {"@type":"Movie","name":"Dune","datePublished":"2024-03-01","description":"Paul Atreides unites with the Fremen on Arrakis.","aggregateRating":{"ratingValue":"8.6"}}
+            </script>
+        """.trimIndent()
+        assertEquals("2024", p.extractYear(ldHtml))
+        assertEquals("8.6", p.extractRating(ldHtml))
+        assertTrue(p.extractSynopsis(ldHtml)!!.contains("Arrakis"))
+
+        // HLS master playlist quality variant parsing
+        val hlsMaster = """
+            #EXTM3U
+            #EXT-X-STREAM-INF:BANDWIDTH=1200000,RESOLUTION=854x480
+            480p/index.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=4500000,RESOLUTION=1920x1080
+            1080p/index.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=2400000,RESOLUTION=1280x720
+            720p/index.m3u8
+        """.trimIndent()
+        val variants = p.parseHlsVariants(hlsMaster, "https://cdn.cinema.org/hls/master.m3u8", emptyMap())
+        assertEquals(listOf(0, 1080, 720, 480), variants.map { it.height })
+        assertEquals("https://cdn.cinema.org/hls/1080p/index.m3u8", variants[1].videoUrl)
+
+        // YouTube URL helper + external ID prefix + adaptive grid columns
+        assertEquals("dQw4w9WgXcQ", com.qmusic.ui.videos.extractYouTubeIdFromUrl("https://youtu.be/dQw4w9WgXcQ?t=42"))
+        assertEquals("dQw4w9WgXcQ", com.qmusic.ui.videos.extractYouTubeIdFromUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
+        assertNull(com.qmusic.ui.videos.extractYouTubeIdFromUrl("https://cinema.example.com/watch/1"))
+        assertEquals("https://a.com/v.m3u8", com.qmusic.ui.videos.externalUrlOf(com.qmusic.ui.videos.externalVideoId("https://a.com/v.m3u8")))
+        assertEquals(2, com.qmusic.ui.videos.movieGridColumnCount(412f))
+        assertEquals(3, com.qmusic.ui.videos.movieGridColumnCount(720f))
+        assertEquals(5, com.qmusic.ui.videos.movieGridColumnCount(1280f))
+    }
 }

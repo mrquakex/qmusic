@@ -152,8 +152,9 @@ data class VideoQuality(
     val videoUrl: String,
     val audioUrl: String?,
     val isLive: Boolean = false,
+    val headers: Map<String, String> = emptyMap(),
 ) {
-    val label: String get() = if (isLive) "Auto" else if (fps > 30) "${height}p$fps" else "${height}p"
+    val label: String get() = if (isLive) "Auto" else if (height <= 0) "HD" else if (fps > 30) "${height}p$fps" else "${height}p"
 }
 
 /** One dubbed/original audio track offered alongside a video's separate picture streams. */

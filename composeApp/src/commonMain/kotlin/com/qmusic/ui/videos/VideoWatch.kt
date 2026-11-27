@@ -689,72 +689,110 @@ private fun WatchDetails(
             }
         }
         item(key = "channel") {
+            val isExternal = isExternalVideoId(w.video.id)
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = sidePad, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Row(
-                    modifier = Modifier.weight(1f).clickable(enabled = (details?.channelId ?: w.video.channelId) != null) {
+                    modifier = Modifier.weight(1f).clickable(enabled = !isExternal && (details?.channelId ?: w.video.channelId) != null) {
                         (details?.channelId ?: w.video.channelId)?.let { controller.push(VideoRoute.Channel(it, details?.channelName ?: w.video.channelName)) }
                     },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Avatar(w.video.channelAvatar ?: details?.channelAvatar, 40.dp)
+                    if (isExternal) {
+                        Box(
+                            modifier = Modifier.size(40.dp).clip(androidx.compose.foundation.shape.CircleShape).background(VideoColors.Chip),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(VideoIcons.Film, null, tint = VideoColors.Text, modifier = Modifier.size(18.dp))
+                        }
+                    } else {
+                        Avatar(w.video.channelAvatar ?: details?.channelAvatar, 40.dp)
+                    }
                     Spacer(Modifier.width(10.dp))
                     Column {
                         Text(details?.channelName ?: w.video.channelName ?: "", color = VideoColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         details?.subscribers?.let { Text(it, color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 1) }
                     }
                 }
-                Text(
-                    if (w.subscribed) s.subscribed else s.subscribe,
-                    color = if (w.subscribed) VideoColors.Text else VideoColors.OnChipSelected,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(if (w.subscribed) VideoColors.Chip else VideoColors.ChipSelected)
-                        .clickable { controller.toggleSubscribe() }
-                        .padding(horizontal = 16.dp, vertical = 9.dp),
-                )
+                if (!isExternal) {
+                    Text(
+                        if (w.subscribed) s.subscribed else s.subscribe,
+                        color = if (w.subscribed) VideoColors.Text else VideoColors.OnChipSelected,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(if (w.subscribed) VideoColors.Chip else VideoColors.ChipSelected)
+                            .clickable { controller.toggleSubscribe() }
+                            .padding(horizontal = 16.dp, vertical = 9.dp),
+                    )
+                }
             }
         }
         item(key = "actions") {
+            val isExternal = isExternalVideoId(w.video.id)
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = sidePad, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                val dislikeStats = w.dislikeStats
-                if (dislikeStats != null) {
-                    LikeDislikePill(
-                        likeLabel = details?.likes ?: formatCompactCount(dislikeStats.likes, s == VideoStrings.English),
-                        dislikeLabel = formatCompactCount(dislikeStats.dislikes, s == VideoStrings.English),
-                        liked = w.liked,
-                        likeRatio = dislikeStats.likeRatio,
-                        onToggleLike = { controller.toggleLike() },
-                    )
-                } else {
-                    ActionPill(
-                        label = details?.likes ?: s.like,
-                        icon = if (w.liked) QMusicIcons.HeartFilled else QMusicIcons.Heart,
-                        active = w.liked,
-                    ) { controller.toggleLike() }
+                if (!isExternal) {
+                    val dislikeStats = w.dislikeStats
+                    if (dislikeStats != null) {
+                        LikeDislikePill(
+                            likeLabel = details?.likes ?: formatCompactCount(dislikeStats.likes, s == VideoStrings.English),
+                            dislikeLabel = formatCompactCount(dislikeStats.dislikes, s == VideoStrings.English),
+                            liked = w.liked,
+                            likeRatio = dislikeStats.likeRatio,
+                            onToggleLike = { controller.toggleLike() },
+                        )
+                    } else {
+                        ActionPill(
+                            label = details?.likes ?: s.like,
+                            icon = if (w.liked) QMusicIcons.HeartFilled else QMusicIcons.Heart,
+                            active = w.liked,
+                        ) { controller.toggleLike() }
+                    }
+                    ActionPill(label = if (w.saved) s.saved else s.save, icon = QMusicIcons.PlaylistAdd, active = w.saved) {
+                        if (!controller.openSaveSheet(w.video.id)) onSignIn()
+                    }
                 }
-                ActionPill(label = if (w.saved) s.saved else s.save, icon = QMusicIcons.PlaylistAdd, active = w.saved) {
-                    if (!controller.openSaveSheet(w.video.id)) onSignIn()
+                // 1-tap Watch Together (invites a friend or group over Firebase TogetherController).
+                ActionPill(label = x.watchTogether, icon = QMusicIcons.Group, active = false) {
+                    val at = com.qmusic.ui.chat.TogetherVideo.playback?.positionMs?.value ?: 0L
+                    com.qmusic.ui.chat.ChatMusic.offerTogether(
+                        com.qmusic.ui.chat.SharedItem(
+                            com.qmusic.ui.chat.ShareKind.VIDEO,
+                            w.video.id,
+                            details?.title ?: w.video.title,
+                            details?.channelName ?: w.video.channelName.orEmpty(),
+                            w.video.thumbnail,
+                            startMs = if (at > 5_000 && !w.isLive()) at else 0L,
+                        ),
+                    )
                 }
                 ActionPill(label = s.share, icon = QMusicIcons.Share, active = false) {
-                    val at = com.qmusic.ui.chat.TogetherVideo.playback?.positionMs?.value ?: 0L
-                    if (!w.isLive() && at >= 5_000L) shareDialogPos = at else onShare("https://youtu.be/${w.video.id}")
+                    val extUrl = externalUrlOf(w.video.id)
+                    if (extUrl != null) {
+                        onShare(extUrl)
+                    } else {
+                        val at = com.qmusic.ui.chat.TogetherVideo.playback?.positionMs?.value ?: 0L
+                        if (!w.isLive() && at >= 5_000L) shareDialogPos = at else onShare("https://youtu.be/${w.video.id}")
+                    }
                 }
                 // To a conversation, at the second it is at (they open it there).
                 ActionPill(label = com.qmusic.ui.chat.ChatMusic.words().sendToChat, icon = QMusicIcons.Chat, active = false) {
                     val at = com.qmusic.ui.chat.TogetherVideo.playback?.positionMs?.value ?: 0L
                     com.qmusic.ui.chat.ChatMusic.offer(
                         com.qmusic.ui.chat.SharedItem(
-                            com.qmusic.ui.chat.ShareKind.VIDEO, w.video.id, w.video.title, w.video.channelName.orEmpty(), w.video.thumbnail,
+                            com.qmusic.ui.chat.ShareKind.VIDEO,
+                            w.video.id,
+                            details?.title ?: w.video.title,
+                            details?.channelName ?: w.video.channelName.orEmpty(),
+                            w.video.thumbnail,
                             startMs = if (at > 5_000 && !w.isLive()) at else 0L,
                         ),
                     )
                 }
-                if (controller.canDownload && !w.isLive()) {
+                if (!isExternal && controller.canDownload && !w.isLive()) {
                     val downloads by controller.downloads.collectAsState()
                     val dl = downloads.firstOrNull { it.item.id == w.video.id }
                     ActionPill(
@@ -816,7 +854,7 @@ private fun WatchDetails(
                 }
             }
         }
-        item(key = "comments-header") {
+        if (!isExternalVideoId(w.video.id)) item(key = "comments-header") {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = sidePad, vertical = 6.dp).clip(RoundedCornerShape(12.dp)).background(VideoColors.Surface).clickable {
                     if (tabletMode && onOpenSideComments != null) {
@@ -851,7 +889,7 @@ private fun WatchDetails(
                     )
                 }
             }
-        } else if (showRelated) {
+        } else if (showRelated && !isExternalVideoId(w.video.id)) {
             relatedItems(controller, w, s)
         }
     }

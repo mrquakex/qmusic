@@ -101,6 +101,8 @@ fun VideosApp(
     /** Goes to the messages (their bar's button), and how many are unread there. */
     onChat: (() -> Unit)? = null,
     chatUnread: Int = 0,
+    /** Admin-configured film sources (live domain updates from Admin Panel). */
+    movieSources: List<com.qmusic.ui.chat.MovieSource> = emptyList(),
 ) {
     val tab by controller.tab.collectAsState()
     val routes by controller.routes.collectAsState()
@@ -289,7 +291,7 @@ fun VideosApp(
                                         transitionSpec = { fadeThrough() },
                                         label = "videoTab",
                                     ) { shownTab ->
-                                        TabContent(controller, shownTab, s, signedIn, onSignIn, playback, onPauseMusic, onShare, onAccount = { accountDialog = true }, barsVisible = tablet || bars.value || !feedPage, tablet = tablet)
+                                        TabContent(controller, shownTab, s, signedIn, onSignIn, playback, onPauseMusic, onShare, onAccount = { accountDialog = true }, barsVisible = tablet || bars.value || !feedPage, tablet = tablet, movieSources = movieSources)
                                     }
                                 }
                                 is VideoRoute.Search -> SearchResultsPage(controller, s, onSignIn)
@@ -499,6 +501,7 @@ private fun VideoNavRail(
         ) {
             RailItem(s.tabHome, QMusicIcons.Home, tab == VideoTab.HOME) { onTab(VideoTab.HOME) }
             RailItem(s.shorts, VideoIcons.Shorts, tab == VideoTab.SHORTS) { onTab(VideoTab.SHORTS) }
+            RailItem(s.extras().tabMovies, VideoIcons.Film, tab == VideoTab.MOVIES) { onTab(VideoTab.MOVIES) }
             RailItem(s.tabSubscriptions, QMusicIcons.VideoPlay, tab == VideoTab.SUBSCRIPTIONS) { onTab(VideoTab.SUBSCRIPTIONS) }
             RailItem(s.tabLibrary, QMusicIcons.Library, tab == VideoTab.LIBRARY) { onTab(VideoTab.LIBRARY) }
             Spacer(Modifier.weight(1f))
@@ -580,6 +583,7 @@ private fun VideoBottomBar(tab: VideoTab?, s: VideoStrings, onTab: (VideoTab) ->
     com.qmusic.ui.components.QeyfBar(VideoColors.Background) {
         QeyfBarItem(s.tabHome, QMusicIcons.Home, tab == VideoTab.HOME) { onTab(VideoTab.HOME) }
         QeyfBarItem(s.shorts, VideoIcons.Shorts, tab == VideoTab.SHORTS) { onTab(VideoTab.SHORTS) }
+        QeyfBarItem(s.extras().tabMovies, VideoIcons.Film, tab == VideoTab.MOVIES) { onTab(VideoTab.MOVIES) }
         QeyfBarItem(s.tabSubscriptions, QMusicIcons.VideoPlay, tab == VideoTab.SUBSCRIPTIONS) { onTab(VideoTab.SUBSCRIPTIONS) }
         QeyfBarItem(s.tabLibrary, QMusicIcons.Library, tab == VideoTab.LIBRARY) { onTab(VideoTab.LIBRARY) }
         QeyfBarItem(s.backToMusic, QMusicIcons.Headphones, false, onClick = onMusic)
@@ -630,6 +634,7 @@ private fun TabContent(
     onAccount: () -> Unit,
     barsVisible: Boolean = true,
     tablet: Boolean = false,
+    movieSources: List<com.qmusic.ui.chat.MovieSource> = emptyList(),
 ) {
     if (tab == VideoTab.SHORTS) {
         ShortsPage(controller, playback, s, false, onPauseMusic, onShare, onSignIn)
@@ -666,6 +671,7 @@ private fun TabContent(
                 )
             }
             VideoTab.SHORTS -> Unit
+            VideoTab.MOVIES -> MoviesTab(controller, movieSources, s, tablet)
             VideoTab.SUBSCRIPTIONS -> SubscriptionsTab(controller, s, signedIn, onSignIn)
             VideoTab.LIBRARY -> LibraryTab(controller, s, signedIn, onSignIn)
         }

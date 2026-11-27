@@ -147,7 +147,7 @@ sealed interface VideoRoute {
     data object Shorts : VideoRoute
 }
 
-enum class VideoTab { HOME, SHORTS, SUBSCRIPTIONS, LIBRARY }
+enum class VideoTab { HOME, SHORTS, MOVIES, SUBSCRIPTIONS, LIBRARY }
 
 enum class LibrarySection { HISTORY, LIKED, WATCH_LATER, PLAYLISTS }
 
@@ -590,6 +590,41 @@ class VideosController(
     val watch: StateFlow<WatchState?> = _watch.asStateFlow()
     private var watchJob: Job? = null
 
+    private val externalHeaders = HashMap<String, Map<String, String>>()
+
+    /**
+     * Opens an external film/stream URL (direct .m3u8/.mpd/.mp4 or HTML page resolved via pure HTTP scraper)
+     * or natively redirects YouTube URLs to the YouTube watch flow.
+     */
+    fun openExternalUrl(
+        rawUrl: String,
+        title: String? = null,
+        sourceName: String? = null,
+        poster: String? = null,
+        headers: Map<String, String> = emptyMap(),
+    ): Boolean {
+        val url = rawUrl.trim()
+        if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) return false
+        val ytId = extractYouTubeIdFromUrl(url)
+        if (ytId != null) {
+            open(VideoItem(id = ytId, title = title?.takeIf { it.isNotBlank() } ?: "YouTube", thumbnail = poster))
+            return true
+        }
+        val id = externalVideoId(url)
+        if (headers.isNotEmpty()) externalHeaders[id] = headers
+        val fallbackTitle = title?.takeIf { it.isNotBlank() }
+            ?: url.substringBefore('?').substringAfterLast('/').ifBlank { MovieHtmlParser.originOf(url).removePrefix("https://").removePrefix("http://") }
+        open(
+            VideoItem(
+                id = id,
+                title = fallbackTitle,
+                channelName = sourceName?.takeIf { it.isNotBlank() } ?: MovieHtmlParser.originOf(url).removePrefix("https://").removePrefix("http://"),
+                thumbnail = poster,
+            ),
+        )
+        return true
+    }
+
     private fun startWatching(video: VideoItem, queue: List<VideoItem> = emptyList(), queueIndex: Int = 0) {
         watchJob?.cancel()
         liveChatJob?.cancel()
@@ -597,6 +632,11 @@ class VideosController(
         FeedPreview.stopAll()
         _watch.value = WatchState(video = video, queue = queue, queueIndex = queueIndex)
         val id = video.id
+        val extUrl = externalUrlOf(id)
+        if (extUrl != null) {
+            watchJob = scope.launch { loadExternalStream(id, extUrl, video) }
+            return
+        }
         watchJob = scope.launch {
             // The stream and the page load side by side: the picture should not wait for the comments' address.
             launch { loadStream(id) }
@@ -623,6 +663,44 @@ class VideosController(
                 },
             )
         }
+    }
+
+    private suspend fun loadExternalStream(id: String, url: String, video: VideoItem) {
+        val headers = externalHeaders[id].orEmpty()
+        resolveExternalMovie(url, headers).fold(
+            onSuccess = { resolved ->
+                val title = resolved.title?.takeIf { it.isNotBlank() } ?: video.title
+                val host = MovieHtmlParser.originOf(url).removePrefix("https://").removePrefix("http://")
+                val caption = if (captionsSetting.value == "1") resolved.captions.firstOrNull() else null
+                _watch.update { w ->
+                    if (w?.video?.id != id) w else w.copy(
+                        video = w.video.copy(title = title, thumbnail = w.video.thumbnail ?: resolved.poster),
+                        details = VideoDetails(
+                            id = id,
+                            title = title,
+                            channelName = video.channelName ?: host,
+                            description = url,
+                        ),
+                        qualities = resolved.streams,
+                        quality = resolved.streams.pickDefault(maxHeight()),
+                        captions = resolved.captions,
+                        caption = caption,
+                        streamLoading = false,
+                        streamError = resolved.streams.isEmpty(),
+                    )
+                }
+            },
+            onFailure = { e ->
+                if (e is CancellationException) throw e
+                _watch.update { w ->
+                    if (w?.video?.id != id) w else w.copy(
+                        details = VideoDetails(id = id, title = video.title, channelName = video.channelName, description = url),
+                        streamLoading = false,
+                        streamError = true,
+                    )
+                }
+            },
+        )
     }
 
     /** The ways to play recent videos: working them out takes seconds, so a video asked for twice (or ahead) is instant. */

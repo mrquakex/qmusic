@@ -581,6 +581,11 @@
       },
       "features": {
         ".validate": "!newData.exists() || ((!newData.child('games').exists() || newData.child('games').isBoolean()) && (!newData.child('calls').exists() || newData.child('calls').isBoolean()) && (!newData.child('statuses').exists() || newData.child('statuses').isBoolean()) && (!newData.child('newChats').exists() || newData.child('newChats').isBoolean()))"
+      },
+      "movieSources": {
+        "$id": {
+          ".validate": "!newData.exists() || (newData.child('name').isString() && newData.child('name').val().length > 0 && newData.child('name').val().length <= 60 && newData.child('baseUrl').isString() && newData.child('baseUrl').val().matches(/^https?:\\/\\/.{3,200}$/) && (!newData.child('searchPath').exists() || (newData.child('searchPath').isString() && newData.child('searchPath').val().length <= 120)) && (!newData.child('catalogPath').exists() || (newData.child('catalogPath').isString() && newData.child('catalogPath').val().length <= 120)) && (!newData.child('headers').exists() || (newData.child('headers').isString() && newData.child('headers').val().length <= 400)) && (!newData.child('enabled').exists() || newData.child('enabled').isBoolean()) && (!newData.child('order').exists() || newData.child('order').isNumber()))"
+        }
       }
     },
     "bannedNames": {

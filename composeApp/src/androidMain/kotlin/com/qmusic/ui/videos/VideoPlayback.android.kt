@@ -187,7 +187,12 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
                 .build()
         }
         val pictureItem = MediaItem.Builder().setUri(quality.videoUrl).apply { if (track != null) setSubtitleConfigurations(listOf(track)) }.build()
-        val picture: MediaSource = DefaultMediaSourceFactory(if (quality.isLive) liveSources else dataSources).createMediaSource(pictureItem)
+        val factory = when {
+            quality.headers.isNotEmpty() -> VideoStreaming.networkWithHeaders(quality.headers)
+            quality.isLive -> liveSources
+            else -> dataSources
+        }
+        val picture: MediaSource = DefaultMediaSourceFactory(factory).createMediaSource(pictureItem)
         val source: MediaSource = if (quality.audioUrl != null && !quality.isLive) {
             MergingMediaSource(picture, ProgressiveMediaSource.Factory(dataSources).createMediaSource(MediaItem.fromUri(quality.audioUrl!!)))
         } else {
