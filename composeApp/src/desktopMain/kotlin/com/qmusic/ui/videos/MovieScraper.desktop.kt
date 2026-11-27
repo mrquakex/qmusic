@@ -9,12 +9,17 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import okhttp3.ConnectionPool
+import okhttp3.Cookie
+import okhttp3.CookieJar
 import okhttp3.FormBody
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import java.security.MessageDigest
 import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
@@ -23,8 +28,27 @@ import javax.crypto.spec.SecretKeySpec
 private const val DESKTOP_SCRAPER_UA =
     "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
 
+private val desktopCookieStore = ConcurrentHashMap<String, MutableList<Cookie>>()
+
+private val desktopCookieJar = object : CookieJar {
+    override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+        val host = url.host
+        val current = desktopCookieStore.getOrPut(host) { CopyOnWriteArrayList() }
+        cookies.forEach { newCookie ->
+            current.removeAll { it.name == newCookie.name }
+            current.add(newCookie)
+        }
+    }
+
+    override fun loadForRequest(url: HttpUrl): List<Cookie> {
+        val host = url.host
+        return desktopCookieStore[host].orEmpty()
+    }
+}
+
 private val desktopScraperClient: OkHttpClient by lazy {
     OkHttpClient.Builder()
+        .cookieJar(desktopCookieJar)
         .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
         .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
         .followRedirects(true)
@@ -149,7 +173,7 @@ actual suspend fun resolveExternalMovie(url: String, headers: Map<String, String
                 streams = listOf(VideoQuality(height = 1080, fps = 30, videoUrl = finalUrl, audioUrl = null, isLive = false, headers = headers)),
             )
         }
-        val streams = ArrayList(MovieHtmlParser.extractStreams(html, finalUrl, headers))
+        val streams = ArrayList<VideoQuality>()
         val captions = ArrayList<VideoCaption>(MovieHtmlParser.extractCaptions(html, finalUrl))
 
         // Layer 1.5: Filmmodu / Vidmixi backend API resolution (sub-second pure HTTP, zero WebView, 1080p master HLS).
@@ -246,6 +270,9 @@ actual suspend fun resolveExternalMovie(url: String, headers: Map<String, String
                 }.awaitAll()
             }
             found.forEach { streams += it }
+        }
+        if (streams.isEmpty()) {
+            streams += MovieHtmlParser.extractStreams(html, finalUrl, headers)
         }
         val unique = streams.distinctBy { it.videoUrl }
         if (unique.isEmpty()) error("Bu sayfada doğrudan oynatılabilir video akışı bulunamadı")

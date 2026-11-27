@@ -9,12 +9,16 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import okhttp3.ConnectionPool
+import okhttp3.Cookie
+import okhttp3.CookieJar
 import okhttp3.FormBody
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
@@ -26,8 +30,27 @@ private const val SCRAPER_UA =
 private const val CATALOG_TTL_MS = 5 * 60_000L
 private const val STREAM_TTL_MS = 15 * 60_000L
 
+private val cookieStore = ConcurrentHashMap<String, MutableList<Cookie>>()
+
+private val scraperCookieJar = object : CookieJar {
+    override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+        val host = url.host
+        val current = cookieStore.getOrPut(host) { CopyOnWriteArrayList() }
+        cookies.forEach { newCookie ->
+            current.removeAll { it.name == newCookie.name }
+            current.add(newCookie)
+        }
+    }
+
+    override fun loadForRequest(url: HttpUrl): List<Cookie> {
+        val host = url.host
+        return cookieStore[host].orEmpty()
+    }
+}
+
 private val scraperClient: OkHttpClient by lazy {
     OkHttpClient.Builder()
+        .cookieJar(scraperCookieJar)
         .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
         .connectionPool(ConnectionPool(12, 5, TimeUnit.MINUTES))
         .followRedirects(true)
@@ -208,7 +231,6 @@ actual suspend fun resolveExternalMovie(url: String, headers: Map<String, String
 
         val streams = ArrayList<VideoQuality>()
         val captions = ArrayList<VideoCaption>(MovieHtmlParser.extractCaptions(html, finalUrl))
-        streams += MovieHtmlParser.extractStreams(html, finalUrl, headers)
 
         // Layer 1.5: Filmmodu / Vidmixi backend API resolution (sub-second pure HTTP, zero WebView, 1080p master HLS).
         val dataK = MovieHtmlParser.extractFilmmoduDataK(html)
@@ -309,6 +331,11 @@ actual suspend fun resolveExternalMovie(url: String, headers: Map<String, String
                     captions += foundCaps
                 }
             }
+        }
+
+        // Generic HTML stream extraction as last resort fallback
+        if (streams.isEmpty()) {
+            streams += MovieHtmlParser.extractStreams(html, finalUrl, headers)
         }
 
         val uniqueStreams = expandHlsQualitiesIfMaster(streams.distinctBy { it.videoUrl })

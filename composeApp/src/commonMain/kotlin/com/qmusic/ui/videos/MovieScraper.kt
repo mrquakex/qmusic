@@ -528,17 +528,32 @@ internal object MovieHtmlParser {
         if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp") || lower.endsWith(".gif") || lower.endsWith(".css") || lower.endsWith(".js")) {
             return false
         }
+        if (lower.contains("wepama") || lower.contains("wepam") || lower.contains("dizifilmizle") || lower.contains("preroll") || lower.contains("/ad/") || lower.contains("ad_") || lower.contains("banner") || lower.contains("kumar") || lower.contains("bet")) {
+            return false
+        }
         return lower.contains(".m3u8") || lower.contains(".mpd") || lower.contains(".mp4") || lower.contains(".mkv") || lower.contains(".webm")
     }
 
-    private fun decodeEntities(s: String): String = s
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&apos;", "'")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&nbsp;", " ")
+    fun decodeEntities(s: String): String {
+        var res = s
+            .replace("&amp;", "&")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+            .replace("&#039;", "'")
+            .replace("&apos;", "'")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&nbsp;", " ")
+        if (res.contains("&#")) {
+            res = Regex("""&#(\d+);""").replace(res) { m ->
+                m.groupValues[1].toIntOrNull()?.toChar()?.toString() ?: m.value
+            }
+            res = Regex("""&#x([0-9a-fA-F]+);""").replace(res) { m ->
+                m.groupValues[1].toIntOrNull(16)?.toChar()?.toString() ?: m.value
+            }
+        }
+        return res
+    }
 
     private fun percentEncode(s: String): String = buildString {
         s.encodeToByteArray().forEach { b ->

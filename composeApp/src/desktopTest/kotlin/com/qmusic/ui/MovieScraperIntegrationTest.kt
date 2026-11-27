@@ -235,4 +235,11 @@ class MovieScraperIntegrationTest {
         assertTrue(stream.startsWith("https://video.twimg.com/"), "Must resolve Twitter CDN HLS")
         assertTrue(stream.contains(".m3u8"), "Must be direct HLS manifest")
     }
+
+    @Test
+    fun decodeEntitiesCleansNumericAndNamedHtmlEntities() {
+        val raw = "Bob Trevino&#039;nun Favorisi &amp; &quot;Film&quot; &lt;1080p&gt;"
+        val decoded = com.qmusic.ui.videos.MovieHtmlParser.decodeEntities(raw)
+        assertEquals("Bob Trevino'nun Favorisi & \"Film\" <1080p>", decoded)
+    }
 }
