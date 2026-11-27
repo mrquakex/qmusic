@@ -563,6 +563,9 @@ class VideosController(
         push(VideoRoute.Search(q))
     }
 
+    /** Recently watched films, the person's own list, and the catalog pages and streams already loaded. */
+    internal val movies = MovieLibrary(settings, scope)
+
     private val _movieQuery = MutableStateFlow("")
     val movieQuery: StateFlow<String> = _movieQuery.asStateFlow()
 
@@ -682,15 +685,24 @@ class VideosController(
 
     private suspend fun loadExternalStream(id: String, url: String, video: VideoItem) {
         val headers = externalHeaders[id].orEmpty()
-        resolveExternalMovie(url, headers).fold(
+        // The detail sheet has usually resolved this page already: its answer is taken instead of asking again.
+        movies.resolve(url, headers).fold(
             onSuccess = { resolved ->
                 val title = resolved.title?.takeIf { it.isNotBlank() } ?: video.title
                 val host = MovieHtmlParser.originOf(url).removePrefix("https://").removePrefix("http://")
-                val caption = if (captionsSetting.value == "1") resolved.captions.firstOrNull() else null
+                movies.refine(url, resolved.title, resolved.poster)
                 val initialAudio = resolved.defaultAudioTrackId?.let { defId ->
                     resolved.audioTracks.firstOrNull { it.id == defId }
                 } ?: resolved.audioTracks.firstOrNull { it.language == "tr" }
                     ?: resolved.audioTracks.firstOrNull()
+                val turkishCaption = resolved.captions.firstOrNull { it.language.lowercase().let { l -> l.startsWith("tr") || l == "tur" } }
+                val audioLanguage = initialAudio?.let { MovieHtmlParser.normalizeHlsLanguage(it.language, it.label) }
+                val caption = when {
+                    captionsSetting.value == "1" -> turkishCaption ?: resolved.captions.firstOrNull()
+                    // A film whose sound is known not to be Turkish starts with its Turkish subtitles on.
+                    audioLanguage != null && audioLanguage != "tr" -> turkishCaption
+                    else -> null
+                }
                 val streams = resolved.streams.map { applyAudioTrackToQuality(it, initialAudio) }
                 _watch.update { w ->
                     if (w?.video?.id != id) w else w.copy(
@@ -814,6 +826,8 @@ class VideosController(
         val id = w.video.id
         _watch.update { it?.copy(streamLoading = true, streamError = false) }
         val extUrl = externalUrlOf(id)
+        // A stream kept from before may be the one that stopped working: retrying asks the site again.
+        if (extUrl != null) movies.forgetStream(extUrl)
         watchJob?.cancel()
         watchJob = scope.launch {
             if (extUrl != null) loadExternalStream(id, extUrl, w.video)
@@ -1735,10 +1749,20 @@ class VideosController(
     }
 
     private val resumeSetting = settings.string(KEY_RESUME, "")
+
+    /**
+     * Films are kept apart: their id is a whole address ("url:https://..."), with ':' and ',' in it, which the YouTube
+     * list's "id:ms,id:ms" cannot hold (they were lost on every restart). One "ms<TAB>id" per line instead.
+     */
+    private val movieResumeSetting = settings.string(KEY_MOVIE_RESUME, "")
     private val resume = LinkedHashMap<String, Long>().also { map ->
         resumeSetting.value.split(',').forEach { entry ->
             val parts = entry.split(':')
             if (parts.size == 2) parts[1].toLongOrNull()?.let { map[parts[0]] = it }
+        }
+        movieResumeSetting.value.split('\n').forEach { line ->
+            val tab = line.indexOf('\t')
+            if (tab > 0) line.substring(0, tab).toLongOrNull()?.let { map[line.substring(tab + 1)] = it }
         }
     }
 
@@ -1749,13 +1773,25 @@ class VideosController(
     /** Where this video was left (0 when it was not, or was nearly over). */
     fun resumeFor(id: String): Long = resume[id] ?: 0L
 
+    /** "Start from the beginning": the place kept for [id] is let go, so it opens at 0. */
+    fun forgetResume(id: String) {
+        if (resume.remove(id) == null) return
+        val (films, videos) = resume.entries.partition { isExternalVideoId(it.key) }
+        settings.setString(KEY_RESUME, videos.joinToString(",") { "${it.key}:${it.value}" })
+        settings.setString(KEY_MOVIE_RESUME, films.joinToString("\n") { "${it.value}\t${it.key}" })
+        VideoResume.positions.value = resume.toMap()
+    }
+
     fun savePosition(id: String, positionMs: Long, durationMs: Long) {
         if (durationMs < RESUME_MIN_LENGTH_MS) return
         resume.remove(id)
         if (positionMs > RESUME_MIN_POSITION_MS && positionMs < durationMs - RESUME_END_MARGIN_MS) resume[id] = positionMs
         while (resume.size > RESUME_KEPT) resume.remove(resume.keys.first())
-        settings.setString(KEY_RESUME, resume.entries.joinToString(",") { "${it.key}:${it.value}" })
+        val (films, videos) = resume.entries.partition { isExternalVideoId(it.key) }
+        settings.setString(KEY_RESUME, videos.joinToString(",") { "${it.key}:${it.value}" })
+        settings.setString(KEY_MOVIE_RESUME, films.joinToString("\n") { "${it.value}\t${it.key}" })
         VideoResume.positions.value = resume.toMap()
+        externalUrlOf(id)?.let { movies.updateProgress(it, positionMs, durationMs) }
     }
 
     /** Tells YouTube this video was watched, so it is in the account's history and the suggestions learn from it. */
@@ -2078,6 +2114,7 @@ class VideosController(
         const val KEY_CAPTIONS = "video_captions"
         const val KEY_FEED_PREVIEW = "video_feed_preview"
         const val KEY_RESUME = "video_resume"
+        private const val KEY_MOVIE_RESUME = "movie_resume"
         private const val RESUME_MIN_LENGTH_MS = 120_000L
         private const val RESUME_MIN_POSITION_MS = 10_000L
         private const val RESUME_END_MARGIN_MS = 20_000L

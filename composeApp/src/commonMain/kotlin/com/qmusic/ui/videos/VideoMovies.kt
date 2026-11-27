@@ -169,8 +169,16 @@ internal fun MoviesTab(
     var loading by remember { mutableStateOf(false) }
     var loadingMore by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
+    var loadMoreError by remember { mutableStateOf(false) }
+    var refreshing by remember { mutableStateOf(false) }
     var reloadTick by remember { mutableStateOf(0) }
+    val handledTick = remember { intArrayOf(0) }
+    val library = controller.movies
+    val movieHistory by library.history.collectAsState()
+    val myList by library.favorites.collectAsState()
 
+    // What was seen of a page before shows at once (this session, or the source's first page from the last one); the
+    // site is asked again only when that is old, or when the person asks for it (reload, retry).
     LaunchedEffect(activeSource?.id, activeSource?.baseUrl, submittedQuery, selectedGenreUrl, reloadTick) {
         val src = activeSource
         if (src == null) {
@@ -178,25 +186,53 @@ internal fun MoviesTab(
             genres = emptyList()
             nextPageUrl = null
             loading = false
+            refreshing = false
             loadError = null
             return@LaunchedEffect
         }
-        loading = true
+        val forced = reloadTick != handledTick[0]
+        handledTick[0] = reloadTick
+        val query = submittedQuery
+        val pageUrl = if (query.isBlank()) selectedGenreUrl else null
+        val showGenres = selectedGenreUrl == null && query.isBlank()
         loadError = null
-        fetchMovieCatalog(src, submittedQuery, pageUrlOverride = if (submittedQuery.isBlank()) selectedGenreUrl else null).fold(
+        loadMoreError = false
+        val cached = library.cachedCatalog(src, query, pageUrl)
+        if (cached != null) {
+            cards = cached.items
+            nextPageUrl = cached.nextPageUrl
+            if (cached.genres.isNotEmpty() && showGenres) genres = cached.genres
+            loading = false
+            if (!forced && library.isCatalogFresh(src, query, pageUrl)) {
+                refreshing = false
+                return@LaunchedEffect
+            }
+            refreshing = true
+        } else {
+            loading = true
+            refreshing = false
+        }
+        library.catalog(src, query, pageUrl).fold(
             onSuccess = { page ->
-                cards = page.items
-                nextPageUrl = page.nextPageUrl
-                if (page.genres.isNotEmpty() && selectedGenreUrl == null && submittedQuery.isBlank()) {
-                    genres = page.genres
+                // A refresh does not empty a page that showed, nor drop the pages loaded under it meanwhile.
+                val keepShown = cached != null && (page.items.isEmpty() || cards.size > cached.items.size)
+                if (!keepShown) {
+                    cards = page.items
+                    nextPageUrl = page.nextPageUrl
                 }
+                if (page.genres.isNotEmpty() && showGenres) genres = page.genres
                 loading = false
+                refreshing = false
             },
             onFailure = { e ->
-                cards = emptyList()
-                nextPageUrl = null
                 loading = false
-                loadError = e.message ?: s.loadError
+                refreshing = false
+                // What was shown stays (it may be a little old); without it the reason is told plainly.
+                if (cached == null) {
+                    cards = emptyList()
+                    nextPageUrl = null
+                    loadError = friendlyMovieError(e, english)
+                }
             },
         )
     }
@@ -206,8 +242,9 @@ internal fun MoviesTab(
         val next = nextPageUrl ?: return
         if (loading || loadingMore) return
         loadingMore = true
+        loadMoreError = false
         scope.launch {
-            fetchMovieCatalog(src, "", pageUrlOverride = next).fold(
+            library.catalog(src, "", next).fold(
                 onSuccess = { page ->
                     val existing = cards.mapTo(HashSet()) { it.pageUrl }
                     val fresh = page.items.filter { it.pageUrl !in existing }
@@ -215,9 +252,26 @@ internal fun MoviesTab(
                     nextPageUrl = if (fresh.isEmpty()) null else page.nextPageUrl
                     loadingMore = false
                 },
-                onFailure = { loadingMore = false },
+                onFailure = {
+                    loadingMore = false
+                    loadMoreError = true
+                },
             )
         }
+    }
+
+    /** Plays [card]: it goes first in the recently watched row, and starts where it was left. */
+    fun watch(card: MovieCard, resolved: ResolvedMovieStream? = null) {
+        val title = resolved?.title?.takeIf { it.isNotBlank() } ?: card.title
+        val poster = card.poster ?: resolved?.poster
+        library.recordWatched(card.copy(title = title, poster = poster))
+        controller.openExternalUrl(
+            rawUrl = card.pageUrl,
+            title = title,
+            sourceName = card.sourceName,
+            poster = poster,
+            headers = card.headers,
+        )
     }
 
     fun sharedItemForUrl(url: String, title: String? = null, sourceName: String = "", poster: String? = null): SharedItem? {
@@ -295,6 +349,7 @@ internal fun MoviesTab(
                         val summary = when {
                             activeSource == null -> tr("Paste any link to start", "Bir bağlantıyla hemen başla")
                             loading -> activeSource.name
+                            refreshing -> "${activeSource.name} · ${tr("updating…", "güncelleniyor…")}"
                             else -> "${activeSource.name} · ${countLabel(cards.size, nextPageUrl != null)} ${tr("titles", "yapım")}"
                         }
                         Text(summary, color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -441,6 +496,32 @@ internal fun MoviesTab(
                     }
                 }
 
+                // Recently watched (with how far) and the person's own list: on the device, so they show even when the
+                // source is slow or down.
+                val browsing = localQuery == null && submittedQuery.isBlank() && selectedGenreUrl == null
+                if (browsing && movieHistory.isNotEmpty()) {
+                    item(key = "movie-history") {
+                        SavedMovieRow(
+                            caption = tr("CONTINUE WATCHING", "İZLEMEYE DEVAM ET"),
+                            action = tr("Clear", "Temizle"),
+                            onAction = { library.clearHistory() },
+                            movies = movieHistory,
+                            onOpen = { selectedCard = it.toCard() },
+                        )
+                    }
+                }
+                if (browsing && myList.isNotEmpty()) {
+                    item(key = "movie-my-list") {
+                        SavedMovieRow(
+                            caption = tr("MY LIST", "LİSTEM"),
+                            action = null,
+                            onAction = {},
+                            movies = myList,
+                            onOpen = { selectedCard = it.toCard() },
+                        )
+                    }
+                }
+
                 when {
                     loading -> item(key = "movies-loading") {
                         CinemaSkeleton(cols = cols, tablet = tablet, withHero = submittedQuery.isBlank() && selectedGenreUrl == null)
@@ -510,15 +591,7 @@ internal fun MoviesTab(
                                     togetherLabel = x.watchTogether,
                                     tablet = tablet,
                                     onOpenDetails = { selectedCard = featured },
-                                    onWatch = {
-                                        controller.openExternalUrl(
-                                            rawUrl = featured.pageUrl,
-                                            title = featured.title,
-                                            sourceName = featured.sourceName,
-                                            poster = featured.poster,
-                                            headers = featured.headers,
-                                        )
-                                    },
+                                    onWatch = { watch(featured) },
                                     onWatchTogether = {
                                         sharedItemForUrl(featured.pageUrl, featured.title, featured.sourceName, featured.poster)?.let {
                                             ChatMusic.offerTogether(it)
@@ -565,6 +638,27 @@ internal fun MoviesTab(
                                 Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
                                     if (loadingMore) {
                                         CircularProgressIndicator(color = Ink, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+                                    } else if (loadMoreError) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Text(
+                                                tr("Couldn't load more", "Daha fazlası yüklenemedi"),
+                                                color = VideoColors.TextSecondary,
+                                                fontSize = 12.sp,
+                                            )
+                                            Text(
+                                                s.retry,
+                                                color = VideoColors.Text,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier
+                                                    .pressScale(0.95f)
+                                                    .clip(RoundedCornerShape(50))
+                                                    .background(VideoColors.Surface)
+                                                    .border(0.5.dp, BorderHover, RoundedCornerShape(50))
+                                                    .clickable { loadNextPage() }
+                                                    .padding(horizontal = 24.dp, vertical = 11.dp),
+                                            )
+                                        }
                                     } else {
                                         Text(
                                             s.loadMore,
@@ -632,8 +726,17 @@ internal fun MoviesTab(
                             height = 44.dp,
                             modifier = Modifier.weight(1f),
                         ) {
-                            if (controller.openExternalUrl(directUrl)) linkDialogOpen = false
-                            else directError = x.movieInvalidUrl
+                            val url = directUrl.trim()
+                            if (controller.openExternalUrl(url)) {
+                                linkDialogOpen = false
+                                if (extractYouTubeIdFromUrl(url) == null) {
+                                    val host = MovieHtmlParser.originOf(url).removePrefix("https://").removePrefix("http://")
+                                    val guess = url.substringBefore('?').trimEnd('/').substringAfterLast('/').ifBlank { host }
+                                    library.recordWatched(MovieCard(title = guess, pageUrl = url, sourceName = host), titleGuessed = true)
+                                }
+                            } else {
+                                directError = x.movieInvalidUrl
+                            }
                         }
                         CinemaButton(
                             label = x.watchTogether,
@@ -666,16 +769,14 @@ internal fun MoviesTab(
             watchLabel = x.moviePlaySolo,
             togetherLabel = x.watchTogether,
             shareLabel = s.share,
+            resolve = { library.resolve(card.pageUrl, card.headers) },
+            inList = myList.any { it.pageUrl == card.pageUrl },
+            onToggleList = { library.toggleFavorite(card) },
+            onRestart = { controller.forgetResume(externalVideoId(card.pageUrl)) },
             onDismiss = { selectedCard = null },
             onWatch = { resolved ->
                 selectedCard = null
-                controller.openExternalUrl(
-                    rawUrl = card.pageUrl,
-                    title = resolved?.title ?: card.title,
-                    sourceName = card.sourceName,
-                    poster = card.poster ?: resolved?.poster,
-                    headers = card.headers,
-                )
+                watch(card, resolved)
             },
             onWatchTogether = { resolved ->
                 selectedCard = null
@@ -708,6 +809,10 @@ private fun MovieDetailSheet(
     onWatch: (ResolvedMovieStream?) -> Unit,
     onWatchTogether: (ResolvedMovieStream?) -> Unit,
     onShare: () -> Unit,
+    resolve: suspend () -> Result<ResolvedMovieStream>,
+    inList: Boolean,
+    onToggleList: () -> Unit,
+    onRestart: () -> Unit,
 ) {
     fun tr(en: String, tr: String) = if (english) en else tr
     var resolved by remember(card.pageUrl) { mutableStateOf<ResolvedMovieStream?>(null) }
@@ -716,17 +821,23 @@ private fun MovieDetailSheet(
     LaunchedEffect(card.pageUrl) {
         resolving = true
         resolveErr = null
-        resolveExternalMovie(card.pageUrl, card.headers).fold(
+        // The same lookup the player waits for when Watch is pressed: it is not done twice.
+        resolve().fold(
             onSuccess = {
                 resolved = it
+                if (it.streams.isEmpty()) {
+                    resolveErr = tr("No playable video was found on this page.", "Bu sayfada oynatılabilir video bulunamadı.")
+                }
                 resolving = false
             },
             onFailure = {
-                resolveErr = it.message
+                resolveErr = friendlyMovieError(it, english)
                 resolving = false
             },
         )
     }
+    val positions by VideoResume.positions.collectAsState()
+    val resumeMs = positions[externalVideoId(card.pageUrl)] ?: 0L
     val r = resolved
     val title = r?.title?.takeIf { it.isNotBlank() } ?: card.title
     val poster = card.poster ?: r?.poster
@@ -859,7 +970,7 @@ private fun MovieDetailSheet(
 
                 StreamStatus(
                     resolving = resolving,
-                    resolved = r,
+                    resolved = r?.takeIf { it.streams.isNotEmpty() },
                     error = resolveErr,
                     pageUrl = card.pageUrl,
                     english = english,
@@ -901,12 +1012,29 @@ private fun MovieDetailSheet(
 
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 2.dp)) {
                     CinemaButton(
-                        label = watchLabel,
+                        label = if (resumeMs > 0L) tr("Resume · ${clock(resumeMs)}", "Devam et · ${clock(resumeMs)}") else watchLabel,
                         icon = QMusicIcons.Play,
                         primary = true,
                         height = 52.dp,
                         modifier = Modifier.fillMaxWidth(),
                     ) { onWatch(r) }
+                    if (resumeMs > 0L) {
+                        Text(
+                            tr("Start from the beginning", "Baştan izle"),
+                            color = VideoColors.TextSecondary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(QMusicShapes.small)
+                                .clickable {
+                                    onRestart()
+                                    onWatch(r)
+                                }
+                                .padding(vertical = 8.dp),
+                        )
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                         CinemaButton(
                             label = togetherLabel,
@@ -915,12 +1043,18 @@ private fun MovieDetailSheet(
                             modifier = Modifier.weight(1f),
                         ) { onWatchTogether(r) }
                         CinemaButton(
-                            label = shareLabel,
-                            icon = QMusicIcons.Share,
+                            label = if (inList) tr("In my list", "Listemde") else tr("My list", "Listeme ekle"),
+                            icon = if (inList) QMusicIcons.Check else QMusicIcons.Add,
                             primary = false,
                             modifier = Modifier.weight(1f),
-                        ) { onShare() }
+                        ) { onToggleList() }
                     }
+                    CinemaButton(
+                        label = shareLabel,
+                        icon = QMusicIcons.Share,
+                        primary = false,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { onShare() }
                 }
             }
         }
@@ -1438,6 +1572,79 @@ private fun FeaturedCinemaHero(
                 ) {
                     Icon(QMusicIcons.Group, null, tint = Color.White, modifier = Modifier.size(15.dp))
                     Text(togetherLabel, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+/** A horizontal row of films kept on the device (recently watched, my list), each with how far it was watched. */
+@Composable
+private fun SavedMovieRow(
+    caption: String,
+    action: String?,
+    onAction: () -> Unit,
+    movies: List<SavedMovie>,
+    onOpen: (SavedMovie) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth().padding(start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            SectionCaption(caption, modifier = Modifier.weight(1f))
+            if (action != null) {
+                Text(
+                    action,
+                    color = VideoColors.TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable(onClick = onAction)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
+        }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(movies, key = { it.pageUrl }) { movie ->
+                val shape = QMusicShapes.medium
+                Column(
+                    modifier = Modifier
+                        .width(108.dp)
+                        .pressScale(0.97f)
+                        .clip(shape)
+                        .clickable { onOpen(movie) },
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(2f / 3f)
+                            .clip(shape)
+                            .background(VideoColors.Surface)
+                            .border(0.5.dp, BorderSubtle, shape),
+                    ) {
+                        FadeInPoster(url = movie.poster, contentDescription = movie.title, iconSize = 26.dp)
+                        if (movie.progress > 0f) {
+                            Box(
+                                Modifier
+                                    .align(Alignment.BottomStart)
+                                    .fillMaxWidth()
+                                    .height(3.dp)
+                                    .background(Color.White.copy(alpha = 0.22f)),
+                            ) {
+                                Box(Modifier.fillMaxWidth(movie.progress).height(3.dp).background(Color.White))
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        movie.title,
+                        color = VideoColors.Text,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        lineHeight = 16.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 2.dp),
+                    )
                 }
             }
         }
