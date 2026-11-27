@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -206,12 +207,22 @@ fun Modifier.warmVideoOnPress(item: VideoItem): Modifier = pointerInput(item.id)
     }
 }
 
-/** The big card of a feed: picture across the width, then avatar, title and who/how many/when. */
+/** The big card of a feed: picture across the width (or rounded in a tablet grid), then avatar, title and who/how many/when. */
 @Composable
-fun VideoCard(item: VideoItem, s: VideoStrings, onClick: () -> Unit, onChannel: (() -> Unit)?, modifier: Modifier = Modifier, onMore: (() -> Unit)? = null, previewing: Boolean = false) {
-    Column(modifier = modifier.fillMaxWidth().warmVideoOnPress(item).clickable(onClick = onClick).padding(bottom = 16.dp)) {
-        VideoThumbnail(item, s, Modifier.fillMaxWidth(), preview = previewing)
-        Row(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp)) {
+fun VideoCard(
+    item: VideoItem,
+    s: VideoStrings,
+    onClick: () -> Unit,
+    onChannel: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    onMore: (() -> Unit)? = null,
+    previewing: Boolean = false,
+    roundedThumbnail: Boolean = false,
+) {
+    Column(modifier = modifier.fillMaxWidth().warmVideoOnPress(item).clickable(onClick = onClick).padding(bottom = if (roundedThumbnail) 20.dp else 16.dp)) {
+        val thumbMod = if (roundedThumbnail) Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)) else Modifier.fillMaxWidth()
+        VideoThumbnail(item, s, thumbMod, preview = previewing)
+        Row(modifier = Modifier.padding(start = if (roundedThumbnail) 2.dp else 12.dp, end = if (roundedThumbnail) 0.dp else 12.dp, top = 10.dp)) {
             if (item.channelAvatar != null || item.channelId != null) {
                 Avatar(
                     item.channelAvatar,
@@ -377,11 +388,12 @@ fun SignInBanner(s: VideoStrings, onSignIn: () -> Unit) {
 
 /** A grey stand-in for a card while a list loads: the page keeps its shape instead of jumping when the cards arrive. */
 @Composable
-fun SkeletonCard() {
+fun SkeletonCard(modifier: Modifier = Modifier, rounded: Boolean = false) {
     val pulse by rememberInfiniteTransition().animateFloat(0.35f, 0.7f, infiniteRepeatable(tween(800), RepeatMode.Reverse))
-    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp).graphicsLayer { alpha = pulse }) {
-        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(VideoColors.Surface))
-        Row(modifier = Modifier.padding(12.dp)) {
+    Column(modifier = modifier.fillMaxWidth().padding(bottom = 16.dp).graphicsLayer { alpha = pulse }) {
+        val boxMod = if (rounded) Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp)) else Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+        Box(boxMod.background(VideoColors.Surface))
+        Row(modifier = Modifier.padding(horizontal = if (rounded) 2.dp else 12.dp, vertical = 12.dp)) {
             Box(Modifier.size(36.dp).clip(CircleShape).background(VideoColors.Surface))
             Spacer(Modifier.width(12.dp))
             Column {
@@ -488,71 +500,131 @@ private fun FeedList(
     onMore: ((VideoItem) -> Unit)? = null,
     header: (LazyListScope.() -> Unit)? = null,
 ) {
-    LaunchedEffect(resetKey) { if (resetKey != null && resetKey > 0) listState.scrollToItem(0) }
-    LaunchedEffect(listState, state.continuation) {
-        if (state.continuation == null) return@LaunchedEffect
-        snapshotFlow {
-            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= listState.layoutInfo.totalItemsCount - 4
-        }.distinctUntilChanged().collect { near -> if (near) onLoadMore() }
-    }
-    val previewId by FeedPreview.playing.collectAsState()
-    if (!compact) {
-        LaunchedEffect(listState, state.entries) {
-            val videoByKey = state.entries.mapIndexedNotNull { i, e -> (e as? VideoEntry.Video)?.let { ((e.ids().firstOrNull() ?: "e") + "#" + i) to it.item } }.toMap()
-            snapshotFlow { listState.isScrollInProgress }.collectLatest { scrolling ->
-                if (scrolling) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val columns = feedColumnCount(maxWidth.value, compact)
+        val gridRows = androidx.compose.runtime.remember(state.entries, columns) {
+            groupFeedForGrid(state.entries, columns)
+        }
+        LaunchedEffect(resetKey) { if (resetKey != null && resetKey > 0) listState.scrollToItem(0) }
+        LaunchedEffect(listState, state.continuation) {
+            if (state.continuation == null) return@LaunchedEffect
+            snapshotFlow {
+                val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                last >= listState.layoutInfo.totalItemsCount - 3
+            }.distinctUntilChanged().collect { near -> if (near) onLoadMore() }
+        }
+        val previewId by FeedPreview.playing.collectAsState()
+        if (!compact) {
+            LaunchedEffect(listState, gridRows, columns) {
+                val videoByRowKey = gridRows.mapNotNull { row ->
+                    (row as? FeedGridRow.VideoChunk)?.items?.firstOrNull()?.item?.let { row.stableKey to it }
+                }.toMap()
+                snapshotFlow { listState.isScrollInProgress }.collectLatest { scrolling ->
+                    if (scrolling) {
+                        FeedPreview.stopAll()
+                        return@collectLatest
+                    }
+                    kotlinx.coroutines.delay(PREVIEW_SETTLE_MS)
+                    if (!FeedPreview.allowed()) {
+                        FeedPreview.stopAll()
+                        return@collectLatest
+                    }
+                    val info = listState.layoutInfo
+                    val pictureHeight = (info.viewportSize.width / columns.coerceAtLeast(1)) * 9 / 16
+                    val item = info.visibleItemsInfo.firstNotNullOfOrNull { visible ->
+                        val video = videoByRowKey[visible.key as? String] ?: return@firstNotNullOfOrNull null
+                        video.takeIf { visible.offset >= info.viewportStartOffset && visible.offset + pictureHeight <= info.viewportEndOffset && !it.isLive }
+                    } ?: return@collectLatest
+                    if (FeedPreview.playing.value == item.id) return@collectLatest
                     FeedPreview.stopAll()
-                    return@collectLatest
+                    val quality = FeedPreview.resolve(item) ?: return@collectLatest
+                    if (listState.isScrollInProgress || !FeedPreview.allowed()) return@collectLatest
+                    FeedPreview.playing.value = item.id
+                    FeedPreview.play(quality)
                 }
-                kotlinx.coroutines.delay(PREVIEW_SETTLE_MS)
-                if (!FeedPreview.allowed()) {
-                    FeedPreview.stopAll()
-                    return@collectLatest
-                }
-                val info = listState.layoutInfo
-                val pictureHeight = info.viewportSize.width * 9 / 16
-                val item = info.visibleItemsInfo.firstNotNullOfOrNull { visible ->
-                    val video = videoByKey[visible.key as? String] ?: return@firstNotNullOfOrNull null
-                    video.takeIf { visible.offset >= info.viewportStartOffset && visible.offset + pictureHeight <= info.viewportEndOffset && !it.isLive }
-                } ?: return@collectLatest
-                if (FeedPreview.playing.value == item.id) return@collectLatest
-                FeedPreview.stopAll()
-                val quality = FeedPreview.resolve(item) ?: return@collectLatest
-                if (listState.isScrollInProgress || !FeedPreview.allowed()) return@collectLatest
-                FeedPreview.playing.value = item.id
-                FeedPreview.play(quality)
             }
+            DisposableEffect(Unit) { onDispose { FeedPreview.stopAll() } }
         }
-        DisposableEffect(Unit) { onDispose { FeedPreview.stopAll() } }
-    }
-    LazyColumn(state = listState, modifier = modifier.fillMaxSize()) {
-        header?.invoke(this)
-        when {
-            state.signInNeeded && state.entries.isEmpty() && signInMessage != null ->
-                item(key = "signin") { MessageBlock(signInMessage.first, signInMessage.second, s.signIn, onSignIn) }
-            state.loading && state.entries.isEmpty() -> items(3, key = { "skeleton$it" }) { SkeletonCard() }
-            state.error && state.entries.isEmpty() -> item(key = "error") { MessageBlock(s.loadError, action = s.retry, onAction = onRetry) }
-            state.loaded && state.entries.isEmpty() -> item(key = "empty") { MessageBlock(s.nothingHere) }
-        }
-        items(state.entries.size, key = { i -> state.entries[i].let { e -> (e.ids().firstOrNull() ?: "e") + "#" + i } }) { index ->
-            when (val entry = state.entries[index]) {
-                is VideoEntry.Video -> if (compact) {
-                    VideoRowCard(entry.item, s, onClick = { onVideo(entry.item) }, onMore = onMore?.let { m -> { m(entry.item) } })
-                } else {
-                    VideoCard(
-                        entry.item, s,
-                        onClick = { onVideo(entry.item) },
-                        onChannel = entry.item.channelId?.let { id -> { onChannel(id, entry.item.channelName) } },
-                        onMore = onMore?.let { m -> { m(entry.item) } },
-                        previewing = previewId == entry.item.id,
-                    )
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+            header?.invoke(this)
+            when {
+                state.signInNeeded && state.entries.isEmpty() && signInMessage != null ->
+                    item(key = "signin") { MessageBlock(signInMessage.first, signInMessage.second, s.signIn, onSignIn) }
+                state.loading && state.entries.isEmpty() -> {
+                    if (columns > 1 && !compact) {
+                        items(2, key = { "skeleton-row-$it" }) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            ) {
+                                repeat(columns) { SkeletonCard(Modifier.weight(1f), rounded = true) }
+                            }
+                        }
+                    } else {
+                        items(3, key = { "skeleton$it" }) { SkeletonCard() }
+                    }
                 }
-                is VideoEntry.Channel -> ChannelResultRow(entry.item) { onChannel(entry.item.id, entry.item.name) }
-                is VideoEntry.Playlist -> PlaylistResultRow(entry.item, s) { onPlaylist(entry.item) }
-                is VideoEntry.Shorts -> ShortsRow(entry.items, s, onClick = onShort)
+                state.error && state.entries.isEmpty() -> item(key = "error") { MessageBlock(s.loadError, action = s.retry, onAction = onRetry) }
+                state.loaded && state.entries.isEmpty() -> item(key = "empty") { MessageBlock(s.nothingHere) }
             }
+            items(gridRows.size, key = { gridRows[it].stableKey }) { rowIndex ->
+                when (val row = gridRows[rowIndex]) {
+                    is FeedGridRow.VideoChunk -> if (columns == 1) {
+                        val v = row.items.first().item
+                        if (compact) {
+                            VideoRowCard(v, s, onClick = { onVideo(v) }, onMore = onMore?.let { m -> { m(v) } })
+                        } else {
+                            VideoCard(
+                                v, s,
+                                onClick = { onVideo(v) },
+                                onChannel = v.channelId?.let { id -> { onChannel(id, v.channelName) } },
+                                onMore = onMore?.let { m -> { m(v) } },
+                                previewing = previewId == v.id,
+                            )
+                        }
+                    } else if (compact) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            row.items.forEach { iv ->
+                                VideoRowCard(
+                                    iv.item, s,
+                                    onClick = { onVideo(iv.item) },
+                                    onMore = onMore?.let { m -> { m(iv.item) } },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            repeat(columns - row.items.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        ) {
+                            row.items.forEach { iv ->
+                                VideoCard(
+                                    iv.item, s,
+                                    onClick = { onVideo(iv.item) },
+                                    onChannel = iv.item.channelId?.let { id -> { onChannel(id, iv.item.channelName) } },
+                                    onMore = onMore?.let { m -> { m(iv.item) } },
+                                    previewing = previewId == iv.item.id,
+                                    roundedThumbnail = true,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            repeat(columns - row.items.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                    is FeedGridRow.FullWidth -> when (val entry = row.entry) {
+                        is VideoEntry.Channel -> ChannelResultRow(entry.item) { onChannel(entry.item.id, entry.item.name) }
+                        is VideoEntry.Playlist -> PlaylistResultRow(entry.item, s) { onPlaylist(entry.item) }
+                        is VideoEntry.Shorts -> ShortsRow(entry.items, s, onClick = onShort)
+                        is VideoEntry.Video -> Unit
+                    }
+                }
+            }
+            if (state.loadingMore) item(key = "more") { Loading() }
         }
-        if (state.loadingMore) item(key = "more") { Loading() }
     }
 }

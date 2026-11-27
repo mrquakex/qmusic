@@ -8,18 +8,23 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -95,11 +100,16 @@ fun ShortsPage(
         }
     }
 
+    val scope = rememberCoroutineScope()
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         VerticalPager(state = pager, modifier = Modifier.fillMaxSize(), key = { state.items[it].id }) { page ->
             ShortItem(
                 item = state.items[page],
                 active = pager.currentPage == page,
+                hasPrev = page > 0,
+                hasNext = page < state.items.lastIndex,
+                onPrev = { scope.launch { pager.animateScrollToPage((page - 1).coerceAtLeast(0)) } },
+                onNext = { scope.launch { pager.animateScrollToPage((page + 1).coerceAtMost(state.items.lastIndex)) } },
                 controller = controller,
                 playback = playback,
                 s = s,
@@ -120,6 +130,10 @@ fun ShortsPage(
 private fun ShortItem(
     item: VideoItem,
     active: Boolean,
+    hasPrev: Boolean,
+    hasNext: Boolean,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
     controller: VideosController,
     playback: VideoPlayback?,
     s: VideoStrings,
@@ -156,66 +170,9 @@ private fun ShortItem(
     // Watching a Short counts too (history, how long): YouTube's suggestions learn from Shorts as well.
     if (active) ReportWatching(controller, item.id, playback)
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { if (active) playback?.togglePlay() },
-    ) {
-        if (item.thumbnail != null && !(active && quality != null && isPlaying)) {
-            AsyncImage(model = item.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-        }
-        if (active && quality != null && playback != null) VideoPlaybackSurface(playback, Modifier.fillMaxSize(), fill = true)
-
-        if (active && (quality == null && !failed || buffering && !isPlaying)) {
-            Box(Modifier.fillMaxSize(), Alignment.Center) { PlayerSpinner() }
-        }
-        if (failed) Box(Modifier.fillMaxSize(), Alignment.Center) { Text(s.streamError, color = Color.White, fontSize = 14.sp) }
-        if (active && quality != null && !isPlaying && !buffering && !failed) {
-            Box(Modifier.align(Alignment.Center).size(72.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)), Alignment.Center) {
-                Icon(QMusicIcons.Play, null, tint = Color.White, modifier = Modifier.size(40.dp))
-            }
-        }
-
-        // A dark foot under the text, so it reads on any picture. Hidden, with the text and the buttons, while the
-        // line is held: only the picture and the time are on screen then.
-        if (seekHeld == null) Box(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(220.dp)
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f)))),
-        )
-        if (seekHeld == null) Column(
-            modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth(0.78f).padding(start = 14.dp, bottom = 22.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.clickable(enabled = item.channelId != null) {
-                    item.channelId?.let { controller.push(VideoRoute.Channel(it, item.channelName)) }
-                },
-            ) {
-                Avatar(item.channelAvatar, 32.dp)
-                Spacer(Modifier.width(8.dp))
-                Text(item.channelName ?: "", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                item.channelId?.let { channelId ->
-                    val subscribed = channelId in subscribedIds
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        if (subscribed) s.subscribed else s.subscribe,
-                        color = if (subscribed) Color.White else Color.Black,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(if (subscribed) Color.White.copy(alpha = 0.25f) else Color.White)
-                            .clickable { if (!controller.toggleSubscribeChannel(channelId)) onSignIn() }
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                }
-            }
-            Text(item.title, color = Color.White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-        if (seekHeld == null) Column(
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 36.dp),
+    val actionsColumn: @Composable (Modifier) -> Unit = { colMod ->
+        Column(
+            modifier = colMod,
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
@@ -225,10 +182,124 @@ private fun ShortItem(
             ShortAction(VideoIcons.Comment, s.comments) { controller.openShortComments(item) }
             ShortAction(QMusicIcons.Share, s.share) { onShare("https://youtube.com/shorts/${item.id}") }
         }
-        if (active && duration > 0 && playback != null) {
-            seekHeld?.let { f -> ShortSeekPreview(f, duration, preview) }
-            ShortSeekBar(position, duration, playback, seekHeld, { seekHeld = it }, Modifier.align(Alignment.BottomCenter))
+    }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        val tabletFrame = isTabletVideoWidth(maxWidth.value)
+
+        Row(
+            modifier = if (tabletFrame) Modifier.align(Alignment.Center).fillMaxHeight() else Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Box(
+                modifier = (if (tabletFrame) {
+                    Modifier
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                        .padding(vertical = 14.dp)
+                        .fillMaxHeight()
+                        .aspectRatio(9f / 16f, matchHeightConstraintsFirst = true)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Black)
+                } else {
+                    Modifier.fillMaxSize().background(Color.Black)
+                })
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { if (active) playback?.togglePlay() },
+            ) {
+                if (item.thumbnail != null && !(active && quality != null && isPlaying)) {
+                    AsyncImage(model = item.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                }
+                if (active && quality != null && playback != null) VideoPlaybackSurface(playback, Modifier.fillMaxSize(), fill = true)
+
+                if (active && (quality == null && !failed || buffering && !isPlaying)) {
+                    Box(Modifier.fillMaxSize(), Alignment.Center) { PlayerSpinner() }
+                }
+                if (failed) Box(Modifier.fillMaxSize(), Alignment.Center) { Text(s.streamError, color = Color.White, fontSize = 14.sp) }
+                if (active && quality != null && !isPlaying && !buffering && !failed) {
+                    Box(Modifier.align(Alignment.Center).size(72.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)), Alignment.Center) {
+                        Icon(QMusicIcons.Play, null, tint = Color.White, modifier = Modifier.size(40.dp))
+                    }
+                }
+
+                // A dark foot under the text, so it reads on any picture. Hidden while scrubbing.
+                if (seekHeld == null) Box(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(220.dp)
+                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f)))),
+                )
+                if (seekHeld == null) Column(
+                    modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth(if (tabletFrame) 0.92f else 0.78f).padding(start = 14.dp, end = 14.dp, bottom = 22.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable(enabled = item.channelId != null) {
+                            item.channelId?.let { controller.push(VideoRoute.Channel(it, item.channelName)) }
+                        },
+                    ) {
+                        Avatar(item.channelAvatar, 32.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(item.channelName ?: "", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                        item.channelId?.let { channelId ->
+                            val subscribed = channelId in subscribedIds
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                if (subscribed) s.subscribed else s.subscribe,
+                                color = if (subscribed) Color.White else Color.Black,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(if (subscribed) Color.White.copy(alpha = 0.25f) else Color.White)
+                                    .clickable { if (!controller.toggleSubscribeChannel(channelId)) onSignIn() }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
+                    Text(item.title, color = Color.White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                if (!tabletFrame && seekHeld == null) {
+                    actionsColumn(Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 36.dp))
+                }
+                if (active && duration > 0 && playback != null) {
+                    seekHeld?.let { f -> ShortSeekPreview(f, duration, preview) }
+                    ShortSeekBar(position, duration, playback, seekHeld, { seekHeld = it }, Modifier.align(Alignment.BottomCenter))
+                }
+            }
+
+            // On tablets, actions & up/down navigation sit neatly beside the 9:16 card without covering the video.
+            if (tabletFrame && seekHeld == null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                        .padding(start = 16.dp, top = 24.dp, bottom = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        TabletShortNavButton(QMusicIcons.ChevronUp, enabled = hasPrev, onClick = onPrev)
+                        TabletShortNavButton(QMusicIcons.ChevronDown, enabled = hasNext, onClick = onNext)
+                    }
+                    actionsColumn(Modifier)
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun TabletShortNavButton(icon: androidx.compose.ui.graphics.vector.ImageVector, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = if (enabled) 0.14f else 0.05f))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, null, tint = Color.White.copy(alpha = if (enabled) 1f else 0.3f), modifier = Modifier.size(22.dp))
     }
 }
 

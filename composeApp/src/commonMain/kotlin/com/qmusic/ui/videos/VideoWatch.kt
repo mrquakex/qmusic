@@ -248,7 +248,7 @@ fun WatchPage(
             val scope = rememberCoroutineScope()
             var height by remember { mutableStateOf(1f) }
             var total by remember { mutableStateOf(0f) }
-            val wide = maxWidth >= WIDE_WATCH && maxHeight >= 600.dp
+            val wide = isTwoPaneWatch(maxWidth.value, maxHeight.value)
             val density = androidx.compose.ui.platform.LocalDensity.current
             val margin = with(density) { 12.dp.toPx() }
             val width = with(density) { maxWidth.toPx() }
@@ -314,11 +314,13 @@ fun WatchPage(
             // Ambient light: the video's colours glow softly around it, on the dark theme (as on YouTube).
             val ambient = !com.qmusic.ui.theme.lightTheme
             val player: @Composable () -> Unit = {
+                val playerShape = if (wide) RoundedCornerShape(14.dp) else RoundedCornerShape(0.dp)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(if (ambient) Color.Transparent else Color.Black)
+                        .background(if (ambient || wide) Color.Transparent else Color.Black)
                         .statusBarsPadding()
+                        .then(if (wide) Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp) else Modifier)
                         .pointerInput(Unit) {
                             detectVerticalDragGestures(
                                 onDragStart = { total = 0f },
@@ -348,7 +350,7 @@ fun WatchPage(
                             )
                         },
                 ) {
-                    PlayerBox(w, playback, s, controller, false, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+                    PlayerBox(w, playback, s, controller, false, Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(playerShape))
                 }
             }
             val layer = Modifier
@@ -374,16 +376,40 @@ fun WatchPage(
             // What is about the video (and its glow) fades out early in the pull, the picture alone travels.
             val fade = Modifier.graphicsLayer { alpha = (1f - progress() * 2.5f).coerceIn(0f, 1f) }
             if (wide) {
-                // A tablet: the video and what is about it on the left, what comes next down the right.
+                // Tablet 2-pane theater layout: rounded 16:9 player + metadata on the left,
+                // switchable Related / Comments / Live Chat side panel on the right.
+                var sideTab by remember(w.video.id) { mutableStateOf(TabletSideTab.RELATED) }
+                val leftWeight = if (maxWidth >= 1100.dp) 1.85f else 1.65f
                 Row(modifier = layer) {
-                    Box(Modifier.weight(1.7f)) {
+                    Box(Modifier.weight(leftWeight).fillMaxHeight()) {
                         if (ambient) AmbientGlow(w.video.thumbnail, Modifier.fillMaxWidth())
-                        Column {
+                        Column(Modifier.fillMaxSize()) {
                             player()
-                            WatchDetails(controller, w, s, onShare, onSignIn, seek, showRelated = false)
+                            WatchDetails(
+                                controller = controller,
+                                w = w,
+                                s = s,
+                                onShare = onShare,
+                                onSignIn = onSignIn,
+                                onSeek = seek,
+                                showRelated = false,
+                                tabletMode = true,
+                                onOpenSideComments = { sideTab = TabletSideTab.COMMENTS },
+                                onOpenSideLiveChat = { sideTab = TabletSideTab.LIVE_CHAT },
+                            )
                         }
                     }
-                    RelatedColumn(controller, w, s, Modifier.weight(1f).statusBarsPadding())
+                    Box(Modifier.width(0.5.dp).fillMaxHeight().background(VideoColors.Divider))
+                    TabletSidePanel(
+                        tab = sideTab,
+                        onTab = { sideTab = it },
+                        controller = controller,
+                        w = w,
+                        s = s,
+                        onSignIn = onSignIn,
+                        onSeek = seek,
+                        modifier = Modifier.weight(1f).fillMaxHeight().statusBarsPadding(),
+                    )
                 }
             } else {
                 Box(modifier = layer) {
@@ -588,7 +614,7 @@ internal fun clock(ms: Long): String {
     return if (h > 0) "$h:${two(m)}:${two(sec)}" else "$m:${two(sec)}"
 }
 
-private val WIDE_WATCH = 840.dp
+private enum class TabletSideTab { RELATED, COMMENTS, LIVE_CHAT }
 
 @Composable
 private fun WatchDetails(
@@ -599,6 +625,9 @@ private fun WatchDetails(
     onSignIn: () -> Unit,
     onSeek: (Long) -> Unit,
     showRelated: Boolean,
+    tabletMode: Boolean = false,
+    onOpenSideComments: (() -> Unit)? = null,
+    onOpenSideLiveChat: (() -> Unit)? = null,
 ) {
     var descriptionOpen by remember { mutableStateOf(false) }
     var commentsOpen by remember { mutableStateOf(false) }
@@ -753,16 +782,23 @@ private fun WatchDetails(
         if (w.isLive() && details?.liveChatToken != null) {
             item(key = "live-chat-header") {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(12.dp)).background(VideoColors.Surface).clickable { controller.toggleLiveChat() }.padding(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(12.dp)).background(VideoColors.Surface).clickable {
+                        if (tabletMode && onOpenSideLiveChat != null) {
+                            if (!w.liveChatOpen) controller.toggleLiveChat()
+                            onOpenSideLiveChat()
+                        } else {
+                            controller.toggleLiveChat()
+                        }
+                    }.padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(Modifier.size(8.dp).clip(androidx.compose.foundation.shape.CircleShape).background(VideoColors.Red))
                     Spacer(Modifier.width(8.dp))
                     Text(x.liveChat, color = VideoColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    Icon(if (w.liveChatOpen) QMusicIcons.ChevronUp else QMusicIcons.ChevronDown, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp))
+                    Icon(if (!tabletMode && w.liveChatOpen) QMusicIcons.ChevronUp else QMusicIcons.ChevronDown, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp))
                 }
             }
-            if (w.liveChatOpen) {
+            if (!tabletMode && w.liveChatOpen) {
                 item(key = "live-chat-box") {
                     LiveChatPanel(w.liveChatMessages, w.liveChatLoading, x.liveChatEmpty)
                 }
@@ -770,17 +806,23 @@ private fun WatchDetails(
         }
         item(key = "comments-header") {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(12.dp)).background(VideoColors.Surface).clickable { commentsOpen = !commentsOpen }.padding(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(12.dp)).background(VideoColors.Surface).clickable {
+                    if (tabletMode && onOpenSideComments != null) {
+                        onOpenSideComments()
+                    } else {
+                        commentsOpen = !commentsOpen
+                    }
+                }.padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     if (w.commentsTotal != null) "${s.comments} · ${w.commentsTotal}" else s.comments,
                     color = VideoColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
                 )
-                Icon(if (commentsOpen) QMusicIcons.ChevronUp else QMusicIcons.ChevronDown, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp))
+                Icon(if (!tabletMode && commentsOpen) QMusicIcons.ChevronUp else QMusicIcons.ChevronDown, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp))
             }
         }
-        if (commentsOpen) {
+        if (!tabletMode && commentsOpen) {
             item(key = "comment-input") { CommentInput(w, s, signedIn, onSignIn) { controller.postComment(it) } }
             if (w.comments.isEmpty() && w.commentsLoading) item(key = "comments-loading") { Loading() }
             if (w.comments.isEmpty() && w.commentsLoaded && !w.commentsLoading) {
@@ -886,16 +928,18 @@ private fun LiveChatPanel(
     messages: List<com.qmusic.engine.video.VideoLiveChatMessage>,
     loading: Boolean,
     emptyText: String,
+    fillHeight: Boolean = false,
 ) {
     val chatState = rememberLazyListState()
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) chatState.animateScrollToItem(messages.lastIndex)
     }
+    val heightMod = if (fillHeight) Modifier.fillMaxHeight() else Modifier.height(260.dp)
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp)
-            .height(260.dp)
+            .then(heightMod)
             .clip(RoundedCornerShape(12.dp))
             .background(VideoColors.Surface),
     ) {
@@ -932,6 +976,74 @@ private fun LiveChatPanel(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/** Tablet side panel: switch effortlessly between Up Next, Comments, and Live Chat beside the playing video. */
+@Composable
+private fun TabletSidePanel(
+    tab: TabletSideTab,
+    onTab: (TabletSideTab) -> Unit,
+    controller: VideosController,
+    w: WatchState,
+    s: VideoStrings,
+    onSignIn: () -> Unit,
+    onSeek: (Long) -> Unit,
+    modifier: Modifier,
+) {
+    val x = s.extras()
+    val hasLiveChat = w.isLive() && w.details?.liveChatToken != null
+    val effectiveTab = if (tab == TabletSideTab.LIVE_CHAT && !hasLiveChat) TabletSideTab.RELATED else tab
+    val signedIn by controller.signedIn.collectAsState()
+
+    LaunchedEffect(effectiveTab, w.video.id) {
+        when (effectiveTab) {
+            TabletSideTab.COMMENTS -> controller.loadComments()
+            TabletSideTab.LIVE_CHAT -> if (!w.liveChatOpen) controller.toggleLiveChat()
+            TabletSideTab.RELATED -> Unit
+        }
+    }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            LabelChip(s.related, effectiveTab == TabletSideTab.RELATED) { onTab(TabletSideTab.RELATED) }
+            val commentLabel = if (w.commentsTotal != null) "${s.comments} · ${w.commentsTotal}" else s.comments
+            LabelChip(commentLabel, effectiveTab == TabletSideTab.COMMENTS) { onTab(TabletSideTab.COMMENTS) }
+            if (hasLiveChat) {
+                LabelChip(x.liveChat, effectiveTab == TabletSideTab.LIVE_CHAT) { onTab(TabletSideTab.LIVE_CHAT) }
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(0.5.dp).background(VideoColors.Divider))
+        when (effectiveTab) {
+            TabletSideTab.RELATED -> RelatedColumn(controller, w, s, Modifier.weight(1f))
+            TabletSideTab.COMMENTS -> LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                item(key = "side-comment-input") { CommentInput(w, s, signedIn, onSignIn) { controller.postComment(it) } }
+                if (w.comments.isEmpty() && w.commentsLoading) item(key = "side-comments-loading") { Loading() }
+                if (w.comments.isEmpty() && w.commentsLoaded && !w.commentsLoading) {
+                    item(key = "side-comments-none") { Text(s.noComments, color = VideoColors.TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(16.dp)) }
+                }
+                items(w.comments, key = { "sc" + it.id }) { c -> CommentRow(c, w, controller, s, onSeek = onSeek, small = false) }
+                if (w.commentsContinuation != null) {
+                    item(key = "side-comments-more") {
+                        Text(
+                            if (w.commentsLoading) "…" else s.loadMore,
+                            color = VideoColors.Text,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.fillMaxWidth().clickable { controller.loadComments() }.padding(16.dp),
+                        )
+                    }
+                }
+            }
+            TabletSideTab.LIVE_CHAT -> Box(Modifier.weight(1f).fillMaxWidth().padding(bottom = 8.dp)) {
+                LiveChatPanel(w.liveChatMessages, w.liveChatLoading, x.liveChatEmpty, fillHeight = true)
             }
         }
     }

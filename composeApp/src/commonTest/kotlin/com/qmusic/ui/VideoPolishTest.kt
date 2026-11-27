@@ -246,4 +246,47 @@ class VideoPolishTest {
         assertTrue(VideoSearchFilter.SORT_UPLOAD_DATE.isNotBlank())
         assertTrue(VideoSearchFilter.DURATION_LONG.isNotBlank())
     }
+
+    @Test
+    fun tabletLayoutBreakpointsAndFeedGridChunkingWork() {
+        // Phones stay single-column and single-pane
+        assertFalse(com.qmusic.ui.videos.isTabletVideoWidth(412f))
+        assertFalse(com.qmusic.ui.videos.isTwoPaneWatch(412f, 915f))
+        assertEquals(1, com.qmusic.ui.videos.feedColumnCount(412f, compact = false))
+        assertEquals(1, com.qmusic.ui.videos.feedColumnCount(412f, compact = true))
+
+        // Portrait 8"-10" tablet: 2-column feed, left rail active
+        assertTrue(com.qmusic.ui.videos.isTabletVideoWidth(700f))
+        assertEquals(2, com.qmusic.ui.videos.feedColumnCount(700f, compact = false))
+        assertEquals(1, com.qmusic.ui.videos.feedColumnCount(700f, compact = true))
+
+        // Landscape 8"-11" tablet: 3-column feed, 2-column compact, 2-pane watch even when height < 600dp
+        assertTrue(com.qmusic.ui.videos.isExpandedTabletWidth(1024f))
+        assertTrue(com.qmusic.ui.videos.isTwoPaneWatch(800f, 520f))
+        assertEquals(3, com.qmusic.ui.videos.feedColumnCount(1024f, compact = false))
+        assertEquals(2, com.qmusic.ui.videos.feedColumnCount(1024f, compact = true))
+        assertEquals(4, com.qmusic.ui.videos.feedColumnCount(1440f, compact = false))
+
+        // Mixed feed chunking keeps Shorts full-width without breaking adjacent video rows
+        val entries = listOf(
+            VideoEntry.Video(VideoItem("v1", "One")),
+            VideoEntry.Video(VideoItem("v2", "Two")),
+            VideoEntry.Video(VideoItem("v3", "Three")),
+            VideoEntry.Shorts(listOf(VideoItem("s1", "Short"))),
+            VideoEntry.Video(VideoItem("v4", "Four")),
+            VideoEntry.Video(VideoItem("v5", "Five")),
+        )
+        val rows2 = com.qmusic.ui.videos.groupFeedForGrid(entries, columns = 2)
+        assertEquals(4, rows2.size)
+        assertEquals(listOf("v1", "v2"), (rows2[0] as com.qmusic.ui.videos.FeedGridRow.VideoChunk).items.map { it.item.id })
+        assertEquals(listOf("v3"), (rows2[1] as com.qmusic.ui.videos.FeedGridRow.VideoChunk).items.map { it.item.id })
+        assertTrue(rows2[2] is com.qmusic.ui.videos.FeedGridRow.FullWidth)
+        assertEquals(listOf("v4", "v5"), (rows2[3] as com.qmusic.ui.videos.FeedGridRow.VideoChunk).items.map { it.item.id })
+
+        val rows3 = com.qmusic.ui.videos.groupFeedForGrid(entries, columns = 3)
+        assertEquals(3, rows3.size)
+        assertEquals(listOf("v1", "v2", "v3"), (rows3[0] as com.qmusic.ui.videos.FeedGridRow.VideoChunk).items.map { it.item.id })
+        assertTrue(rows3[1] is com.qmusic.ui.videos.FeedGridRow.FullWidth)
+        assertEquals(listOf("v4", "v5"), (rows3[2] as com.qmusic.ui.videos.FeedGridRow.VideoChunk).items.map { it.item.id })
+    }
 }

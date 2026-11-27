@@ -235,12 +235,13 @@ fun VideosApp(
     }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize().background(VideoColors.Background)) {
+        val tablet = isTabletVideoWidth(maxWidth.value)
         // Turning the phone sideways while a video is open makes it full screen, and turning it back leaves it.
         val landscape = maxWidth > maxHeight && minOf(maxWidth, maxHeight) < 600.dp
         LaunchedEffect(landscape, top is VideoRoute.Watch) {
             if (top is VideoRoute.Watch) controller.setFullscreen(landscape)
         }
-        // Scrolling a feed down hides the bars, scrolling up brings them back (as on YouTube).
+        // Scrolling a feed down hides the bars on phones; on tablets the left navigation rail stays anchored.
         val bars = remember { mutableStateOf(true) }
         val hideOnScroll = remember {
             object : NestedScrollConnection {
@@ -253,64 +254,78 @@ fun VideosApp(
         val feedPage = top == null && tab != VideoTab.SHORTS
         LaunchedEffect(tab, routes.size) { bars.value = true }
         val miniShown = watch != null && top !is VideoRoute.Watch && top !is VideoRoute.Shorts && !(top == null && tab == VideoTab.SHORTS) && !pip
-        Column(modifier = Modifier.fillMaxSize()) {
-            Box(modifier = Modifier.weight(1f).fillMaxWidth().then(if (feedPage) Modifier.nestedScroll(hideOnScroll) else Modifier)) {
-                // The page under the video shows while the video is pulled down into the small player (as on YouTube),
-                // instead of black; it stays where it is once the video is small, so nothing reloads.
-                val drag by controller.watchDrag.collectAsState()
-                val watching = top is VideoRoute.Watch
-                val below = if (watching) routes.dropLast(1).lastOrNull() else top
-                if (!watching || drag > 0f) {
-                    // Pages slide over one another as they open and close; the tabs fade through.
-                    com.qmusic.ui.motion.PageHost(
-                        target = below,
-                        depth = routes.count { it !is VideoRoute.Watch },
-                        contentKey = { r -> r?.let { if (it is VideoRoute.Watch) null else it } },
-                        background = VideoColors.Background,
-                    ) { page ->
-                        when (page) {
-                            // (Shorts play in the same player: not drawn under a video.)
-                            null -> if (!watching || tab != VideoTab.SHORTS) {
-                                androidx.compose.animation.AnimatedContent(
-                                    targetState = tab,
-                                    transitionSpec = { fadeThrough() },
-                                    label = "videoTab",
-                                ) { shownTab ->
-                                    TabContent(controller, shownTab, s, signedIn, onSignIn, playback, onPauseMusic, onShare, onAccount = { accountDialog = true }, barsVisible = bars.value || !feedPage)
+        val showRail = tablet && top !is VideoRoute.Watch && !pip
+        Row(modifier = Modifier.fillMaxSize()) {
+            if (showRail) {
+                VideoNavRail(
+                    tab = tab.takeIf { routes.isEmpty() },
+                    s = s,
+                    onTab = { t -> if (t == tab && routes.isEmpty()) controller.refreshCurrent() else controller.selectTab(t) },
+                    onMusic = exit,
+                    onChat = onChat,
+                    chatUnread = chatUnread,
+                )
+            }
+            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth().then(if (feedPage && !tablet) Modifier.nestedScroll(hideOnScroll) else Modifier)) {
+                    // The page under the video shows while the video is pulled down into the small player (as on YouTube),
+                    // instead of black; it stays where it is once the video is small, so nothing reloads.
+                    val drag by controller.watchDrag.collectAsState()
+                    val watching = top is VideoRoute.Watch
+                    val below = if (watching) routes.dropLast(1).lastOrNull() else top
+                    if (!watching || drag > 0f) {
+                        // Pages slide over one another as they open and close; the tabs fade through.
+                        com.qmusic.ui.motion.PageHost(
+                            target = below,
+                            depth = routes.count { it !is VideoRoute.Watch },
+                            contentKey = { r -> r?.let { if (it is VideoRoute.Watch) null else it } },
+                            background = VideoColors.Background,
+                        ) { page ->
+                            when (page) {
+                                // (Shorts play in the same player: not drawn under a video.)
+                                null -> if (!watching || tab != VideoTab.SHORTS) {
+                                    androidx.compose.animation.AnimatedContent(
+                                        targetState = tab,
+                                        transitionSpec = { fadeThrough() },
+                                        label = "videoTab",
+                                    ) { shownTab ->
+                                        TabContent(controller, shownTab, s, signedIn, onSignIn, playback, onPauseMusic, onShare, onAccount = { accountDialog = true }, barsVisible = tablet || bars.value || !feedPage, tablet = tablet)
+                                    }
                                 }
+                                is VideoRoute.Search -> SearchResultsPage(controller, s, onSignIn)
+                                is VideoRoute.Watch -> Unit
+                                is VideoRoute.Channel -> ChannelPage(controller, s, onSignIn, tablet = tablet)
+                                is VideoRoute.Playlist -> PlaylistPage(controller, page.title, s, onSignIn)
+                                is VideoRoute.Shorts -> if (!watching) ShortsPage(controller, playback, s, true, onPauseMusic, onShare, onSignIn)
                             }
-                            is VideoRoute.Search -> SearchResultsPage(controller, s, onSignIn)
-                            is VideoRoute.Watch -> Unit
-                            is VideoRoute.Channel -> ChannelPage(controller, s, onSignIn)
-                            is VideoRoute.Playlist -> PlaylistPage(controller, page.title, s, onSignIn)
-                            is VideoRoute.Shorts -> if (!watching) ShortsPage(controller, playback, s, true, onPauseMusic, onShare, onSignIn)
                         }
                     }
+                    // A video opens rising from below (as on YouTube); it leaves by being pulled down into the small player.
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = watching,
+                        modifier = Modifier,
+                        enter = androidx.compose.animation.slideInVertically(com.qmusic.ui.motion.Motion.enter(com.qmusic.ui.motion.Motion.LONG)) { it / 3 } +
+                            androidx.compose.animation.fadeIn(com.qmusic.ui.motion.Motion.enter(com.qmusic.ui.motion.Motion.MEDIUM)),
+                        exit = androidx.compose.animation.ExitTransition.None,
+                    ) {
+                        WatchPage(controller, playback, s, onShare, onSignIn)
+                    }
+                    // The video that was pulled down floats in a corner over the page, as on YouTube.
+                    val w = watch
+                    if (w != null && miniShown) {
+                        FloatingMiniPlayer(w, playback, tablet = tablet, onOpen = { controller.push(VideoRoute.Watch(w.video)) }, onClose = { controller.closeWatch() })
+                    }
                 }
-                // A video opens rising from below (as on YouTube); it leaves by being pulled down into the small player.
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = watching,
-                    modifier = Modifier,
-                    enter = androidx.compose.animation.slideInVertically(com.qmusic.ui.motion.Motion.enter(com.qmusic.ui.motion.Motion.LONG)) { it / 3 } +
-                        androidx.compose.animation.fadeIn(com.qmusic.ui.motion.Motion.enter(com.qmusic.ui.motion.Motion.MEDIUM)),
-                    exit = androidx.compose.animation.ExitTransition.None,
-                ) {
-                    WatchPage(controller, playback, s, onShare, onSignIn)
-                }
-                // The video that was pulled down floats in a corner over the page, as on YouTube.
-                val w = watch
-                if (w != null && miniShown) {
-                    FloatingMiniPlayer(w, playback, onOpen = { controller.push(VideoRoute.Watch(w.video)) }, onClose = { controller.closeWatch() })
-                }
-            }
-            // While the video floats small the bottom bar is away; closing the video brings it back.
-            if (top !is VideoRoute.Watch && !pip && !miniShown) {
-                AnimatedVisibility(visible = bars.value || !feedPage, enter = expandVertically(expandFrom = Alignment.Top), exit = shrinkVertically(shrinkTowards = Alignment.Top)) {
-                    VideoBottomBar(tab = tab.takeIf { routes.isEmpty() }, s = s, onTab = { t -> if (t == tab && routes.isEmpty()) controller.refreshCurrent() else controller.selectTab(t) }, onMusic = exit, onChat = onChat, chatUnread = chatUnread)
+                // On phones: while the video floats small the bottom bar is away; closing the video brings it back.
+                // On tablets: navigation lives in the left rail instead of a bottom bar.
+                if (!tablet && top !is VideoRoute.Watch && !pip && !miniShown) {
+                    AnimatedVisibility(visible = bars.value || !feedPage, enter = expandVertically(expandFrom = Alignment.Top), exit = shrinkVertically(shrinkTowards = Alignment.Top)) {
+                        VideoBottomBar(tab = tab.takeIf { routes.isEmpty() }, s = s, onTab = { t -> if (t == tab && routes.isEmpty()) controller.refreshCurrent() else controller.selectTab(t) }, onMusic = exit, onChat = onChat, chatUnread = chatUnread)
+                    }
                 }
             }
         }
-        if (searching) SearchBox(controller, s)
+        if (searching) SearchBox(controller, s, tablet = tablet)
         VideoSheets(controller, playback, s, onShare, onSignIn)
         val toast by controller.toast.collectAsState()
         toast?.let { msg ->
@@ -355,7 +370,13 @@ private val NoPosition: StateFlow<Long> = MutableStateFlow(0L)
  * play / pause and close on it, drag it anywhere; let go and it settles on the nearer side.
  */
 @Composable
-private fun androidx.compose.foundation.layout.BoxScope.FloatingMiniPlayer(w: WatchState, playback: VideoPlayback?, onOpen: () -> Unit, onClose: () -> Unit) {
+private fun androidx.compose.foundation.layout.BoxScope.FloatingMiniPlayer(
+    w: WatchState,
+    playback: VideoPlayback?,
+    tablet: Boolean = false,
+    onOpen: () -> Unit,
+    onClose: () -> Unit,
+) {
     val playing by (playback?.isPlaying ?: NotPlaying).collectAsState()
     val position by (playback?.positionMs ?: NoPosition).collectAsState()
     val duration by (playback?.durationMs ?: NoPosition).collectAsState()
@@ -363,7 +384,7 @@ private fun androidx.compose.foundation.layout.BoxScope.FloatingMiniPlayer(w: Wa
     var area by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     var card by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     var offset by remember { mutableStateOf(Offset.Zero) }
-    val margin = with(density) { 12.dp.toPx() }
+    val margin = with(density) { (if (tablet) 16.dp else 12.dp).toPx() }
     val minX = -(area.width - card.width - 2 * margin).coerceAtLeast(0f)
     val minY = -(area.height - card.height - 2 * margin).coerceAtLeast(0f)
     Box(Modifier.matchParentSize().onSizeChanged { area = it })
@@ -372,8 +393,8 @@ private fun androidx.compose.foundation.layout.BoxScope.FloatingMiniPlayer(w: Wa
             .align(Alignment.BottomEnd)
             .padding(margin.let { with(density) { it.toDp() } })
             .offset { IntOffset(offset.x.roundToInt(), offset.y.roundToInt()) }
-            .fillMaxWidth(0.5f)
-            .widthIn(max = 300.dp)
+            .fillMaxWidth(if (tablet) 0.36f else 0.5f)
+            .widthIn(min = if (tablet) 260.dp else 160.dp, max = if (tablet) 360.dp else 300.dp)
             .aspectRatio(16f / 9f)
             .onSizeChanged { card = it }
             .shadow(14.dp, RoundedCornerShape(10.dp))
@@ -410,17 +431,140 @@ private fun androidx.compose.foundation.layout.BoxScope.FloatingMiniPlayer(w: Wa
 }
 
 @Composable
-private fun TopBar(s: VideoStrings, onSearch: () -> Unit, onAccount: () -> Unit) {
+private fun TopBar(s: VideoStrings, onSearch: () -> Unit, onAccount: () -> Unit, tablet: Boolean = false) {
     Row(
-        modifier = Modifier.fillMaxWidth().background(VideoColors.Background).padding(start = 12.dp, end = 4.dp).height(52.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(VideoColors.Background)
+            .padding(start = if (tablet) 16.dp else 12.dp, end = if (tablet) 12.dp else 4.dp)
+            .height(if (tablet) 60.dp else 52.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // The app's written logo, as on the music and the messages.
-        Box(Modifier.weight(1f).padding(start = 4.dp), contentAlignment = Alignment.CenterStart) {
-            com.qmusic.ui.theme.NuveloWordmark(letterHeight = 18.dp, color = VideoColors.Text)
+        Box(
+            modifier = if (tablet) Modifier.padding(end = 16.dp) else Modifier.weight(1f).padding(start = 4.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            com.qmusic.ui.theme.NuveloWordmark(letterHeight = if (tablet) 20.dp else 18.dp, color = VideoColors.Text)
         }
-        IconButton(onClick = onSearch) { Icon(QMusicIcons.Search, s.searchHint, tint = VideoColors.Text) }
+        if (tablet) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 460.dp)
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(VideoColors.Chip)
+                        .clickable(onClick = onSearch)
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(QMusicIcons.Search, s.searchHint, tint = VideoColors.TextSecondary, modifier = Modifier.size(19.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text(s.searchHint, color = VideoColors.TextSecondary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+        } else {
+            IconButton(onClick = onSearch) { Icon(QMusicIcons.Search, s.searchHint, tint = VideoColors.Text) }
+        }
         IconButton(onClick = onAccount) { Icon(QMusicIcons.Account, s.account, tint = VideoColors.Text) }
+    }
+}
+
+/**
+ * Tablet left navigation rail: same monochrome pill language and unread badge as [QeyfBar],
+ * anchored cleanly along the left edge so feeds and Shorts get the full vertical height.
+ */
+@Composable
+private fun VideoNavRail(
+    tab: VideoTab?,
+    s: VideoStrings,
+    onTab: (VideoTab) -> Unit,
+    onMusic: () -> Unit,
+    onChat: (() -> Unit)?,
+    chatUnread: Int,
+) {
+    Row(Modifier.fillMaxHeight().background(VideoColors.Background)) {
+        Column(
+            modifier = Modifier
+                .width(84.dp)
+                .fillMaxHeight()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(vertical = 12.dp, horizontal = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            RailItem(s.tabHome, QMusicIcons.Home, tab == VideoTab.HOME) { onTab(VideoTab.HOME) }
+            RailItem(s.shorts, VideoIcons.Shorts, tab == VideoTab.SHORTS) { onTab(VideoTab.SHORTS) }
+            RailItem(s.tabSubscriptions, QMusicIcons.VideoPlay, tab == VideoTab.SUBSCRIPTIONS) { onTab(VideoTab.SUBSCRIPTIONS) }
+            RailItem(s.tabLibrary, QMusicIcons.Library, tab == VideoTab.LIBRARY) { onTab(VideoTab.LIBRARY) }
+            Spacer(Modifier.weight(1f))
+            Box(Modifier.fillMaxWidth(0.6f).height(0.5.dp).background(VideoColors.Divider))
+            Spacer(Modifier.height(2.dp))
+            RailItem(s.backToMusic, QMusicIcons.Headphones, false, onClick = onMusic)
+            if (onChat != null) {
+                RailItem(com.qmusic.ui.chat.ChatMusic.words().messages, QMusicIcons.Chat, false, count = chatUnread, onClick = onChat)
+            }
+        }
+        Box(Modifier.width(0.5.dp).fillMaxHeight().background(VideoColors.Divider))
+    }
+}
+
+@Composable
+private fun RailItem(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    count: Int = 0,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .width(56.dp)
+                    .height(32.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(if (selected) Ink.copy(alpha = 0.14f) else Color.Transparent),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, null, tint = if (selected) VideoColors.Text else VideoColors.TextSecondary, modifier = Modifier.size(22.dp))
+            }
+            if (count > 0) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = (-2).dp, y = (-2).dp)
+                        .height(17.dp)
+                        .widthIn(min = 17.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(com.qmusic.ui.components.QeyfBadgeGreen)
+                        .padding(horizontal = 4.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(if (count > 99) "99+" else count.toString(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = label,
+            color = if (selected) VideoColors.Text else VideoColors.TextSecondary,
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -479,6 +623,7 @@ private fun TabContent(
     onShare: (String) -> Unit,
     onAccount: () -> Unit,
     barsVisible: Boolean = true,
+    tablet: Boolean = false,
 ) {
     if (tab == VideoTab.SHORTS) {
         ShortsPage(controller, playback, s, false, onPauseMusic, onShare, onSignIn)
@@ -487,7 +632,7 @@ private fun TabContent(
     val refresh by controller.refresh.collectAsState()
     Column(modifier = Modifier.fillMaxSize().background(VideoColors.Background).statusBarsPadding()) {
         AnimatedVisibility(visible = barsVisible, enter = expandVertically(expandFrom = Alignment.Bottom), exit = shrinkVertically(shrinkTowards = Alignment.Top)) {
-            TopBar(s, onSearch = { controller.openSearchBox() }, onAccount = onAccount)
+            TopBar(s, onSearch = { controller.openSearchBox() }, onAccount = onAccount, tablet = tablet)
         }
         when (tab) {
             VideoTab.HOME -> {
@@ -651,7 +796,7 @@ private fun DownloadsPage(controller: VideosController, s: VideoStrings, chips: 
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun SearchBox(controller: VideosController, s: VideoStrings) {
+private fun SearchBox(controller: VideosController, s: VideoStrings, tablet: Boolean = false) {
     val query by controller.query.collectAsState()
     val suggestions by controller.suggestions.collectAsState()
     val history by controller.searchHistory.collectAsState()
@@ -662,7 +807,8 @@ private fun SearchBox(controller: VideosController, s: VideoStrings) {
     LaunchedEffect(Unit) { controller.fillSearchPictures() }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
-    Column(modifier = Modifier.fillMaxSize().background(VideoColors.Background)) {
+    Box(modifier = Modifier.fillMaxSize().background(VideoColors.Background), contentAlignment = Alignment.TopCenter) {
+        Column(modifier = Modifier.fillMaxHeight().then(if (tablet) Modifier.widthIn(max = 760.dp).fillMaxWidth() else Modifier.fillMaxWidth())) {
         Row(
             modifier = Modifier.fillMaxWidth().statusBarsPadding().height(56.dp).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -768,6 +914,7 @@ private fun SearchBox(controller: VideosController, s: VideoStrings) {
                     }
                 }
             }
+        }
         }
     }
     removing?.let { text ->
@@ -882,7 +1029,7 @@ private fun SearchResultsPage(controller: VideosController, s: VideoStrings, onS
 // ---------------------------------------------------------------------- channels and playlists
 
 @Composable
-private fun ChannelPage(controller: VideosController, s: VideoStrings, onSignIn: () -> Unit) {
+private fun ChannelPage(controller: VideosController, s: VideoStrings, onSignIn: () -> Unit, tablet: Boolean = false) {
     val channel by controller.channel.collectAsState()
     val c = channel ?: return
     val page = c.page
@@ -962,28 +1109,48 @@ private fun ChannelPage(controller: VideosController, s: VideoStrings, onSignIn:
                     item(key = "channel-header") {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             if (page.banner != null) {
-                                AsyncImage(model = page.banner, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().height(90.dp))
+                                val bannerMod = if (tablet) {
+                                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).height(156.dp).clip(RoundedCornerShape(14.dp))
+                                } else {
+                                    Modifier.fillMaxWidth().height(90.dp)
+                                }
+                                AsyncImage(model = page.banner, contentDescription = null, contentScale = ContentScale.Crop, modifier = bannerMod)
                             }
                             Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Avatar(page.avatar, 72.dp)
+                                Avatar(page.avatar, if (tablet) 84.dp else 72.dp)
                                 Spacer(Modifier.width(16.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(page.name, color = VideoColors.Text, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+                                    Text(page.name, color = VideoColors.Text, fontSize = if (tablet) 24.sp else 20.sp, fontWeight = FontWeight.Bold, maxLines = 2)
                                     val line = listOfNotNull(page.handle, page.subscribers, page.videoCount).joinToString(" · ")
                                     if (line.isNotEmpty()) Text(line, color = VideoColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
                                 }
+                                if (tablet) {
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(
+                                        if (c.subscribed) s.subscribed else s.subscribe,
+                                        color = if (c.subscribed) VideoColors.Text else InkInverse,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(if (c.subscribed) VideoColors.Chip else VideoColors.ChipSelected)
+                                            .clickable { if (controller.signedIn.value) controller.toggleChannelSubscribe() else onSignIn() }
+                                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                                    )
+                                }
                             }
-                            Text(
-                                if (c.subscribed) s.subscribed else s.subscribe,
-                                color = if (c.subscribed) VideoColors.Text else InkInverse,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier
-                                    .padding(horizontal = 16.dp)
-                                    .clip(RoundedCornerShape(50))
-                                    .background(if (c.subscribed) VideoColors.Chip else VideoColors.ChipSelected)
-                                    .clickable { if (controller.signedIn.value) controller.toggleChannelSubscribe() else onSignIn() }
-                                    .padding(horizontal = 20.dp, vertical = 9.dp),
-                            )
+                            if (!tablet) {
+                                Text(
+                                    if (c.subscribed) s.subscribed else s.subscribe,
+                                    color = if (c.subscribed) VideoColors.Text else InkInverse,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier
+                                        .padding(horizontal = 16.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(if (c.subscribed) VideoColors.Chip else VideoColors.ChipSelected)
+                                        .clickable { if (controller.signedIn.value) controller.toggleChannelSubscribe() else onSignIn() }
+                                        .padding(horizontal = 20.dp, vertical = 9.dp),
+                                )
+                            }
                             if (page.tabs.isNotEmpty()) {
                                 LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     items(page.tabs, key = { it.params }) { tab ->
