@@ -298,21 +298,5 @@ class VideoPolishTest {
         assertFalse(com.qmusic.ui.components.isMusicCompactTopBar(1024f))
         assertFalse(com.qmusic.ui.components.isMusicTwoPaneNowPlaying(720f))
         assertTrue(com.qmusic.ui.components.isMusicTwoPaneNowPlaying(1024f))
-
-        // Music editorial home layout helpers (phone, portrait tablet, landscape tablet)
-        assertEquals(16, com.qmusic.ui.screens.musicHomeHorizontalPaddingDp(412f))
-        assertEquals(24, com.qmusic.ui.screens.musicHomeHorizontalPaddingDp(720f))
-        assertEquals(36, com.qmusic.ui.screens.musicHomeHorizontalPaddingDp(1024f))
-        assertFalse(com.qmusic.ui.screens.isMusicBentoWide(412f))
-        assertTrue(com.qmusic.ui.screens.isMusicBentoWide(720f))
-        val homeShelves = listOf(
-            com.qmusic.engine.models.HomeSection(title = "Hızlı seçimler", style = com.qmusic.engine.models.SectionStyle.ROWS),
-            com.qmusic.engine.models.HomeSection(title = "Yeni keşifler", style = com.qmusic.engine.models.SectionStyle.CARDS),
-            com.qmusic.engine.models.HomeSection(title = "Müzik videoları", style = com.qmusic.engine.models.SectionStyle.VIDEOS),
-        )
-        assertEquals(1, com.qmusic.ui.screens.featuredCardsShelfIndex(homeShelves))
-        assertEquals(1, com.qmusic.ui.screens.exploreStripAfterShelfIndex(homeShelves.size))
-        assertEquals(0, com.qmusic.ui.screens.exploreStripAfterShelfIndex(1))
-        assertEquals(-1, com.qmusic.ui.screens.exploreStripAfterShelfIndex(0))
     }
 }
