@@ -36,7 +36,7 @@ android {
         // Phones are ARM; x86_64 only for a build meant for the PC's emulator (-Pqmusic.emulator=true). The calls'
         // WebRTC library is ~12 MB per kind, so the others are left out.
         ndk {
-            abiFilters += if (fastBuild) listOf("arm64-v8a") else listOf("arm64-v8a", "armeabi-v7a")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
             if (providers.gradleProperty("qmusic.emulator").orNull == "true") abiFilters += listOf("x86_64", "x86")
         }
         buildConfigField("String", "LASTFM_KEY", "\"${localProperties.getProperty("lastfm.key", "")}\"")

@@ -26,7 +26,7 @@ COMMON_ARGS=(
 
 case "$MODE" in
     fast)
-        EXTRA_ARGS=("-Pqmusic.fast=true" "-x" "lintVitalRelease" "-x" "uploadCrashlyticsMappingFileRelease")
+        EXTRA_ARGS=("-Pqmusic.fast=true" "-x" "lintVitalRelease")
         ;;
     release)
         EXTRA_ARGS=("-x" "lintVitalRelease" "-x" "uploadCrashlyticsMappingFileRelease")
