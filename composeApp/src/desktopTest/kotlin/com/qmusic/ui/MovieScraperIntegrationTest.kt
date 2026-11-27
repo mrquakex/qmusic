@@ -168,4 +168,54 @@ class MovieScraperIntegrationTest {
         assertEquals("https://site.example.com/img/arr-lg.jpg", cards[1].poster)
         assertEquals(listOf("https://player.example.com/v/999"), com.qmusic.ui.videos.MovieHtmlParser.extractEmbedIframes(html, "https://site.example.com/"))
     }
+
+    @Test
+    fun cryptoJsAesDecryptionExtractsStreamPayload() {
+        val hash = "RkwyZjRjTm9TQ2Y3YnZyYm5PWU9CZz09"
+        val payload = """{"ct":"cLW+ch5fHx4Zm3lkKkLVeCgyMAoAc4o2De1A01wrQnyR2rKCtsMVz4bKK3VqUVnAKszxezt+1TaTh72ecRl+Qs9igN0bcpY2D/nIOdNe+oRoOc93d5bRO5vuZGpRy/prqlwOyH3yB4lkntysOuFgAfAHZggbEEgW2L0gQwJYjmdBHj88QZpa44ehLVpb3ARVvy7z5YUWsKkm2OaFMmbwPlJltjh5SBXZOyZslGYjU18z4/QvJMuPV3wD9pdYmt3Mxm5s1baB7uK/oin/PZ8Af3rgWwCNCrDU8cpTo15RtvC7k97ESjIeqDaeTlxjwiayFH4rqfpjYxefhtbrSZmYAKFwTXl4TPbs8G13UFEnpmL7BGWSLu6etb9lEP4BXMtf2QQJ9fFAcVoO2haMFmILl9hic9/xQkWrT2pzCab3VPQkuhI15OsQgpa/DBclQdl7tEO8RtymNpGLpOd/4S+0lj2FrTRQecLMMXO4CVVM2J8B6Ko3lO49RR+jWeynlfRHt5HGkGh1QUsR3qHxoGg3Mwdknksa8tQ+0Qu4ggU9jVWAcuY8yHsU9KHwEJdP8VdQnHY0zapHzqDr1iKC6U9sVUA4lrujILwJoJf9s3FsAfGmF5FRrFFV+rVvv8fq7q42fl0fdrKGAQDye9QQM1f6ixYGNdmkcFs+6O/x16vKS1O3iRyLzlSLRZgNx4qpMlske89J3zA3ZwdHp91JdAujQRnR/5U9whIC1tMVLW3QNOWLCE8IfAFz9lFa5EpozgmP5QVKEcBbfE4+2lseO0lPVHjjWyn88L2DRJ0zz9cgg15RUi1Kf72XSUrVuxjhhN8a20aFu+Dhg3UfaMdPmbwEynhMj7c2lXciWN12o1ErhL4pzxpqbPLg4bBvR7jWU3giREbiFpGOHe/YSAYc5zhbc9YKUhLMEEDrfVTiUyw4oGVVjcK5j1FHN76sk/m1sSMnbX/LBRV5GJP2u7ZFUBvWGmguhu8FP+KTiELRdtja7cvbycTuEKEe7bLC4dFvttBxz+TfHxJ07hXcb4TX5yQirWdeosTLg4+iu3pGeN6b34U91NViq6vztLj8hYTKQUneE9HetxhZ8OtSOTqZr+MELBeTPxmrPZwtDx3k76Efc+9V+SfIL0PwtJO4D7YIzLxmBohqbdwl5cTI8B3jKKkkTtz1OtVRyBjrq21XhVBObxanD8ulTlePZ+O7cJhLGaj5CCyO+OWPWasu1CnBFdabn+SrCZdfuU2JRTtJO1y3JRH1+jlv0c8YT/SP+s/Tt8jg3tbK75EqFIM4C1OIex77SK6JX3TI572MxCr6CBElp1ubXPVvN+aMhQGCKgJZwBW+37OHv7v/BNRNp8yMleGQfLNCwjcgNnaboMn3Jb+kW4KPE5e7HZ3Ykpr/Es8BM5KW7ipMOxg3XCJ5oP/KWp+aIdlxjWTgSL+YpaKMaj7+TVtBf+rfKBQjBzIrPnqjE1pmM7cpsqDw2hLKCJFddT6T03zBY0cMSxKQcuBU7fWH7q+3hJUDxA1dQSVVu9pAS4Q9xQ3mrqkvNDeOaorjiWo5BDqti1mz5YeDSP/DniKXK/6v3RcTaTM9JOSNwqebdiwGyFTi1lJFGVntAMn5pAf42Rdr39K10pamecQpz4hVtFn5zlsqkT0KvM7YJdlkpQaAgksD25m1+9qxripIgmpNwYtQrzCihxQeZxOzhfcX6XyvRriiWp5j7rhToU+1Xs0iyvx+pAThxxVlk9pDfLNsuscTcTVkpJi2D6Su9753eJB+B96lGA9NwDWz64v1k9Ud","iv":"57489ff55bd86c0f9f0b11c0a095baeb","s":"b09bf2e9691f3fd3"}"""
+        val ct = Regex(""""ct"\s*:\s*"([^"]+)"""").find(payload)?.groupValues?.get(1)
+        assertNotNull(ct)
+        val sHex = Regex(""""s"\s*:\s*"([^"]+)"""").find(payload)?.groupValues?.get(1)
+        assertNotNull(sHex)
+        val ivHex = Regex(""""iv"\s*:\s*"([^"]+)"""").find(payload)?.groupValues?.get(1)
+        assertNotNull(ivHex)
+
+        fun parseHex(s: String): ByteArray {
+            val len = s.length
+            val data = ByteArray(len / 2)
+            var i = 0
+            while (i < len) {
+                data[i / 2] = ((Character.digit(s[i], 16) shl 4) + Character.digit(s[i + 1], 16)).toByte()
+                i += 2
+            }
+            return data
+        }
+
+        val salt = parseHex(sHex)
+        val iv = parseHex(ivHex)
+        val cipherBytes = java.util.Base64.getDecoder().decode(ct)
+
+        val md = java.security.MessageDigest.getInstance("MD5")
+        var d = ByteArray(0)
+        var keyAndIv = ByteArray(0)
+        val passBytes = hash.toByteArray(Charsets.UTF_8)
+        while (keyAndIv.size < 48) {
+            md.reset()
+            md.update(d)
+            md.update(passBytes)
+            md.update(salt)
+            d = md.digest()
+            val next = ByteArray(keyAndIv.size + d.size)
+            System.arraycopy(keyAndIv, 0, next, 0, keyAndIv.size)
+            System.arraycopy(d, 0, next, keyAndIv.size, d.size)
+            keyAndIv = next
+        }
+        val key = ByteArray(32)
+        System.arraycopy(keyAndIv, 0, key, 0, 32)
+        val cipher = javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding")
+        cipher.init(javax.crypto.Cipher.DECRYPT_MODE, javax.crypto.spec.SecretKeySpec(key, "AES"), javax.crypto.spec.IvParameterSpec(iv))
+        val decrypted = String(cipher.doFinal(cipherBytes), Charsets.UTF_8).replace("\\/", "/")
+        assertTrue(decrypted.contains("video_location"), "Decrypted payload must contain video_location")
+        assertTrue(decrypted.contains("https://vidmixi.com/list/"), "Must extract real vidmixi list HLS url")
+    }
 }

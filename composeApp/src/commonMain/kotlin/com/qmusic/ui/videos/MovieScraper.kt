@@ -93,6 +93,7 @@ internal object MovieHtmlParser {
     private val FIRST_ANCHOR = Regex("""(?is)<a\b([^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*)>(.*?)</a>""")
     private val ANCHOR_WITH_IMG = Regex("""(?is)<a\b([^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*)>(.*?)</a>""")
     private val IMG_TAG = Regex("""(?is)<img\b([^>]+)>""")
+    private val LAZY_SRC_ATTR = Regex("""(?i)\b(?:data-src|data-lazy-src|data-original|data-poster)\s*=\s*["']([^"']+)["']""")
     private val IMG_SRC_ATTR = Regex("""(?i)\b(?:data-src|data-lazy-src|data-original|data-poster|src)\s*=\s*["']([^"']+)["']""")
     private val IMG_SRCSET_ATTR = Regex("""(?i)\b(?:data-srcset|srcset)\s*=\s*["']([^"']+)["']""")
     private val DATA_BG_ATTR = Regex("""(?i)\b(?:data-bg|data-background|data-background-image)\s*=\s*["']([^"']+)["']""")
@@ -111,6 +112,28 @@ internal object MovieHtmlParser {
     private val GENRE_LINK = Regex("""(?is)<a\b[^>]*\bhref\s*=\s*["']([^"']*(?:/tur/|/genre/|/kategori/|/category/|/films/|/movies/)[^"']*)["'][^>]*>(.*?)</a>""")
     private val HLS_STREAM_INF = Regex("""#EXT-X-STREAM-INF:([^\r\n]+)[\r\n]+([^\r\n#]+)""")
     private val HLS_RES = Regex("""RESOLUTION=\d+x(\d+)""")
+    private val FILM_DATA_K = Regex("""(?i)\bdata-k\s*=\s*["']([^"']+)["']""")
+    private val CSRF_TOKEN = Regex("""(?i)<meta\b[^>]*\bname\s*=\s*["']csrf-token["'][^>]*\bcontent\s*=\s*["']([^"']+)["']""")
+    private val BEPLAYER_REGEX = Regex("""(?is)bePlayer\s*\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*,\s*['"](\{.+?\})['"]""")
+
+    /** Extracts Filmmodu `(i, s)` pair from `data-k` attribute. */
+    fun extractFilmmoduDataK(html: String): Pair<Int, String>? {
+        val raw = FILM_DATA_K.find(html)?.groupValues?.getOrNull(1) ?: return null
+        val unescaped = decodeEntities(raw)
+        val i = Regex(""""i"\s*:\s*(\d+)""").find(unescaped)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: return null
+        val s = Regex(""""s"\s*:\s*"([^"]+)"""").find(unescaped)?.groupValues?.getOrNull(1) ?: return null
+        return i to s
+    }
+
+    /** Extracts `<meta name="csrf-token" content="...">`. */
+    fun extractCsrfToken(html: String): String? =
+        CSRF_TOKEN.find(html)?.groupValues?.getOrNull(1)
+
+    /** Extracts `bePlayer(hash, jsonPayload)` arguments from player embed HTML. */
+    fun extractBePlayerArgs(html: String): Pair<String, String>? {
+        val m = BEPLAYER_REGEX.find(html) ?: return null
+        return m.groupValues[1] to m.groupValues[2]
+    }
 
     /** True when [url] points straight to a playable video/HLS/DASH resource with no HTML scraping needed. */
     fun isDirectMediaUrl(url: String): Boolean {
@@ -402,8 +425,9 @@ internal object MovieHtmlParser {
         val imgAttrs = IMG_TAG.find(block)?.groupValues?.getOrNull(1)
         val alt = imgAttrs?.let { IMG_ALT_ATTR.find(it)?.groupValues?.getOrNull(1) }
         val fromImg = imgAttrs?.let { attrs ->
-            IMG_SRC_ATTR.find(attrs)?.groupValues?.getOrNull(1)
+            LAZY_SRC_ATTR.find(attrs)?.groupValues?.getOrNull(1)
                 ?: IMG_SRCSET_ATTR.find(attrs)?.groupValues?.getOrNull(1)?.let(::pickBestSrcsetUrl)
+                ?: IMG_SRC_ATTR.find(attrs)?.groupValues?.getOrNull(1)?.takeUnless { it.startsWith("data:", true) }
         }
         val rawPoster = fromImg
             ?: DATA_BG_ATTR.find(block)?.groupValues?.getOrNull(1)

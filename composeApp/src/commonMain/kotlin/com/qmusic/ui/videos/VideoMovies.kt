@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -633,7 +634,25 @@ internal fun MoviesTab(
                                     fontWeight = FontWeight.SemiBold,
                                 )
                             }
-                            resolveErr != null -> Text(resolveErr!!, color = VideoColors.Red, fontSize = 12.sp, maxLines = 2)
+                            resolveErr != null -> {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(resolveErr!!, color = VideoColors.Red, fontSize = 12.sp, maxLines = 2)
+                                    val uriHandler = LocalUriHandler.current
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(VideoColors.Chip)
+                                            .border(0.5.dp, BorderHover, RoundedCornerShape(50))
+                                            .clickable { runCatching { uriHandler.openUri(card.pageUrl) } }
+                                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Icon(VideoIcons.Film, null, tint = VideoColors.Text, modifier = Modifier.size(13.dp))
+                                        Text(if (english) "Open in Browser" else "Web'de / Tarayıcıda İzle", color = VideoColors.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
