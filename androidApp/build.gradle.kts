@@ -21,6 +21,8 @@ val localProperties = Properties().apply {
 android {
     namespace = "com.qmusic.app"
     compileSdk = 36
+    // -Pqmusic.fast=true skips R8 + 32-bit ABI for ~5x faster personal test APKs; normal release stays full-fat.
+    val fastBuild = providers.gradleProperty("qmusic.fast").orNull == "true"
 
     defaultConfig {
         applicationId = "com.qmusic.app"
@@ -34,7 +36,7 @@ android {
         // Phones are ARM; x86_64 only for a build meant for the PC's emulator (-Pqmusic.emulator=true). The calls'
         // WebRTC library is ~12 MB per kind, so the others are left out.
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            abiFilters += if (fastBuild) listOf("arm64-v8a") else listOf("arm64-v8a", "armeabi-v7a")
             if (providers.gradleProperty("qmusic.emulator").orNull == "true") abiFilters += listOf("x86_64", "x86")
         }
         buildConfigField("String", "LASTFM_KEY", "\"${localProperties.getProperty("lastfm.key", "")}\"")
@@ -43,9 +45,9 @@ android {
 
     buildTypes {
         release {
-            // R8 + resource shrinking: the release build is what feels smooth; debug runs Compose unoptimised.
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // R8 + resource shrinking: the release build is what feels smooth; -Pqmusic.fast=true skips them for rapid testing.
+            isMinifyEnabled = !fastBuild
+            isShrinkResources = !fastBuild
             // Signed with the debug key so it can be installed straight from the build for daily use.
             signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
