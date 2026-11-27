@@ -19,12 +19,14 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.qmusic.engine.video.VideoCaption
@@ -38,16 +40,20 @@ import kotlinx.coroutines.flow.asStateFlow
 internal class ExoVideoPlayback(context: Context) : VideoPlayback {
     private val appContext = context.applicationContext
     val player: ExoPlayer = ExoPlayer.Builder(context.applicationContext)
+        // A hardware decoder that cannot take a stream (a high profile, an odd film encode) hands it to the next one
+        // instead of stopping the video.
+        .setRenderersFactory(DefaultRenderersFactory(context.applicationContext).setEnableDecoderFallback(true))
         .setAudioAttributes(
             AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
             true,
         )
         .setHandleAudioBecomingNoisy(true)
         // Starts after under a second of picture, keeps up to a minute and a half ahead, and keeps the last fifteen
-        // seconds so a short seek back needs nothing new.
+        // seconds so a short seek back needs nothing new. After a stall it waits for four seconds of picture, so a slow
+        // connection does not stop and start again every other second.
         .setLoadControl(
             DefaultLoadControl.Builder()
-                .setBufferDurationsMs(20_000, 90_000, 800, 2_000)
+                .setBufferDurationsMs(20_000, 90_000, 800, 4_000)
                 .setPrioritizeTimeOverSizeThresholds(true)
                 .setBackBuffer(15_000, true)
                 .build(),
@@ -128,6 +134,9 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
         handler.postDelayed(dropAhead, AHEAD_KEEP_MS)
     }
     private val liveSources = VideoStreaming.network()
+
+    /** A film server that drops a segment now and then is asked again a few more times before the video gives up. */
+    private val loadErrors = DefaultLoadErrorHandlingPolicy(LOAD_RETRIES)
 
     init {
         VideoBackground.player = player
@@ -236,7 +245,9 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
             isHls -> liveSources
             else -> dataSources
         }
-        val picture: MediaSource = DefaultMediaSourceFactory(videoFactory).createMediaSource(pictureItem)
+        val picture: MediaSource = DefaultMediaSourceFactory(videoFactory)
+            .setLoadErrorHandlingPolicy(loadErrors)
+            .createMediaSource(pictureItem)
         val separateAudioUrl = quality.audioUrl?.takeIf { it.isNotBlank() && !quality.isLive }
         val source: MediaSource = if (separateAudioUrl != null) {
             val audioIsHls = MovieHtmlParser.isHlsCandidateUrl(separateAudioUrl) || isHls
@@ -252,9 +263,10 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
             val audioSource: MediaSource = if (audioIsHls) {
                 HlsMediaSource.Factory(audioFactory)
                     .setAllowChunklessPreparation(true)
+                    .setLoadErrorHandlingPolicy(loadErrors)
                     .createMediaSource(audioItem)
             } else {
-                ProgressiveMediaSource.Factory(audioFactory).createMediaSource(audioItem)
+                ProgressiveMediaSource.Factory(audioFactory).setLoadErrorHandlingPolicy(loadErrors).createMediaSource(audioItem)
             }
             // Align period time offsets and clip durations so separate HLS/DASH/progressive audio & video stay in sync.
             MergingMediaSource(/* adjustPeriodTimeOffsets = */ true, /* clipDurations = */ true, picture, audioSource)
@@ -379,6 +391,7 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
         const val TICK_MS = 400L
         const val SEEK_GRACE_MS = 2_500L
         const val AHEAD_KEEP_MS = 8_000L
+        const val LOAD_RETRIES = 6
     }
 }
 
