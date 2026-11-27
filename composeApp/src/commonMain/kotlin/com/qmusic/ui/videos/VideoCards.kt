@@ -270,10 +270,15 @@ fun VideoRowCard(item: VideoItem, s: VideoStrings, onClick: () -> Unit, modifier
 }
 
 @Composable
-fun ShortsRow(items: List<VideoItem>, s: VideoStrings, onClick: (items: List<VideoItem>, index: Int) -> Unit) {
+fun ShortsRow(
+    items: List<VideoItem>,
+    s: VideoStrings,
+    horizontalPadding: androidx.compose.ui.unit.Dp = 12.dp,
+    onClick: (items: List<VideoItem>, index: Int) -> Unit,
+) {
     Column(modifier = Modifier.padding(bottom = 12.dp)) {
-        Text(s.shorts, color = VideoColors.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
-        LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(s.shorts, color = VideoColors.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 8.dp))
+        LazyRow(contentPadding = PaddingValues(horizontal = horizontalPadding), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(items.size, key = { items[it].id }) { index ->
                 val item = items[index]
                 Column(modifier = Modifier.width(150.dp).clickable { onClick(items, index) }) {
@@ -330,8 +335,8 @@ fun PlaylistResultRow(playlist: VideoPlaylist, s: VideoStrings, onClick: () -> U
 }
 
 @Composable
-fun ChipRow(chips: List<VideoChip>, onClick: (VideoChip) -> Unit) {
-    LazyRow(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+fun ChipRow(chips: List<VideoChip>, horizontalPadding: androidx.compose.ui.unit.Dp = 12.dp, onClick: (VideoChip) -> Unit) {
+    LazyRow(contentPadding = PaddingValues(horizontal = horizontalPadding, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(chips, key = { it.text + "|" + it.token }) { chip ->
             LabelChip(chip.text, chip.selected) { onClick(chip) }
         }
@@ -619,7 +624,7 @@ private fun FeedList(
                     is FeedGridRow.FullWidth -> when (val entry = row.entry) {
                         is VideoEntry.Channel -> ChannelResultRow(entry.item) { onChannel(entry.item.id, entry.item.name) }
                         is VideoEntry.Playlist -> PlaylistResultRow(entry.item, s) { onPlaylist(entry.item) }
-                        is VideoEntry.Shorts -> ShortsRow(entry.items, s, onClick = onShort)
+                        is VideoEntry.Shorts -> ShortsRow(entry.items, s, horizontalPadding = if (columns > 1) 16.dp else 12.dp, onClick = onShort)
                         is VideoEntry.Video -> Unit
                     }
                 }

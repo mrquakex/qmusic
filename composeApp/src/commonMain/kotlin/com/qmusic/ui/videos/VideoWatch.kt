@@ -639,6 +639,7 @@ private fun WatchDetails(
     val title = details?.title ?: w.video.title
     val signedIn by controller.signedIn.collectAsState()
     val x = s.extras()
+    val sidePad = if (tabletMode) 16.dp else 12.dp
 
     if (showRelated) {
         LaunchedEffect(listState, w.relatedContinuation) {
@@ -653,7 +654,7 @@ private fun WatchDetails(
 
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
         item(key = "title") {
-            Column(modifier = Modifier.fillMaxWidth().clickable { descriptionOpen = !descriptionOpen }.padding(12.dp)) {
+            Column(modifier = Modifier.fillMaxWidth().clickable { descriptionOpen = !descriptionOpen }.padding(horizontal = sidePad, vertical = 12.dp)) {
                 Text(title, color = VideoColors.Text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, lineHeight = 24.sp, maxLines = if (descriptionOpen) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
                 val meta = listOfNotNull(details?.views ?: w.video.views, details?.date ?: w.video.published).joinToString(" · ")
                 Row(modifier = Modifier.padding(top = 4.dp)) {
@@ -665,7 +666,7 @@ private fun WatchDetails(
         if (descriptionOpen && !details?.description.isNullOrBlank()) {
             item(key = "description") {
                 val description = details!!.description!!
-                Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().padding(start = sidePad, end = sidePad, bottom = 8.dp)) {
                     val chapters = remember(description) { chaptersOf(description) }
                     if (chapters.isNotEmpty()) {
                         Text(s.chapters, color = VideoColors.Text, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 4.dp))
@@ -688,7 +689,7 @@ private fun WatchDetails(
             }
         }
         item(key = "channel") {
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = sidePad, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Row(
                     modifier = Modifier.weight(1f).clickable(enabled = (details?.channelId ?: w.video.channelId) != null) {
                         (details?.channelId ?: w.video.channelId)?.let { controller.push(VideoRoute.Channel(it, details?.channelName ?: w.video.channelName)) }
@@ -717,7 +718,7 @@ private fun WatchDetails(
         }
         item(key = "actions") {
             Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = sidePad, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 ActionPill(
@@ -782,7 +783,7 @@ private fun WatchDetails(
         if (w.isLive() && details?.liveChatToken != null) {
             item(key = "live-chat-header") {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(12.dp)).background(VideoColors.Surface).clickable {
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = sidePad, vertical = 6.dp).clip(RoundedCornerShape(12.dp)).background(VideoColors.Surface).clickable {
                         if (tabletMode && onOpenSideLiveChat != null) {
                             if (!w.liveChatOpen) controller.toggleLiveChat()
                             onOpenSideLiveChat()
@@ -806,7 +807,7 @@ private fun WatchDetails(
         }
         item(key = "comments-header") {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(12.dp)).background(VideoColors.Surface).clickable {
+                modifier = Modifier.fillMaxWidth().padding(horizontal = sidePad, vertical = 6.dp).clip(RoundedCornerShape(12.dp)).background(VideoColors.Surface).clickable {
                     if (tabletMode && onOpenSideComments != null) {
                         onOpenSideComments()
                     } else {

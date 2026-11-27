@@ -544,15 +544,21 @@ private fun RailItem(
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .offset(x = (-2).dp, y = (-2).dp)
-                        .height(17.dp)
-                        .widthIn(min = 17.dp)
+                        .offset(x = (-2).dp, y = (-4).dp)
+                        .height(18.dp)
+                        .widthIn(min = 18.dp)
                         .clip(androidx.compose.foundation.shape.CircleShape)
                         .background(com.qmusic.ui.components.QeyfBadgeGreen)
-                        .padding(horizontal = 4.dp),
+                        .padding(horizontal = 5.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(if (count > 99) "99+" else count.toString(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (count > 99) "99+" else count.toString(),
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        lineHeight = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
             }
         }
@@ -654,7 +660,7 @@ private fun TabContent(
                     header = if (state.chips.isNotEmpty() || (!signedIn && state.entries.isNotEmpty())) {
                         {
                             if (!signedIn && state.entries.isNotEmpty()) item(key = "banner") { SignInBanner(s, onSignIn) }
-                            if (state.chips.isNotEmpty()) item(key = "chips") { ChipRow(state.chips) { controller.home.selectChip(it) } }
+                            if (state.chips.isNotEmpty()) item(key = "chips") { ChipRow(state.chips, horizontalPadding = if (tablet) 16.dp else 12.dp) { controller.home.selectChip(it) } }
                         }
                     } else null,
                 )
