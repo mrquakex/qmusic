@@ -691,7 +691,7 @@ private fun TabContent(
                 )
             }
             VideoTab.SHORTS -> Unit
-            VideoTab.MOVIES -> MoviesTab(controller, movieSources, s, tablet)
+            VideoTab.MOVIES -> MoviesTab(controller, movieSources, s, tablet, onShare)
             VideoTab.SUBSCRIPTIONS -> SubscriptionsTab(controller, s, signedIn, onSignIn)
             VideoTab.LIBRARY -> LibraryTab(controller, s, signedIn, onSignIn)
         }
