@@ -55,3 +55,8 @@ expect fun rememberVideoPlayback(): VideoPlayback?
 /** Draws what [playback] plays; [fill] crops the picture to fill the space (upright clips), else it fits inside. */
 @Composable
 expect fun VideoPlaybackSurface(playback: VideoPlayback, modifier: Modifier, fill: Boolean = false)
+
+/** How subtitles are drawn on the picture: their size as a multiple of the player's default (set from the settings). */
+object VideoCaptionStyle {
+    val scale = kotlinx.coroutines.flow.MutableStateFlow(1f)
+}

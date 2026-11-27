@@ -166,6 +166,31 @@ internal class MovieLibrary(private val settings: AppSettings, private val scope
         return !inList
     }
 
+    fun removeFavorite(pageUrl: String) {
+        val next = _favorites.value.filterNot { it.pageUrl == pageUrl }
+        _favorites.value = next
+        settings.setString(KEY_FAVORITES, json.encodeToString(listSerializer, next))
+    }
+
+    // ------------------------------------------------------------------ film searches
+
+    private val _searches = MutableStateFlow(settings.string(KEY_SEARCHES, "").value.split('\n').filter { it.isNotBlank() })
+    val searches: StateFlow<List<String>> = _searches.asStateFlow()
+
+    private fun saveSearches(list: List<String>) {
+        _searches.value = list
+        settings.setString(KEY_SEARCHES, list.joinToString("\n"))
+    }
+
+    /** The newest first; the same words searched again move to the top instead of showing twice. */
+    fun rememberSearch(query: String) {
+        val q = query.trim().replace('\n', ' ')
+        if (q.isEmpty()) return
+        saveSearches((listOf(q) + _searches.value.filterNot { it.equals(q, ignoreCase = true) }).take(SEARCHES_KEPT))
+    }
+
+    fun clearSearches() = saveSearches(emptyList())
+
     // ------------------------------------------------------------------ catalog pages
 
     private class CatalogEntry(val at: TimeMark, val page: MovieCatalogPage)
@@ -250,6 +275,8 @@ internal class MovieLibrary(private val settings: AppSettings, private val scope
         const val KEY_HISTORY = "movie_history"
         const val KEY_FAVORITES = "movie_favorites"
         const val KEY_CATALOG_PREFIX = "movie_catalog_"
+        const val KEY_SEARCHES = "movie_searches"
+        const val SEARCHES_KEPT = 12
         const val HISTORY_KEPT = 40
         const val FAVORITES_KEPT = 300
         const val HOME_ITEMS_KEPT = 60

@@ -15,9 +15,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -48,6 +51,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -75,6 +80,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.TextStyle
@@ -98,6 +104,9 @@ import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import com.qmusic.ui.theme.QMusicIcons
 import com.qmusic.ui.theme.QMusicShapes
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -179,10 +188,15 @@ internal fun MoviesTab(
     val library = controller.movies
     val movieHistory by library.history.collectAsState()
     val myList by library.favorites.collectAsState()
+    val recentSearches by library.searches.collectAsState()
+    var searchAll by remember { mutableStateOf(false) }   // search every source at once
+    var searchFocused by remember { mutableStateOf(false) }
+    var sort by remember { mutableStateOf(MovieSort.SITE) }
+    val focusManager = LocalFocusManager.current
 
     // What was seen of a page before shows at once (this session, or the source's first page from the last one); the
     // site is asked again only when that is old, or when the person asks for it (reload, retry).
-    LaunchedEffect(activeSource?.id, activeSource?.baseUrl, submittedQuery, selectedGenreUrl, reloadTick) {
+    LaunchedEffect(activeSource?.id, activeSource?.baseUrl, submittedQuery, selectedGenreUrl, reloadTick, searchAll, activeSources) {
         val src = activeSource
         if (src == null) {
             cards = emptyList()
@@ -196,6 +210,25 @@ internal fun MoviesTab(
         val forced = reloadTick != handledTick[0]
         handledTick[0] = reloadTick
         val query = submittedQuery
+        if (searchAll && query.isNotBlank() && activeSources.size > 1) {
+            // Every source is asked at the same time; their results are dealt in turn, so each source shows near the top.
+            loading = true
+            refreshing = false
+            loadError = null
+            loadMoreError = false
+            val results = coroutineScope { activeSources.map { source -> async { library.catalog(source, query, null) } }.awaitAll() }
+            val lists = results.map { it.getOrNull()?.items.orEmpty() }
+            val merged = buildList {
+                for (i in 0 until (lists.maxOfOrNull { it.size } ?: 0)) lists.forEach { l -> l.getOrNull(i)?.let(::add) }
+            }.distinctBy { it.pageUrl }
+            cards = merged
+            nextPageUrl = null
+            loading = false
+            if (merged.isEmpty() && results.all { it.isFailure }) {
+                loadError = friendlyMovieError(results.firstNotNullOfOrNull { it.exceptionOrNull() }, english)
+            }
+            return@LaunchedEffect
+        }
         val pageUrl = if (query.isBlank()) selectedGenreUrl else null
         val showGenres = selectedGenreUrl == null && query.isBlank()
         loadError = null
@@ -293,6 +326,7 @@ internal fun MoviesTab(
 
     fun submitSearch() {
         val q = searchQuery.trim()
+        library.rememberSearch(q)
         if (q != submittedQuery) {
             selectedGenreUrl = null
             submittedQuery = q
@@ -450,7 +484,48 @@ internal fun MoviesTab(
                             onSubmit = { submitSearch() },
                             onClear = { clearSearch() },
                             onReload = { reloadTick++ },
+                            onFocusChange = { searchFocused = it },
                         )
+
+                        // Recent film searches while the empty field is focused: one tap searches again.
+                        AnimatedVisibility(
+                            visible = searchFocused && searchQuery.isEmpty() && recentSearches.isNotEmpty(),
+                            enter = fadeIn(tween(Motion.SHORT)),
+                            exit = fadeOut(tween(Motion.SHORT)),
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    SectionCaption(tr("RECENT SEARCHES", "SON ARAMALAR"), modifier = Modifier.weight(1f))
+                                    Text(
+                                        tr("Clear", "Temizle"),
+                                        color = VideoColors.TextSecondary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .clickable { library.clearSearches() }
+                                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                                    )
+                                }
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    items(recentSearches, key = { "recent-$it" }) { q ->
+                                        CinemaPill(q, selected = false) {
+                                            searchQuery = q
+                                            focusManager.clearFocus()
+                                            submitSearch()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Where to search: this source, or all of them at once.
+                        if (activeSources.size > 1 && (searchQuery.isNotBlank() || submittedQuery.isNotBlank())) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                CinemaPill(activeSource?.name ?: tr("This source", "Bu kaynak"), selected = !searchAll) { searchAll = false }
+                                CinemaPill(tr("All sources", "Tüm kaynaklar"), selected = searchAll) { searchAll = true }
+                            }
+                        }
 
                         if (genres.isNotEmpty()) {
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -540,6 +615,8 @@ internal fun MoviesTab(
                             onAction = { library.clearHistory() },
                             movies = movieHistory,
                             onOpen = { selectedCard = it.toCard() },
+                            removeLabel = tr("Remove from history", "Geçmişten kaldır"),
+                            onRemove = { library.forget(it.pageUrl) },
                         )
                     }
                 }
@@ -551,6 +628,8 @@ internal fun MoviesTab(
                             onAction = {},
                             movies = myList,
                             onOpen = { selectedCard = it.toCard() },
+                            removeLabel = tr("Remove from my list", "Listemden çıkar"),
+                            onRemove = { library.removeFavorite(it.pageUrl) },
                         )
                     }
                 }
@@ -673,8 +752,18 @@ internal fun MoviesTab(
                             }
                         }
 
+                        if (gridCards.size > 2) {
+                            item(key = "grid-sort") {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    items(MovieSort.entries.toList(), key = { it.name }) { mode ->
+                                        CinemaPill(tr(mode.en, mode.tr), selected = sort == mode, quiet = sort != mode) { sort = mode }
+                                    }
+                                }
+                            }
+                        }
+
                         // Responsive 2..5-column cinema poster grid
-                        val rows = gridCards.chunked(cols)
+                        val rows = sortedMovies(gridCards, sort).chunked(cols)
                         items(rows.size, key = { "mrow-$it-${rows[it].first().pageUrl}" }) { rIdx ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -826,8 +915,18 @@ internal fun MoviesTab(
     }
 
     selectedCard?.let { card ->
+        // "More like this": the genre rows this film is in first, then the open genre, then the best rated, then the rest.
+        val similar = remember(card.pageUrl, genreRows, cards, topRated) {
+            val sameGenre = genreRows.values.filter { l -> l.any { it.pageUrl == card.pageUrl } }.flatten()
+            val pool = sameGenre + (if (selectedGenreUrl != null) cards else emptyList()) + topRated + cards
+            val list = pool.filter { it.pageUrl != card.pageUrl }.distinctBy { it.pageUrl }.take(SIMILAR_COUNT)
+            list to (sameGenre.size > 1 || selectedGenreUrl != null)
+        }
         MovieDetailSheet(
             card = card,
+            similar = similar.first,
+            similarCaption = if (similar.second) tr("MORE LIKE THIS", "BENZER YAPIMLAR") else tr("YOU MIGHT ALSO LIKE", "BUNLARA DA BAK"),
+            onOpenSimilar = { selectedCard = it },
             genreHint = selectedGenreLabel,
             english = english,
             watchLabel = x.moviePlaySolo,
@@ -864,6 +963,9 @@ internal fun MoviesTab(
 @Composable
 private fun MovieDetailSheet(
     card: MovieCard,
+    similar: List<MovieCard>,
+    similarCaption: String,
+    onOpenSimilar: (MovieCard) -> Unit,
     genreHint: String?,
     english: Boolean,
     watchLabel: String,
@@ -926,7 +1028,8 @@ private fun MovieDetailSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                // A film opened from "more like this" starts at the top of the sheet.
+                .verticalScroll(remember(card.pageUrl) { ScrollState(0) })
                 .navigationBarsPadding()
                 .padding(bottom = 20.dp),
         ) {
@@ -1119,6 +1222,46 @@ private fun MovieDetailSheet(
                         primary = false,
                         modifier = Modifier.fillMaxWidth(),
                     ) { onShare() }
+                }
+
+                if (similar.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 6.dp)) {
+                        SectionCaption(similarCaption)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(similar, key = { "similar-${it.pageUrl}" }) { other ->
+                                val shape = QMusicShapes.medium
+                                Column(
+                                    modifier = Modifier
+                                        .width(96.dp)
+                                        .pressScale(0.97f)
+                                        .clip(shape)
+                                        .clickable { onOpenSimilar(other) },
+                                ) {
+                                    Box(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .aspectRatio(2f / 3f)
+                                            .clip(shape)
+                                            .background(VideoColors.Surface)
+                                            .border(0.5.dp, BorderSubtle, shape),
+                                    ) {
+                                        FadeInPoster(url = other.poster, contentDescription = other.title, iconSize = 24.dp)
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        other.title,
+                                        color = VideoColors.Text,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        lineHeight = 15.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(horizontal = 2.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1318,6 +1461,7 @@ private fun CinemaSearchBar(
     onSubmit: () -> Unit,
     onClear: () -> Unit,
     onReload: () -> Unit,
+    onFocusChange: (Boolean) -> Unit = {},
 ) {
     var focused by remember { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -1350,7 +1494,10 @@ private fun CinemaSearchBar(
                     keyboard?.hide()
                     onSubmit()
                 }),
-                modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused },
+                modifier = Modifier.fillMaxWidth().onFocusChanged {
+                    focused = it.isFocused
+                    onFocusChange(it.isFocused)
+                },
             )
         }
         AnimatedVisibility(
@@ -1735,12 +1882,29 @@ private fun CinemaRow(
     }
 }
 
+/** How the "all titles" grid is ordered. */
+private enum class MovieSort(val tr: String, val en: String) {
+    SITE("Önerilen", "Suggested"),
+    RATING("Puan", "Rating"),
+    YEAR("En yeni", "Newest"),
+    TITLE("A-Z", "A-Z"),
+}
+
+private fun sortedMovies(cards: List<MovieCard>, sort: MovieSort): List<MovieCard> = when (sort) {
+    MovieSort.SITE -> cards
+    MovieSort.RATING -> cards.sortedByDescending { it.rating?.replace(',', '.')?.toFloatOrNull() ?: -1f }
+    MovieSort.YEAR -> cards.sortedByDescending { it.year?.toIntOrNull() ?: 0 }
+    MovieSort.TITLE -> cards.sortedBy { it.title.lowercase() }
+}
+
+private const val SIMILAR_COUNT = 12
 private const val HERO_COUNT = 5
 private const val HERO_ROTATE_MS = 7_000L
 private const val ROW_SIZE = 20
 private const val GENRE_ROWS = 4
 
 /** A horizontal row of films kept on the device (recently watched, my list), each with how far it was watched. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SavedMovieRow(
     caption: String,
@@ -1748,6 +1912,8 @@ private fun SavedMovieRow(
     onAction: () -> Unit,
     movies: List<SavedMovie>,
     onOpen: (SavedMovie) -> Unit,
+    removeLabel: String,
+    onRemove: (SavedMovie) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth().padding(start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1768,12 +1934,29 @@ private fun SavedMovieRow(
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             items(movies, key = { it.pageUrl }) { movie ->
                 val shape = QMusicShapes.medium
+                var menu by remember { mutableStateOf(false) }
+                // Tap opens it; a long press offers to take it out of the row.
+                Box {
+                DropdownMenu(
+                    expanded = menu,
+                    onDismissRequest = { menu = false },
+                    modifier = Modifier.background(VideoColors.Surface),
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(removeLabel, color = VideoColors.Text, fontSize = 14.sp) },
+                        leadingIcon = { Icon(QMusicIcons.Close, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(16.dp)) },
+                        onClick = {
+                            menu = false
+                            onRemove(movie)
+                        },
+                    )
+                }
                 Column(
                     modifier = Modifier
                         .width(108.dp)
                         .pressScale(0.97f)
                         .clip(shape)
-                        .clickable { onOpen(movie) },
+                        .combinedClickable(onClick = { onOpen(movie) }, onLongClick = { menu = true }),
                 ) {
                     Box(
                         modifier = Modifier
@@ -1807,6 +1990,7 @@ private fun SavedMovieRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 2.dp),
                     )
+                }
                 }
             }
         }

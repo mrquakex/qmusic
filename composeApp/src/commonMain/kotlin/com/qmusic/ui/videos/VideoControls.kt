@@ -119,6 +119,14 @@ object VideoIcons {
     )
 }
 
+/** Subtitle sizes offered in the settings sheet: multiple of the default, Turkish and English names. */
+private val CAPTION_SIZES = listOf(
+    Triple(0.8f, "Küçük", "Small"),
+    Triple(1f, "Orta", "Medium"),
+    Triple(1.3f, "Büyük", "Large"),
+    Triple(1.6f, "Çok büyük", "Extra large"),
+)
+
 private val SPEEDS = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
 private const val HIDE_CONTROLS_MS = 3_000L
 private const val LONG_PRESS_MS = 400L
@@ -216,6 +224,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
     val x = s.extras()
     val autoplay by controller.autoplay.collectAsState()
     val sleep by controller.sleep.collectAsState()
+    val captionSize by controller.captionSize.collectAsState()
     val skipTick by controller.skipTick.collectAsState()
     val lastSkipped by controller.lastSkipped.collectAsState()
     val preview by controller.preview.collectAsState()
@@ -695,6 +704,12 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                         }
                         items(manual + auto) { track ->
                             LabelChip(if (track.auto) "${track.label} (auto)" else track.label, track == w.caption) { controller.selectCaption(track) }
+                        }
+                    }
+                    val englishSizes = s == VideoStrings.English
+                    SheetSection(if (englishSizes) "Subtitle size" else "Altyazı boyutu") {
+                        items(CAPTION_SIZES) { (value, tr, en) ->
+                            LabelChip(if (englishSizes) en else tr, captionSize.toFloatOrNull() == value) { controller.setCaptionSize(value) }
                         }
                     }
                 }

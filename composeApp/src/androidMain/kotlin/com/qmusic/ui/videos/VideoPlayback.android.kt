@@ -5,6 +5,8 @@ import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -28,7 +30,9 @@ import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import com.qmusic.engine.video.VideoCaption
 import com.qmusic.engine.video.VideoQuality
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -406,6 +410,7 @@ actual fun rememberVideoPlayback(): VideoPlayback? {
 @Composable
 actual fun VideoPlaybackSurface(playback: VideoPlayback, modifier: Modifier, fill: Boolean) {
     val exo = (playback as? ExoVideoPlayback)?.player
+    val captionScale by VideoCaptionStyle.scale.collectAsState()
     AndroidView(
         modifier = modifier,
         factory = { context ->
@@ -416,12 +421,30 @@ actual fun VideoPlaybackSurface(playback: VideoPlayback, modifier: Modifier, fil
                 // The screen stays on while a video plays.
                 keepScreenOn = true
                 player = exo
+                subtitleView?.let { v -> styleCaptions(v, captionScale) }
             }
         },
         update = {
             it.player = exo
+            it.subtitleView?.let { v -> styleCaptions(v, captionScale) }
             it.resizeMode = if (fill) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
         },
         onRelease = { it.player = null },
     )
+}
+
+/** Subtitles readable on any picture: white letters with a dark outline on a soft dark band, at the chosen size. */
+@androidx.media3.common.util.UnstableApi
+private fun styleCaptions(view: SubtitleView, scale: Float) {
+    view.setStyle(
+        CaptionStyleCompat(
+            android.graphics.Color.WHITE,
+            0x88000000.toInt(),
+            android.graphics.Color.TRANSPARENT,
+            CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+            android.graphics.Color.BLACK,
+            null,
+        ),
+    )
+    view.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * scale)
 }

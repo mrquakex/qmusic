@@ -1543,6 +1543,19 @@ class VideosController(
     private val _playbackSpeed = MutableStateFlow(speedSetting.value.toFloatOrNull()?.coerceIn(0.25f, 2f) ?: 1f)
     val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
 
+    /** Subtitle size: a multiple of the player's own size (1 = as it was). */
+    val captionSize = settings.string(KEY_CAPTION_SIZE, "1.0")
+
+    init {
+        VideoCaptionStyle.scale.value = captionSize.value.toFloatOrNull() ?: 1f
+    }
+
+    fun setCaptionSize(scale: Float) {
+        val clamped = scale.coerceIn(0.6f, 2f)
+        settings.setString(KEY_CAPTION_SIZE, clamped.toString())
+        VideoCaptionStyle.scale.value = clamped
+    }
+
     fun setPlaybackSpeed(speed: Float) {
         val clamped = speed.coerceIn(0.25f, 2f)
         _playbackSpeed.value = clamped
@@ -2092,6 +2105,7 @@ class VideosController(
         const val KEY_DISLIKES = "video_show_dislikes"
         const val KEY_HEATMAP = "video_show_heatmap"
         const val KEY_SPEED = "video_speed"
+        private const val KEY_CAPTION_SIZE = "video_caption_size"
         private const val SEEN_KEPT = 600
         private const val FRESH_MIN = 8
         private const val RECENT_SEARCHES_USED = 6
