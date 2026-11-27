@@ -1,9 +1,11 @@
 package com.qmusic.ui.videos
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -96,6 +98,7 @@ import com.qmusic.ui.theme.Ink
 import com.qmusic.ui.theme.InkInverse
 import com.qmusic.ui.theme.QMusicIcons
 import com.qmusic.ui.theme.QMusicShapes
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 
@@ -125,7 +128,7 @@ internal fun movieGridColumnCount(widthDp: Float): Int = when {
 
 /**
  * Dedicated Cinema / Film tab inside Video's navigation bar (pure Nuvelo monochrome, zero WebView):
- * - Cinematic featured hero banner with 1-tap Watch & Watch Together
+ * - Netflix-style home: rotating showcase, continue watching, my list, latest / top rated / genre rows
  * - Segmented source picker, instant local filtering while typing, genre pills, source search + pagination
  * - Instant pre-resolving Movie Detail sheet (backdrop, IMDb, year, genres, synopsis, streams, Watch / Together / Share)
  * - Direct URL modal for any .m3u8 / .mpd / .mp4 / YouTube / film page link
@@ -311,14 +314,30 @@ internal fun MoviesTab(
     // Instant, local filter over what is already loaded while the user is typing (no network until they submit).
     val localQuery = searchQuery.trim().takeIf { it.isNotEmpty() && it != submittedQuery }
     val selectedGenreLabel = remember(genres, selectedGenreUrl) { genres.firstOrNull { it.second == selectedGenreUrl }?.first }
-    val featured = remember(cards, submittedQuery, selectedGenreUrl, localQuery) {
-        if (localQuery == null && submittedQuery.isBlank() && selectedGenreUrl == null) cards.firstOrNull { it.poster != null } ?: cards.firstOrNull() else null
+    val gridCards = remember(cards, localQuery) {
+        if (localQuery != null) cards.filter { it.title.contains(localQuery, ignoreCase = true) } else cards
     }
-    val gridCards = remember(cards, featured, localQuery) {
-        when {
-            localQuery != null -> cards.filter { it.title.contains(localQuery, ignoreCase = true) }
-            featured != null && cards.size > 1 -> cards.filterNot { it.pageUrl == featured.pageUrl }
-            else -> cards
+    // Home page, Netflix style: a rotating showcase on top, then rows that slide sideways.
+    val heroPicks = remember(cards) { cards.filter { it.poster != null }.take(HERO_COUNT) }
+    val topRated = remember(cards) {
+        cards.mapNotNull { c -> c.rating?.replace(',', '.')?.toFloatOrNull()?.let { c to it } }
+            .filter { it.second >= 7f }
+            .sortedByDescending { it.second }
+            .map { it.first }
+            .take(ROW_SIZE)
+    }
+    // One row per genre (the first few), loaded one after another in the background and kept in the cache.
+    var genreRows by remember(activeSource?.id) { mutableStateOf<Map<String, List<MovieCard>>>(emptyMap()) }
+    val rowGenres = remember(genres) { genres.take(GENRE_ROWS) }
+    LaunchedEffect(activeSource?.id, rowGenres) {
+        val src = activeSource ?: return@LaunchedEffect
+        for ((_, url) in rowGenres) {
+            if (genreRows[url] != null) continue
+            val page = library.cachedCatalog(src, "", url)?.takeIf { library.isCatalogFresh(src, "", url) }
+                ?: library.catalog(src, "", url).getOrNull()
+                ?: library.cachedCatalog(src, "", url)
+            val items = page?.items?.take(ROW_SIZE).orEmpty()
+            if (items.isNotEmpty()) genreRows = genreRows + (url to items)
         }
     }
     val countLabel = { n: Int, more: Boolean -> if (more) "$n+" else "$n" }
@@ -499,6 +518,20 @@ internal fun MoviesTab(
                 // Recently watched (with how far) and the person's own list: on the device, so they show even when the
                 // source is slow or down.
                 val browsing = localQuery == null && submittedQuery.isBlank() && selectedGenreUrl == null
+                if (browsing && !loading && loadError == null && heroPicks.isNotEmpty()) {
+                    item(key = "cinema-hero") {
+                        CinemaHeroCarousel(
+                            cards = heroPicks,
+                            english = english,
+                            tablet = tablet,
+                            watchLabel = x.moviePlaySolo,
+                            isInList = { c -> myList.any { it.pageUrl == c.pageUrl } },
+                            onToggleList = { library.toggleFavorite(it) },
+                            onOpenDetails = { selectedCard = it },
+                            onWatch = { watch(it) },
+                        )
+                    }
+                }
                 if (browsing && movieHistory.isNotEmpty()) {
                     item(key = "movie-history") {
                         SavedMovieRow(
@@ -582,30 +615,61 @@ internal fun MoviesTab(
                     }
 
                     else -> {
-                        if (featured != null) {
-                            item(key = "featured-hero-${featured.pageUrl}") {
-                                FeaturedCinemaHero(
-                                    card = featured,
-                                    english = english,
-                                    watchLabel = x.moviePlaySolo,
-                                    togetherLabel = x.watchTogether,
+                        if (browsing) {
+                            val together = { card: MovieCard ->
+                                sharedItemForUrl(card.pageUrl, card.title, card.sourceName, card.poster)?.let {
+                                    ChatMusic.offerTogether(it)
+                                }
+                                Unit
+                            }
+                            item(key = "row-latest") {
+                                CinemaRow(
+                                    caption = tr("LATEST", "SON EKLENENLER"),
+                                    cards = cards.take(ROW_SIZE),
                                     tablet = tablet,
-                                    onOpenDetails = { selectedCard = featured },
-                                    onWatch = { watch(featured) },
-                                    onWatchTogether = {
-                                        sharedItemForUrl(featured.pageUrl, featured.title, featured.sourceName, featured.poster)?.let {
-                                            ChatMusic.offerTogether(it)
-                                        }
-                                    },
+                                    watchTogetherLabel = x.watchTogether,
+                                    seeAllLabel = null,
+                                    onSeeAll = null,
+                                    onOpen = { selectedCard = it },
+                                    onWatchTogether = together,
                                 )
                             }
-                            if (gridCards.isNotEmpty()) {
-                                item(key = "grid-caption") {
-                                    SectionCaption(
-                                        selectedGenreLabel?.uppercase() ?: tr("LATEST", "SON EKLENENLER"),
-                                        modifier = Modifier.padding(top = 4.dp, start = 2.dp),
+                            if (topRated.size >= 4) {
+                                item(key = "row-top-rated") {
+                                    CinemaRow(
+                                        caption = tr("TOP RATED", "EN YÜKSEK PUAN"),
+                                        cards = topRated,
+                                        tablet = tablet,
+                                        watchTogetherLabel = x.watchTogether,
+                                        seeAllLabel = null,
+                                        onSeeAll = null,
+                                        onOpen = { selectedCard = it },
+                                        onWatchTogether = together,
                                     )
                                 }
+                            }
+                            rowGenres.forEach { (label, url) ->
+                                val list = genreRows[url]
+                                if (!list.isNullOrEmpty()) {
+                                    item(key = "row-genre-$url") {
+                                        CinemaRow(
+                                            caption = label.uppercase(),
+                                            cards = list,
+                                            tablet = tablet,
+                                            watchTogetherLabel = x.watchTogether,
+                                            seeAllLabel = tr("See all", "Tümü"),
+                                            onSeeAll = { selectedGenreUrl = url },
+                                            onOpen = { selectedCard = it },
+                                            onWatchTogether = together,
+                                        )
+                                    }
+                                }
+                            }
+                            item(key = "grid-caption") {
+                                SectionCaption(
+                                    tr("ALL TITLES", "TÜM YAPIMLAR"),
+                                    modifier = Modifier.padding(top = 8.dp, start = 2.dp),
+                                )
                             }
                         }
 
@@ -1469,114 +1533,212 @@ private fun FadeInPoster(url: String?, contentDescription: String?, iconSize: Dp
 
 // ------------------------------------------------------------------ hero, tiles, skeleton
 
-/** Cinematic featured hero banner above the poster grid (pure Nuvelo monochrome). */
+/**
+ * Home showcase, Netflix style: a tall poster that changes by itself every few seconds (crossfade), the title in the
+ * middle, and My list / Watch / Details under it. Dots show which one is up; tapping a dot jumps to it.
+ */
 @Composable
-private fun FeaturedCinemaHero(
-    card: MovieCard,
+private fun CinemaHeroCarousel(
+    cards: List<MovieCard>,
     english: Boolean,
-    watchLabel: String,
-    togetherLabel: String,
     tablet: Boolean,
-    onOpenDetails: () -> Unit,
-    onWatch: () -> Unit,
-    onWatchTogether: () -> Unit,
+    watchLabel: String,
+    isInList: (MovieCard) -> Boolean,
+    onToggleList: (MovieCard) -> Unit,
+    onOpenDetails: (MovieCard) -> Unit,
+    onWatch: (MovieCard) -> Unit,
 ) {
-    val shape = QMusicShapes.large
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(if (tablet) 300.dp else 236.dp)
-            .clip(shape)
-            .background(VideoColors.Surface)
-            .border(0.5.dp, BorderHover, shape)
-            .clickable(onClick = onOpenDetails),
-    ) {
-        FadeInPoster(url = card.poster, contentDescription = card.title, iconSize = 44.dp)
+    fun tr(en: String, tr: String) = if (english) en else tr
+    var index by remember(cards) { mutableStateOf(0) }
+    var tick by remember { mutableStateOf(0) }
+    LaunchedEffect(cards, tick) {
+        if (cards.size < 2) return@LaunchedEffect
+        while (true) {
+            delay(HERO_ROTATE_MS)
+            index = (index + 1) % cards.size
+        }
+    }
+    val card = cards[index.coerceIn(0, cards.lastIndex)]
+    val shape = QMusicShapes.extraLarge
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 0.20f),
-                        0.40f to Color.Black.copy(alpha = 0.35f),
-                        1f to Color.Black.copy(alpha = 0.94f),
-                    ),
-                ),
-        )
-        Text(
-            text = if (english) "FEATURED" else "ÖNE ÇIKAN",
-            color = Color.White,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.4.sp,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(14.dp)
-                .clip(RoundedCornerShape(50))
-                .background(Color.Black.copy(alpha = 0.50f))
-                .border(0.5.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(50))
-                .padding(horizontal = 10.dp, vertical = 5.dp),
-        )
-
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(18.dp),
+                .height(if (tablet) 440.dp else 470.dp)
+                .clip(shape)
+                .background(VideoColors.Surface)
+                .border(0.5.dp, BorderSubtle, shape)
+                .clickable { onOpenDetails(card) },
         ) {
-            val meta = listOfNotNull(
-                card.rating?.let { "IMDb $it" },
-                card.year,
-                card.qualityBadge,
-                card.sourceName.takeIf { it.isNotBlank() },
-            ).joinToString("  ·  ")
-            if (meta.isNotEmpty()) {
-                Text(meta, color = Color.White.copy(alpha = 0.72f), fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(4.dp))
+            Crossfade(targetState = card, animationSpec = tween(Motion.LONG * 2), label = "heroPoster") { c ->
+                FadeInPoster(url = c.poster, contentDescription = c.title, iconSize = 48.dp)
             }
-            Text(
-                text = card.title,
-                color = Color.White,
-                fontSize = if (tablet) 26.sp else 22.sp,
-                lineHeight = if (tablet) 31.sp else 27.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.3).sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Black.copy(alpha = 0.15f),
+                            0.45f to Color.Black.copy(alpha = 0.10f),
+                            0.72f to Color.Black.copy(alpha = 0.65f),
+                            1f to Color.Black.copy(alpha = 0.95f),
+                        ),
+                    ),
             )
-            Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    modifier = Modifier
-                        .pressScale(0.95f)
-                        .clip(RoundedCornerShape(50))
-                        .background(Color.White)
-                        .clickable(onClick = onWatch)
-                        .padding(horizontal = 18.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Icon(QMusicIcons.Play, null, tint = Color.Black, modifier = Modifier.size(15.dp))
-                    Text(watchLabel, color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    tr("FEATURED", "ÖNE ÇIKAN"),
+                    color = Color.White.copy(alpha = 0.80f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Crossfade(targetState = card, animationSpec = tween(Motion.LONG), label = "heroTitle") { c ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            c.title,
+                            color = Color.White,
+                            fontSize = if (tablet) 30.sp else 26.sp,
+                            lineHeight = if (tablet) 35.sp else 31.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.4).sp,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        val meta = listOfNotNull(
+                            c.rating?.let { "★ $it" },
+                            c.year,
+                            c.qualityBadge,
+                            c.sourceName.takeIf { it.isNotBlank() },
+                        ).joinToString("  •  ")
+                        if (meta.isNotEmpty()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(meta, color = Color.White.copy(alpha = 0.72f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
                 }
-                Row(
-                    modifier = Modifier
-                        .pressScale(0.95f)
-                        .clip(RoundedCornerShape(50))
-                        .background(Color.White.copy(alpha = 0.14f))
-                        .border(0.5.dp, Color.White.copy(alpha = 0.30f), RoundedCornerShape(50))
-                        .clickable(onClick = onWatchTogether)
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Icon(QMusicIcons.Group, null, tint = Color.White, modifier = Modifier.size(15.dp))
-                    Text(togetherLabel, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(18.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+                    val inList = isInList(card)
+                    HeroSideButton(label = tr("My list", "Listem"), onClick = { onToggleList(card) }) {
+                        Icon(if (inList) QMusicIcons.Check else QMusicIcons.Add, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                    Row(
+                        modifier = Modifier
+                            .pressScale(0.95f)
+                            .clip(QMusicShapes.small)
+                            .background(Color.White)
+                            .clickable { onWatch(card) }
+                            .padding(horizontal = 26.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(QMusicIcons.Play, null, tint = Color.Black, modifier = Modifier.size(17.dp))
+                        Text(watchLabel, color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
+                    HeroSideButton(label = tr("Details", "Detay"), onClick = { onOpenDetails(card) }) {
+                        Box(
+                            Modifier.size(22.dp).border(1.6.dp, Color.White, CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("i", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+        if (cards.size > 1) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                cards.indices.forEach { i ->
+                    val selected = i == index
+                    val w by animateDpAsState(if (selected) 18.dp else 6.dp, tween(Motion.MEDIUM, easing = Motion.Emphasized), label = "heroDot")
+                    Box(
+                        Modifier
+                            .size(width = w, height = 6.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(if (selected) Ink else BorderHover)
+                            .clickable {
+                                index = i
+                                tick++ // the timer starts again, so the chosen one stays its full time
+                            },
+                    )
                 }
             }
         }
     }
 }
+
+@Composable
+private fun HeroSideButton(label: String, onClick: () -> Unit, icon: @Composable () -> Unit) {
+    Column(
+        modifier = Modifier
+            .pressScale(0.92f)
+            .clip(QMusicShapes.small)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        icon()
+        Text(label, color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** One home row: a caption (with "See all" for a genre) and posters that slide sideways. */
+@Composable
+private fun CinemaRow(
+    caption: String,
+    cards: List<MovieCard>,
+    tablet: Boolean,
+    watchTogetherLabel: String,
+    seeAllLabel: String?,
+    onSeeAll: (() -> Unit)?,
+    onOpen: (MovieCard) -> Unit,
+    onWatchTogether: (MovieCard) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth().padding(start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            SectionCaption(caption, modifier = Modifier.weight(1f))
+            if (seeAllLabel != null && onSeeAll != null) {
+                Text(
+                    seeAllLabel,
+                    color = VideoColors.TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable(onClick = onSeeAll)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
+        }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(cards, key = { it.pageUrl }) { card ->
+                MoviePosterTile(
+                    card = card,
+                    watchTogetherLabel = watchTogetherLabel,
+                    onOpenDetails = { onOpen(card) },
+                    onWatchTogether = { onWatchTogether(card) },
+                    modifier = Modifier.width(if (tablet) 140.dp else 116.dp),
+                )
+            }
+        }
+    }
+}
+
+private const val HERO_COUNT = 5
+private const val HERO_ROTATE_MS = 7_000L
+private const val ROW_SIZE = 20
+private const val GENRE_ROWS = 4
 
 /** A horizontal row of films kept on the device (recently watched, my list), each with how far it was watched. */
 @Composable
