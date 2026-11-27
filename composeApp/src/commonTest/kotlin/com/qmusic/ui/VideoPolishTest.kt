@@ -288,5 +288,15 @@ class VideoPolishTest {
         assertEquals(listOf("v1", "v2", "v3"), (rows3[0] as com.qmusic.ui.videos.FeedGridRow.VideoChunk).items.map { it.item.id })
         assertTrue(rows3[1] is com.qmusic.ui.videos.FeedGridRow.FullWidth)
         assertEquals(listOf("v4", "v5"), (rows3[2] as com.qmusic.ui.videos.FeedGridRow.VideoChunk).items.map { it.item.id })
+
+        // Music tablet shell aligns on the same 600dp threshold as Videos, with collapsed rail on portrait tablets
+        assertFalse(com.qmusic.ui.components.isMusicTabletWidth(412f))
+        assertTrue(com.qmusic.ui.components.isMusicTabletWidth(600f))
+        assertFalse(com.qmusic.ui.components.shouldExpandMusicSidebar(720f))
+        assertTrue(com.qmusic.ui.components.shouldExpandMusicSidebar(1024f))
+        assertTrue(com.qmusic.ui.components.isMusicCompactTopBar(720f))
+        assertFalse(com.qmusic.ui.components.isMusicCompactTopBar(1024f))
+        assertFalse(com.qmusic.ui.components.isMusicTwoPaneNowPlaying(720f))
+        assertTrue(com.qmusic.ui.components.isMusicTwoPaneNowPlaying(1024f))
     }
 }

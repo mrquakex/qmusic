@@ -104,13 +104,14 @@ fun LibraryScreen(
     onOpenCollection: (CollectionItem) -> Unit = {},
     onOpenStats: () -> Unit = {},
     onOpenLiked: () -> Unit = {},
+    desktop: Boolean = false,
 ) {
     val s = LocalStrings.current
     val w = remember(s.english) { LibraryWords(s.english) }
     // The app's "open the downloads" lands here with the Downloads chip on.
     var filter by remember(startTab) { mutableStateOf(if (startTab == 2) LibraryFilter.DOWNLOADS else null) }
     var showHistory by remember { mutableStateOf(false) }
-    var grid by remember { mutableStateOf(false) }
+    var grid by remember(desktop) { mutableStateOf(desktop) }
     var order by remember { mutableStateOf(LibraryOrder.RECENT) }
     var orderMenu by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
@@ -297,12 +298,13 @@ fun LibraryScreen(
                             )
                         }
                     } else if (grid) {
+                        val hPad = if (desktop) 24.dp else 16.dp
                         LazyVerticalGrid(
-                            columns = GridCells.Adaptive(150.dp),
+                            columns = GridCells.Adaptive(if (desktop) 172.dp else 150.dp),
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 180.dp),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(18.dp),
+                            contentPadding = PaddingValues(start = hPad, end = hPad, bottom = if (desktop) 96.dp else 180.dp),
+                            horizontalArrangement = Arrangement.spacedBy(if (desktop) 18.dp else 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(20.dp),
                         ) {
                             item(span = { GridItemSpan(maxLineSpan) }) { orderRow() }
                             items(entries, key = { it.key }) { entry -> EntryCard(entry, w) { open(entry) } }
@@ -310,9 +312,9 @@ fun LibraryScreen(
                     } else {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(bottom = 180.dp),
+                            contentPadding = PaddingValues(bottom = if (desktop) 96.dp else 180.dp),
                         ) {
-                            item { Box(Modifier.padding(horizontal = 16.dp)) { orderRow() } }
+                            item { Box(Modifier.padding(horizontal = if (desktop) 24.dp else 16.dp)) { orderRow() } }
                             items(entries, key = { it.key }) { entry -> EntryRow(entry, w) { open(entry) } }
                         }
                     }
@@ -325,7 +327,7 @@ fun LibraryScreen(
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 104.dp)
+                    .padding(end = if (desktop) 24.dp else 16.dp, bottom = if (desktop) 24.dp else 104.dp)
                     .pressScale(0.95f)
                     .clip(RoundedCornerShape(50))
                     .background(Ink)

@@ -7,6 +7,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.hoverable
@@ -105,11 +107,17 @@ import com.qmusic.ui.theme.QMusicLogo
 import com.qmusic.ui.viewmodel.LyricsState
 import com.qmusic.ui.viewmodel.ScreenTab
 
-val DESKTOP_MIN_WIDTH = 700.dp
+val DESKTOP_MIN_WIDTH = 600.dp
+val DESKTOP_EXPANDED_SIDEBAR_WIDTH = 960.dp
 val DESKTOP_TOP_BAR_HEIGHT = 64.dp
 val DESKTOP_PLAYER_BAR_HEIGHT = 72.dp
 private val SIDEBAR_EXPANDED_WIDTH = 240.dp
-private val SIDEBAR_COLLAPSED_WIDTH = 72.dp
+private val SIDEBAR_COLLAPSED_WIDTH = 84.dp
+
+internal fun isMusicTabletWidth(widthDp: Float): Boolean = widthDp >= 600f
+internal fun shouldExpandMusicSidebar(widthDp: Float): Boolean = widthDp >= 960f
+internal fun isMusicCompactTopBar(widthDp: Float): Boolean = widthDp < 860f
+internal fun isMusicTwoPaneNowPlaying(widthDp: Float): Boolean = widthDp >= 840f
 
 /**
  * Custom dark window chrome callbacks provided on Desktop so the top navigation bar itself
@@ -150,6 +158,8 @@ fun DesktopTopNavBar(
     /** The messages, with the number of conversations not read. */
     onOpenChat: (() -> Unit)? = null,
     chatUnread: Int = 0,
+    sidebarExpanded: Boolean = true,
+    compact: Boolean = false,
 ) {
     val s = LocalStrings.current
     val windowActions = LocalDesktopWindowActions.current
@@ -170,9 +180,9 @@ fun DesktopTopNavBar(
                 .padding(start = 16.dp, end = if (windowActions != null) 6.dp else 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Left section matching sidebar width
+            // Left section matches expanded sidebar on wide screens, wraps cleanly on portrait tablets
             Row(
-                modifier = Modifier.width(224.dp),
+                modifier = if (sidebarExpanded && !compact) Modifier.width(224.dp) else Modifier.padding(end = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
@@ -186,7 +196,7 @@ fun DesktopTopNavBar(
                         modifier = Modifier.size(22.dp),
                     )
                 }
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(10.dp))
                 QMusicHeaderLogo(
                     modifier = Modifier.clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -199,7 +209,7 @@ fun DesktopTopNavBar(
             // Centered Search Box (`ytmusic-search-box`)
             Box(
                 modifier = Modifier.weight(1f),
-                contentAlignment = Alignment.CenterStart,
+                contentAlignment = if (compact) Alignment.Center else Alignment.CenterStart,
             ) {
                 val boxBg = if (searchFocused) DarkSurface else com.qmusic.ui.theme.Ink.copy(alpha = 0.11f)
                 val boxBorder = if (searchFocused) com.qmusic.ui.theme.Ink.copy(alpha = 0.24f) else com.qmusic.ui.theme.Ink.copy(alpha = 0.08f)
@@ -208,9 +218,9 @@ fun DesktopTopNavBar(
                         .widthIn(max = 480.dp)
                         .fillMaxWidth()
                         .height(40.dp)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(50))
                         .background(boxBg)
-                        .border(1.dp, boxBorder, RoundedCornerShape(8.dp))
+                        .border(1.dp, boxBorder, RoundedCornerShape(50))
                         .padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -220,7 +230,7 @@ fun DesktopTopNavBar(
                         tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.7f),
                         modifier = Modifier.size(18.dp),
                     )
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(10.dp))
                     Box(
                         modifier = Modifier.weight(1f),
                         contentAlignment = Alignment.CenterStart,
@@ -265,16 +275,19 @@ fun DesktopTopNavBar(
 
             // Right Action Icons + Dark Window Controls
             Row(
+                modifier = Modifier.padding(start = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                CastButton(modifier = Modifier.size(40.dp))
-                if (onOpenVideos != null) {
+                if (!compact) {
+                    CastButton(modifier = Modifier.size(40.dp))
+                }
+                if (onOpenVideos != null && sidebarExpanded) {
                     IconButton(onClick = onOpenVideos, modifier = Modifier.size(40.dp)) {
                         Icon(QMusicIcons.VideoPlay, contentDescription = "Video", tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f), modifier = Modifier.size(20.dp))
                     }
                 }
-                if (onOpenChat != null) {
+                if (onOpenChat != null && sidebarExpanded) {
                     IconButton(onClick = onOpenChat, modifier = Modifier.size(40.dp)) {
                         Box {
                             Icon(QMusicIcons.Chat, contentDescription = null, tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f), modifier = Modifier.size(20.dp))
@@ -283,32 +296,36 @@ fun DesktopTopNavBar(
                                     modifier = Modifier
                                         .align(Alignment.TopEnd)
                                         .offset(x = 6.dp, y = (-6).dp)
-                                        .size(14.dp)
-                                        .clip(androidx.compose.foundation.shape.CircleShape)
-                                        .background(com.qmusic.ui.theme.Ink),
+                                        .height(17.dp)
+                                        .widthIn(min = 17.dp)
+                                        .clip(CircleShape)
+                                        .background(QeyfBadgeGreen)
+                                        .padding(horizontal = 4.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Text(if (chatUnread > 9) "9+" else chatUnread.toString(), color = com.qmusic.ui.theme.InkInverse, fontSize = 9.sp)
+                                    Text(if (chatUnread > 99) "99+" else chatUnread.toString(), color = Color.White, fontSize = 9.sp, lineHeight = 9.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
                     }
                 }
-                IconButton(onClick = onOpenStats, modifier = Modifier.size(40.dp)) {
-                    Icon(
-                        imageVector = QMusicIcons.Stats,
-                        contentDescription = s.statsTitle,
-                        tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f),
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-                IconButton(onClick = onOpenEqualizer, modifier = Modifier.size(40.dp)) {
-                    Icon(
-                        imageVector = QMusicIcons.Tune,
-                        contentDescription = s.equalizerTitle,
-                        tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f),
-                        modifier = Modifier.size(20.dp),
-                    )
+                if (!compact) {
+                    IconButton(onClick = onOpenStats, modifier = Modifier.size(40.dp)) {
+                        Icon(
+                            imageVector = QMusicIcons.Stats,
+                            contentDescription = s.statsTitle,
+                            tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    IconButton(onClick = onOpenEqualizer, modifier = Modifier.size(40.dp)) {
+                        Icon(
+                            imageVector = QMusicIcons.Tune,
+                            contentDescription = s.equalizerTitle,
+                            tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
                 IconButton(onClick = onOpenSettings, modifier = Modifier.size(40.dp)) {
                     Icon(
@@ -495,6 +512,9 @@ fun DesktopLeftSidebar(
     onCreatePlaylist: (String) -> Unit,
     dominantTint: Color?,
     modifier: Modifier = Modifier,
+    onOpenVideos: (() -> Unit)? = null,
+    onOpenChat: (() -> Unit)? = null,
+    chatUnread: Int = 0,
 ) {
     val s = LocalStrings.current
     var showNewPlaylistDialog by remember { mutableStateOf(false) }
@@ -503,7 +523,7 @@ fun DesktopLeftSidebar(
     val activePillColor = if (dominantTint != null) {
         lerp(com.qmusic.ui.theme.Ink.copy(alpha = 0.14f), dominantTint.copy(alpha = 0.36f), 0.55f)
     } else {
-        com.qmusic.ui.theme.Ink.copy(alpha = 0.12f)
+        com.qmusic.ui.theme.Ink.copy(alpha = 0.14f)
     }
 
     val primaryItems = listOfNotNull(
@@ -513,50 +533,49 @@ fun DesktopLeftSidebar(
     )
 
     if (!expanded) {
-        Column(
-            modifier = modifier
-                .fillMaxHeight()
-                .width(SIDEBAR_COLLAPSED_WIDTH)
-                .background(DarkBackground)
-                .padding(top = 8.dp, start = 4.dp, end = 4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            primaryItems.forEach { (tab, label, icon) ->
-                val selected = currentTab == tab
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (selected) activePillColor else Color.Transparent)
-                        .clickable { onSelectTab(tab) }
-                        .padding(vertical = 10.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = label,
-                        tint = if (selected) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.68f),
-                        modifier = Modifier.size(22.dp),
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = label,
-                        fontSize = 10.sp,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (selected) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.68f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+        // Unified 84.dp tablet rail matching VideoNavRail geometry, pill indicator, and Video/Messages dock.
+        Row(modifier = modifier.fillMaxHeight().background(DarkBackground)) {
+            Column(
+                modifier = Modifier
+                    .width(SIDEBAR_COLLAPSED_WIDTH)
+                    .fillMaxHeight()
+                    .padding(vertical = 10.dp, horizontal = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                primaryItems.forEach { (tab, label, icon) ->
+                    val selected = currentTab == tab
+                    MusicRailItem(label = label, icon = icon, selected = selected, pillColor = activePillColor) {
+                        onSelectTab(tab)
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                if (onOpenVideos != null || onOpenChat != null) {
+                    Box(Modifier.fillMaxWidth(0.6f).height(0.5.dp).background(com.qmusic.ui.theme.BorderSubtle))
+                    Spacer(Modifier.height(2.dp))
+                }
+                if (onOpenVideos != null) {
+                    MusicRailItem(label = s.video, icon = QMusicIcons.VideoPlay, selected = false, pillColor = activePillColor, onClick = onOpenVideos)
+                }
+                if (onOpenChat != null) {
+                    MusicRailItem(
+                        label = com.qmusic.ui.chat.ChatMusic.words().messages,
+                        icon = QMusicIcons.Chat,
+                        selected = false,
+                        pillColor = activePillColor,
+                        count = chatUnread,
+                        onClick = onOpenChat,
                     )
                 }
             }
+            Box(Modifier.width(0.5.dp).fillMaxHeight().background(com.qmusic.ui.theme.BorderSubtle))
         }
     } else {
+        Row(modifier = modifier.fillMaxHeight().background(DarkBackground)) {
         Column(
-            modifier = modifier
+            modifier = Modifier
                 .fillMaxHeight()
                 .width(SIDEBAR_EXPANDED_WIDTH)
-                .background(DarkBackground)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             primaryItems.forEach { (tab, label, icon) ->
@@ -667,6 +686,8 @@ fun DesktopLeftSidebar(
                 }
             }
         }
+        Box(Modifier.width(0.5.dp).fillMaxHeight().background(com.qmusic.ui.theme.BorderSubtle))
+        }
     }
 
     if (showNewPlaylistDialog) {
@@ -702,6 +723,73 @@ fun DesktopLeftSidebar(
                     Text(s.cancel)
                 }
             },
+        )
+    }
+}
+
+@Composable
+private fun MusicRailItem(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    pillColor: Color,
+    count: Int = 0,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .width(56.dp)
+                    .height(32.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(if (selected) pillColor else Color.Transparent),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = if (selected) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.65f),
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            if (count > 0) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = (-2).dp, y = (-4).dp)
+                        .height(18.dp)
+                        .widthIn(min = 18.dp)
+                        .clip(CircleShape)
+                        .background(QeyfBadgeGreen)
+                        .padding(horizontal = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (count > 99) "99+" else count.toString(),
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        lineHeight = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.65f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -804,25 +892,26 @@ fun DesktopBottomPlayerBar(
     val accentColor = dominantTint?.let { lerp(MaterialTheme.colorScheme.primary, it.copy(alpha = 1f), 0.35f) }
         ?: MaterialTheme.colorScheme.primary
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             .height(DESKTOP_PLAYER_BAR_HEIGHT)
             .background(BgSurface),
     ) {
-        // Main 3-column row (`1fr 2fr 1fr`)
+        val compactBar = maxWidth < 860.dp
+        // Main 3-column row (`1fr 2fr 1fr` on wide; roomy balanced layout on portrait tablets)
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 4.dp, start = 16.dp, end = 16.dp),
+                .padding(top = 4.dp, start = if (compactBar) 10.dp else 16.dp, end = if (compactBar) 10.dp else 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 1. Left Transport Controls (`Prev`, `Play/Pause`, `Next`, `1:24 / 3:45`)
+            // 1. Left Transport Controls
             Row(
-                modifier = Modifier.weight(1f),
+                modifier = if (compactBar) Modifier else Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = onPrevious, modifier = Modifier.size(40.dp)) {
+                IconButton(onClick = onPrevious, modifier = Modifier.size(if (compactBar) 36.dp else 40.dp)) {
                     Icon(
                         imageVector = QMusicIcons.Previous,
                         contentDescription = s.previous,
@@ -830,15 +919,15 @@ fun DesktopBottomPlayerBar(
                         modifier = Modifier.size(22.dp),
                     )
                 }
-                IconButton(onClick = onTogglePlayPause, modifier = Modifier.size(48.dp)) {
+                IconButton(onClick = onTogglePlayPause, modifier = Modifier.size(if (compactBar) 44.dp else 48.dp)) {
                     Icon(
                         imageVector = if (isPlaying) QMusicIcons.Pause else QMusicIcons.Play,
                         contentDescription = if (isPlaying) s.pause else s.play,
                         tint = com.qmusic.ui.theme.Ink,
-                        modifier = Modifier.size(30.dp),
+                        modifier = Modifier.size(if (compactBar) 28.dp else 30.dp),
                     )
                 }
-                IconButton(onClick = onNext, modifier = Modifier.size(40.dp)) {
+                IconButton(onClick = onNext, modifier = Modifier.size(if (compactBar) 36.dp else 40.dp)) {
                     Icon(
                         imageVector = QMusicIcons.Next,
                         contentDescription = s.next,
@@ -846,32 +935,35 @@ fun DesktopBottomPlayerBar(
                         modifier = Modifier.size(22.dp),
                     )
                 }
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    text = "${formatDurationMs(pos)} / ${formatDurationMs(effectiveDuration)}",
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                    color = com.qmusic.ui.theme.Ink.copy(alpha = 0.65f),
-                    maxLines = 1,
-                )
+                if (!compactBar) {
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = "${formatDurationMs(pos)} / ${formatDurationMs(effectiveDuration)}",
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                        color = com.qmusic.ui.theme.Ink.copy(alpha = 0.65f),
+                        maxLines = 1,
+                    )
+                }
             }
 
-            // 2. Center Track Info (`44.dp` cover + Title/Artist + Like / Add / More)
+            // 2. Center Track Info
             Row(
                 modifier = Modifier
-                    .weight(1.8f)
+                    .weight(if (compactBar) 1f else 1.8f)
+                    .padding(horizontal = if (compactBar) 10.dp else 0.dp)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         onClick = onToggleExpand,
                     ),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
+                horizontalArrangement = if (compactBar) Arrangement.Start else Arrangement.Center,
             ) {
                 val thumb = currentTrack.thumbnail ?: currentTrack.thumbnails.firstOrNull()?.url
                 Box(
                     modifier = Modifier
                         .size(44.dp)
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(RoundedCornerShape(6.dp))
                         .background(DarkSurfaceVariant),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -887,10 +979,10 @@ fun DesktopBottomPlayerBar(
                     }
                 }
 
-                Spacer(Modifier.width(14.dp))
+                Spacer(Modifier.width(12.dp))
 
                 Column(
-                    modifier = Modifier.widthIn(max = 320.dp),
+                    modifier = if (compactBar) Modifier.weight(1f) else Modifier.widthIn(max = 320.dp),
                 ) {
                     Text(
                         text = currentTrack.title,
@@ -915,7 +1007,7 @@ fun DesktopBottomPlayerBar(
                     )
                 }
 
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(8.dp))
 
                 IconButton(onClick = onToggleFavorite, modifier = Modifier.size(36.dp)) {
                     Icon(
@@ -925,50 +1017,54 @@ fun DesktopBottomPlayerBar(
                         modifier = Modifier.size(20.dp),
                     )
                 }
-                IconButton(onClick = onAddToPlaylist, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        imageVector = QMusicIcons.PlaylistAdd,
-                        contentDescription = s.addToPlaylist,
-                        tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.72f),
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-                IconButton(onClick = onMore, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        imageVector = QMusicIcons.More,
-                        contentDescription = s.moreOptions,
-                        tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.72f),
-                        modifier = Modifier.size(20.dp),
-                    )
+                if (!compactBar) {
+                    IconButton(onClick = onAddToPlaylist, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            imageVector = QMusicIcons.PlaylistAdd,
+                            contentDescription = s.addToPlaylist,
+                            tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.72f),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    IconButton(onClick = onMore, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            imageVector = QMusicIcons.More,
+                            contentDescription = s.moreOptions,
+                            tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.72f),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
             }
 
-            // 3. Right Controls (Volume slider + Repeat + Shuffle + Equalizer + Expand Chevron)
+            // 3. Right Controls (Volume slider on wide/desktop; streamlined controls on portrait tablets)
             Row(
-                modifier = Modifier.weight(1.2f),
+                modifier = if (compactBar) Modifier else Modifier.weight(1.2f),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.End,
             ) {
-                IconButton(
-                    onClick = {
-                        if (volume > 0.01f) {
-                            volumeBeforeMute = volume
-                            onVolumeChange(0f)
-                        } else {
-                            onVolumeChange(volumeBeforeMute.coerceAtLeast(0.2f))
-                        }
-                    },
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    Icon(
-                        imageVector = if (volume <= 0.01f) QMusicIcons.VolumeMute else QMusicIcons.Volume,
-                        contentDescription = null,
-                        tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.8f),
-                        modifier = Modifier.size(20.dp),
-                    )
+                if (!compactBar) {
+                    IconButton(
+                        onClick = {
+                            if (volume > 0.01f) {
+                                volumeBeforeMute = volume
+                                onVolumeChange(0f)
+                            } else {
+                                onVolumeChange(volumeBeforeMute.coerceAtLeast(0.2f))
+                            }
+                        },
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            imageVector = if (volume <= 0.01f) QMusicIcons.VolumeMute else QMusicIcons.Volume,
+                            contentDescription = null,
+                            tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.8f),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    ThinSlider(value = volume, onValueChange = onVolumeChange, modifier = Modifier.width(96.dp))
+                    Spacer(Modifier.width(4.dp))
                 }
-                ThinSlider(value = volume, onValueChange = onVolumeChange, modifier = Modifier.width(96.dp))
-                Spacer(Modifier.width(4.dp))
                 IconButton(onClick = onCycleRepeat, modifier = Modifier.size(36.dp)) {
                     Icon(
                         imageVector = if (repeatMode == RepeatMode.ONE) QMusicIcons.RepeatOne else QMusicIcons.Repeat,
@@ -989,13 +1085,15 @@ fun DesktopBottomPlayerBar(
                         modifier = Modifier.size(20.dp),
                     )
                 }
-                IconButton(onClick = onOpenEqualizer, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        imageVector = QMusicIcons.Tune,
-                        contentDescription = s.equalizerTitle,
-                        tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.72f),
-                        modifier = Modifier.size(19.dp),
-                    )
+                if (!compactBar) {
+                    IconButton(onClick = onOpenEqualizer, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            imageVector = QMusicIcons.Tune,
+                            contentDescription = s.equalizerTitle,
+                            tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.72f),
+                            modifier = Modifier.size(19.dp),
+                        )
+                    }
                 }
                 IconButton(onClick = onToggleExpand, modifier = Modifier.size(40.dp)) {
                     Icon(
@@ -1157,180 +1255,201 @@ fun DesktopWatchPage(
                 ),
         )
 
-        // Two-Column Split Layout (`div#main-panel` + `div#side-panel`)
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 48.dp, vertical = 28.dp),
-            horizontalArrangement = Arrangement.spacedBy(48.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // Left Column (~54% width): Song/Video switch + Large Album Cover + Quick Action Chips
-            Column(
-                modifier = Modifier
-                    .weight(1.15f)
-                    .fillMaxHeight(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                if (track.hasVideo) {
+        // Responsive Now Playing stage: 2-column side-by-side on landscape tablets & desktop (>= 840 dp),
+        // clean vertical theater (large cover on top, full-width queue/lyrics/related below) on portrait tablets.
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val sideBySide = isMusicTwoPaneNowPlaying(maxWidth.value)
+            val hPad = if (maxWidth >= 1040.dp) 48.dp else 24.dp
+            val gap = if (maxWidth >= 1040.dp) 44.dp else 24.dp
+
+            val coverSection: @Composable (Modifier) -> Unit = { colMod ->
+                Column(
+                    modifier = colMod,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    if (track.hasVideo) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(com.qmusic.ui.theme.Ink.copy(alpha = 0.10f))
+                                .padding(3.dp),
+                        ) {
+                            listOf(false to s.song, true to s.video).forEach { (isVideo, label) ->
+                                val active = videoPreferred == isVideo
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(if (active) com.qmusic.ui.theme.Ink.copy(alpha = 0.22f) else Color.Transparent)
+                                        .clickable { onSetVideoPreferred(isVideo) }
+                                        .padding(horizontal = 18.dp, vertical = 6.dp),
+                                ) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = if (active) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.65f),
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(14.dp))
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .widthIn(max = if (sideBySide) 420.dp else 300.dp)
+                            .aspectRatio(if (track.hasVideo && videoMode) 16f / 9f else 1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DarkSurfaceVariant),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (track.hasVideo && videoMode) {
+                            VideoSurface(trackKey = track.id, modifier = Modifier.fillMaxSize())
+                        } else if (artwork != null) {
+                            SharpCover(
+                                url = artwork,
+                                px = 800,
+                                contentDescription = track.title,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            QMusicLogo(size = 72.dp, tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f))
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    // Quick action pills below the cover (scrollable so narrow tablets never clip)
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        WatchQuickChip(
+                            icon = if (isDownloaded) QMusicIcons.DownloadDone else QMusicIcons.Download,
+                            label = if (isDownloaded) s.downloaded else if (downloadProgress != null) "${(downloadProgress * 100).toInt()}%" else s.download,
+                            active = isDownloaded,
+                            onClick = onToggleDownload,
+                        )
+                        WatchQuickChip(
+                            icon = QMusicIcons.Moon,
+                            label = s.sleepTimer,
+                            active = sleepTimer.active,
+                            onClick = { showSleepDialog = true },
+                        )
+                        WatchQuickChip(
+                            icon = QMusicIcons.Tune,
+                            label = s.equalizerTitle,
+                            active = false,
+                            onClick = onOpenEqualizer,
+                        )
+                        WatchQuickChip(
+                            icon = null,
+                            label = "${playbackSpeed}x",
+                            active = playbackSpeed != 1f,
+                            onClick = onCycleSpeed,
+                        )
+                    }
+                }
+            }
+
+            val tabsSection: @Composable (Modifier) -> Unit = { colMod ->
+                Column(modifier = colMod) {
+                    val tabs = listOf(
+                        s.upNext(null).uppercase(),
+                        s.lyrics.uppercase(),
+                        s.related.uppercase(),
+                    )
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(com.qmusic.ui.theme.Ink.copy(alpha = 0.10f))
-                            .padding(3.dp),
+                            .fillMaxWidth()
+                            .height(48.dp),
                     ) {
-                        listOf(false to s.song, true to s.video).forEach { (isVideo, label) ->
-                            val active = videoPreferred == isVideo
-                            Box(
+                        tabs.forEachIndexed { idx, title ->
+                            val active = selectedTab == idx
+                            Column(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(50))
-                                    .background(if (active) com.qmusic.ui.theme.Ink.copy(alpha = 0.22f) else Color.Transparent)
-                                    .clickable { onSetVideoPreferred(isVideo) }
-                                    .padding(horizontal = 18.dp, vertical = 6.dp),
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .clickable { selectedTab = idx },
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.SpaceBetween,
                             ) {
+                                Spacer(Modifier.height(2.dp))
                                 Text(
-                                    text = label,
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = if (active) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.65f),
+                                    text = title,
+                                    style = MaterialTheme.typography.labelLarge.copy(
+                                        fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                        letterSpacing = 0.6.sp,
+                                    ),
+                                    color = if (active) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.55f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(2.dp)
+                                        .background(if (active) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.12f)),
                                 )
                             }
                         }
                     }
-                    Spacer(Modifier.height(18.dp))
-                }
 
-                Box(
-                    modifier = Modifier
-                        .weight(1f, fill = false)
-                        .widthIn(max = 420.dp)
-                        .aspectRatio(if (track.hasVideo && videoMode) 16f / 9f else 1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(DarkSurfaceVariant),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (track.hasVideo && videoMode) {
-                        VideoSurface(trackKey = track.id, modifier = Modifier.fillMaxSize())
-                    } else if (artwork != null) {
-                        SharpCover(
-                            url = artwork,
-                            px = 800,
-                            contentDescription = track.title,
-                            modifier = Modifier.fillMaxSize(),
+                    Spacer(Modifier.height(12.dp))
+
+                    when (selectedTab) {
+                        0 -> DesktopQueueTab(
+                            queue = queue,
+                            queueIndex = queueIndex,
+                            isPlaying = isPlaying,
+                            onItemClick = onQueueItemClick,
+                            onItemRemove = onQueueItemRemove,
+                            onSaveQueue = { showSaveQueueDialog = true },
+                            onClearQueue = onClearQueue,
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
                         )
-                    } else {
-                        QMusicLogo(size = 72.dp, tint = com.qmusic.ui.theme.Ink.copy(alpha = 0.85f))
+                        1 -> DesktopLyricsTab(
+                            state = lyrics,
+                            positionMs = positionMs,
+                            onSeekTo = onSeekTo,
+                            translation = lyricsTranslation,
+                            onToggleTranslation = onToggleTranslation,
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                        )
+                        else -> DesktopRelatedTab(
+                            related = related,
+                            onSongClick = onRelatedSongClick,
+                            onCollectionClick = onRelatedCollectionClick,
+                            onSongMore = onRelatedSongMore,
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                        )
                     }
-                }
-
-                Spacer(Modifier.height(20.dp))
-
-                // Quick action pills below the cover
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    WatchQuickChip(
-                        icon = if (isDownloaded) QMusicIcons.DownloadDone else QMusicIcons.Download,
-                        label = if (isDownloaded) s.downloaded else if (downloadProgress != null) "${(downloadProgress * 100).toInt()}%" else s.download,
-                        active = isDownloaded,
-                        onClick = onToggleDownload,
-                    )
-                    WatchQuickChip(
-                        icon = QMusicIcons.Moon,
-                        label = s.sleepTimer,
-                        active = sleepTimer.active,
-                        onClick = { showSleepDialog = true },
-                    )
-                    WatchQuickChip(
-                        icon = QMusicIcons.Tune,
-                        label = s.equalizerTitle,
-                        active = false,
-                        onClick = onOpenEqualizer,
-                    )
-                    WatchQuickChip(
-                        icon = null,
-                        label = "${playbackSpeed}x",
-                        active = playbackSpeed != 1f,
-                        onClick = onCycleSpeed,
-                    )
                 }
             }
 
-            // Right Column (~46% width): 3-Tab Panel (`SIRADAKİ` / `ŞARKI SÖZLERİ` / `BENZER`)
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-            ) {
-                val tabs = listOf(
-                    s.upNext(null).uppercase(),
-                    s.lyrics.uppercase(),
-                    s.related.uppercase(),
-                )
+            if (sideBySide) {
                 Row(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
+                        .fillMaxSize()
+                        .padding(horizontal = hPad, vertical = 24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(gap),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    tabs.forEachIndexed { idx, title ->
-                        val active = selectedTab == idx
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .clickable { selectedTab = idx },
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = title,
-                                style = MaterialTheme.typography.labelLarge.copy(
-                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                                    letterSpacing = 0.6.sp,
-                                ),
-                                color = if (active) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.55f),
-                                maxLines = 1,
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(2.dp)
-                                    .background(if (active) com.qmusic.ui.theme.Ink else com.qmusic.ui.theme.Ink.copy(alpha = 0.12f)),
-                            )
-                        }
-                    }
+                    coverSection(Modifier.weight(1.1f).fillMaxHeight())
+                    tabsSection(Modifier.weight(1f).fillMaxHeight())
                 }
-
-                Spacer(Modifier.height(12.dp))
-
-                when (selectedTab) {
-                    0 -> DesktopQueueTab(
-                        queue = queue,
-                        queueIndex = queueIndex,
-                        isPlaying = isPlaying,
-                        onItemClick = onQueueItemClick,
-                        onItemRemove = onQueueItemRemove,
-                        onSaveQueue = { showSaveQueueDialog = true },
-                        onClearQueue = onClearQueue,
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                    )
-                    1 -> DesktopLyricsTab(
-                        state = lyrics,
-                        positionMs = positionMs,
-                        onSeekTo = onSeekTo,
-                        translation = lyricsTranslation,
-                        onToggleTranslation = onToggleTranslation,
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                    )
-                    else -> DesktopRelatedTab(
-                        related = related,
-                        onSongClick = onRelatedSongClick,
-                        onCollectionClick = onRelatedCollectionClick,
-                        onSongMore = onRelatedSongMore,
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                    )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = hPad, vertical = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    coverSection(Modifier.weight(0.95f).fillMaxWidth())
+                    tabsSection(Modifier.weight(1.15f).fillMaxWidth())
                 }
             }
         }

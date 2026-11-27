@@ -1080,6 +1080,7 @@ fun QMusicApp(
                         onOpenCollection = { viewModel.openCollection(it) },
                         onOpenStats = { viewModel.openStats() },
                         onOpenLiked = { viewModel.openLiked() },
+                        desktop = wide,
                     )
 
                     ScreenTab.SETTINGS -> SettingsScreen(
@@ -1268,7 +1269,9 @@ fun QMusicApp(
             }
 
             if (wide) {
-                var sidebarExpanded by remember { mutableStateOf(true) }
+                val expandByDefault = maxWidth >= com.qmusic.ui.components.DESKTOP_EXPANDED_SIDEBAR_WIDTH
+                val compactTop = maxWidth < 860.dp
+                var sidebarExpanded by remember(expandByDefault) { mutableStateOf(expandByDefault) }
                 val desktopDominant = rememberDominantColor(
                     currentTrack?.let { it.thumbnail ?: it.thumbnails.lastOrNull()?.url }
                 )?.asBackdrop()
@@ -1322,6 +1325,8 @@ fun QMusicApp(
                         onOpenVideos = { videosOpen = true },
                         onOpenChat = if (chatAvailable) ({ chatOpen = true }) else null,
                         chatUnread = chatUnread,
+                        sidebarExpanded = sidebarExpanded,
+                        compact = compactTop,
                     )
 
                     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -1357,6 +1362,9 @@ fun QMusicApp(
                                 },
                                 onCreatePlaylist = { viewModel.createPlaylist(it) },
                                 dominantTint = desktopDominant,
+                                onOpenVideos = { videosOpen = true },
+                                onOpenChat = if (chatAvailable) ({ chatOpen = true }) else null,
+                                chatUnread = chatUnread,
                             )
 
                             Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
