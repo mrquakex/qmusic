@@ -721,11 +721,22 @@ private fun WatchDetails(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = sidePad, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                ActionPill(
-                    label = details?.likes ?: s.like,
-                    icon = if (w.liked) QMusicIcons.HeartFilled else QMusicIcons.Heart,
-                    active = w.liked,
-                ) { controller.toggleLike() }
+                val dislikeStats = w.dislikeStats
+                if (dislikeStats != null) {
+                    LikeDislikePill(
+                        likeLabel = details?.likes ?: formatCompactCount(dislikeStats.likes, s == VideoStrings.English),
+                        dislikeLabel = formatCompactCount(dislikeStats.dislikes, s == VideoStrings.English),
+                        liked = w.liked,
+                        likeRatio = dislikeStats.likeRatio,
+                        onToggleLike = { controller.toggleLike() },
+                    )
+                } else {
+                    ActionPill(
+                        label = details?.likes ?: s.like,
+                        icon = if (w.liked) QMusicIcons.HeartFilled else QMusicIcons.Heart,
+                        active = w.liked,
+                    ) { controller.toggleLike() }
+                }
                 ActionPill(label = if (w.saved) s.saved else s.save, icon = QMusicIcons.PlaylistAdd, active = w.saved) {
                     if (!controller.openSaveSheet(w.video.id)) onSignIn()
                 }
@@ -1187,5 +1198,77 @@ private fun ActionPill(label: String, icon: androidx.compose.ui.graphics.vector.
         Icon(icon, null, tint = if (active) VideoColors.Red else VideoColors.Text, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(6.dp))
         Text(label, color = VideoColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
+}
+
+/** Combined Like + Return YouTube Dislike pill with an integrated monochrome like/dislike ratio hairline. */
+@Composable
+private fun LikeDislikePill(
+    likeLabel: String,
+    dislikeLabel: String,
+    liked: Boolean,
+    likeRatio: Float?,
+    onToggleLike: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .width(androidx.compose.foundation.layout.IntrinsicSize.Max)
+            .clip(RoundedCornerShape(50))
+            .background(VideoColors.Chip),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier
+                    .clickable(onClick = onToggleLike)
+                    .padding(start = 14.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = if (liked) QMusicIcons.HeartFilled else QMusicIcons.Heart,
+                    contentDescription = null,
+                    tint = if (liked) VideoColors.Red else VideoColors.Text,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(likeLabel, color = VideoColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            }
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(16.dp)
+                    .background(VideoColors.Divider),
+            )
+            Row(
+                modifier = Modifier.padding(start = 10.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = VideoIcons.ThumbDown,
+                    contentDescription = null,
+                    tint = VideoColors.TextSecondary,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(5.dp))
+                Text(dislikeLabel, color = VideoColors.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            }
+        }
+        if (likeRatio != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .height(2.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(VideoColors.TextSecondary.copy(alpha = 0.24f)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(likeRatio.coerceIn(0f, 1f))
+                        .fillMaxHeight()
+                        .background(if (liked) VideoColors.Red else VideoColors.Text.copy(alpha = 0.82f)),
+                )
+            }
+        }
     }
 }

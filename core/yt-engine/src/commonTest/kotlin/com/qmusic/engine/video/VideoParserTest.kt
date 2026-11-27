@@ -256,4 +256,32 @@ class VideoParserTest {
         assertEquals("next-lc-tok", page.continuation)
         assertEquals(5_000L, page.timeoutMs)
     }
+
+    @Test
+    fun parseHeatmapExtractsAndSortsNormalizedPoints() {
+        val raw = """
+        {
+          "frameworkUpdates": {
+            "entityBatchUpdate": {
+              "mutations": [{
+                "payload": {
+                  "macroMarkersListEntity": {
+                    "markersList": {
+                      "markers": [
+                        {"heatMarkerRenderer": {"timeRangeStartMillis": "20000", "markerDurationMillis": "10000", "heatMarkerIntensityScoreNormalized": 0.95}},
+                        {"heatMarkerRenderer": {"timeRangeStartMillis": "0", "markerDurationMillis": "10000", "heatMarkerIntensityScoreNormalized": 0.2}},
+                        {"heatMarkerRenderer": {"timeRangeStartMillis": "10000", "markerDurationMillis": "10000", "heatMarkerIntensityScoreNormalized": 0.5}}
+                      ]
+                    }
+                  }
+                }
+              }]
+            }
+          }
+        }
+        """.trimIndent()
+        val heat = VideoParser.parseHeatmap(parse(raw))
+        assertEquals(listOf(0L, 10_000L, 20_000L), heat.map { it.startMs })
+        assertEquals(0.95f, heat.last().intensity)
+    }
 }

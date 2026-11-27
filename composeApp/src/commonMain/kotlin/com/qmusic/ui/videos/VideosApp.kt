@@ -1208,10 +1208,14 @@ private fun SettingsBody(controller: VideosController, s: VideoStrings, signedIn
     val mobile by controller.mobileQuality.collectAsState()
     val autoplay by controller.autoplay.collectAsState()
     val sponsor by controller.sponsorBlock.collectAsState()
+    val showDislikes by controller.showDislikes.collectAsState()
+    val showHeatmap by controller.showHeatmap.collectAsState()
     val x = s.extras()
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (!signedIn) Text(s.signInBody, color = VideoColors.TextSecondary, fontSize = 14.sp)
         SwitchRow(x.autoplay, null, autoplay != "0") { controller.setAutoplay(it) }
+        SwitchRow(x.showDislikes, x.showDislikesHint, showDislikes != "0") { controller.setShowDislikes(it) }
+        SwitchRow(x.showHeatmap, x.showHeatmapHint, showHeatmap != "0") { controller.setShowHeatmap(it) }
         SwitchRow(x.sponsorBlock, x.sponsorBlockHint, sponsor != "0") { controller.setSponsorBlock(it) }
         if (sponsor != "0") {
             val sponsorCats by controller.sponsorCategories.collectAsState()
@@ -1285,6 +1289,18 @@ private fun VideoSheets(controller: VideosController, playback: VideoPlayback?, 
                 SheetRow(QMusicIcons.PlaylistAdd, s.menuSave) {
                     controller.closeMenu()
                     if (!controller.openSaveSheet(item.id)) onSignIn()
+                }
+                SheetRow(QMusicIcons.Chat, com.qmusic.ui.chat.ChatMusic.words().sendToChat) {
+                    controller.closeMenu()
+                    com.qmusic.ui.chat.ChatMusic.offer(
+                        com.qmusic.ui.chat.SharedItem(
+                            com.qmusic.ui.chat.ShareKind.VIDEO,
+                            item.id,
+                            item.title,
+                            item.channelName.orEmpty(),
+                            item.thumbnail,
+                        ),
+                    )
                 }
                 SheetRow(QMusicIcons.Share, s.share) {
                     controller.closeMenu()

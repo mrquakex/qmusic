@@ -299,4 +299,27 @@ class VideoPolishTest {
         assertFalse(com.qmusic.ui.components.isMusicTwoPaneNowPlaying(720f))
         assertTrue(com.qmusic.ui.components.isMusicTwoPaneNowPlaying(1024f))
     }
+
+    @Test
+    fun heatmapParserDislikeStatsAndVideoPowerSettingsWork() = runTest(UnconfinedTestDispatcher()) {
+        // 1. Return YouTube Dislike ratio & compact formatting (Turkish + English)
+        val stats = com.qmusic.ui.videos.VideoDislikeStats(likes = 900L, dislikes = 100L)
+        assertEquals(0.9f, stats.likeRatio)
+        assertNull(com.qmusic.ui.videos.VideoDislikeStats(0L, 0L).likeRatio)
+        assertEquals("842", com.qmusic.ui.videos.formatCompactCount(842L, english = false))
+        assertEquals("12,5 B", com.qmusic.ui.videos.formatCompactCount(12_500L, english = false))
+        assertEquals("12.5K", com.qmusic.ui.videos.formatCompactCount(12_500L, english = true))
+        assertEquals("1,4 Mn", com.qmusic.ui.videos.formatCompactCount(1_400_000L, english = false))
+        assertEquals("1.4M", com.qmusic.ui.videos.formatCompactCount(1_400_000L, english = true))
+
+        // 2. Settings persistence for dislikes and heatmap toggles
+        val settings = InMemoryAppSettings()
+        val c = VideosController(PolishFakeVideos(), backgroundScope, settings, musicSession = { null })
+        assertEquals("1", c.showDislikes.value)
+        assertEquals("1", c.showHeatmap.value)
+        c.setShowDislikes(false)
+        c.setShowHeatmap(false)
+        assertEquals("0", settings.string(VideosController.KEY_DISLIKES, "1").value)
+        assertEquals("0", settings.string(VideosController.KEY_HEATMAP, "1").value)
+    }
 }

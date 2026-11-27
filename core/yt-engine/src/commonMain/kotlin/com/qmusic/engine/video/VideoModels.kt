@@ -63,6 +63,13 @@ data class VideoFeed(
     val isEmpty: Boolean get() = entries.isEmpty()
 }
 
+/** One point along YouTube's "Most replayed" heatmap above the seek bar ([intensity] normalized 0..1). */
+data class VideoHeatMarker(
+    val startMs: Long,
+    val durationMs: Long,
+    val intensity: Float,
+)
+
 /** The watch page: the video's own details, the channel, and what comes after it. */
 data class VideoDetails(
     val id: String,
@@ -82,6 +89,8 @@ data class VideoDetails(
     val isLive: Boolean = false,
     /** Continuation token for a live stream's chat (null when unavailable or chat is disabled). */
     val liveChatToken: String? = null,
+    /** "Most replayed" heatmap points from YouTube's macro markers (empty when unavailable). */
+    val heatmap: List<VideoHeatMarker> = emptyList(),
 )
 
 /** A channel page: its header and the first page of its videos. */

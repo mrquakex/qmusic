@@ -407,7 +407,30 @@ internal object VideoParser {
             commentsToken = commentsSection?.let(::continuation),
             isLive = viewCount.path("isLive").let { (it as? JsonPrimitive)?.booleanOrNull } == true,
             liveChatToken = liveChatToken,
+            heatmap = parseHeatmap(root),
         )
+    }
+
+    /** Extracts YouTube's "Most replayed" intensity points (`heatMarkerRenderer` or `heatmap` markers). */
+    internal fun parseHeatmap(root: JsonObject): List<VideoHeatMarker> {
+        val raw = root.all("heatMarkerRenderer").mapNotNull { m ->
+            val start = m["timeRangeStartMillis"].longVal() ?: return@mapNotNull null
+            val dur = m["markerDurationMillis"].longVal() ?: 0L
+            val score = m["heatMarkerIntensityScoreNormalized"].floatVal() ?: return@mapNotNull null
+            VideoHeatMarker(startMs = start.coerceAtLeast(0L), durationMs = dur.coerceAtLeast(0L), intensity = score.coerceIn(0f, 1f))
+        }
+        val cleaned = raw.distinctBy { it.startMs }.sortedBy { it.startMs }
+        return if (cleaned.size >= 3 && cleaned.any { it.intensity > 0.01f }) cleaned else emptyList()
+    }
+
+    private fun JsonElement?.longVal(): Long? {
+        val p = this as? JsonPrimitive ?: return null
+        return p.content.toLongOrNull() ?: p.content.toDoubleOrNull()?.toLong()
+    }
+
+    private fun JsonElement?.floatVal(): Float? {
+        val p = this as? JsonPrimitive ?: return null
+        return p.content.toFloatOrNull()
     }
 
     // ------------------------------------------------------------------ live chat

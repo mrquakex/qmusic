@@ -186,6 +186,7 @@ data class WatchState(
     val liveChatOpen: Boolean = false,
     val liveChatMessages: List<VideoLiveChatMessage> = emptyList(),
     val liveChatLoading: Boolean = false,
+    val dislikeStats: VideoDislikeStats? = null,
 )
 
 /** The "save to" sheet: the account's playlists, with the ones this video is already in ticked. */
@@ -602,6 +603,7 @@ class VideosController(
             launch { loadAudioTracks(id) }
             launch { loadCaptions(id) }
             launch { loadSegments(id) }
+            launch { loadDislikes(id) }
             launch { loadPreview(id) }
             service.watch(id).fold(
                 onSuccess = { d ->
@@ -1533,6 +1535,32 @@ class VideosController(
         if (_watch.value?.video?.id == id) _segments.value = found
     }
 
+    /** Return YouTube Dislike count + like ratio bar: "1" on (default), "0" off. */
+    val showDislikes = settings.string(KEY_DISLIKES, "1")
+
+    fun setShowDislikes(on: Boolean) {
+        settings.setString(KEY_DISLIKES, if (on) "1" else "0")
+        val id = _watch.value?.video?.id
+        if (on && id != null) {
+            scope.launch { loadDislikes(id) }
+        } else if (!on) {
+            _watch.update { it?.copy(dislikeStats = null) }
+        }
+    }
+
+    /** Most replayed intensity graph above the seek bar: "1" on (default), "0" off. */
+    val showHeatmap = settings.string(KEY_HEATMAP, "1")
+
+    fun setShowHeatmap(on: Boolean) {
+        settings.setString(KEY_HEATMAP, if (on) "1" else "0")
+    }
+
+    private suspend fun loadDislikes(id: String) {
+        if (showDislikes.value == "0") return
+        val stats = fetchVideoDislikes(id) ?: return
+        _watch.update { w -> if (w?.video?.id == id) w.copy(dislikeStats = stats) else w }
+    }
+
     private val _downloads = MutableStateFlow<List<DownloadedVideo>>(emptyList())
 
     /** The videos on the device and the ones on their way there. */
@@ -1910,6 +1938,8 @@ class VideosController(
         const val KEY_AUTOPLAY = "video_autoplay"
         const val KEY_SPONSOR = "video_sponsorblock"
         const val KEY_SPONSOR_CATS = "video_sponsor_categories"
+        const val KEY_DISLIKES = "video_show_dislikes"
+        const val KEY_HEATMAP = "video_show_heatmap"
         const val KEY_SPEED = "video_speed"
         private const val SEEN_KEPT = 600
         private const val FRESH_MIN = 8

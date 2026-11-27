@@ -64,6 +64,36 @@ expect suspend fun fetchSponsorSegments(
     categories: Set<String> = DEFAULT_SPONSOR_CATEGORIES,
 ): List<SkipSegment>
 
+/** Public like/dislike counts from Return YouTube Dislike (null when unavailable or offline). */
+data class VideoDislikeStats(val likes: Long, val dislikes: Long) {
+    /** Share of likes in `[0f, 1f]`, or null when both counts are zero. */
+    val likeRatio: Float?
+        get() {
+            val total = likes + dislikes
+            return if (total > 0L) (likes.toDouble() / total.toDouble()).toFloat().coerceIn(0f, 1f) else null
+        }
+}
+
+/** Formats a raw vote count compactly in Turkish ("12,5 B", "1,4 Mn") or English ("12.5K", "1.4M"). */
+internal fun formatCompactCount(count: Long, english: Boolean): String {
+    val n = count.coerceAtLeast(0L)
+    fun oneDecimal(value: Double): String {
+        val rounded = kotlin.math.round(value * 10.0) / 10.0
+        val whole = rounded.toLong()
+        val frac = ((rounded - whole) * 10.0 + 0.0001).toInt()
+        return if (frac == 0) whole.toString() else if (english) "$whole.$frac" else "$whole,$frac"
+    }
+    return when {
+        n >= 1_000_000_000L -> "${oneDecimal(n / 1_000_000_000.0)}${if (english) "B" else " Mr"}"
+        n >= 1_000_000L -> "${oneDecimal(n / 1_000_000.0)}${if (english) "M" else " Mn"}"
+        n >= 1_000L -> "${oneDecimal(n / 1_000.0)}${if (english) "K" else " B"}"
+        else -> n.toString()
+    }
+}
+
+/** Fetches Return YouTube Dislike counts for [videoId] (null on failure or offline). */
+expect suspend fun fetchVideoDislikes(videoId: String): VideoDislikeStats?
+
 /** The words of the features added to the player later: kept apart so [VideoStrings] stays as it is. */
 data class VideoExtraStrings(
     val autoplay: String,
@@ -218,6 +248,12 @@ internal val VideoExtraStrings.durMedium: String get() = if (this == VideoExtraS
 internal val VideoExtraStrings.durLong: String get() = if (this == VideoExtraStrings.English) "Long (>20m)" else "Uzun (>20 dk)"
 internal val VideoExtraStrings.liveChat: String get() = if (this == VideoExtraStrings.English) "Live chat" else "Canlı sohbet"
 internal val VideoExtraStrings.liveChatEmpty: String get() = if (this == VideoExtraStrings.English) "Waiting for chat messages…" else "Sohbet mesajları bekleniyor…"
+internal val VideoExtraStrings.showDislikes: String get() = if (this == VideoExtraStrings.English) "Show dislike count" else "Beğenmeme sayısını göster"
+internal val VideoExtraStrings.showDislikesHint: String get() = if (this == VideoExtraStrings.English) "Return YouTube Dislike: shows dislikes and the like ratio bar" else "Return YouTube Dislike: beğenmeme sayısını ve beğeni oran çubuğunu gösterir"
+internal val VideoExtraStrings.showHeatmap: String get() = if (this == VideoExtraStrings.English) "Most replayed graph" else "En çok izlenen yer grafiği"
+internal val VideoExtraStrings.showHeatmapHint: String get() = if (this == VideoExtraStrings.English) "Draws the replay intensity wave above the progress bar" else "İlerleme çubuğunun üstünde en çok tekrar izlenen anları gösterir"
+internal val VideoExtraStrings.dislikeLabel: String get() = if (this == VideoExtraStrings.English) "Dislikes" else "Beğenmeme"
+internal val VideoExtraStrings.chatShort: String get() = if (this == VideoExtraStrings.English) "Chat" else "Sohbet"
 
 /** The extra words that go with these strings' language. */
 internal fun VideoStrings.extras(): VideoExtraStrings =

@@ -69,6 +69,38 @@ actual suspend fun fetchSponsorSegments(videoId: String, categories: Set<String>
     }.getOrDefault(emptyList())
 }
 
+// ---------------------------------------------------------------------- Return YouTube Dislike
+
+private val dislikeCache = ConcurrentHashMap<String, VideoDislikeStats>()
+
+actual suspend fun fetchVideoDislikes(videoId: String): VideoDislikeStats? = withContext(Dispatchers.IO) {
+    if (videoId.isBlank()) return@withContext null
+    dislikeCache[videoId]?.let { return@withContext it }
+    runCatching {
+        val encoded = URLEncoder.encode(videoId, "UTF-8")
+        val connection = URL("https://returnyoutubedislikeapi.com/votes?videoId=$encoded")
+            .openConnection() as HttpURLConnection
+        connection.connectTimeout = 5_000
+        connection.readTimeout = 5_000
+        connection.setRequestProperty("User-Agent", "Nuvelo")
+        connection.setRequestProperty("Accept", "application/json")
+        try {
+            if (connection.responseCode != 200) return@runCatching null
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            val json = JSONObject(body)
+            val likes = json.optLong("likes", -1L)
+            val dislikes = json.optLong("dislikes", -1L)
+            if (likes < 0L || dislikes < 0L) return@runCatching null
+            VideoDislikeStats(likes = likes, dislikes = dislikes).also { stats ->
+                if (dislikeCache.size > 200) dislikeCache.clear()
+                dislikeCache[videoId] = stats
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }.getOrNull()
+}
+
 // ---------------------------------------------------------------------- downloads
 
 /** What the app does while videos download (see DownloadKeepAliveService): set where the service is. */
