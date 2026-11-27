@@ -983,6 +983,7 @@ fun QMusicApp(
                         onOpenExplore = { id, title -> viewModel.openExplore(id, null, title) },
                         showExplore = accountMode != com.qmusic.settings.AccountMode.SPOTIFY,
                         currentTrack = currentTrack,
+                        isPlaying = isPlaying,
                         onCollectionClick = { viewModel.openCollection(it) },
                         onSearchClick = { viewModel.selectTab(ScreenTab.SEARCH) },
                         onChatClick = if (chatAvailable) ({ chatOpen = true }) else null,

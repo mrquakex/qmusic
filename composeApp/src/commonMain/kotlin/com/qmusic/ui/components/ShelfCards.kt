@@ -1,6 +1,7 @@
 package com.qmusic.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,24 +11,31 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import com.qmusic.ui.theme.DarkSurface
+import com.qmusic.ui.theme.BorderSubtle
 import com.qmusic.ui.theme.DarkSurfaceVariant
+import com.qmusic.ui.theme.Ink
+import com.qmusic.ui.theme.QMusicIcons
+import com.qmusic.ui.theme.TextPrimary
+import com.qmusic.ui.theme.TextSecondary
 
 /** Asks the image host for a bigger rendition: thumbnail URLs carry their size (`=w60-h60`). */
 fun String.upscaleThumbnail(px: Int): String =
@@ -64,45 +72,74 @@ fun ShelfCard(
     thumbnail: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    cardWidth: Dp = 150.dp,
+    showPlayBadge: Boolean = false,
+    isCurrent: Boolean = false,
 ) {
+    val coverShape = RoundedCornerShape(12.dp)
     Column(
         modifier = modifier
-            .width(150.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .width(cardWidth)
+            .clip(coverShape)
             .clickable(onClick = onClick),
     ) {
-        run {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(DarkSurfaceVariant),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (thumbnail != null) {
-                    AsyncImage(
-                        model = thumbnail,
-                        contentDescription = title,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(coverShape)
+                .background(DarkSurfaceVariant)
+                .border(
+                    width = if (isCurrent) 1.5.dp else 0.5.dp,
+                    color = if (isCurrent) Ink else BorderSubtle,
+                    shape = coverShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (thumbnail != null) {
+                AsyncImage(
+                    model = thumbnail,
+                    contentDescription = title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+            if (isCurrent || showPlayBadge) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(8.dp)
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.66f))
+                        .border(0.5.dp, Color.White.copy(alpha = 0.24f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (isCurrent) QMusicIcons.Waveform else QMusicIcons.Play,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(15.dp),
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+        }
+        Spacer(modifier = Modifier.height(9.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = TextPrimary,
+        )
+        if (subtitle.isNotBlank()) {
+            Spacer(modifier = Modifier.height(1.dp))
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = TextSecondary,
             )
         }
     }
@@ -119,7 +156,7 @@ fun ArtistCircleCard(
 ) {
     Column(
         modifier = modifier
-            .width(120.dp)
+            .width(124.dp)
             .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
             .padding(vertical = 6.dp),
@@ -127,10 +164,11 @@ fun ArtistCircleCard(
     ) {
         Box(
             modifier = Modifier
-                .width(104.dp)
+                .width(106.dp)
                 .aspectRatio(1f)
                 .clip(CircleShape)
-                .background(DarkSurfaceVariant),
+                .background(DarkSurfaceVariant)
+                .border(0.5.dp, BorderSubtle, CircleShape),
         ) {
             if (thumbnail != null) {
                 AsyncImage(
@@ -141,23 +179,24 @@ fun ArtistCircleCard(
                 )
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(9.dp))
         Text(
             text = name,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = TextPrimary,
         )
         if (!subtitle.isNullOrBlank()) {
+            Spacer(modifier = Modifier.height(1.dp))
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = TextSecondary,
             )
         }
     }
