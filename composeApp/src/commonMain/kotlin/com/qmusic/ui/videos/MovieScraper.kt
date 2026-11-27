@@ -824,6 +824,11 @@ internal object MovieHtmlParser {
                 m.groupValues[1].toIntOrNull(16)?.toChar()?.toString() ?: m.value
             }
         }
+        // Text taken out of JSON keeps its escapes: "Y\u00fcz\u00fck" -> "Yüzük", "\/" -> "/", "\"" -> ".
+        if (res.contains("\\u")) {
+            res = Regex("""\\u([0-9a-fA-F]{4})""").replace(res) { m -> m.groupValues[1].toInt(16).toChar().toString() }
+        }
+        if (res.contains('\\')) res = res.replace("\\/", "/").replace("\\\"", "\"")
         return res
     }
 

@@ -81,8 +81,11 @@ internal class MovieLibrary(private val settings: AppSettings, private val scope
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
     private val listSerializer = ListSerializer(SavedMovie.serializer())
 
+    // Titles saved before JSON escapes were decoded ("Y\u00fcz\u00fck") are cleaned when read back.
+    private fun clean(m: SavedMovie) = m.copy(title = MovieHtmlParser.decodeEntities(m.title))
+
     private fun decode(raw: String): List<SavedMovie> =
-        if (raw.isBlank()) emptyList() else runCatching { json.decodeFromString(listSerializer, raw) }.getOrDefault(emptyList())
+        if (raw.isBlank()) emptyList() else runCatching { json.decodeFromString(listSerializer, raw) }.getOrDefault(emptyList()).map(::clean)
 
     // ------------------------------------------------------------------ recently watched
 
@@ -185,7 +188,7 @@ internal class MovieLibrary(private val settings: AppSettings, private val scope
         if (raw.isBlank()) return null
         val stored = runCatching { json.decodeFromString(StoredCatalog.serializer(), raw) }.getOrNull() ?: return null
         if (stored.items.isEmpty()) return null
-        return MovieCatalogPage(items = stored.items.map { it.toCard() }, nextPageUrl = stored.next, genres = stored.genres)
+        return MovieCatalogPage(items = stored.items.map { clean(it).toCard() }, nextPageUrl = stored.next, genres = stored.genres)
     }
 
     /** The page was loaded from the site a short while ago: no need to ask again. */
