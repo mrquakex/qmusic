@@ -12,11 +12,15 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
@@ -71,8 +75,18 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
     private var wasReady = false
     private var lastSeekAt = 0L
 
-    /** What was loaded last: the quality, where it started, and whether it carried subtitles. */
-    private var lastLoad: Triple<VideoQuality, Long, Boolean>? = null
+    private data class LoadedRequest(
+        val quality: VideoQuality,
+        val startMs: Long,
+        val hasSubtitle: Boolean,
+        val preferredAudioLanguage: String?,
+        val preferredAudioLabel: String?,
+    )
+
+    /** What was loaded last: the quality, where it started, whether it carried subtitles, and preferred audio. */
+    private var lastLoad: LoadedRequest? = null
+    private var pendingAudioLanguage: String? = null
+    private var pendingAudioLabel: String? = null
 
     private val handler = Handler(Looper.getMainLooper())
     private val ticker = object : Runnable {
@@ -148,12 +162,23 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
                 }
             }
 
+            override fun onTracksChanged(tracks: Tracks) {
+                applyAudioTrackSelection(tracks, pendingAudioLanguage, pendingAudioLabel)
+            }
+
             override fun onPlayerError(error: PlaybackException) {
                 // A subtitle track that cannot be read must not take the video with it: play again without it.
                 val last = lastLoad
-                if (last != null && last.third) {
+                if (last != null && last.hasSubtitle) {
                     lastLoad = null
-                    load(last.first, player.currentPosition, true, null)
+                    load(
+                        quality = last.quality,
+                        startMs = player.currentPosition,
+                        autoPlay = true,
+                        caption = null,
+                        preferredAudioLanguage = last.preferredAudioLanguage,
+                        preferredAudioLabel = last.preferredAudioLabel,
+                    )
                     return
                 }
                 _error.value = error.errorCodeName
@@ -162,18 +187,27 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
         handler.post(ticker)
     }
 
-    override fun load(quality: VideoQuality, startMs: Long, autoPlay: Boolean, caption: VideoCaption?) {
+    override fun load(
+        quality: VideoQuality,
+        startMs: Long,
+        autoPlay: Boolean,
+        caption: VideoCaption?,
+        preferredAudioLanguage: String?,
+        preferredAudioLabel: String?,
+    ) {
         handler.removeCallbacks(dropAhead)
         val wasAhead = ahead
         ahead = null
+        pendingAudioLanguage = preferredAudioLanguage
+        pendingAudioLabel = preferredAudioLabel
         // Opened what was loaded ahead: it only has to start.
-        if (wasAhead == quality && startMs == 0L && caption == null && player.mediaItemCount > 0 && player.playerError == null) {
+        if (wasAhead == quality && startMs == 0L && caption == null && preferredAudioLanguage == null && player.mediaItemCount > 0 && player.playerError == null) {
             player.playWhenReady = autoPlay
             return
         }
         // Another quality (or subtitles) of the same video keeps its picture; a new video waits for its first frame.
         val videoOf = { url: String -> runCatching { android.net.Uri.parse(url).getQueryParameter("id") }.getOrNull() ?: url }
-        if (lastLoad == null || videoOf(lastLoad!!.first.videoUrl) != videoOf(quality.videoUrl)) _picture.value = false
+        if (lastLoad == null || videoOf(lastLoad!!.quality.videoUrl) != videoOf(quality.videoUrl)) _picture.value = false
         _error.value = null
         _ended.value = false
         wasReady = false
@@ -186,44 +220,125 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
                 .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                 .build()
         }
-        val isHls = quality.isLive ||
-            quality.videoUrl.contains(".m3u8", ignoreCase = true) ||
-            quality.videoUrl.contains("/m3u/", ignoreCase = true) ||
-            quality.videoUrl.contains("/list/", ignoreCase = true) ||
-            quality.videoUrl.contains("vidmixi.com", ignoreCase = true) ||
-            quality.videoUrl.contains("peacemakerst.com", ignoreCase = true) ||
-            quality.videoUrl.contains("twimg.com", ignoreCase = true) ||
-            quality.videoUrl.contains("akamaized.net", ignoreCase = true) ||
-            quality.videoUrl.contains("hls", ignoreCase = true)
+        val isHls = quality.isLive || MovieHtmlParser.isHlsCandidateUrl(quality.videoUrl)
         val isDash = quality.videoUrl.contains(".mpd", ignoreCase = true)
 
         val pictureItem = MediaItem.Builder()
             .setUri(quality.videoUrl)
             .apply {
-                if (isHls) setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
-                else if (isDash) setMimeType(androidx.media3.common.MimeTypes.APPLICATION_MPD)
+                if (isHls) setMimeType(MimeTypes.APPLICATION_M3U8)
+                else if (isDash) setMimeType(MimeTypes.APPLICATION_MPD)
                 if (track != null) setSubtitleConfigurations(listOf(track))
             }
             .build()
-        val factory = when {
+        val videoFactory = when {
             quality.headers.isNotEmpty() -> VideoStreaming.networkWithHeaders(quality.headers)
             isHls -> liveSources
             else -> dataSources
         }
-        val picture: MediaSource = DefaultMediaSourceFactory(factory).createMediaSource(pictureItem)
-        val source: MediaSource = if (quality.audioUrl != null && !quality.isLive) {
-            MergingMediaSource(picture, ProgressiveMediaSource.Factory(dataSources).createMediaSource(MediaItem.fromUri(quality.audioUrl!!)))
+        val picture: MediaSource = DefaultMediaSourceFactory(videoFactory).createMediaSource(pictureItem)
+        val separateAudioUrl = quality.audioUrl?.takeIf { it.isNotBlank() && !quality.isLive }
+        val source: MediaSource = if (separateAudioUrl != null) {
+            val audioIsHls = MovieHtmlParser.isHlsCandidateUrl(separateAudioUrl) || isHls
+            val audioFactory = when {
+                quality.headers.isNotEmpty() -> VideoStreaming.networkWithHeaders(quality.headers)
+                audioIsHls -> liveSources
+                else -> dataSources
+            }
+            val audioItem = MediaItem.Builder()
+                .setUri(separateAudioUrl)
+                .apply { if (audioIsHls) setMimeType(MimeTypes.APPLICATION_M3U8) }
+                .build()
+            val audioSource: MediaSource = if (audioIsHls) {
+                HlsMediaSource.Factory(audioFactory)
+                    .setAllowChunklessPreparation(true)
+                    .createMediaSource(audioItem)
+            } else {
+                ProgressiveMediaSource.Factory(audioFactory).createMediaSource(audioItem)
+            }
+            // Align period time offsets and clip durations so separate HLS/DASH/progressive audio & video stay in sync.
+            MergingMediaSource(/* adjustPeriodTimeOffsets = */ true, /* clipDurations = */ true, picture, audioSource)
         } else {
             picture
         }
-        lastLoad = Triple(quality, startMs, track != null)
-        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+        lastLoad = LoadedRequest(quality, startMs, track != null, preferredAudioLanguage, preferredAudioLabel)
+        val paramsBuilder = player.trackSelectionParameters.buildUpon()
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, track == null)
-            .build()
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+        val langCandidates = languageCandidates(preferredAudioLanguage)
+        if (langCandidates.isNotEmpty()) {
+            paramsBuilder.setPreferredAudioLanguages(*langCandidates)
+        } else {
+            paramsBuilder.setPreferredAudioLanguage(null)
+        }
+        player.trackSelectionParameters = paramsBuilder.build()
         player.setMediaSource(source, startMs)
         player.prepare()
         player.playWhenReady = autoPlay
     }
+
+    override fun selectAudioTrack(language: String?, label: String?) {
+        pendingAudioLanguage = language
+        pendingAudioLabel = label
+        val paramsBuilder = player.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+        val langCandidates = languageCandidates(language)
+        if (langCandidates.isNotEmpty()) {
+            paramsBuilder.setPreferredAudioLanguages(*langCandidates)
+        } else {
+            paramsBuilder.setPreferredAudioLanguage(null)
+        }
+        player.trackSelectionParameters = paramsBuilder.build()
+        applyAudioTrackSelection(player.currentTracks, language, label)
+    }
+
+    private fun applyAudioTrackSelection(tracks: Tracks, language: String?, label: String?) {
+        val targetLang = MovieHtmlParser.normalizeHlsLanguage(language, label)
+        val targetLabel = label?.trim()?.lowercase()?.removeSuffix(" (orijinal)")?.removeSuffix(" (original)")?.trim()
+        if (targetLang == null && targetLabel.isNullOrEmpty()) return
+
+        var bestGroup: Tracks.Group? = null
+        var bestIndex = -1
+        var bestScore = 0
+        for (group in tracks.groups) {
+            if (group.type != C.TRACK_TYPE_AUDIO) continue
+            for (i in 0 until group.length) {
+                if (!group.isTrackSupported(i)) continue
+                val fmt = group.getTrackFormat(i)
+                val fmtLang = MovieHtmlParser.normalizeHlsLanguage(fmt.language, fmt.label)
+                val fmtLabel = fmt.label?.trim()?.lowercase().orEmpty()
+                val langMatches = targetLang != null && fmtLang == targetLang
+                val labelMatches = !targetLabel.isNullOrEmpty() && (
+                    fmtLabel == targetLabel ||
+                        fmtLabel.contains(targetLabel) ||
+                        targetLabel.contains(fmtLabel).takeIf { fmtLabel.length >= 2 } == true
+                    )
+                val score = when {
+                    langMatches && labelMatches -> 3
+                    labelMatches -> 2
+                    langMatches -> 1
+                    else -> 0
+                }
+                if (score > bestScore) {
+                    bestScore = score
+                    bestGroup = group
+                    bestIndex = i
+                }
+            }
+        }
+        if (bestGroup != null && bestIndex >= 0 && !bestGroup.isTrackSelected(bestIndex)) {
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                .setOverrideForType(TrackSelectionOverride(bestGroup.mediaTrackGroup, bestIndex))
+                .build()
+        }
+    }
+
+    private fun languageCandidates(language: String?): Array<String> =
+        when (MovieHtmlParser.normalizeHlsLanguage(language, null)) {
+            "tr" -> arrayOf("tr", "tur", "tr-TR")
+            "en" -> arrayOf("en", "eng", "en-US", "en-GB")
+            else -> language?.trim()?.takeIf { it.isNotEmpty() }?.let { arrayOf(it) } ?: emptyArray()
+        }
 
     override fun togglePlay() {
         if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)

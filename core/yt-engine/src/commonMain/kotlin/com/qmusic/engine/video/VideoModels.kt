@@ -163,6 +163,7 @@ data class VideoAudioTrack(
     val label: String,
     val url: String,
     val isOriginal: Boolean = false,
+    val language: String? = null,
 )
 
 /** One message in a live stream's chat. */

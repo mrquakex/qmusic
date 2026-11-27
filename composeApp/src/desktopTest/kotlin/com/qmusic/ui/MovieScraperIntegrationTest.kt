@@ -11,6 +11,7 @@ import java.net.InetSocketAddress
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -241,5 +242,101 @@ class MovieScraperIntegrationTest {
         val raw = "Bob Trevino&#039;nun Favorisi &amp; &quot;Film&quot; &lt;1080p&gt;"
         val decoded = com.qmusic.ui.videos.MovieHtmlParser.decodeEntities(raw)
         assertEquals("Bob Trevino'nun Favorisi & \"Film\" <1080p>", decoded)
+    }
+
+    @Test
+    fun multiAudioHlsMasterResolvesAndSwitchesTurkishAndEnglishInController() = runBlocking {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        val port = server.address.port
+        val base = "http://127.0.0.1:$port"
+
+        server.createContext("/hls/multi.m3u8") { ex ->
+            val m3u8 = """
+                #EXTM3U
+                #EXT-X-VERSION:4
+                #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="Türkçe",LANGUAGE="tr",DEFAULT=YES,AUTOSELECT=YES,URI="audio/tr.m3u8"
+                #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="English",LANGUAGE="en",DEFAULT=NO,AUTOSELECT=YES,URI="audio/en.m3u8"
+                #EXT-X-STREAM-INF:BANDWIDTH=4500000,RESOLUTION=1920x1080,AUDIO="audio"
+                video/1080p.m3u8
+                #EXT-X-STREAM-INF:BANDWIDTH=2400000,RESOLUTION=1280x720,AUDIO="audio"
+                video/720p.m3u8
+            """.trimIndent().toByteArray()
+            ex.responseHeaders.add("Content-Type", "application/vnd.apple.mpegurl")
+            ex.sendResponseHeaders(200, m3u8.size.toLong())
+            ex.responseBody.use { it.write(m3u8) }
+        }
+
+        server.start()
+        try {
+            val resolved = resolveExternalMovie("$base/hls/multi.m3u8", mapOf("Referer" to "$base/")).getOrThrow()
+            assertEquals(listOf(0, 1080, 720), resolved.streams.map { it.height })
+            assertEquals(2, resolved.audioTracks.size)
+            assertEquals("$base/hls/audio/tr.m3u8", resolved.streams[1].audioUrl)
+            assertEquals("tr", resolved.audioTracks[0].language)
+            assertEquals("en", resolved.audioTracks[1].language)
+
+            val settings = com.qmusic.settings.InMemoryAppSettings()
+            val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined + kotlinx.coroutines.SupervisorJob())
+            val emptyService = object : com.qmusic.engine.video.VideoService {
+                override var auth: com.qmusic.engine.auth.YouTubeAuth? = null
+                override var locale = com.qmusic.engine.models.YouTubeLocale("tr", "TR")
+                override val isSignedIn = false
+                override suspend fun home() = Result.success(com.qmusic.engine.video.VideoFeed())
+                override suspend fun more(continuation: String) = Result.success(com.qmusic.engine.video.VideoFeed())
+                override suspend fun subscriptions() = Result.success(com.qmusic.engine.video.VideoFeed())
+                override suspend fun history() = Result.success(com.qmusic.engine.video.VideoFeed())
+                override suspend fun likedVideos() = Result.success(com.qmusic.engine.video.VideoFeed())
+                override suspend fun watchLater() = Result.success(com.qmusic.engine.video.VideoFeed())
+                override suspend fun playlists() = Result.success(com.qmusic.engine.video.VideoFeed())
+                override suspend fun subscribedChannels() = Result.success(com.qmusic.engine.video.VideoFeed())
+                override suspend fun playlist(playlistId: String) = Result.success(com.qmusic.engine.video.VideoFeed())
+                override suspend fun search(query: String, params: String?) = Result.success(com.qmusic.engine.video.VideoFeed())
+                override suspend fun suggestions(input: String) = Result.success(emptyList<String>())
+                override suspend fun watch(videoId: String) = Result.failure<com.qmusic.engine.video.VideoDetails>(UnsupportedOperationException())
+                override suspend fun comments(token: String) = Result.success(com.qmusic.engine.video.VideoComments())
+                override suspend fun qualities(videoId: String) = Result.success(emptyList<com.qmusic.engine.video.VideoQuality>())
+                override suspend fun channel(channelId: String, params: String?) = Result.failure<com.qmusic.engine.video.VideoChannelPage>(UnsupportedOperationException())
+                override suspend fun setLike(videoId: String, like: Boolean) = Result.success(Unit)
+                override suspend fun setSubscribed(channelId: String, subscribed: Boolean) = Result.success(Unit)
+                override suspend fun setWatchLater(videoId: String, saved: Boolean) = Result.success(Unit)
+                override suspend fun setInPlaylist(playlistId: String, videoId: String, add: Boolean) = Result.success(Unit)
+                override suspend fun captions(videoId: String) = Result.success(emptyList<com.qmusic.engine.video.VideoCaption>())
+                override suspend fun postComment(createToken: String, text: String) = Result.success(Unit)
+                override suspend fun reportWatch(videoId: String) = Unit
+            }
+            val controller = com.qmusic.ui.videos.VideosController(emptyService, scope, settings, musicSession = { null })
+            assertTrue(controller.openExternalUrl("$base/hls/multi.m3u8", title = "Çok Dilli Film", headers = mapOf("Referer" to "$base/")))
+
+            val deadline = System.currentTimeMillis() + 5_000L
+            while (controller.watch.value?.streamLoading == true && System.currentTimeMillis() < deadline) {
+                kotlinx.coroutines.delay(20)
+            }
+            val w = controller.watch.value!!
+            assertEquals(2, w.audioTracks.size)
+            assertEquals("tr", w.audioTrack?.language)
+            assertEquals(720, w.quality?.height)
+            assertEquals("$base/hls/audio/tr.m3u8", w.quality?.audioUrl)
+
+            // Switch to English audio track while staying on 720p
+            val enTrack = w.audioTracks.first { it.language == "en" }
+            controller.selectAudioTrack(enTrack)
+            assertEquals("$base/hls/audio/en.m3u8", controller.watch.value?.quality?.audioUrl)
+
+            // Switch to Auto master (height = 0) -> audioUrl is null (master handles sync natively), track selection kept
+            val autoQuality = controller.watch.value!!.qualities.first { it.height == 0 }
+            controller.selectQuality(autoQuality)
+            assertEquals(0, controller.watch.value?.quality?.height)
+            assertNull(controller.watch.value?.quality?.audioUrl)
+            assertEquals("en", controller.watch.value?.audioTrack?.language)
+
+            // Switch back to Turkish while on Auto -> stays on Auto with audioUrl = null
+            val trTrack = w.audioTracks.first { it.language == "tr" }
+            controller.selectAudioTrack(trTrack)
+            assertEquals(0, controller.watch.value?.quality?.height)
+            assertNull(controller.watch.value?.quality?.audioUrl)
+            assertEquals("tr", controller.watch.value?.audioTrack?.language)
+        } finally {
+            server.stop(0)
+        }
     }
 }

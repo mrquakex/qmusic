@@ -115,7 +115,7 @@ val DEFAULT_MOVIE_SOURCES = listOf(
         name = "Filmmodu",
         baseUrl = "https://filmmodu.cc",
         catalogPath = "/",
-        searchPath = "/?s={query}",
+        searchPath = "/arama/oneri",
         enabled = true,
         order = 0,
     ),

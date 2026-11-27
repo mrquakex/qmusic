@@ -444,4 +444,56 @@ class VideoPolishTest {
         assertEquals(3, com.qmusic.ui.videos.movieGridColumnCount(720f))
         assertEquals(5, com.qmusic.ui.videos.movieGridColumnCount(1280f))
     }
+
+    @Test
+    fun hlsMasterPlaylistExtractsVideoVariantsAndTurkishEnglishAudioTracks() {
+        val p = com.qmusic.ui.videos.MovieHtmlParser
+        val master = """
+            #EXTM3U
+            #EXT-X-VERSION:4
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aac-audio",NAME="Türkçe Dublaj (AAC, 2.0)",LANGUAGE="tr",DEFAULT=YES,AUTOSELECT=YES,URI="audio/tr/index.m3u8?k=1,2"
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aac-audio",NAME="English",LANGUAGE="eng",DEFAULT=NO,AUTOSELECT=YES,URI="audio/en/index.m3u8"
+            #EXT-X-STREAM-INF:BANDWIDTH=4800000,RESOLUTION=1920x1080,FRAME-RATE=24.000,CODECS="avc1.640028,mp4a.40.2",AUDIO="aac-audio"
+            video/1080p/index.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=2400000,RESOLUTION=1280x720,CODECS="avc1.4d401f,mp4a.40.2",AUDIO="aac-audio"
+            video/720p/index.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=128000,CODECS="mp4a.40.2"
+            audio/fallback.m3u8
+        """.trimIndent()
+        val headers = mapOf("Referer" to "https://cdn.cinema.org/")
+        val parsed = p.parseHlsMasterPlaylist(master, "https://cdn.cinema.org/hls/master.m3u8", headers)
+
+        assertTrue(parsed.hasSeparateAudio)
+        assertEquals(listOf(0, 1080, 720), parsed.variants.map { it.height })
+        assertEquals("https://cdn.cinema.org/hls/master.m3u8", parsed.variants[0].videoUrl)
+        assertNull(parsed.variants[0].audioUrl)
+        assertEquals("https://cdn.cinema.org/hls/video/1080p/index.m3u8", parsed.variants[1].videoUrl)
+        assertEquals("https://cdn.cinema.org/hls/audio/tr/index.m3u8?k=1,2", parsed.variants[1].audioUrl)
+        assertEquals(24, parsed.variants[1].fps)
+
+        assertEquals(2, parsed.audioTracks.size)
+        assertEquals("tr", parsed.audioTracks[0].language)
+        assertEquals("Türkçe Dublaj (AAC, 2.0)", parsed.audioTracks[0].label)
+        assertEquals("https://cdn.cinema.org/hls/audio/tr/index.m3u8?k=1,2", parsed.audioTracks[0].url)
+        assertFalse(parsed.audioTracks[0].isOriginal)
+        assertEquals(parsed.audioTracks[0].id, parsed.defaultAudioTrackId)
+
+        assertEquals("en", parsed.audioTracks[1].language)
+        assertEquals("İngilizce", parsed.audioTracks[1].label)
+        assertEquals("https://cdn.cinema.org/hls/audio/en/index.m3u8", parsed.audioTracks[1].url)
+        assertTrue(parsed.audioTracks[1].isOriginal)
+
+        // Filmmodu Live Search JSON parser test
+        val jsonSearch = """
+            {"films":[{"title":"Avatar 2 Suyun Yolu","year":2022,"rating":7.5,"poster":"https:\/\/img.filmmodu.cc\/poster\/avatar2.webp","url":"https:\/\/filmmodu.cc\/film\/avatar-2\/","ilgi":3}],"series":[{"title":"Avatar Son Havabukucu","year":2024,"rating":7.3,"poster":"https:\/\/img.filmmodu.cc\/dizi\/avatar.webp","url":"https:\/\/filmmodu.cc\/dizi\/avatar\/","ilgi":2}]}
+        """.trimIndent()
+        val searchItems = p.parseFilmmoduSearchJson(jsonSearch, "Filmmodu", headers)
+        assertEquals(2, searchItems.size)
+        assertEquals("Avatar 2 Suyun Yolu", searchItems[0].title)
+        assertEquals("2022", searchItems[0].year)
+        assertEquals("7.5", searchItems[0].rating)
+        assertEquals("https://filmmodu.cc/film/avatar-2/", searchItems[0].pageUrl)
+        assertEquals("https://img.filmmodu.cc/poster/avatar2.webp", searchItems[0].poster)
+        assertEquals("Avatar Son Havabukucu", searchItems[1].title)
+    }
 }

@@ -1,0 +1,1 @@
+/home/mrquake/kod/nuvelo/AGENTS.md

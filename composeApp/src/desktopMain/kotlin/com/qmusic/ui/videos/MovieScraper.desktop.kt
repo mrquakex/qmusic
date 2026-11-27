@@ -1,12 +1,10 @@
 package com.qmusic.ui.videos
 
+import com.qmusic.engine.video.VideoAudioTrack
 import com.qmusic.engine.video.VideoCaption
 import com.qmusic.engine.video.VideoQuality
 import com.qmusic.ui.chat.MovieSource
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import okhttp3.ConnectionPool
 import okhttp3.Cookie
@@ -143,19 +141,21 @@ private fun decryptCryptoJsAes(password: String, jsonStr: String): String? = run
     String(cipher.doFinal(cipherBytes), Charsets.UTF_8).replace("\\/", "/")
 }.getOrNull()
 
-private fun expandHlsQualitiesIfMaster(streams: List<VideoQuality>): List<VideoQuality> {
-    val master = streams.firstOrNull {
-        it.videoUrl.contains(".m3u8", ignoreCase = true) ||
-        it.videoUrl.contains("/list/", ignoreCase = true) ||
-        it.videoUrl.contains("/m3u/", ignoreCase = true) ||
-        it.videoUrl.contains("vidmixi.com", ignoreCase = true)
-    } ?: return streams
-    val fetched = runCatching { desktopFetch(master.videoUrl, master.headers, referer = master.headers["Referer"]) }.getOrNull()
-        ?: return streams
-    val variants = MovieHtmlParser.parseHlsVariants(fetched.second, fetched.first, master.headers)
-    if (variants.isEmpty()) return streams
-    val rest = streams.filterNot { it.videoUrl == master.videoUrl }
-    return (variants + rest).distinctBy { it.videoUrl }
+private data class DesktopHlsExpansion(
+    val streams: List<VideoQuality>,
+    val audioTracks: List<VideoAudioTrack> = emptyList(),
+    val defaultAudioTrackId: String? = null,
+)
+
+/** Generic resolver's HTTP hook, backed by the desktop OkHttp client. */
+private val desktopScraperFetch: ScraperFetcher = { url, headers, referer ->
+    runCatching { desktopFetch(url, headers, referer) }.getOrNull()
+        ?.let { (finalUrl, body, ct) -> ScraperResponse(finalUrl, body, ct) }
+}
+
+private suspend fun expandHlsMaster(streams: List<VideoQuality>): DesktopHlsExpansion {
+    val r = expandGenericHls(streams, desktopScraperFetch)
+    return DesktopHlsExpansion(r.streams, r.audioTracks, r.defaultAudioTrackId)
 }
 
 actual suspend fun fetchMovieCatalog(
@@ -164,8 +164,27 @@ actual suspend fun fetchMovieCatalog(
     pageUrlOverride: String?,
 ): Result<MovieCatalogPage> = withContext(Dispatchers.IO) {
     runCatching {
-        val target = pageUrlOverride?.takeIf { it.isNotBlank() } ?: MovieHtmlParser.buildSourceUrl(source, query)
+        val q = query.trim()
         val customHeaders = MovieHtmlParser.parseHeaders(source.headers)
+
+        // Filmmodu Live Search API (POST /arama/oneri)
+        if (q.isNotEmpty() && pageUrlOverride.isNullOrBlank() && (source.baseUrl.contains("filmmodu", ignoreCase = true) || source.searchPath.contains("arama/oneri", ignoreCase = true))) {
+            val origin = source.normalizedBaseUrl
+            val homeFetched = desktopFetch(origin, customHeaders, referer = "$origin/")
+            val csrf = homeFetched?.second?.let { MovieHtmlParser.extractCsrfToken(it) }
+            val postHeaders = customHeaders + mapOf(
+                "Referer" to "$origin/",
+                "X-Requested-With" to "XMLHttpRequest",
+                "Accept" to "application/json",
+            ) + (csrf?.let { mapOf("X-CSRF-TOKEN" to it) } ?: emptyMap())
+            val res = desktopPostForm("$origin/arama/oneri", mapOf("q" to q), postHeaders)
+            if (res != null && res.second.contains("films")) {
+                val items = MovieHtmlParser.parseFilmmoduSearchJson(res.second, source.name, customHeaders)
+                return@runCatching MovieCatalogPage(items = items)
+            }
+        }
+
+        val target = pageUrlOverride?.takeIf { it.isNotBlank() } ?: MovieHtmlParser.buildSourceUrl(source, query)
         val (finalUrl, html, _) = desktopFetch(target, customHeaders, referer = source.normalizedBaseUrl + "/")
             ?: error("Kaynak yanıt vermedi")
         MovieHtmlParser.extractCatalogPage(html, finalUrl, source.name, customHeaders)
@@ -177,15 +196,25 @@ actual suspend fun resolveExternalMovie(url: String, headers: Map<String, String
         val trimmed = url.trim()
         require(trimmed.startsWith("http://", true) || trimmed.startsWith("https://", true)) { "Geçersiz bağlantı" }
         if (MovieHtmlParser.isDirectMediaUrl(trimmed)) {
+            val expanded = expandHlsMaster(
+                listOf(VideoQuality(height = 1080, fps = 30, videoUrl = trimmed, audioUrl = null, isLive = false, headers = headers)),
+            )
             return@runCatching ResolvedMovieStream(
-                streams = listOf(VideoQuality(height = 1080, fps = 30, videoUrl = trimmed, audioUrl = null, isLive = false, headers = headers)),
+                streams = expanded.streams,
+                audioTracks = expanded.audioTracks,
+                defaultAudioTrackId = expanded.defaultAudioTrackId,
             )
         }
         val (finalUrl, html, ct) = desktopFetch(trimmed, headers, referer = MovieHtmlParser.originOf(trimmed) + "/")
             ?: error("Sayfa açılamadı")
         if (ct.startsWith("video/") || ct.contains("mpegurl") || MovieHtmlParser.isDirectMediaUrl(finalUrl)) {
+            val expanded = expandHlsMaster(
+                listOf(VideoQuality(height = 1080, fps = 30, videoUrl = finalUrl, audioUrl = null, isLive = false, headers = headers)),
+            )
             return@runCatching ResolvedMovieStream(
-                streams = listOf(VideoQuality(height = 1080, fps = 30, videoUrl = finalUrl, audioUrl = null, isLive = false, headers = headers)),
+                streams = expanded.streams,
+                audioTracks = expanded.audioTracks,
+                defaultAudioTrackId = expanded.defaultAudioTrackId,
             )
         }
         val streams = ArrayList<VideoQuality>()
@@ -254,7 +283,7 @@ actual suspend fun resolveExternalMovie(url: String, headers: Map<String, String
                 if (firstEp != null) {
                     val epFetched = desktopFetch(firstEp, headers, referer = finalUrl)
                     if (epFetched != null) {
-                        peacemakerHash = MovieHtmlParser.extractPeacemakerHash(epFetched.first, epFetched.second)
+                        peacemakerHash = MovieHtmlParser.extractPeacemakerHash(epFetched.second, epFetched.first)
                     }
                 }
             }
@@ -265,7 +294,7 @@ actual suspend fun resolveExternalMovie(url: String, headers: Map<String, String
                     "X-Requested-With" to "XMLHttpRequest",
                 )
                 val pmRes = desktopPostForm(pmApiUrl, mapOf("hash" to peacemakerHash, "r" to "https://www.dizidad.com/", "s" to ""), pmHeaders)
-                val streamUrl = pmRes?.first?.let { MovieHtmlParser.extractPeacemakerStreamUrl(it) }
+                val streamUrl = pmRes?.second?.let { MovieHtmlParser.extractPeacemakerStreamUrl(it) }
                 if (streamUrl != null) {
                     streams += VideoQuality(
                         height = 1080,
@@ -279,31 +308,24 @@ actual suspend fun resolveExternalMovie(url: String, headers: Map<String, String
             }
         }
 
+        // Generic HLS + iframe resolver (any source): parallel multi-hop embeds, then the page's own streams.
         if (streams.isEmpty()) {
-            val embeds = MovieHtmlParser.extractEmbedIframes(html, finalUrl).take(4)
-            val found = supervisorScope {
-                embeds.map { embedUrl ->
-                    async(Dispatchers.IO) {
-                        val res = runCatching { desktopFetch(embedUrl, headers, referer = finalUrl) }.getOrNull() ?: return@async emptyList<VideoQuality>()
-                        MovieHtmlParser.extractStreams(res.second, res.first, headers)
-                    }
-                }.awaitAll()
-            }
-            found.forEach { streams += it }
+            val generic = resolveGenericStreams(finalUrl, html, headers, desktopScraperFetch, expandHls = false)
+            streams += generic.streams
+            captions += generic.captions
         }
-        if (streams.isEmpty()) {
-            streams += MovieHtmlParser.extractStreams(html, finalUrl, headers)
-        }
-        val unique = expandHlsQualitiesIfMaster(streams.distinctBy { it.videoUrl })
-        if (unique.isEmpty()) error("Bu sayfada doğrudan oynatılabilir video akışı bulunamadı")
+        val expanded = expandHlsMaster(streams.distinctBy { it.videoUrl })
+        if (expanded.streams.isEmpty()) error("Bu sayfada doğrudan oynatılabilir video akışı bulunamadı")
         ResolvedMovieStream(
             title = MovieHtmlParser.extractTitle(html),
             poster = MovieHtmlParser.extractPoster(html, finalUrl),
             synopsis = MovieHtmlParser.extractSynopsis(html),
             year = MovieHtmlParser.extractYear(html),
             rating = MovieHtmlParser.extractRating(html),
-            streams = unique,
+            streams = expanded.streams,
             captions = captions.distinctBy { it.url },
+            audioTracks = expanded.audioTracks,
+            defaultAudioTrackId = expanded.defaultAudioTrackId,
         )
     }
 }

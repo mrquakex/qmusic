@@ -1,8 +1,13 @@
 package com.qmusic.ui.videos
 
+import com.qmusic.engine.video.VideoAudioTrack
 import com.qmusic.engine.video.VideoCaption
 import com.qmusic.engine.video.VideoQuality
 import com.qmusic.ui.chat.MovieSource
+import kotlin.math.roundToInt
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.supervisorScope
 
 /** Prefix used to identify external film/stream URLs inside VideoItem.id and SharedItem.id (syncs over TogetherController). */
 internal const val EXTERNAL_VIDEO_PREFIX = "url:"
@@ -34,7 +39,41 @@ data class MovieCatalogPage(
     val genres: List<Pair<String, String>> = emptyList(),
 )
 
-/** Resolved playable stream(s), metadata, and optional subtitles extracted purely via HTTP scraping (no WebView). */
+/** Parsed `#EXT-X-MEDIA:TYPE=AUDIO` rendition from an HLS master playlist. */
+data class HlsAudioTrack(
+    val groupId: String,
+    val name: String,
+    val language: String?,
+    val uri: String?,
+    val isDefault: Boolean = false,
+    val isAutoSelect: Boolean = false,
+    val channels: String? = null,
+) {
+    val normalizedLanguage: String?
+        get() = MovieHtmlParser.normalizeHlsLanguage(language, name)
+
+    val displayLabel: String
+        get() {
+            val raw = name.trim()
+            return when (normalizedLanguage) {
+                "tr" -> if (raw.isNotEmpty() && !raw.equals("tr", true) && !raw.equals("tur", true) && !raw.equals("turkish", true)) raw else "Türkçe"
+                "en" -> if (raw.isNotEmpty() && !raw.equals("en", true) && !raw.equals("eng", true) && !raw.equals("english", true)) raw else "İngilizce"
+                else -> raw.ifEmpty { language?.uppercase() ?: "Varsayılan" }
+            }
+        }
+}
+
+/** Parsed HLS master playlist containing video variants and synchronized audio renditions. */
+data class HlsMasterPlaylist(
+    val masterUrl: String,
+    val variants: List<VideoQuality>,
+    val audioTracks: List<VideoAudioTrack>,
+    val rawAudioTracks: List<HlsAudioTrack> = emptyList(),
+    val defaultAudioTrackId: String? = null,
+    val hasSeparateAudio: Boolean = false,
+)
+
+/** Resolved playable stream(s), metadata, audio tracks, and optional subtitles extracted purely via HTTP scraping (no WebView). */
 data class ResolvedMovieStream(
     val title: String? = null,
     val poster: String? = null,
@@ -43,6 +82,8 @@ data class ResolvedMovieStream(
     val rating: String? = null,
     val streams: List<VideoQuality> = emptyList(),
     val captions: List<VideoCaption> = emptyList(),
+    val audioTracks: List<VideoAudioTrack> = emptyList(),
+    val defaultAudioTrackId: String? = null,
 )
 
 /**
@@ -110,8 +151,6 @@ internal object MovieHtmlParser {
     private val NEXT_LINK_REL_REV = Regex("""(?i)<(?:a|link)\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*\brel\s*=\s*["']next["']""")
     private val NEXT_LINK_CLASS = Regex("""(?i)<a\b[^>]*\bclass\s*=\s*["'][^"']*\b(?:next|nextpostslink|pagination-next)\b[^"']*["'][^>]*\bhref\s*=\s*["']([^"']+)["']""")
     private val GENRE_LINK = Regex("""(?is)<a\b[^>]*\bhref\s*=\s*["']([^"']*(?:/tur/|/genre/|/kategori/|/category/|/films/|/movies/)[^"']*)["'][^>]*>(.*?)</a>""")
-    private val HLS_STREAM_INF = Regex("""#EXT-X-STREAM-INF:([^\r\n]+)[\r\n]+([^\r\n#]+)""")
-    private val HLS_RES = Regex("""RESOLUTION=\d+x(\d+)""")
     private val FILM_DATA_K = Regex("""(?i)\bdata-k\s*=\s*["']([^"']+)["']""")
     private val CSRF_TOKEN = Regex("""(?i)<meta\b[^>]*\bname\s*=\s*["']csrf-token["'][^>]*\bcontent\s*=\s*["']([^"']+)["']""")
     private val BEPLAYER_REGEX = Regex("""(?is)bePlayer\s*\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*,\s*['"](\{.+?\})['"]""")
@@ -196,6 +235,31 @@ internal object MovieHtmlParser {
                 "$baseDir/$raw"
             }
         }
+    }
+
+    /** Parses Filmmodu live search JSON (`/arama/oneri`) into catalog items. */
+    fun parseFilmmoduSearchJson(json: String, sourceName: String, headers: Map<String, String>): List<MovieCard> {
+        val items = ArrayList<MovieCard>()
+        val objectRegex = Regex("""\{[^{}]*"title"\s*:\s*"([^"]+)".*?\}""")
+        objectRegex.findAll(json).forEach { m ->
+            val objStr = m.value
+            val title = Regex(""""title"\s*:\s*"([^"]+)"""").find(objStr)?.groupValues?.getOrNull(1) ?: return@forEach
+            val rawUrl = Regex(""""url"\s*:\s*"([^"]+)"""").find(objStr)?.groupValues?.getOrNull(1)?.replace("\\/", "/") ?: return@forEach
+            val rawPoster = Regex(""""poster"\s*:\s*"([^"]+)"""").find(objStr)?.groupValues?.getOrNull(1)?.replace("\\/", "/")
+            val year = Regex(""""year"\s*:\s*"?(\d{4})""").find(objStr)?.groupValues?.getOrNull(1)
+            val rating = Regex(""""rating"\s*:\s*"?(\d(?:[.,]\d)?)"?""").find(objStr)?.groupValues?.getOrNull(1)
+
+            items += MovieCard(
+                title = decodeEntities(title),
+                pageUrl = rawUrl,
+                poster = rawPoster,
+                year = year,
+                rating = rating,
+                sourceName = sourceName,
+                headers = headers,
+            )
+        }
+        return items.distinctBy { it.pageUrl }
     }
 
     /** Builds the catalog or search URL for an admin-configured [source]. */
@@ -327,33 +391,230 @@ internal object MovieHtmlParser {
         )
     }
 
-    /** Parses an HLS master playlist (`#EXT-X-STREAM-INF`) into individual quality options + Auto master. */
-    fun parseHlsVariants(playlistText: String, masterUrl: String, headers: Map<String, String>): List<VideoQuality> {
-        if (!playlistText.contains("#EXT-X-STREAM-INF", ignoreCase = true)) return emptyList()
-        val hasSeparateAudio = playlistText.contains("#EXT-X-MEDIA:TYPE=AUDIO", ignoreCase = true)
-        val variants = ArrayList<VideoQuality>()
-        HLS_STREAM_INF.findAll(playlistText).forEach { m ->
-            val attrs = m.groupValues[1]
-            val relUrl = m.groupValues[2].trim()
-            val resolved = resolveUrl(masterUrl, relUrl) ?: return@forEach
-            val height = HLS_RES.find(attrs)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: return@forEach
-            variants += VideoQuality(height = height, fps = 30, videoUrl = resolved, audioUrl = null, isLive = false, headers = headers)
+    /** True when [url] likely points to an HLS master or media playlist (even without `.m3u8` extension). */
+    fun isHlsCandidateUrl(url: String): Boolean =
+        url.contains(".m3u8", ignoreCase = true) ||
+            url.contains("/list/", ignoreCase = true) ||
+            url.contains("/m3u/", ignoreCase = true) ||
+            url.contains("vidmixi.com", ignoreCase = true) ||
+            url.contains("peacemakerst.com", ignoreCase = true) ||
+            url.contains("twimg.com", ignoreCase = true) ||
+            url.contains("akamaized.net", ignoreCase = true) ||
+            url.contains("/hls", ignoreCase = true)
+
+    /** Normalizes ISO 639-1/639-2 language codes and track name hints (e.g. `tur` / `Türkçe Dublaj` -> `tr`, `eng` -> `en`). */
+    fun normalizeHlsLanguage(rawLang: String?, rawName: String? = null): String? {
+        val code = rawLang?.trim()?.lowercase()?.substringBefore('-')?.substringBefore('_').orEmpty()
+        when (code) {
+            "tr", "tur", "turkish", "türkçe", "turkce" -> return "tr"
+            "en", "eng", "english", "ingilizce", "ing" -> return "en"
+            "de", "deu", "ger", "german" -> return "de"
+            "fr", "fra", "fre", "french" -> return "fr"
+            "es", "spa", "spanish" -> return "es"
+            "ru", "rus", "russian" -> return "ru"
+            "ar", "ara", "arabic" -> return "ar"
+            "ja", "jpn", "japanese" -> return "ja"
+            "ko", "kor", "korean" -> return "ko"
         }
-        val distinct = variants.distinctBy { it.height }.sortedByDescending { it.height }
-        if (distinct.isEmpty()) return emptyList()
+        if (code.length in 2..3 && code != "und") return code
 
-        val topHeight = distinct.firstOrNull()?.height ?: 1080
-        val masterQuality = VideoQuality(height = topHeight, fps = 30, videoUrl = masterUrl, audioUrl = null, isLive = false, headers = headers)
-
-        // When the master playlist specifies separate audio tracks (#EXT-X-MEDIA:TYPE=AUDIO, e.g. Dizimom/Twitter or Vidmixi),
-        // the child playlists are VIDEO ONLY (e.g. avc1 without mp4a). ExoPlayer MUST play the master playlist URL
-        // so that Media3 HlsMediaSource fetches and synchronizes audio + video.
-        return if (hasSeparateAudio) {
-            listOf(masterQuality)
-        } else {
-            listOf(VideoQuality(height = 0, fps = 30, videoUrl = masterUrl, audioUrl = null, isLive = false, headers = headers)) + distinct
+        val name = rawName?.trim()?.lowercase().orEmpty()
+        return when {
+            name.contains("türk") || name.contains("turk") || (name.contains("dublaj") && !name.contains("ing")) -> "tr"
+            name.contains("engl") || name.contains("ingiliz") || name.contains("orijinal") || name.contains("original") -> "en"
+            else -> null
         }
     }
+
+    /** Parses RFC 8216 HLS attribute lists (`KEY=VALUE` pairs, preserving commas/equals inside quoted values). */
+    fun parseHlsAttributes(attrText: String): Map<String, String> {
+        val attrs = LinkedHashMap<String, String>()
+        var i = 0
+        val n = attrText.length
+        while (i < n) {
+            while (i < n && (attrText[i] == ',' || attrText[i].isWhitespace())) i++
+            if (i >= n) break
+            val eq = attrText.indexOf('=', i)
+            if (eq < 0) break
+            val key = attrText.substring(i, eq).trim().uppercase()
+            var vStart = eq + 1
+            while (vStart < n && attrText[vStart].isWhitespace()) vStart++
+            val value = if (vStart < n && attrText[vStart] == '"') {
+                val close = attrText.indexOf('"', vStart + 1)
+                if (close >= 0) {
+                    i = close + 1
+                    attrText.substring(vStart + 1, close)
+                } else {
+                    i = n
+                    attrText.substring(vStart + 1)
+                }
+            } else {
+                var end = vStart
+                while (end < n && attrText[end] != ',') end++
+                i = end
+                attrText.substring(vStart, end).trim()
+            }
+            if (key.isNotEmpty()) attrs[key] = value
+        }
+        return attrs
+    }
+
+    /**
+     * Parses an HLS master playlist (`#EXT-X-MEDIA:TYPE=AUDIO` + `#EXT-X-STREAM-INF`) into:
+     * - An adaptive Auto master entry (`height = 0, videoUrl = masterUrl`)
+     * - Per-resolution video variants linked to the default audio rendition URI when separate audio exists
+     * - Normalized [VideoAudioTrack] entries (Türkçe / İngilizce / etc.) for synchronized Media3 track selection.
+     */
+    fun parseHlsMasterPlaylist(playlistText: String, masterUrl: String, headers: Map<String, String>): HlsMasterPlaylist {
+        if (!playlistText.contains("#EXT-X-STREAM-INF", ignoreCase = true)) {
+            return HlsMasterPlaylist(masterUrl, emptyList(), emptyList())
+        }
+        val lines = playlistText.lineSequence().map { it.trim() }.toList()
+        val rawAudioTracks = ArrayList<HlsAudioTrack>()
+        data class RawVariant(
+            val height: Int,
+            val fps: Int,
+            val bandwidth: Long,
+            val url: String,
+            val audioGroupId: String?,
+        )
+        val rawVariants = ArrayList<RawVariant>()
+
+        var idx = 0
+        while (idx < lines.size) {
+            val line = lines[idx]
+            if (line.startsWith("#EXT-X-MEDIA:", ignoreCase = true)) {
+                val attrs = parseHlsAttributes(line.substringAfter(':'))
+                if (attrs["TYPE"].equals("AUDIO", ignoreCase = true)) {
+                    val uri = attrs["URI"]?.takeIf { it.isNotBlank() }?.let { resolveUrl(masterUrl, it) }
+                    rawAudioTracks += HlsAudioTrack(
+                        groupId = attrs["GROUP-ID"].orEmpty(),
+                        name = attrs["NAME"].orEmpty(),
+                        language = attrs["LANGUAGE"]?.takeIf { it.isNotBlank() },
+                        uri = uri,
+                        isDefault = attrs["DEFAULT"].equals("YES", ignoreCase = true),
+                        isAutoSelect = attrs["AUTOSELECT"].equals("YES", ignoreCase = true),
+                        channels = attrs["CHANNELS"]?.takeIf { it.isNotBlank() },
+                    )
+                }
+            } else if (line.startsWith("#EXT-X-STREAM-INF:", ignoreCase = true)) {
+                val attrs = parseHlsAttributes(line.substringAfter(':'))
+                var nextIdx = idx + 1
+                while (nextIdx < lines.size && (lines[nextIdx].isEmpty() || lines[nextIdx].startsWith("#"))) {
+                    nextIdx++
+                }
+                val relUrl = lines.getOrNull(nextIdx)
+                val resolved = relUrl?.let { resolveUrl(masterUrl, it) }
+                if (resolved != null) {
+                    val codecs = attrs["CODECS"].orEmpty().lowercase()
+                    val resStr = attrs["RESOLUTION"].orEmpty()
+                    val resHeight = resStr.substringAfter('x', "").substringAfter('X', "").toIntOrNull()
+                    val isAudioOnly = resHeight == null && codecs.isNotEmpty() &&
+                        (codecs.contains("mp4a") || codecs.contains("ac-3") || codecs.contains("ec-3") || codecs.contains("opus")) &&
+                        !codecs.contains("avc") && !codecs.contains("hev") && !codecs.contains("hvc") && !codecs.contains("vp0") && !codecs.contains("av01")
+                    if (!isAudioOnly) {
+                        val bandwidth = attrs["BANDWIDTH"]?.toLongOrNull() ?: 0L
+                        val height = resHeight
+                            ?: QUALITY_HINT.find(attrs["NAME"].orEmpty())?.groupValues?.getOrNull(1)?.toIntOrNull()
+                            ?: QUALITY_HINT.find(resolved)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                            ?: when {
+                                bandwidth >= 3_500_000L -> 1080
+                                bandwidth >= 1_800_000L -> 720
+                                bandwidth >= 700_000L -> 480
+                                else -> 360
+                            }
+                        val fps = attrs["FRAME-RATE"]?.toFloatOrNull()?.roundToInt()?.takeIf { it > 0 } ?: 30
+                        rawVariants += RawVariant(
+                            height = height,
+                            fps = fps,
+                            bandwidth = bandwidth,
+                            url = resolved,
+                            audioGroupId = attrs["AUDIO"]?.takeIf { it.isNotBlank() },
+                        )
+                    }
+                    idx = nextIdx
+                }
+            }
+            idx++
+        }
+
+        val sortedRaw = rawVariants
+            .sortedWith(compareByDescending<RawVariant> { it.height }.thenByDescending { it.bandwidth })
+            .distinctBy { it.height }
+        if (sortedRaw.isEmpty()) {
+            return HlsMasterPlaylist(masterUrl, emptyList(), emptyList())
+        }
+
+        val byGroup = rawAudioTracks.groupBy { it.groupId }
+        val preferredGroupId = sortedRaw.firstNotNullOfOrNull { v ->
+            v.audioGroupId?.takeIf { !byGroup[it].isNullOrEmpty() }
+        } ?: rawAudioTracks.firstOrNull()?.groupId
+
+        fun pickDefaultAudio(group: List<HlsAudioTrack>): HlsAudioTrack? =
+            group.firstOrNull { it.isDefault }
+                ?: group.firstOrNull { it.normalizedLanguage == "tr" }
+                ?: group.firstOrNull { it.isAutoSelect }
+                ?: group.firstOrNull()
+
+        val primaryGroup = preferredGroupId?.let { byGroup[it] }.orEmpty().ifEmpty { rawAudioTracks }
+        val distinctAudio = primaryGroup.distinctBy {
+            "${it.normalizedLanguage ?: "und"}|${it.displayLabel.lowercase()}|${it.uri.orEmpty()}"
+        }
+        val defaultAudio = pickDefaultAudio(distinctAudio)
+        var defaultAudioId: String? = null
+        val audioTracks = distinctAudio.mapIndexed { aIdx, t ->
+            val lang = t.normalizedLanguage
+            val id = "hls:${lang ?: "und"}:${t.groupId.ifBlank { "default" }}:$aIdx"
+            if (t == defaultAudio) defaultAudioId = id
+            val isOrig = !t.isDefault && (
+                lang == "en" ||
+                    t.name.contains("original", ignoreCase = true) ||
+                    t.name.contains("orijinal", ignoreCase = true)
+                )
+            VideoAudioTrack(
+                id = id,
+                label = t.displayLabel,
+                url = t.uri.orEmpty(),
+                isOriginal = isOrig,
+                language = lang,
+            )
+        }
+
+        val hasSeparateAudio = rawAudioTracks.isNotEmpty()
+        val variants = sortedRaw.map { v ->
+            val groupTracks = v.audioGroupId?.let { byGroup[it] }.orEmpty().ifEmpty { primaryGroup }
+            val matchedAudio = pickDefaultAudio(groupTracks)
+            VideoQuality(
+                height = v.height,
+                fps = v.fps,
+                videoUrl = v.url,
+                audioUrl = matchedAudio?.uri,
+                isLive = false,
+                headers = headers,
+            )
+        }
+        val topFps = sortedRaw.firstOrNull()?.fps ?: 30
+        val autoMaster = VideoQuality(
+            height = 0,
+            fps = topFps,
+            videoUrl = masterUrl,
+            audioUrl = null,
+            isLive = false,
+            headers = headers,
+        )
+        return HlsMasterPlaylist(
+            masterUrl = masterUrl,
+            variants = listOf(autoMaster) + variants,
+            audioTracks = audioTracks,
+            rawAudioTracks = rawAudioTracks,
+            defaultAudioTrackId = defaultAudioId,
+            hasSeparateAudio = hasSeparateAudio,
+        )
+    }
+
+    /** Parses an HLS master playlist (`#EXT-X-STREAM-INF`) into individual quality options + Auto master. */
+    fun parseHlsVariants(playlistText: String, masterUrl: String, headers: Map<String, String>): List<VideoQuality> =
+        parseHlsMasterPlaylist(playlistText, masterUrl, headers).variants
 
     /** Extracts embedded player iframe URLs (including Base64-encoded embeds) for parallel HTTP resolution. */
     fun extractEmbedIframes(html: String, pageUrl: String): List<String> {
@@ -576,6 +837,142 @@ internal object MovieHtmlParser {
             }
         }
     }
+}
+
+/** Plain HTTP response handed to the generic resolver; each platform fills it from its own OkHttp client. */
+internal data class ScraperResponse(val finalUrl: String, val body: String, val contentType: String) {
+    /** True when the server answered with a video/HLS/DASH resource instead of an HTML page. */
+    val isMedia: Boolean
+        get() = contentType.startsWith("video/") || contentType.contains("mpegurl") ||
+            contentType.contains("dash+xml") || MovieHtmlParser.isDirectMediaUrl(finalUrl)
+}
+
+/** GET request used by the generic resolver: `(url, headers, referer) -> response or null`. Must not throw for HTTP errors. */
+internal typealias ScraperFetcher = suspend (url: String, headers: Map<String, String>, referer: String?) -> ScraperResponse?
+
+/** Output of [resolveGenericStreams] / [expandGenericHls]. */
+internal data class GenericStreamResult(
+    val streams: List<VideoQuality> = emptyList(),
+    val captions: List<VideoCaption> = emptyList(),
+    val audioTracks: List<VideoAudioTrack> = emptyList(),
+    val defaultAudioTrackId: String? = null,
+)
+
+private class EmbedHop(
+    val url: String,
+    val streams: List<VideoQuality>,
+    val captions: List<VideoCaption>,
+    val children: List<String>,
+)
+
+private fun mediaQuality(url: String, headers: Map<String, String>, height: Int? = null): VideoQuality {
+    val h = height
+        ?: Regex("""(?i)(2160|1440|1080|720|480|360)p""").find(url)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        ?: if (url.contains(".m3u8", true) || url.contains(".mpd", true)) 1080 else 720
+    return VideoQuality(height = h, fps = 30, videoUrl = url, audioUrl = null, isLive = false, headers = headers)
+}
+
+/** Runs [block], turning failures into null but never swallowing coroutine cancellation. */
+private suspend inline fun <T> probeOrNull(block: () -> T?): T? = try {
+    block()
+} catch (e: kotlin.coroutines.cancellation.CancellationException) {
+    throw e
+} catch (_: Throwable) {
+    null
+}
+
+/** Opens one embed page and reports its streams, `<track>` captions and nested iframes. */
+private suspend fun probeEmbed(
+    embedUrl: String,
+    parentUrl: String,
+    headers: Map<String, String>,
+    fetch: ScraperFetcher,
+): EmbedHop? {
+    val res = probeOrNull { fetch(embedUrl, headers, parentUrl) } ?: return null
+    if (res.isMedia) {
+        // The embed URL redirected straight to the media file: the CDN expects the parent page as Referer.
+        val hdrs = headers + ("Referer" to (MovieHtmlParser.originOf(parentUrl) + "/"))
+        return EmbedHop(res.finalUrl, listOf(mediaQuality(res.finalUrl, hdrs)), emptyList(), emptyList())
+    }
+    val found = MovieHtmlParser.extractStreams(res.body, res.finalUrl, headers)
+    val caps = MovieHtmlParser.extractCaptions(res.body, res.finalUrl)
+    val children = if (found.isEmpty()) MovieHtmlParser.extractEmbedIframes(res.body, res.finalUrl) else emptyList()
+    return EmbedHop(res.finalUrl, found, caps, children)
+}
+
+/**
+ * Generic, site-independent resolver for a new film source: follows the page's player iframes
+ * (plain, `data-*` and Base64 embeds) level by level, probing each level in parallel, and collects
+ * HLS/DASH/MP4 links found via `<video>`/`<source>`, player JSON (`file:`, `hls:`), packed JS and `atob(...)`.
+ *
+ * - Iframes are tried first (the page itself often carries only trailers or ads); the page's own
+ *   streams are used as a fallback.
+ * - Stops at the first level that yields a stream; at most [maxPerLevel] embeds per level, [maxDepth] levels.
+ * - Each stream keeps the Referer of the page it was found on, so Referer-protected CDNs play in Media3.
+ * - With [expandHls], the first HLS master is opened and split into quality variants + audio renditions.
+ *
+ * The caller supplies [fetch] (platform OkHttp) and the already downloaded [html] of [pageUrl].
+ */
+internal suspend fun resolveGenericStreams(
+    pageUrl: String,
+    html: String,
+    headers: Map<String, String>,
+    fetch: ScraperFetcher,
+    maxDepth: Int = 2,
+    maxPerLevel: Int = 4,
+    expandHls: Boolean = true,
+): GenericStreamResult {
+    val streams = LinkedHashMap<String, VideoQuality>()
+    val captions = ArrayList<VideoCaption>(MovieHtmlParser.extractCaptions(html, pageUrl))
+    val visited = HashSet<String>().apply { add(pageUrl) }
+
+    var frontier: List<Pair<String, String>> = MovieHtmlParser.extractEmbedIframes(html, pageUrl)
+        .filter { visited.add(it) }
+        .take(maxPerLevel)
+        .map { it to pageUrl }
+    var depth = 0
+    while (frontier.isNotEmpty() && streams.isEmpty() && depth < maxDepth) {
+        val hops = supervisorScope {
+            frontier.map { (embed, parent) -> async { probeEmbed(embed, parent, headers, fetch) } }.awaitAll()
+        }
+        val next = ArrayList<Pair<String, String>>()
+        hops.filterNotNull().forEach { hop ->
+            hop.streams.forEach { streams.getOrPut(it.videoUrl) { it } }
+            captions += hop.captions
+            hop.children.forEach { child -> if (visited.add(child)) next += child to hop.url }
+        }
+        frontier = next.take(maxPerLevel)
+        depth++
+    }
+
+    if (streams.isEmpty()) {
+        MovieHtmlParser.extractStreams(html, pageUrl, headers).forEach { streams.getOrPut(it.videoUrl) { it } }
+    }
+
+    val found = GenericStreamResult(streams = streams.values.toList(), captions = captions.distinctBy { it.url })
+    if (!expandHls || found.streams.isEmpty()) return found
+    val expanded = expandGenericHls(found.streams, fetch)
+    return expanded.copy(captions = found.captions)
+}
+
+/**
+ * Opens the first HLS candidate in [streams] and, if it is a master playlist, replaces it with its
+ * `#EXT-X-STREAM-INF` quality variants and `#EXT-X-MEDIA` audio tracks. Media playlists and failures
+ * leave [streams] unchanged.
+ */
+internal suspend fun expandGenericHls(streams: List<VideoQuality>, fetch: ScraperFetcher): GenericStreamResult {
+    val master = streams.firstOrNull { MovieHtmlParser.isHlsCandidateUrl(it.videoUrl) }
+        ?: return GenericStreamResult(streams = streams)
+    val fetched = probeOrNull { fetch(master.videoUrl, master.headers, master.headers["Referer"]) }
+        ?: return GenericStreamResult(streams = streams)
+    val parsed = MovieHtmlParser.parseHlsMasterPlaylist(fetched.body, fetched.finalUrl, master.headers)
+    if (parsed.variants.isEmpty()) return GenericStreamResult(streams = streams)
+    val rest = streams.filterNot { it.videoUrl == master.videoUrl }
+    return GenericStreamResult(
+        streams = (parsed.variants + rest).distinctBy { it.videoUrl to it.audioUrl },
+        audioTracks = parsed.audioTracks,
+        defaultAudioTrackId = parsed.defaultAudioTrackId,
+    )
 }
 
 /** Fetches and parses a catalog/search/genre/next page from an admin-configured [source] via pure HTTP (no WebView). */

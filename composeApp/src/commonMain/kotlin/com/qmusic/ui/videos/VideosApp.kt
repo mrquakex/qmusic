@@ -122,22 +122,42 @@ fun VideosApp(
         onDispose { if (com.qmusic.ui.chat.TogetherVideo.playback === playback) com.qmusic.ui.chat.TogetherVideo.playback = null }
     }
     var loadedId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(watch?.video?.id, watch?.quality, watch?.caption, playback) {
+    var loadedQuality by remember { mutableStateOf<com.qmusic.engine.video.VideoQuality?>(null) }
+    var loadedCaption by remember { mutableStateOf<com.qmusic.engine.video.VideoCaption?>(null) }
+    LaunchedEffect(watch?.video?.id, watch?.quality, watch?.caption, watch?.audioTrack, watch?.streamLoading, playback) {
         val w = watch
         val p = playback
         if (w == null) {
             p?.pause()
             loadedId = null
+            loadedQuality = null
+            loadedCaption = null
+            return@LaunchedEffect
+        }
+        if (w.streamLoading) {
+            loadedQuality = null
             return@LaunchedEffect
         }
         val q = w.quality ?: return@LaunchedEffect
         if (p == null) return@LaunchedEffect
+        if (loadedId == w.video.id && loadedQuality == q && loadedCaption == w.caption) {
+            w.audioTrack?.let { p.selectAudioTrack(it.language, it.label) }
+            return@LaunchedEffect
+        }
         // Another quality of the same video carries on from where it was.
         // A video that was left half way starts there again.
         val start = if (loadedId == w.video.id) p.positionMs.value else controller.resumeFor(w.video.id)
         loadedId = w.video.id
+        loadedQuality = q
+        loadedCaption = w.caption
         onPauseMusic()
-        p.load(q, start, caption = w.caption)
+        p.load(
+            quality = q,
+            startMs = start,
+            caption = w.caption,
+            preferredAudioLanguage = w.audioTrack?.language,
+            preferredAudioLabel = w.audioTrack?.label,
+        )
         p.setSpeed(if (w.isLive()) 1f else controller.playbackSpeed.value)
         p.setLooping(!w.isLive() && controller.looping.value)
     }

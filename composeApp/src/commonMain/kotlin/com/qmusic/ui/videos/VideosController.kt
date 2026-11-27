@@ -687,6 +687,11 @@ class VideosController(
                 val title = resolved.title?.takeIf { it.isNotBlank() } ?: video.title
                 val host = MovieHtmlParser.originOf(url).removePrefix("https://").removePrefix("http://")
                 val caption = if (captionsSetting.value == "1") resolved.captions.firstOrNull() else null
+                val initialAudio = resolved.defaultAudioTrackId?.let { defId ->
+                    resolved.audioTracks.firstOrNull { it.id == defId }
+                } ?: resolved.audioTracks.firstOrNull { it.language == "tr" }
+                    ?: resolved.audioTracks.firstOrNull()
+                val streams = resolved.streams.map { applyAudioTrackToQuality(it, initialAudio) }
                 _watch.update { w ->
                     if (w?.video?.id != id) w else w.copy(
                         video = w.video.copy(title = title, thumbnail = w.video.thumbnail ?: resolved.poster),
@@ -694,14 +699,16 @@ class VideosController(
                             id = id,
                             title = title,
                             channelName = video.channelName ?: host,
-                            description = url,
+                            description = resolved.synopsis ?: url,
                         ),
-                        qualities = resolved.streams,
-                        quality = resolved.streams.pickDefault(maxHeight()),
+                        qualities = streams,
+                        quality = streams.pickDefault(maxHeight()),
+                        audioTracks = resolved.audioTracks,
+                        audioTrack = initialAudio,
                         captions = resolved.captions,
                         caption = caption,
                         streamLoading = false,
-                        streamError = resolved.streams.isEmpty(),
+                        streamError = streams.isEmpty(),
                     )
                 }
             },
@@ -803,18 +810,31 @@ class VideosController(
     }
 
     fun retryStream() {
-        val id = _watch.value?.video?.id ?: return
+        val w = _watch.value ?: return
+        val id = w.video.id
         _watch.update { it?.copy(streamLoading = true, streamError = false) }
-        scope.launch { loadStream(id) }
+        val extUrl = externalUrlOf(id)
+        watchJob?.cancel()
+        watchJob = scope.launch {
+            if (extUrl != null) loadExternalStream(id, extUrl, w.video)
+            else loadStream(id)
+        }
+    }
+
+    private fun applyAudioTrackToQuality(quality: VideoQuality, track: VideoAudioTrack?): VideoQuality {
+        if (track == null || quality.isLive) return quality
+        val isHlsTrack = track.id.startsWith("hls:")
+        return when {
+            isHlsTrack && quality.height == 0 -> quality.copy(audioUrl = null)
+            isHlsTrack -> quality.copy(audioUrl = track.url.takeIf { it.isNotBlank() })
+            quality.audioUrl != null -> quality.copy(audioUrl = track.url)
+            else -> quality
+        }
     }
 
     fun selectQuality(quality: VideoQuality) {
         _watch.update { cur ->
-            if (cur == null) null else {
-                val trackUrl = cur.audioTrack?.url
-                val chosen = if (trackUrl != null && !quality.isLive && quality.audioUrl != null) quality.copy(audioUrl = trackUrl) else quality
-                cur.copy(quality = chosen)
-            }
+            if (cur == null) null else cur.copy(quality = applyAudioTrackToQuality(quality, cur.audioTrack))
         }
     }
 
@@ -833,10 +853,12 @@ class VideosController(
     fun selectAudioTrack(track: VideoAudioTrack) {
         _watch.update { w ->
             if (w == null) null else {
-                val updatedList = w.qualities.map { q -> if (!q.isLive && q.audioUrl != null) q.copy(audioUrl = track.url) else q }
+                val updatedList = w.qualities.map { q -> applyAudioTrackToQuality(q, track) }
                 val cur = w.quality
+                val isHlsTrack = track.id.startsWith("hls:")
                 val updatedCur = when {
                     cur == null || cur.isLive -> cur
+                    isHlsTrack -> applyAudioTrackToQuality(cur, track)
                     cur.audioUrl != null -> cur.copy(audioUrl = track.url)
                     else -> updatedList.firstOrNull { !it.isLive && it.audioUrl != null } ?: cur
                 }
