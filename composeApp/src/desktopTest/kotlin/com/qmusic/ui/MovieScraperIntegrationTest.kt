@@ -218,4 +218,21 @@ class MovieScraperIntegrationTest {
         assertTrue(decrypted.contains("video_location"), "Decrypted payload must contain video_location")
         assertTrue(decrypted.contains("https://vidmixi.com/list/"), "Must extract real vidmixi list HLS url")
     }
+
+    @Test
+    fun peacemakerHashAndStreamExtraction() {
+        val html = """
+            <html><body>
+                <iframe src="https://peacemakerst.com/tv/video/6c516fdf5c23e8c93913d9f36bfa562a" frameborder="0"></iframe>
+            </body></html>
+        """
+        val hash = com.qmusic.ui.videos.MovieHtmlParser.extractPeacemakerHash(html, "https://www.dizidad.com/gassal-4-sezon-3-bolum-izle/")
+        assertEquals("6c516fdf5c23e8c93913d9f36bfa562a", hash)
+
+        val apiJson = """{"videoImage":null,"videoSources":[{"file":"https:\/\/video.twimg.com\/amplify_video\/2123919649590894592\/pl\/U6zOqkylxF0scP4W.m3u8?tag=29","label":"HD","type":"application\/vnd.apple.mpegurl"}],"sIndex":"s0","sourceList":{"s0":"video.twimg.com"}}"""
+        val stream = com.qmusic.ui.videos.MovieHtmlParser.extractPeacemakerStreamUrl(apiJson)
+        assertNotNull(stream)
+        assertTrue(stream.startsWith("https://video.twimg.com/"), "Must resolve Twitter CDN HLS")
+        assertTrue(stream.contains(".m3u8"), "Must be direct HLS manifest")
+    }
 }

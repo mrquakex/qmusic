@@ -202,6 +202,39 @@ actual suspend fun resolveExternalMovie(url: String, headers: Map<String, String
             }
         }
 
+        // Layer 1.6: Peacemaker (Dizimom / Dizidad) backend API resolution (direct Twitter/CDN 1080p HLS).
+        if (streams.isEmpty()) {
+            var peacemakerHash = MovieHtmlParser.extractPeacemakerHash(html, finalUrl)
+            if (peacemakerHash == null) {
+                val firstEp = MovieHtmlParser.extractDizidadFirstEpisode(html)
+                if (firstEp != null) {
+                    val epFetched = desktopFetch(firstEp, headers, referer = finalUrl)
+                    if (epFetched != null) {
+                        peacemakerHash = MovieHtmlParser.extractPeacemakerHash(epFetched.first, epFetched.second)
+                    }
+                }
+            }
+            if (peacemakerHash != null) {
+                val pmApiUrl = "https://peacemakerst.com/tv/video/$peacemakerHash?do=getVideo"
+                val pmHeaders = headers + mapOf(
+                    "Referer" to "https://peacemakerst.com/tv/video/$peacemakerHash",
+                    "X-Requested-With" to "XMLHttpRequest",
+                )
+                val pmRes = desktopPostForm(pmApiUrl, mapOf("hash" to peacemakerHash, "r" to "https://www.dizidad.com/", "s" to ""), pmHeaders)
+                val streamUrl = pmRes?.first?.let { MovieHtmlParser.extractPeacemakerStreamUrl(it) }
+                if (streamUrl != null) {
+                    streams += VideoQuality(
+                        height = 1080,
+                        fps = 30,
+                        videoUrl = streamUrl,
+                        audioUrl = null,
+                        isLive = false,
+                        headers = headers,
+                    )
+                }
+            }
+        }
+
         if (streams.isEmpty()) {
             val embeds = MovieHtmlParser.extractEmbedIframes(html, finalUrl).take(4)
             val found = supervisorScope {

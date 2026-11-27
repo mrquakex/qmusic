@@ -115,6 +115,9 @@ internal object MovieHtmlParser {
     private val FILM_DATA_K = Regex("""(?i)\bdata-k\s*=\s*["']([^"']+)["']""")
     private val CSRF_TOKEN = Regex("""(?i)<meta\b[^>]*\bname\s*=\s*["']csrf-token["'][^>]*\bcontent\s*=\s*["']([^"']+)["']""")
     private val BEPLAYER_REGEX = Regex("""(?is)bePlayer\s*\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*,\s*['"](\{.+?\})['"]""")
+    private val PEACEMAKER_IFRAME_REGEX = Regex("""(?i)peacemakerst\.com/tv/video/([a-zA-Z0-9]+)""")
+    private val DIZIDAD_EPISODE_LINK = Regex("""(?i)href\s*=\s*["'](https?://(?:www\.)?dizidad\.com/[^"']+(?:sezon|bolum)-izle/)["']""")
+    private val PEACEMAKER_STREAM_FILE = Regex("""(?i)"file"\s*:\s*"([^"]+\.m3u8[^"]*)"""")
 
     /** Extracts Filmmodu `(i, s)` pair from `data-k` attribute. */
     fun extractFilmmoduDataK(html: String): Pair<Int, String>? {
@@ -134,6 +137,19 @@ internal object MovieHtmlParser {
         val m = BEPLAYER_REGEX.find(html) ?: return null
         return m.groupValues[1] to m.groupValues[2]
     }
+
+    /** Extracts Peacemaker player hash for Dizimom/Dizidad episodes. */
+    fun extractPeacemakerHash(html: String, pageUrl: String): String? =
+        PEACEMAKER_IFRAME_REGEX.find(html)?.groupValues?.getOrNull(1)
+            ?: PEACEMAKER_IFRAME_REGEX.find(pageUrl)?.groupValues?.getOrNull(1)
+
+    /** Extracts first episode URL from a Dizidad TV series page. */
+    fun extractDizidadFirstEpisode(html: String): String? =
+        DIZIDAD_EPISODE_LINK.find(html)?.groupValues?.getOrNull(1)
+
+    /** Extracts the direct .m3u8 URL from Peacemaker `?do=getVideo` response JSON. */
+    fun extractPeacemakerStreamUrl(json: String): String? =
+        PEACEMAKER_STREAM_FILE.find(json)?.groupValues?.getOrNull(1)?.replace("\\/", "/")
 
     /** True when [url] points straight to a playable video/HLS/DASH resource with no HTML scraping needed. */
     fun isDirectMediaUrl(url: String): Boolean {

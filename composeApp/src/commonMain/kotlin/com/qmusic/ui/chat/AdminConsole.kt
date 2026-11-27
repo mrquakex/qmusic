@@ -108,6 +108,28 @@ data class MovieSource(
     val normalizedBaseUrl: String get() = baseUrl.trim().trimEnd('/')
 }
 
+/** Built-in default film & dizi sources so the Cinema tab is never empty on launch. */
+val DEFAULT_MOVIE_SOURCES = listOf(
+    MovieSource(
+        id = "filmmodu",
+        name = "Filmmodu",
+        baseUrl = "https://filmmodu.cc",
+        catalogPath = "/",
+        searchPath = "/?s={query}",
+        enabled = true,
+        order = 0,
+    ),
+    MovieSource(
+        id = "dizimom",
+        name = "Dizimom",
+        baseUrl = "https://www.dizidad.com",
+        catalogPath = "/",
+        searchPath = "/?s={query}",
+        enabled = true,
+        order = 1,
+    ),
+)
+
 /** Diagnostic trail of a finished call uploaded by a phone to callDebug/{uid}/{call}. */
 data class CallDebugEntry(
     val id: String,

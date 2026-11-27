@@ -36,7 +36,7 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
     override val recommendedVersion: StateFlow<String?> = _recommendedVersion.asStateFlow()
     private val _features = MutableStateFlow(FeatureFlags())
     override val features: StateFlow<FeatureFlags> = _features.asStateFlow()
-    private val _movieSources = MutableStateFlow<List<MovieSource>>(emptyList())
+    private val _movieSources = MutableStateFlow<List<MovieSource>>(DEFAULT_MOVIE_SOURCES)
     override val movieSources: StateFlow<List<MovieSource>> = _movieSources.asStateFlow()
     private val _maintenance = MutableStateFlow(Maintenance())
     override val maintenance: StateFlow<Maintenance> = _maintenance.asStateFlow()
@@ -77,7 +77,7 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
                     order = c.child("order").getValue(Long::class.java)?.toInt() ?: 0,
                 )
             }?.sortedWith(compareBy<MovieSource> { it.order }.thenBy { it.name.lowercase() }).orEmpty()
-            _movieSources.value = list
+            _movieSources.value = if (list.isEmpty()) DEFAULT_MOVIE_SOURCES else list
         })
         root.child("appConfig").child("maintenance").addValueEventListener(listener { s ->
             _maintenance.value = Maintenance(

@@ -563,6 +563,21 @@ class VideosController(
         push(VideoRoute.Search(q))
     }
 
+    private val _movieQuery = MutableStateFlow("")
+    val movieQuery: StateFlow<String> = _movieQuery.asStateFlow()
+
+    fun submitMovieSearch(text: String) {
+        val q = text.trim()
+        _movieQuery.value = q
+        if (q.isNotEmpty()) rememberSearch(q)
+        _searching.value = false
+        _suggestions.value = emptyList()
+    }
+
+    fun clearMovieSearch() {
+        _movieQuery.value = ""
+    }
+
     fun setFilter(params: String?) {
         if (_filter.value == params) return
         _filter.value = params

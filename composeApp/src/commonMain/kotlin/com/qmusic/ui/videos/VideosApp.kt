@@ -327,7 +327,7 @@ fun VideosApp(
                 }
             }
         }
-        if (searching) SearchBox(controller, s, tablet = tablet)
+        if (searching) SearchBox(controller, s, tablet = tablet, tab = tab)
         VideoSheets(controller, playback, s, onShare, onSignIn)
         val toast by controller.toast.collectAsState()
         toast?.let { msg ->
@@ -808,13 +808,15 @@ private fun DownloadsPage(controller: VideosController, s: VideoStrings, chips: 
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun SearchBox(controller: VideosController, s: VideoStrings, tablet: Boolean = false) {
+private fun SearchBox(controller: VideosController, s: VideoStrings, tablet: Boolean = false, tab: VideoTab? = null) {
     val query by controller.query.collectAsState()
     val suggestions by controller.suggestions.collectAsState()
     val history by controller.searchHistory.collectAsState()
     val pictures by controller.searchPictures.collectAsState()
     val mayLike by controller.mayLike.collectAsState()
     val x = s.extras()
+    val isMovies = tab == VideoTab.MOVIES
+    val movieSearchHint = if (s == VideoStrings.English) "Search movies and series…" else "Film veya dizi ara…"
     var removing by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { controller.fillSearchPictures() }
     val focus = remember { FocusRequester() }
@@ -830,7 +832,7 @@ private fun SearchBox(controller: VideosController, s: VideoStrings, tablet: Boo
                 modifier = Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(50)).background(VideoColors.Chip).padding(horizontal = 16.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
-                if (query.isEmpty()) Text(s.searchHint, color = VideoColors.TextSecondary, fontSize = 16.sp)
+                if (query.isEmpty()) Text(if (isMovies) movieSearchHint else s.searchHint, color = VideoColors.TextSecondary, fontSize = 16.sp)
                 // Opened with words in it, the cursor stands at their end, ready to change them.
                 var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(query, androidx.compose.ui.text.TextRange(query.length))) }
                 if (field.text != query) field = androidx.compose.ui.text.input.TextFieldValue(query, androidx.compose.ui.text.TextRange(query.length))
@@ -844,7 +846,9 @@ private fun SearchBox(controller: VideosController, s: VideoStrings, tablet: Boo
                     textStyle = TextStyle(color = VideoColors.Text, fontSize = 16.sp),
                     cursorBrush = SolidColor(VideoColors.Text),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { controller.submitSearch(query) }),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        if (isMovies) controller.submitMovieSearch(query) else controller.submitSearch(query)
+                    }),
                     modifier = Modifier.fillMaxWidth().focusRequester(focus),
                 )
             }
@@ -860,7 +864,12 @@ private fun SearchBox(controller: VideosController, s: VideoStrings, tablet: Boo
                 items(history, key = { "h$it" }) { text ->
                     Row(
                         modifier = Modifier.fillMaxWidth()
-                            .combinedClickable(onClick = { controller.submitSearch(text) }, onLongClick = { removing = text })
+                            .combinedClickable(
+                                onClick = {
+                                    if (isMovies) controller.submitMovieSearch(text) else controller.submitSearch(text)
+                                },
+                                onLongClick = { removing = text }
+                            )
                             .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -875,7 +884,7 @@ private fun SearchBox(controller: VideosController, s: VideoStrings, tablet: Boo
                 }
             }
             // "You may like": channels watched lately and not searched for yet.
-            if (query.isBlank() && mayLike.isNotEmpty()) {
+            if (!isMovies && query.isBlank() && mayLike.isNotEmpty()) {
                 item(key = "maylike-header") {
                     Text(
                         x.mayLike,
@@ -914,7 +923,9 @@ private fun SearchBox(controller: VideosController, s: VideoStrings, tablet: Boo
             }
             items(if (query.isBlank()) emptyList() else suggestions) { text ->
                 Row(
-                    modifier = Modifier.fillMaxWidth().clickable { controller.submitSearch(text) }.padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        if (isMovies) controller.submitMovieSearch(text) else controller.submitSearch(text)
+                    }.padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(QMusicIcons.Search, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp))

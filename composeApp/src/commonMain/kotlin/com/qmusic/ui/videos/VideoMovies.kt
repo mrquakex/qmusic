@@ -36,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -109,7 +110,10 @@ internal fun MoviesTab(
     val x = s.extras()
     val english = s == VideoStrings.English
     val scope = rememberCoroutineScope()
-    val activeSources = remember(sources) { sources.filter { it.enabled } }
+    val activeSources = remember(sources) {
+        val enabled = sources.filter { it.enabled }
+        if (enabled.isEmpty()) com.qmusic.ui.chat.DEFAULT_MOVIE_SOURCES else enabled
+    }
     var selectedSourceId by remember(activeSources) { mutableStateOf(activeSources.firstOrNull()?.id) }
     val activeSource = activeSources.firstOrNull { it.id == selectedSourceId } ?: activeSources.firstOrNull()
 
@@ -119,6 +123,14 @@ internal fun MoviesTab(
     var searchQuery by remember { mutableStateOf("") }
     var submittedQuery by remember { mutableStateOf("") }
     var selectedGenreUrl by remember { mutableStateOf<String?>(null) }
+    val externalMovieQuery by controller.movieQuery.collectAsState()
+    LaunchedEffect(externalMovieQuery) {
+        if (externalMovieQuery.isNotBlank() && externalMovieQuery != submittedQuery) {
+            searchQuery = externalMovieQuery
+            submittedQuery = externalMovieQuery
+            selectedGenreUrl = null
+        }
+    }
     var cards by remember { mutableStateOf<List<MovieCard>>(emptyList()) }
     var genres by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var nextPageUrl by remember { mutableStateOf<String?>(null) }
@@ -221,6 +233,7 @@ internal fun MoviesTab(
                                     selectedGenreUrl = null
                                     submittedQuery = ""
                                     searchQuery = ""
+                                    controller.clearMovieSearch()
                                 }
                             }
                         }
@@ -316,6 +329,7 @@ internal fun MoviesTab(
                                     onClick = {
                                         searchQuery = ""
                                         submittedQuery = ""
+                                        controller.clearMovieSearch()
                                     },
                                     modifier = Modifier.size(36.dp),
                                 ) {
