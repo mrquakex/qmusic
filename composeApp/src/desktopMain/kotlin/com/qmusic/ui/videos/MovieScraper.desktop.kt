@@ -143,6 +143,21 @@ private fun decryptCryptoJsAes(password: String, jsonStr: String): String? = run
     String(cipher.doFinal(cipherBytes), Charsets.UTF_8).replace("\\/", "/")
 }.getOrNull()
 
+private fun expandHlsQualitiesIfMaster(streams: List<VideoQuality>): List<VideoQuality> {
+    val master = streams.firstOrNull {
+        it.videoUrl.contains(".m3u8", ignoreCase = true) ||
+        it.videoUrl.contains("/list/", ignoreCase = true) ||
+        it.videoUrl.contains("/m3u/", ignoreCase = true) ||
+        it.videoUrl.contains("vidmixi.com", ignoreCase = true)
+    } ?: return streams
+    val fetched = runCatching { desktopFetch(master.videoUrl, master.headers, referer = master.headers["Referer"]) }.getOrNull()
+        ?: return streams
+    val variants = MovieHtmlParser.parseHlsVariants(fetched.second, fetched.first, master.headers)
+    if (variants.isEmpty()) return streams
+    val rest = streams.filterNot { it.videoUrl == master.videoUrl }
+    return (variants + rest).distinctBy { it.videoUrl }
+}
+
 actual suspend fun fetchMovieCatalog(
     source: MovieSource,
     query: String,
@@ -199,7 +214,12 @@ actual suspend fun resolveExternalMovie(url: String, headers: Map<String, String
                         if (decrypted != null) {
                             val streamLoc = Regex(""""video_location"\s*:\s*"([^"]+)"""").find(decrypted)?.groupValues?.getOrNull(1)?.replace("\\/", "/")
                             if (streamLoc != null) {
-                                val streamHeaders = headers + ("Referer" to (MovieHtmlParser.originOf(embedUrl) + "/"))
+                                val embedOrigin = MovieHtmlParser.originOf(embedUrl)
+                                val streamHeaders = headers + mapOf(
+                                    "Referer" to embedUrl,
+                                    "Origin" to embedOrigin,
+                                    "User-Agent" to DESKTOP_SCRAPER_UA,
+                                )
                                 val vidQual = VideoQuality(
                                     height = 1080,
                                     fps = 30,
@@ -274,7 +294,7 @@ actual suspend fun resolveExternalMovie(url: String, headers: Map<String, String
         if (streams.isEmpty()) {
             streams += MovieHtmlParser.extractStreams(html, finalUrl, headers)
         }
-        val unique = streams.distinctBy { it.videoUrl }
+        val unique = expandHlsQualitiesIfMaster(streams.distinctBy { it.videoUrl })
         if (unique.isEmpty()) error("Bu sayfada doğrudan oynatılabilir video akışı bulunamadı")
         ResolvedMovieStream(
             title = MovieHtmlParser.extractTitle(html),

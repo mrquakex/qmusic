@@ -186,10 +186,28 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
                 .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                 .build()
         }
-        val pictureItem = MediaItem.Builder().setUri(quality.videoUrl).apply { if (track != null) setSubtitleConfigurations(listOf(track)) }.build()
+        val isHls = quality.isLive ||
+            quality.videoUrl.contains(".m3u8", ignoreCase = true) ||
+            quality.videoUrl.contains("/m3u/", ignoreCase = true) ||
+            quality.videoUrl.contains("/list/", ignoreCase = true) ||
+            quality.videoUrl.contains("vidmixi.com", ignoreCase = true) ||
+            quality.videoUrl.contains("peacemakerst.com", ignoreCase = true) ||
+            quality.videoUrl.contains("twimg.com", ignoreCase = true) ||
+            quality.videoUrl.contains("akamaized.net", ignoreCase = true) ||
+            quality.videoUrl.contains("hls", ignoreCase = true)
+        val isDash = quality.videoUrl.contains(".mpd", ignoreCase = true)
+
+        val pictureItem = MediaItem.Builder()
+            .setUri(quality.videoUrl)
+            .apply {
+                if (isHls) setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
+                else if (isDash) setMimeType(androidx.media3.common.MimeTypes.APPLICATION_MPD)
+                if (track != null) setSubtitleConfigurations(listOf(track))
+            }
+            .build()
         val factory = when {
             quality.headers.isNotEmpty() -> VideoStreaming.networkWithHeaders(quality.headers)
-            quality.isLive -> liveSources
+            isHls -> liveSources
             else -> dataSources
         }
         val picture: MediaSource = DefaultMediaSourceFactory(factory).createMediaSource(pictureItem)

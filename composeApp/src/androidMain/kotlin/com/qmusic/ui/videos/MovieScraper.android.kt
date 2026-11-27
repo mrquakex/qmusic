@@ -132,6 +132,14 @@ private fun parseHexBytes(s: String): ByteArray {
 }
 
 private fun decryptCryptoJsAes(password: String, jsonStr: String): String? = runCatching {
+    decryptWithKey(password, jsonStr)
+        ?: runCatching {
+            val decoded = String(android.util.Base64.decode(password, android.util.Base64.DEFAULT), Charsets.UTF_8)
+            decryptWithKey(decoded, jsonStr)
+        }.getOrNull()
+}.getOrNull()
+
+private fun decryptWithKey(password: String, jsonStr: String): String? = runCatching {
     val ct = Regex(""""ct"\s*:\s*"([^"]+)"""").find(jsonStr)?.groupValues?.get(1) ?: return null
     val ivHex = Regex(""""iv"\s*:\s*"([^"]+)"""").find(jsonStr)?.groupValues?.get(1) ?: return null
     val sHex = Regex(""""s"\s*:\s*"([^"]+)"""").find(jsonStr)?.groupValues?.get(1) ?: return null
@@ -162,7 +170,12 @@ private fun decryptCryptoJsAes(password: String, jsonStr: String): String? = run
 }.getOrNull()
 
 private fun expandHlsQualitiesIfMaster(streams: List<VideoQuality>): List<VideoQuality> {
-    val master = streams.firstOrNull { it.videoUrl.contains(".m3u8", ignoreCase = true) } ?: return streams
+    val master = streams.firstOrNull {
+        it.videoUrl.contains(".m3u8", ignoreCase = true) ||
+        it.videoUrl.contains("/list/", ignoreCase = true) ||
+        it.videoUrl.contains("/m3u/", ignoreCase = true) ||
+        it.videoUrl.contains("vidmixi.com", ignoreCase = true)
+    } ?: return streams
     val fetched = runCatching { fetchTextSync(master.videoUrl, master.headers, referer = master.headers["Referer"]) }.getOrNull()
         ?: return streams
     val variants = MovieHtmlParser.parseHlsVariants(fetched.body, fetched.finalUrl, master.headers)
@@ -255,7 +268,12 @@ actual suspend fun resolveExternalMovie(url: String, headers: Map<String, String
                         if (decrypted != null) {
                             val streamLoc = Regex(""""video_location"\s*:\s*"([^"]+)"""").find(decrypted)?.groupValues?.getOrNull(1)?.replace("\\/", "/")
                             if (streamLoc != null) {
-                                val streamHeaders = headers + ("Referer" to (MovieHtmlParser.originOf(embedUrl) + "/"))
+                                val embedOrigin = MovieHtmlParser.originOf(embedUrl)
+                                val streamHeaders = headers + mapOf(
+                                    "Referer" to embedUrl,
+                                    "Origin" to embedOrigin,
+                                    "User-Agent" to SCRAPER_UA,
+                                )
                                 val vidQual = VideoQuality(
                                     height = 1080,
                                     fps = 30,

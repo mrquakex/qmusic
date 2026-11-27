@@ -330,6 +330,7 @@ internal object MovieHtmlParser {
     /** Parses an HLS master playlist (`#EXT-X-STREAM-INF`) into individual quality options + Auto master. */
     fun parseHlsVariants(playlistText: String, masterUrl: String, headers: Map<String, String>): List<VideoQuality> {
         if (!playlistText.contains("#EXT-X-STREAM-INF", ignoreCase = true)) return emptyList()
+        val hasSeparateAudio = playlistText.contains("#EXT-X-MEDIA:TYPE=AUDIO", ignoreCase = true)
         val variants = ArrayList<VideoQuality>()
         HLS_STREAM_INF.findAll(playlistText).forEach { m ->
             val attrs = m.groupValues[1]
@@ -340,8 +341,18 @@ internal object MovieHtmlParser {
         }
         val distinct = variants.distinctBy { it.height }.sortedByDescending { it.height }
         if (distinct.isEmpty()) return emptyList()
-        // Keep Auto master at top so adaptive bitrate works, plus explicit height choices.
-        return listOf(VideoQuality(height = 0, fps = 30, videoUrl = masterUrl, audioUrl = null, isLive = false, headers = headers)) + distinct
+
+        val topHeight = distinct.firstOrNull()?.height ?: 1080
+        val masterQuality = VideoQuality(height = topHeight, fps = 30, videoUrl = masterUrl, audioUrl = null, isLive = false, headers = headers)
+
+        // When the master playlist specifies separate audio tracks (#EXT-X-MEDIA:TYPE=AUDIO, e.g. Dizimom/Twitter or Vidmixi),
+        // the child playlists are VIDEO ONLY (e.g. avc1 without mp4a). ExoPlayer MUST play the master playlist URL
+        // so that Media3 HlsMediaSource fetches and synchronizes audio + video.
+        return if (hasSeparateAudio) {
+            listOf(masterQuality)
+        } else {
+            listOf(VideoQuality(height = 0, fps = 30, videoUrl = masterUrl, audioUrl = null, isLive = false, headers = headers)) + distinct
+        }
     }
 
     /** Extracts embedded player iframe URLs (including Base64-encoded embeds) for parallel HTTP resolution. */
