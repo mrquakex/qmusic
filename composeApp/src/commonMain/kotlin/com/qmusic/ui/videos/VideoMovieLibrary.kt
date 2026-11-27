@@ -189,6 +189,8 @@ internal class MovieLibrary(private val settings: AppSettings, private val scope
         saveSearches((listOf(q) + _searches.value.filterNot { it.equals(q, ignoreCase = true) }).take(SEARCHES_KEPT))
     }
 
+    fun forgetSearch(query: String) = saveSearches(_searches.value.filterNot { it == query })
+
     fun clearSearches() = saveSearches(emptyList())
 
     // ------------------------------------------------------------------ catalog pages

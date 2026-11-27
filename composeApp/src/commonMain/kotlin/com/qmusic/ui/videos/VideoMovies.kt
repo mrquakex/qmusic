@@ -192,6 +192,12 @@ internal fun MoviesTab(
     var searchAll by remember { mutableStateOf(false) }   // search every source at once
     var searchFocused by remember { mutableStateOf(false) }
     var sort by remember { mutableStateOf(MovieSort.SITE) }
+    var minRating by remember { mutableStateOf<Float?>(null) }   // "Puan 7+"
+    var minYear by remember { mutableStateOf<Int?>(null) }       // "2020+"
+    var kind by remember { mutableStateOf<Boolean?>(null) }      // true: dizi, false: film, null: hepsi
+    // What the person already has with a film: how far it was watched, and whether it is in their list.
+    val progressOf = remember(movieHistory) { movieHistory.associate { it.pageUrl to it.progress } }
+    val listUrls = remember(myList) { myList.mapTo(HashSet()) { it.pageUrl } }
     val focusManager = LocalFocusManager.current
 
     // What was seen of a page before shows at once (this session, or the source's first page from the last one); the
@@ -349,7 +355,7 @@ internal fun MoviesTab(
     val localQuery = searchQuery.trim().takeIf { it.isNotEmpty() && it != submittedQuery }
     val selectedGenreLabel = remember(genres, selectedGenreUrl) { genres.firstOrNull { it.second == selectedGenreUrl }?.first }
     val gridCards = remember(cards, localQuery) {
-        if (localQuery != null) cards.filter { it.title.contains(localQuery, ignoreCase = true) } else cards
+        if (localQuery != null) cards.filter { matchesQuery(it.title, localQuery) } else cards
     }
     // Home page, Netflix style: a rotating showcase on top, then rows that slide sideways.
     val heroPicks = remember(cards) { cards.filter { it.poster != null }.take(HERO_COUNT) }
@@ -375,6 +381,40 @@ internal fun MoviesTab(
         }
     }
     val countLabel = { n: Int, more: Boolean -> if (more) "$n+" else "$n" }
+
+    // Speak a title instead of typing it (the phone's own speech recognition).
+    val voiceSearch = com.qmusic.ui.rememberVoiceSearch { spoken ->
+        searchQuery = spoken
+        focusManager.clearFocus()
+        submitSearch()
+    }
+
+    // Suggestions while typing: films already seen anywhere in the tab (this page, the rows, history, my list) and
+    // past searches, best matches first.
+    val suggestions = remember(searchQuery, submittedQuery, cards, genreRows, movieHistory, myList, recentSearches) {
+        val q = searchQuery.trim()
+        if (q.length < 2 || q == submittedQuery) {
+            emptyList()
+        } else {
+            val films = (movieHistory.map { it.toCard() } + myList.map { it.toCard() } + cards + genreRows.values.flatten())
+                .distinctBy { it.pageUrl }
+                .mapNotNull { c -> matchRank(c.title, q)?.let { r -> MovieSuggestion(c.title, c, r) } }
+            val words = recentSearches
+                .mapNotNull { w -> matchRank(w, q)?.let { r -> MovieSuggestion(w, null, r + 1) } }
+                .filterNot { w -> w.text.equals(q, ignoreCase = true) }
+            (films + words).sortedBy { it.rank }.distinctBy { foldTurkish(it.text) }.take(SUGGESTION_COUNT)
+        }
+    }
+
+    // Filters over the shown titles; the dizi/film chips only appear when both kinds can be told apart.
+    val kinds = remember(cards) { cards.map { movieKind(it) }.toSet() }
+    val filteredCards = remember(gridCards, minRating, minYear, kind) {
+        gridCards.filter { c ->
+            (minRating == null || (c.rating?.replace(',', '.')?.toFloatOrNull() ?: 0f) >= minRating!!) &&
+                (minYear == null || (c.year?.toIntOrNull() ?: 0) >= minYear!!) &&
+                (kind == null || movieKind(c) == kind)
+        }
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(VideoColors.Background)) {
         val cols = movieGridColumnCount(maxWidth.value)
@@ -485,7 +525,63 @@ internal fun MoviesTab(
                             onClear = { clearSearch() },
                             onReload = { reloadTick++ },
                             onFocusChange = { searchFocused = it },
+                            onVoice = voiceSearch,
+                            voiceLabel = tr("Search by voice", "Sesle ara"),
                         )
+
+                        AnimatedVisibility(
+                            visible = searchFocused && suggestions.isNotEmpty(),
+                            enter = fadeIn(tween(Motion.SHORT)),
+                            exit = fadeOut(tween(Motion.SHORT)),
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(QMusicShapes.large)
+                                    .background(VideoColors.Surface)
+                                    .border(0.5.dp, BorderSubtle, QMusicShapes.large)
+                                    .padding(vertical = 6.dp),
+                            ) {
+                                suggestions.forEach { sug ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                focusManager.clearFocus()
+                                                if (sug.card != null) {
+                                                    selectedCard = sug.card
+                                                } else {
+                                                    searchQuery = sug.text
+                                                    submitSearch()
+                                                }
+                                            }
+                                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        if (sug.card != null) {
+                                            Box(
+                                                Modifier
+                                                    .size(width = 28.dp, height = 42.dp)
+                                                    .clip(QMusicShapes.extraSmall)
+                                                    .background(VideoColors.Chip),
+                                            ) {
+                                                FadeInPoster(url = sug.card.poster, contentDescription = null, iconSize = 14.dp)
+                                            }
+                                        } else {
+                                            Icon(QMusicIcons.History, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(18.dp))
+                                        }
+                                        Column(Modifier.weight(1f)) {
+                                            Text(sug.text, color = VideoColors.Text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            val meta = sug.card?.let { c -> listOfNotNull(c.year, c.sourceName.takeIf { it.isNotBlank() }).joinToString(" · ") }
+                                            if (!meta.isNullOrEmpty()) {
+                                                Text(meta, color = VideoColors.TextSecondary, fontSize = 11.sp, maxLines = 1)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         // Recent film searches while the empty field is focused: one tap searches again.
                         AnimatedVisibility(
@@ -509,11 +605,16 @@ internal fun MoviesTab(
                                 }
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     items(recentSearches, key = { "recent-$it" }) { q ->
-                                        CinemaPill(q, selected = false) {
-                                            searchQuery = q
-                                            focusManager.clearFocus()
-                                            submitSearch()
-                                        }
+                                        RecentSearchChip(
+                                            text = q,
+                                            removeLabel = tr("Remove", "Kaldır"),
+                                            onClick = {
+                                                searchQuery = q
+                                                focusManager.clearFocus()
+                                                submitSearch()
+                                            },
+                                            onRemove = { library.forgetSearch(q) },
+                                        )
                                     }
                                 }
                             }
@@ -711,6 +812,8 @@ internal fun MoviesTab(
                                     onSeeAll = null,
                                     onOpen = { selectedCard = it },
                                     onWatchTogether = together,
+                                    progressOf = { progressOf[it.pageUrl] ?: 0f },
+                                    inListOf = { it.pageUrl in listUrls },
                                 )
                             }
                             if (topRated.size >= 4) {
@@ -724,6 +827,8 @@ internal fun MoviesTab(
                                         onSeeAll = null,
                                         onOpen = { selectedCard = it },
                                         onWatchTogether = together,
+                                        progressOf = { progressOf[it.pageUrl] ?: 0f },
+                                        inListOf = { it.pageUrl in listUrls },
                                     )
                                 }
                             }
@@ -740,6 +845,8 @@ internal fun MoviesTab(
                                             onSeeAll = { selectedGenreUrl = url },
                                             onOpen = { selectedCard = it },
                                             onWatchTogether = together,
+                                            progressOf = { progressOf[it.pageUrl] ?: 0f },
+                                            inListOf = { it.pageUrl in listUrls },
                                         )
                                     }
                                 }
@@ -754,35 +861,74 @@ internal fun MoviesTab(
 
                         if (gridCards.size > 2) {
                             item(key = "grid-sort") {
-                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    items(MovieSort.entries.toList(), key = { it.name }) { mode ->
-                                        CinemaPill(tr(mode.en, mode.tr), selected = sort == mode, quiet = sort != mode) { sort = mode }
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        items(MovieSort.entries.toList(), key = { it.name }) { mode ->
+                                            CinemaPill(tr(mode.en, mode.tr), selected = sort == mode, quiet = sort != mode) { sort = mode }
+                                        }
+                                    }
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        item(key = "f-r7") { CinemaPill(tr("Rating 7+", "Puan 7+"), selected = minRating == 7f) { minRating = if (minRating == 7f) null else 7f } }
+                                        item(key = "f-r8") { CinemaPill(tr("Rating 8+", "Puan 8+"), selected = minRating == 8f) { minRating = if (minRating == 8f) null else 8f } }
+                                        item(key = "f-y20") { CinemaPill(tr("2020 and later", "2020 ve sonrası"), selected = minYear == 2020) { minYear = if (minYear == 2020) null else 2020 } }
+                                        item(key = "f-y10") { CinemaPill(tr("2010 and later", "2010 ve sonrası"), selected = minYear == 2010) { minYear = if (minYear == 2010) null else 2010 } }
+                                        if (true in kinds && false in kinds) {
+                                            item(key = "f-film") { CinemaPill(tr("Movies", "Film"), selected = kind == false) { kind = if (kind == false) null else false } }
+                                            item(key = "f-dizi") { CinemaPill(tr("Series", "Dizi"), selected = kind == true) { kind = if (kind == true) null else true } }
+                                        }
+                                    }
+                                    if (filteredCards.size != gridCards.size) {
+                                        Text(
+                                            tr("${filteredCards.size} of ${gridCards.size} shown", "${gridCards.size} yapımdan ${filteredCards.size} tanesi gösteriliyor"),
+                                            color = VideoColors.TextSecondary,
+                                            fontSize = 12.sp,
+                                            modifier = Modifier.padding(start = 4.dp),
+                                        )
                                     }
                                 }
                             }
                         }
 
-                        // Responsive 2..5-column cinema poster grid
-                        val rows = sortedMovies(gridCards, sort).chunked(cols)
-                        items(rows.size, key = { "mrow-$it-${rows[it].first().pageUrl}" }) { rIdx ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                rows[rIdx].forEach { card ->
-                                    MoviePosterTile(
-                                        card = card,
-                                        watchTogetherLabel = x.watchTogether,
-                                        onOpenDetails = { selectedCard = card },
-                                        onWatchTogether = {
-                                            sharedItemForUrl(card.pageUrl, card.title, card.sourceName, card.poster)?.let {
-                                                ChatMusic.offerTogether(it)
-                                            }
-                                        },
-                                        modifier = Modifier.weight(1f),
+                        // Responsive 2..5-column cinema poster grid; searching every source, one titled group per source.
+                        val shown = sortedMovies(filteredCards, sort)
+                        val groups: List<Pair<String?, List<MovieCard>>> =
+                            if (searchAll && submittedQuery.isNotBlank() && activeSources.size > 1) {
+                                shown.groupBy { it.sourceName }.toList()
+                            } else {
+                                listOf(null to shown)
+                            }
+                        groups.forEach { (groupName, groupCards) ->
+                            if (groupName != null) {
+                                item(key = "group-$groupName") {
+                                    SectionCaption(
+                                        "${groupName.ifBlank { tr("OTHER", "DİĞER") }.uppercase()} · ${groupCards.size}",
+                                        modifier = Modifier.padding(top = 8.dp, start = 2.dp),
                                     )
                                 }
-                                repeat(cols - rows[rIdx].size) { Spacer(Modifier.weight(1f)) }
+                            }
+                            val rows = groupCards.chunked(cols)
+                            items(rows.size, key = { "mrow-${groupName.orEmpty()}-$it-${rows[it].first().pageUrl}" }) { rIdx ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    rows[rIdx].forEach { card ->
+                                        MoviePosterTile(
+                                            card = card,
+                                            watchTogetherLabel = x.watchTogether,
+                                            onOpenDetails = { selectedCard = card },
+                                            onWatchTogether = {
+                                                sharedItemForUrl(card.pageUrl, card.title, card.sourceName, card.poster)?.let {
+                                                    ChatMusic.offerTogether(it)
+                                                }
+                                            },
+                                            progress = progressOf[card.pageUrl] ?: 0f,
+                                            inList = card.pageUrl in listUrls,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                    repeat(cols - rows[rIdx].size) { Spacer(Modifier.weight(1f)) }
+                                }
                             }
                         }
 
@@ -1462,6 +1608,8 @@ private fun CinemaSearchBar(
     onClear: () -> Unit,
     onReload: () -> Unit,
     onFocusChange: (Boolean) -> Unit = {},
+    onVoice: (() -> Unit)? = null,
+    voiceLabel: String = "",
 ) {
     var focused by remember { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -1515,6 +1663,14 @@ private fun CinemaSearchBar(
                 ) {
                     Icon(QMusicIcons.Close, clearLabel, tint = VideoColors.Text, modifier = Modifier.size(11.dp))
                 }
+            }
+        }
+        if (onVoice != null && query.isEmpty()) {
+            Box(
+                modifier = Modifier.size(36.dp).pressScale(0.9f).clip(CircleShape).clickable(onClick = onVoice),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(QMusicIcons.Mic, voiceLabel, tint = VideoColors.TextSecondary, modifier = Modifier.size(17.dp))
             }
         }
         Spacer(Modifier.width(2.dp))
@@ -1851,6 +2007,8 @@ private fun CinemaRow(
     onSeeAll: (() -> Unit)?,
     onOpen: (MovieCard) -> Unit,
     onWatchTogether: (MovieCard) -> Unit,
+    progressOf: (MovieCard) -> Float = { 0f },
+    inListOf: (MovieCard) -> Boolean = { false },
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth().padding(start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1875,9 +2033,80 @@ private fun CinemaRow(
                     watchTogetherLabel = watchTogetherLabel,
                     onOpenDetails = { onOpen(card) },
                     onWatchTogether = { onWatchTogether(card) },
+                    progress = progressOf(card),
+                    inList = inListOf(card),
                     modifier = Modifier.width(if (tablet) 140.dp else 116.dp),
                 )
             }
+        }
+    }
+}
+
+/** One line under the search box: a film (opens its page) or a past search (searches it again). */
+private data class MovieSuggestion(val text: String, val card: MovieCard?, val rank: Int)
+
+/** Lowercase without Turkish marks, so "yuzuk" finds "Yüzük" and "ISIK" finds "ışık". */
+internal fun foldTurkish(s: String): String = buildString(s.length) {
+    s.forEach { c ->
+        append(
+            when (c) {
+                'ı', 'İ', 'I', 'î', 'Î' -> 'i'
+                'ş', 'Ş' -> 's'
+                'ğ', 'Ğ' -> 'g'
+                'ü', 'Ü', 'û', 'Û' -> 'u'
+                'ö', 'Ö' -> 'o'
+                'ç', 'Ç' -> 'c'
+                'â', 'Â' -> 'a'
+                else -> c.lowercaseChar()
+            },
+        )
+    }
+}
+
+internal fun matchesQuery(title: String, query: String): Boolean = foldTurkish(title).contains(foldTurkish(query.trim()))
+
+/** 0: the title starts with it, 1: a word starts with it, 2: it is somewhere inside; null: no match. */
+private fun matchRank(text: String, query: String): Int? {
+    val t = foldTurkish(text)
+    val q = foldTurkish(query.trim())
+    return when {
+        q.isEmpty() -> null
+        t.startsWith(q) -> 0
+        t.split(' ', '-', ':', '.', ',').any { it.startsWith(q) } -> 1
+        q in t -> 2
+        else -> null
+    }
+}
+
+/** Dizi (true) or film (false) from the page's address, when the site says so in it; null when it cannot be told. */
+private fun movieKind(card: MovieCard): Boolean? {
+    val u = card.pageUrl.lowercase()
+    return when {
+        "/dizi" in u || "-dizi" in u || "/series" in u || "/tv/" in u || "sezon" in u || "bolum" in u -> true
+        "/film" in u || "/movie" in u -> false
+        else -> null
+    }
+}
+
+/** A past search: tap searches it again, the × (or a long press) forgets it. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RecentSearchChip(text: String, removeLabel: String, onClick: () -> Unit, onRemove: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(VideoColors.Chip)
+            .border(0.5.dp, BorderSubtle, RoundedCornerShape(50))
+            .combinedClickable(onClick = onClick, onLongClick = onRemove)
+            .padding(start = 14.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, color = VideoColors.Text, fontSize = 13.sp, maxLines = 1, modifier = Modifier.padding(vertical = 8.dp))
+        Box(
+            modifier = Modifier.size(28.dp).clip(CircleShape).clickable(onClick = onRemove),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(QMusicIcons.Close, removeLabel, tint = VideoColors.TextSecondary, modifier = Modifier.size(11.dp))
         }
     }
 }
@@ -1898,6 +2127,7 @@ private fun sortedMovies(cards: List<MovieCard>, sort: MovieSort): List<MovieCar
 }
 
 private const val SIMILAR_COUNT = 12
+private const val SUGGESTION_COUNT = 6
 private const val HERO_COUNT = 5
 private const val HERO_ROTATE_MS = 7_000L
 private const val ROW_SIZE = 20
@@ -2004,6 +2234,8 @@ private fun MoviePosterTile(
     onOpenDetails: () -> Unit,
     onWatchTogether: () -> Unit,
     modifier: Modifier = Modifier,
+    progress: Float = 0f,
+    inList: Boolean = false,
 ) {
     val shape = QMusicShapes.medium
     Column(
@@ -2067,6 +2299,32 @@ private fun MoviePosterTile(
                         .border(0.5.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(4.dp))
                         .padding(horizontal = 5.dp, vertical = 2.dp),
                 )
+            }
+            // Bottom-right: in my list
+            if (inList) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(7.dp)
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Color.White),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(QMusicIcons.Check, null, tint = Color.Black, modifier = Modifier.size(12.dp))
+                }
+            }
+            // Along the bottom: how far it was watched
+            if (progress > 0f) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .background(Color.White.copy(alpha = 0.22f)),
+                ) {
+                    Box(Modifier.fillMaxWidth(progress).height(3.dp).background(Color.White))
+                }
             }
         }
         Spacer(Modifier.height(8.dp))
