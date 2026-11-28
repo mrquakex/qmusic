@@ -2115,7 +2115,11 @@ class VideosController(
         settings.setString(KEY_RESUME, videos.joinToString(",") { "${it.key}:${it.value}" })
         settings.setString(KEY_MOVIE_RESUME, films.joinToString("\n") { "${it.value}\t${it.key}" })
         VideoResume.positions.value = resume.toMap()
-        externalUrlOf(id)?.let { movies.updateProgress(it, positionMs, durationMs) }
+        externalUrlOf(id)?.let { url ->
+            // An episode's progress goes on its series' row (the series' address comes from the episode page).
+            val seriesUrl = _watch.value?.takeIf { it.video.id == id }?.movieSeriesUrl
+            movies.updateProgress(url, positionMs, durationMs, seriesUrl)
+        }
     }
 
     /** Tells YouTube this video was watched, so it is in the account's history and the suggestions learn from it. */

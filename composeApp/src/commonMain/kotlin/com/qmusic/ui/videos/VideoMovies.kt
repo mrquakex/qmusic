@@ -363,6 +363,8 @@ internal fun MoviesTab(
             relatedMovies = relatedMovies.take(12),
         )
         library.recordWatched(card.copy(title = baseTitle, poster = poster))
+        // A series opens one of its episodes: the series' row follows that episode's progress.
+        if (playUrl != card.pageUrl) library.noteEpisode(card.pageUrl, playUrl)
         controller.openExternalUrl(
             rawUrl = playUrl,
             title = playTitle,
@@ -905,6 +907,7 @@ internal fun MoviesTab(
                             cards = heroPicks,
                             english = english,
                             tablet = tablet,
+                            viewportHeight = maxHeight,
                             watchLabel = x.moviePlaySolo,
                             isInList = { c -> myList.any { it.pageUrl == c.pageUrl } },
                             onToggleList = { library.toggleFavorite(it) },
@@ -2204,6 +2207,8 @@ private fun CinemaHeroCarousel(
     cards: List<MovieCard>,
     english: Boolean,
     tablet: Boolean,
+    /** The page's height: a phone turned sideways keeps the poster within the screen. */
+    viewportHeight: Dp,
     watchLabel: String,
     isInList: (MovieCard) -> Boolean,
     onToggleList: (MovieCard) -> Unit,
@@ -2230,7 +2235,8 @@ private fun CinemaHeroCarousel(
 
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val itemWidth = minOf(maxWidth * 0.58f, if (tablet) 300.dp else 250.dp)
+            // As wide as fits: about half the width, at most 250 (300 on tablets), and never taller than ~55% of the page.
+            val itemWidth = minOf(maxWidth * 0.58f, if (tablet) 300.dp else 250.dp, viewportHeight * 0.55f * (2f / 3f))
             val side = (maxWidth - itemWidth) / 2
             LazyRow(
                 state = state,

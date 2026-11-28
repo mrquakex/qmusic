@@ -34,6 +34,8 @@ internal data class SavedMovie(
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val finished: Boolean = false,
+    /** A series: the episode watched last (its own address), so that episode's progress shows on the series. */
+    val lastEpisodeUrl: String? = null,
 ) {
     fun toCard() = MovieCard(
         title = title,
@@ -116,6 +118,7 @@ internal class MovieLibrary(private val settings: AppSettings, private val scope
                 positionMs = old.positionMs,
                 durationMs = old.durationMs,
                 finished = false,
+                lastEpisodeUrl = old.lastEpisodeUrl,
             )
         }
         saveHistory((listOf(fresh) + _history.value.filterNot { it.pageUrl == card.pageUrl }).take(HISTORY_KEPT))
@@ -136,18 +139,46 @@ internal class MovieLibrary(private val settings: AppSettings, private val scope
     }
 
     /** Where the open film is (the player tells it every few seconds), for the progress bar in the row. */
-    fun updateProgress(pageUrl: String, positionMs: Long, durationMs: Long) {
+    fun updateProgress(pageUrl: String, positionMs: Long, durationMs: Long, seriesUrl: String? = null) {
         if (durationMs <= 0L) return
         val list = _history.value
-        val i = list.indexOfFirst { it.pageUrl == pageUrl }
+        // A film is its own row; an episode belongs to its series' row (found by the episode last noted on it, or by
+        // the series' address the episode page gave).
+        var i = list.indexOfFirst { it.pageUrl == pageUrl || it.lastEpisodeUrl == pageUrl }
+        if (i < 0 && seriesUrl != null) i = list.indexOfFirst { sameAddress(it.pageUrl, seriesUrl) }
         if (i < 0) return
         val old = list[i]
-        val finished = positionMs >= durationMs - FINISHED_MARGIN_MS
+        val episode = old.pageUrl != pageUrl
+        val ended = positionMs >= durationMs - FINISHED_MARGIN_MS
+        // An episode watched to its end does not finish the series: the bar only empties for the next one.
+        val finished = ended && !episode
+        val episodeUrl = if (episode) pageUrl else old.lastEpisodeUrl
         // Writing every tick is not needed: a few seconds either way does not change the bar.
-        if (old.finished == finished && old.durationMs == durationMs && kotlin.math.abs(old.positionMs - positionMs) < PROGRESS_STEP_MS) return
+        if (old.finished == finished && old.durationMs == durationMs && old.lastEpisodeUrl == episodeUrl &&
+            kotlin.math.abs(old.positionMs - positionMs) < PROGRESS_STEP_MS
+        ) return
         saveHistory(list.toMutableList().also {
-            it[i] = old.copy(positionMs = if (finished) 0L else positionMs, durationMs = durationMs, finished = finished)
+            it[i] = old.copy(
+                positionMs = if (ended) 0L else positionMs,
+                durationMs = durationMs,
+                finished = finished,
+                lastEpisodeUrl = episodeUrl,
+            )
         })
+    }
+
+    /** An episode of a series in the row is starting: its progress goes on the series' row from the first second. */
+    fun noteEpisode(seriesPageUrl: String, episodeUrl: String) {
+        if (seriesPageUrl == episodeUrl) return
+        val list = _history.value
+        val i = list.indexOfFirst { it.pageUrl == seriesPageUrl }
+        if (i < 0 || list[i].lastEpisodeUrl == episodeUrl) return
+        saveHistory(list.toMutableList().also { it[i] = list[i].copy(lastEpisodeUrl = episodeUrl, positionMs = 0L, finished = false) })
+    }
+
+    private fun sameAddress(a: String, b: String): Boolean {
+        fun bare(u: String) = u.trim().lowercase().removePrefix("https://").removePrefix("http://").removePrefix("www.").trimEnd('/')
+        return bare(a) == bare(b)
     }
 
     fun forget(pageUrl: String) = saveHistory(_history.value.filterNot { it.pageUrl == pageUrl })
