@@ -53,11 +53,10 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
         )
         .setHandleAudioBecomingNoisy(true)
         // Starts after under a second of picture, keeps up to a minute and a half ahead, and keeps the last fifteen
-        // seconds so a short seek back needs nothing new. After a stall it waits for four seconds of picture, so a slow
-        // connection does not stop and start again every other second.
+        // seconds so a short seek back needs nothing new.
         .setLoadControl(
             DefaultLoadControl.Builder()
-                .setBufferDurationsMs(20_000, 90_000, 800, 4_000)
+                .setBufferDurationsMs(20_000, 90_000, 800, 2_000)
                 .setPrioritizeTimeOverSizeThresholds(true)
                 .setBackBuffer(15_000, true)
                 .build(),
@@ -139,8 +138,13 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
     }
     private val liveSources = VideoStreaming.network()
 
-    /** A film server that drops a segment now and then is asked again a few more times before the video gives up. */
-    private val loadErrors = DefaultLoadErrorHandlingPolicy(LOAD_RETRIES)
+    /**
+     * A film server that drops a segment now and then is asked again a few more times before the video gives up. Only
+     * for films (streams that need their own headers): a YouTube address that has gone stale must fail fast, so a fresh
+     * one is looked up instead of waiting through the retries.
+     */
+    private val filmLoadErrors = DefaultLoadErrorHandlingPolicy(LOAD_RETRIES)
+    private val defaultLoadErrors = DefaultLoadErrorHandlingPolicy()
 
     init {
         VideoBackground.player = player
@@ -249,6 +253,7 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
             isHls -> liveSources
             else -> dataSources
         }
+        val loadErrors = if (quality.headers.isNotEmpty()) filmLoadErrors else defaultLoadErrors
         val picture: MediaSource = DefaultMediaSourceFactory(videoFactory)
             .setLoadErrorHandlingPolicy(loadErrors)
             .createMediaSource(pictureItem)
