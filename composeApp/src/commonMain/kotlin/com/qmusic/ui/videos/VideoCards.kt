@@ -197,6 +197,17 @@ object VideoWarm {
     var bytes: (com.qmusic.engine.video.VideoQuality) -> Unit = {}
     /** Nothing open: the player itself loads the touched video, silent and still, so the tap only starts it. */
     var prepare: (com.qmusic.engine.video.VideoQuality) -> Unit = {}
+    /**
+     * A film's page is open and its stream is known: the player loads it still and silent exactly as Watch will start
+     * it (where it was left, its sound and subtitles), so pressing Watch only has to start it.
+     */
+    var prepareFilm: (
+        quality: com.qmusic.engine.video.VideoQuality,
+        startMs: Long,
+        caption: com.qmusic.engine.video.VideoCaption?,
+        audioLanguage: String?,
+        audioLabel: String?,
+    ) -> Unit = { _, _, _, _, _ -> }
 }
 
 /** Gets [item] ready as soon as a finger lands on it; the touch goes on to the click as before. */

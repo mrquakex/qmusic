@@ -36,6 +36,8 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
     override val recommendedVersion: StateFlow<String?> = _recommendedVersion.asStateFlow()
     private val _features = MutableStateFlow(FeatureFlags())
     override val features: StateFlow<FeatureFlags> = _features.asStateFlow()
+    private val _movieSources = MutableStateFlow<List<MovieSource>>(DEFAULT_MOVIE_SOURCES)
+    override val movieSources: StateFlow<List<MovieSource>> = _movieSources.asStateFlow()
     private val _maintenance = MutableStateFlow(Maintenance())
     override val maintenance: StateFlow<Maintenance> = _maintenance.asStateFlow()
     private val _spam = MutableStateFlow(SpamGuard())
@@ -57,6 +59,52 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
                 statuses = s?.child("statuses")?.getValue(Boolean::class.java) != false,
                 newChats = s?.child("newChats")?.getValue(Boolean::class.java) != false,
             )
+        })
+        root.child("appConfig").child("movieSources").addValueEventListener(listener { snap ->
+            val list = snap?.children?.mapNotNull { c ->
+                val id = c.key?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val name = c.child("name").getValue(String::class.java)?.trim().orEmpty()
+                val baseUrl = c.child("baseUrl").getValue(String::class.java)?.trim().orEmpty()
+                if (name.isEmpty() || baseUrl.isEmpty()) return@mapNotNull null
+                MovieSource(
+                    id = id,
+                    name = name,
+                    baseUrl = baseUrl,
+                    searchPath = c.child("searchPath").getValue(String::class.java)?.trim()?.ifEmpty { "/?s={query}" } ?: "/?s={query}",
+                    catalogPath = c.child("catalogPath").getValue(String::class.java)?.trim()?.ifEmpty { "/" } ?: "/",
+                    headers = c.child("headers").getValue(String::class.java)?.trim().orEmpty(),
+                    enabled = c.child("enabled").getValue(Boolean::class.java) != false,
+                    order = c.child("order").getValue(Long::class.java)?.toInt() ?: 0,
+                )
+            }?.map { src ->
+                val isLegacyHdfc = (src.id.equals("hdfilmcehennemi", ignoreCase = true) ||
+                    src.baseUrl.contains("hdfilmcehennemi", ignoreCase = true)) &&
+                    !src.baseUrl.contains("hdfilmcehennemi.vip", ignoreCase = true)
+                if (isLegacyHdfc) {
+                    val isDeadDomain = listOf(".life", ".nl", ".la", ".io", ".ws", ".rest", ".com", ".net", ".org")
+                        .any { src.baseUrl.contains(it, ignoreCase = true) }
+                    if (isDeadDomain || !src.enabled) {
+                        src.copy(
+                            baseUrl = "https://hdfilmcehennemi.vip",
+                            searchPath = "/api/search?q={query}",
+                            enabled = true,
+                        )
+                    } else {
+                        src
+                    }
+                } else {
+                    src
+                }
+            }?.sortedWith(compareBy<MovieSource> { it.order }.thenBy { it.name.lowercase() }).orEmpty()
+            val merged = if (list.isEmpty()) {
+                DEFAULT_MOVIE_SOURCES
+            } else {
+                val extra = DEFAULT_MOVIE_SOURCES.filter { def ->
+                    list.none { it.id.equals(def.id, ignoreCase = true) || it.baseUrl.contains(def.id, ignoreCase = true) }
+                }
+                (list + extra).sortedWith(compareBy<MovieSource> { it.order }.thenBy { it.name.lowercase() })
+            }
+            _movieSources.value = merged
         })
         root.child("appConfig").child("maintenance").addValueEventListener(listener { s ->
             _maintenance.value = Maintenance(
@@ -419,6 +467,33 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
             if (!features.newChats) add("newChats")
         }
         record("features", "", if (off.isEmpty()) "all on" else "off: " + off.joinToString(","))
+    }
+
+    override suspend fun saveMovieSource(source: MovieSource): Result<Unit> = runCatching {
+        val id = source.id.trim().lowercase().replace(Regex("[^a-z0-9_-]"), "").take(32)
+        val name = source.name.trim().take(60)
+        val url = source.baseUrl.trim().trimEnd('/').take(200)
+        require(id.isNotEmpty() && name.isNotEmpty()) { "Ad ve kimlik gerekli" }
+        require(url.startsWith("https://") || url.startsWith("http://")) { "URL https:// ile başlamalı" }
+        root.child("appConfig").child("movieSources").child(id).setValue(
+            mapOf(
+                "name" to name,
+                "baseUrl" to url,
+                "searchPath" to source.searchPath.trim().ifEmpty { "/?s={query}" }.take(120),
+                "catalogPath" to source.catalogPath.trim().ifEmpty { "/" }.take(120),
+                "headers" to source.headers.trim().take(400),
+                "enabled" to source.enabled,
+                "order" to source.order,
+            ),
+        ).await()
+        record("movieSource", id, url.take(80))
+    }
+
+    override suspend fun deleteMovieSource(id: String): Result<Unit> = runCatching {
+        val clean = id.trim()
+        require(clean.isNotEmpty())
+        root.child("appConfig").child("movieSources").child(clean).removeValue().await()
+        record("delMovieSrc", clean, "")
     }
 
     override suspend fun setMaintenance(on: Boolean, text: String): Result<Unit> = runCatching {

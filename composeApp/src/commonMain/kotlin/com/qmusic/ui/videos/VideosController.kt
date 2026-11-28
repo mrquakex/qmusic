@@ -147,9 +147,23 @@ sealed interface VideoRoute {
     data object Shorts : VideoRoute
 }
 
-enum class VideoTab { HOME, SHORTS, SUBSCRIPTIONS, LIBRARY }
+enum class VideoTab { HOME, SHORTS, MOVIES, SUBSCRIPTIONS, LIBRARY }
 
 enum class LibrarySection { HISTORY, LIKED, WATCH_LATER, PLAYLISTS }
+
+/** Optional series/catalog metadata passed into [VideosController.openExternalUrl] so the watch screen opens ready. */
+data class MovieWatchContext(
+    val seriesUrl: String? = null,
+    val seriesTitle: String? = null,
+    val tvshowId: String? = null,
+    val year: String? = null,
+    val rating: String? = null,
+    val seasons: List<Int> = emptyList(),
+    val selectedSeason: Int? = null,
+    val episodesBySeason: Map<Int, List<MovieEpisode>> = emptyMap(),
+    val activeEpisodeUrl: String? = null,
+    val relatedMovies: List<MovieCard> = emptyList(),
+)
 
 /** The page of one video: what it is, how it plays, the account's actions on it, its comments. */
 data class WatchState(
@@ -186,6 +200,19 @@ data class WatchState(
     val liveChatOpen: Boolean = false,
     val liveChatMessages: List<VideoLiveChatMessage> = emptyList(),
     val liveChatLoading: Boolean = false,
+    val dislikeStats: VideoDislikeStats? = null,
+    val movieSeriesUrl: String? = null,
+    val movieSeriesTitle: String? = null,
+    val movieTvshowId: String? = null,
+    val movieYear: String? = null,
+    val movieRating: String? = null,
+    val movieSeasons: List<Int> = emptyList(),
+    val movieSelectedSeason: Int? = null,
+    val movieEpisodesBySeason: Map<Int, List<MovieEpisode>> = emptyMap(),
+    val movieSeasonLoading: Int? = null,
+    val movieActiveEpisodeUrl: String? = null,
+    val movieHeaders: Map<String, String> = emptyMap(),
+    val relatedMovies: List<MovieCard> = emptyList(),
 )
 
 /** The "save to" sheet: the account's playlists, with the ones this video is already in ticked. */
@@ -463,6 +490,11 @@ class VideosController(
         }
     }
 
+    /** Every page goes except an open video (moving between the Video and Film sections, or their bar's pages). */
+    fun dropPages() {
+        _routes.value = _routes.value.filter { it is VideoRoute.Watch }
+    }
+
     /** Back: the topmost page goes; true when there was one. */
     fun pop(): Boolean {
         val stack = _routes.value
@@ -475,7 +507,8 @@ class VideosController(
     }
 
     fun open(item: VideoItem) {
-        rememberChannel(item)
+        // A film is not a YouTube channel to suggest later.
+        if (!isExternalVideoId(item.id)) rememberChannel(item)
         // It was playing in the list: the video goes on from there, as on YouTube.
         if (FeedPreview.playing.value == item.id) {
             val at = FeedPreview.position()
@@ -562,6 +595,24 @@ class VideosController(
         push(VideoRoute.Search(q))
     }
 
+    /** Recently watched films, the person's own list, and the catalog pages and streams already loaded. */
+    internal val movies = MovieLibrary(settings, scope)
+
+    private val _movieQuery = MutableStateFlow("")
+    val movieQuery: StateFlow<String> = _movieQuery.asStateFlow()
+
+    fun submitMovieSearch(text: String) {
+        val q = text.trim()
+        _movieQuery.value = q
+        if (q.isNotEmpty()) rememberSearch(q)
+        _searching.value = false
+        _suggestions.value = emptyList()
+    }
+
+    fun clearMovieSearch() {
+        _movieQuery.value = ""
+    }
+
     fun setFilter(params: String?) {
         if (_filter.value == params) return
         _filter.value = params
@@ -589,19 +640,89 @@ class VideosController(
     val watch: StateFlow<WatchState?> = _watch.asStateFlow()
     private var watchJob: Job? = null
 
+    private val externalHeaders = HashMap<String, Map<String, String>>()
+    private val externalContexts = HashMap<String, MovieWatchContext>()
+    private var movieSeasonJob: Job? = null
+
+    /**
+     * Opens an external film/stream URL (direct .m3u8/.mpd/.mp4 or HTML page resolved via pure HTTP scraper)
+     * or natively redirects YouTube URLs to the YouTube watch flow.
+     */
+    fun openExternalUrl(
+        rawUrl: String,
+        title: String? = null,
+        sourceName: String? = null,
+        poster: String? = null,
+        headers: Map<String, String> = emptyMap(),
+        context: MovieWatchContext? = null,
+        replaceCurrentWatch: Boolean = false,
+    ): Boolean {
+        val url = rawUrl.trim()
+        if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) return false
+        val ytId = extractYouTubeIdFromUrl(url)
+        if (ytId != null) {
+            open(VideoItem(id = ytId, title = title?.takeIf { it.isNotBlank() } ?: "YouTube", thumbnail = poster))
+            return true
+        }
+        val id = externalVideoId(url)
+        if (headers.isNotEmpty()) externalHeaders[id] = headers
+        if (context != null) externalContexts[id] = context
+        val fallbackTitle = title?.takeIf { it.isNotBlank() }
+            ?: url.substringBefore('?').substringAfterLast('/').ifBlank { MovieHtmlParser.originOf(url).removePrefix("https://").removePrefix("http://") }
+        val videoItem = VideoItem(
+            id = id,
+            title = fallbackTitle,
+            channelName = sourceName?.takeIf { it.isNotBlank() } ?: MovieHtmlParser.originOf(url).removePrefix("https://").removePrefix("http://"),
+            thumbnail = poster,
+        )
+        if (replaceCurrentWatch && _routes.value.lastOrNull() is VideoRoute.Watch) {
+            switchTo(videoItem, emptyList(), 0)
+        } else {
+            open(videoItem)
+        }
+        return true
+    }
+
     private fun startWatching(video: VideoItem, queue: List<VideoItem> = emptyList(), queueIndex: Int = 0) {
         watchJob?.cancel()
+        movieSeasonJob?.cancel()
         liveChatJob?.cancel()
         _lastSkipped.value = null
         FeedPreview.stopAll()
-        _watch.value = WatchState(video = video, queue = queue, queueIndex = queueIndex)
         val id = video.id
+        val ctx = externalContexts[id]
+        val hdrs = externalHeaders[id].orEmpty()
+        val initialSeason = ctx?.selectedSeason
+            ?: ctx?.episodesBySeason?.keys?.minOrNull()
+            ?: ctx?.seasons?.firstOrNull()
+        _watch.value = WatchState(
+            video = video,
+            queue = queue,
+            queueIndex = queueIndex,
+            movieSeriesUrl = ctx?.seriesUrl,
+            movieSeriesTitle = ctx?.seriesTitle,
+            movieTvshowId = ctx?.tvshowId,
+            movieYear = ctx?.year,
+            movieRating = ctx?.rating,
+            movieSeasons = ctx?.seasons.orEmpty(),
+            movieSelectedSeason = initialSeason,
+            movieEpisodesBySeason = ctx?.episodesBySeason.orEmpty(),
+            movieActiveEpisodeUrl = ctx?.activeEpisodeUrl,
+            movieHeaders = hdrs,
+            relatedMovies = ctx?.relatedMovies.orEmpty(),
+        )
+        val extUrl = externalUrlOf(id)
+        if (extUrl != null) {
+            watchJob = scope.launch { loadExternalStream(id, extUrl, video) }
+            return
+        }
         watchJob = scope.launch {
             // The stream and the page load side by side: the picture should not wait for the comments' address.
             launch { loadStream(id) }
             launch { loadAudioTracks(id) }
             launch { loadCaptions(id) }
             launch { loadSegments(id) }
+            launch { loadDislikes(id) }
             launch { loadPreview(id) }
             service.watch(id).fold(
                 onSuccess = { d ->
@@ -621,6 +742,241 @@ class VideosController(
                 },
             )
         }
+    }
+
+    private suspend fun loadExternalStream(id: String, url: String, video: VideoItem) {
+        val headers = externalHeaders[id].orEmpty()
+        // The detail sheet has usually resolved this page already: its answer is taken instead of asking again.
+        movies.resolve(url, headers).fold(
+            onSuccess = { resolved ->
+                val cleanedResolvedTitle = MovieHtmlParser.cleanMovieTitle(resolved.title)?.takeIf { it.isNotBlank() }
+                val rawTitle = cleanedResolvedTitle ?: video.title
+                val host = MovieHtmlParser.originOf(url).removePrefix("https://").removePrefix("http://")
+                movies.refine(url, cleanedResolvedTitle ?: resolved.title, resolved.poster)
+                val start = filmStart(resolved)
+                val initialAudio = start.audio
+                val caption = start.caption
+                val streams = start.streams
+                _watch.update { w ->
+                    if (w?.video?.id != id) w else {
+                        val mergedGrouped = LinkedHashMap<Int, List<MovieEpisode>>(w.movieEpisodesBySeason)
+                        if (resolved.episodes.isNotEmpty()) {
+                            resolved.episodes.groupBy { it.season }.forEach { (sn, list) ->
+                                if (list.isNotEmpty()) mergedGrouped[sn] = list
+                            }
+                        }
+                        val mergedSeasons = (w.movieSeasons + resolved.seasons + mergedGrouped.keys)
+                            .distinct()
+                            .sorted()
+                        val hasSeries = mergedSeasons.isNotEmpty() || mergedGrouped.isNotEmpty()
+                        val activeEpUrl = w.movieActiveEpisodeUrl
+                            ?: resolved.activeEpisodeUrl
+                            ?: url.takeIf { hasSeries }
+                        val allMergedEps = mergedGrouped.values.flatten()
+                        val matchedEp = activeEpUrl?.let { aUrl ->
+                            allMergedEps.firstOrNull { it.pageUrl.equals(aUrl, ignoreCase = true) }
+                        }
+                        val baseSeriesTitle = w.movieSeriesTitle?.takeIf { it.isNotBlank() }
+                            ?: cleanedResolvedTitle?.takeIf { !it.contains("sezon", ignoreCase = true) }
+                        val displayTitle = when {
+                            matchedEp != null && !baseSeriesTitle.isNullOrBlank() ->
+                                "$baseSeriesTitle · ${matchedEp.season}. Sezon ${matchedEp.episode}. Bölüm"
+                            video.title.contains("Sezon", ignoreCase = true) && video.title.contains("Bölüm", ignoreCase = true) ->
+                                video.title
+                            else -> rawTitle
+                        }
+                        val selectedSeason = matchedEp?.season
+                            ?: activeEpUrl?.let { MovieHtmlParser.extractDiziyouEpisodeSeason(it, "") }
+                            ?: w.movieSelectedSeason
+                            ?: mergedSeasons.firstOrNull()
+                        w.copy(
+                            video = w.video.copy(title = displayTitle, thumbnail = w.video.thumbnail ?: resolved.poster),
+                            details = VideoDetails(
+                                id = id,
+                                title = displayTitle,
+                                channelName = video.channelName ?: host,
+                                // A film without a synopsis shows nothing there, not the site's address.
+                                description = resolved.synopsis.orEmpty(),
+                            ),
+                            qualities = streams,
+                            quality = streams.pickDefault(maxHeight()),
+                            audioTracks = resolved.audioTracks,
+                            audioTrack = initialAudio,
+                            captions = resolved.captions,
+                            caption = caption,
+                            streamLoading = false,
+                            streamError = streams.isEmpty(),
+                            movieSeriesUrl = w.movieSeriesUrl ?: resolved.seriesUrl,
+                            movieSeriesTitle = baseSeriesTitle ?: rawTitle,
+                            movieTvshowId = w.movieTvshowId ?: resolved.tvshowId,
+                            movieYear = w.movieYear ?: resolved.year,
+                            movieRating = w.movieRating ?: resolved.rating,
+                            movieSeasons = mergedSeasons,
+                            movieSelectedSeason = selectedSeason,
+                            movieEpisodesBySeason = mergedGrouped,
+                            movieActiveEpisodeUrl = activeEpUrl,
+                        )
+                    }
+                }
+            },
+            onFailure = { e ->
+                if (e is CancellationException) throw e
+                _watch.update { w ->
+                    if (w?.video?.id != id) w else w.copy(
+                        details = VideoDetails(id = id, title = video.title, channelName = video.channelName, description = ""),
+                        streamLoading = false,
+                        streamError = true,
+                    )
+                }
+            },
+        )
+    }
+
+    /** Switches the visible season in [WatchState] and fetches its episodes on demand when needed. */
+    fun selectWatchSeason(season: Int) {
+        val w = _watch.value ?: return
+        _watch.update { cur ->
+            if (cur?.video?.id != w.video.id) cur else cur.copy(movieSelectedSeason = season)
+        }
+        if (w.movieEpisodesBySeason[season]?.isNotEmpty() == true) return
+        val seriesUrl = w.movieSeriesUrl ?: return
+        val tvId = w.movieTvshowId ?: return
+        movieSeasonJob?.cancel()
+        _watch.update { cur ->
+            if (cur?.video?.id != w.video.id) cur else cur.copy(movieSeasonLoading = season)
+        }
+        movieSeasonJob = scope.launch {
+            fetchSeriesSeasonEpisodes(seriesUrl, tvId, season, w.movieHeaders).onSuccess { eps ->
+                _watch.update { cur ->
+                    if (cur?.video?.id != w.video.id) cur else {
+                        val updated = if (eps.isNotEmpty()) cur.movieEpisodesBySeason + (season to eps) else cur.movieEpisodesBySeason
+                        cur.copy(
+                            movieEpisodesBySeason = updated,
+                            movieSeasonLoading = if (cur.movieSeasonLoading == season) null else cur.movieSeasonLoading,
+                        )
+                    }
+                }
+            }.onFailure {
+                _watch.update { cur ->
+                    if (cur?.video?.id != w.video.id) cur else cur.copy(
+                        movieSeasonLoading = if (cur.movieSeasonLoading == season) null else cur.movieSeasonLoading,
+                    )
+                }
+            }
+        }
+    }
+
+    /** Plays [episode] directly inside the active watch screen while preserving series seasons and episode list. */
+    fun watchMovieEpisode(episode: MovieEpisode) {
+        val w = _watch.value ?: return
+        val baseTitle = w.movieSeriesTitle?.takeIf { it.isNotBlank() }
+            ?: w.video.title.substringBefore(" · ").ifBlank { w.video.title }
+        val playTitle = "$baseTitle · ${episode.season}. Sezon ${episode.episode}. Bölüm"
+        val ctx = MovieWatchContext(
+            seriesUrl = w.movieSeriesUrl,
+            seriesTitle = baseTitle,
+            tvshowId = w.movieTvshowId,
+            year = w.movieYear,
+            rating = w.movieRating,
+            seasons = w.movieSeasons,
+            selectedSeason = episode.season,
+            episodesBySeason = w.movieEpisodesBySeason,
+            activeEpisodeUrl = episode.pageUrl,
+            relatedMovies = w.relatedMovies,
+        )
+        openExternalUrl(
+            rawUrl = episode.pageUrl,
+            title = playTitle,
+            sourceName = w.details?.channelName ?: w.video.channelName,
+            poster = episode.poster ?: w.video.thumbnail,
+            headers = w.movieHeaders,
+            context = ctx,
+            replaceCurrentWatch = true,
+        )
+    }
+
+    /** Opens another movie or series card suggested on the watch screen (replaces current watch item). */
+    fun watchRelatedMovie(card: MovieCard) {
+        val w = _watch.value ?: return
+        val otherRelated = (listOfNotNull(
+            w.movieSeriesUrl?.let { sUrl ->
+                MovieCard(
+                    title = w.movieSeriesTitle ?: w.video.title,
+                    pageUrl = sUrl,
+                    poster = w.video.thumbnail,
+                    year = w.movieYear,
+                    rating = w.movieRating,
+                    sourceName = w.details?.channelName ?: w.video.channelName.orEmpty(),
+                    headers = w.movieHeaders,
+                )
+            },
+        ) + w.relatedMovies.filterNot { it.pageUrl == card.pageUrl }).distinctBy { it.pageUrl }
+        movies.recordWatched(card)
+        openExternalUrl(
+            rawUrl = card.pageUrl,
+            title = card.title,
+            sourceName = card.sourceName,
+            poster = card.poster,
+            headers = card.headers,
+            context = MovieWatchContext(
+                seriesUrl = card.pageUrl,
+                seriesTitle = card.title,
+                year = card.year,
+                rating = card.rating,
+                relatedMovies = otherRelated,
+            ),
+            replaceCurrentWatch = true,
+        )
+    }
+
+    /** Returns `(previousEpisode, nextEpisode)` for the currently playing TV series episode, or `(null, null)`. */
+    fun adjacentMovieEpisodes(w: WatchState): Pair<MovieEpisode?, MovieEpisode?> {
+        val activeUrl = w.movieActiveEpisodeUrl ?: externalUrlOf(w.video.id) ?: return null to null
+        val ordered = w.movieEpisodesBySeason.values
+            .flatten()
+            .sortedWith(compareBy<MovieEpisode> { it.season }.thenBy { it.episode })
+        if (ordered.isEmpty()) return null to null
+        val idx = ordered.indexOfFirst { it.pageUrl.equals(activeUrl, ignoreCase = true) }
+        if (idx < 0) return null to null
+        return ordered.getOrNull(idx - 1) to ordered.getOrNull(idx + 1)
+    }
+
+    /** How a resolved film starts: its sound, its subtitles, its streams (with that sound) and the quality to start at. */
+    private data class FilmStart(
+        val audio: VideoAudioTrack?,
+        val caption: VideoCaption?,
+        val streams: List<VideoQuality>,
+        val quality: VideoQuality?,
+    )
+
+    /** The same choice for the warm-up on the film's page and for the real start, so the warmed-up player is reused. */
+    private fun filmStart(resolved: ResolvedMovieStream): FilmStart {
+        val initialAudio = resolved.defaultAudioTrackId?.let { defId ->
+            resolved.audioTracks.firstOrNull { it.id == defId }
+        } ?: resolved.audioTracks.firstOrNull { it.language == "tr" }
+            ?: resolved.audioTracks.firstOrNull()
+        val turkishCaption = resolved.captions.firstOrNull { it.language.lowercase().let { l -> l.startsWith("tr") || l == "tur" } }
+        val audioLanguage = initialAudio?.let { MovieHtmlParser.normalizeHlsLanguage(it.language, it.label) }
+        val caption = when {
+            captionsSetting.value == "1" -> turkishCaption ?: resolved.captions.firstOrNull()
+            // A film whose sound is known not to be Turkish starts with its Turkish subtitles on.
+            audioLanguage != null && audioLanguage != "tr" -> turkishCaption
+            else -> null
+        }
+        val streams = resolved.streams.map { applyAudioTrackToQuality(it, initialAudio) }
+        return FilmStart(initialAudio, caption, streams, streams.pickDefault(maxHeight()))
+    }
+
+    /**
+     * A film's page is open and its stream is known: when nothing is playing, the player loads it already (still and
+     * silent, where it was left), so Watch starts at once. Series are left alone: Watch opens an episode, not this page.
+     */
+    fun warmUpFilm(pageUrl: String, resolved: ResolvedMovieStream) {
+        if (_watch.value != null) return
+        if (resolved.episodes.isNotEmpty() || resolved.activeEpisodeUrl != null) return
+        val start = filmStart(resolved)
+        val quality = start.quality ?: return
+        VideoWarm.prepareFilm(quality, resumeFor(externalVideoId(pageUrl)), start.caption, start.audio?.language, start.audio?.label)
     }
 
     /** The ways to play recent videos: working them out takes seconds, so a video asked for twice (or ahead) is instant. */
@@ -677,9 +1033,40 @@ class VideosController(
         )
     }
 
-    /** When a video ends: the first video of "up next" plays, as on YouTube's autoplay. */
+    /** When a video ends: the first video of "up next" (or next series episode) plays, as on YouTube's autoplay. */
     fun playNext() {
         val w = _watch.value ?: return
+        if (isExternalVideoId(w.video.id)) {
+            val (_, nextEp) = adjacentMovieEpisodes(w)
+            if (nextEp != null) {
+                watchMovieEpisode(nextEp)
+                return
+            }
+            val curSeason = w.movieSelectedSeason ?: w.movieSeasons.firstOrNull()
+            val nextSeason = curSeason?.let { cur -> w.movieSeasons.firstOrNull { it > cur } }
+            val seriesUrl = w.movieSeriesUrl
+            val tvId = w.movieTvshowId
+            if (nextSeason != null && seriesUrl != null && tvId != null && w.movieEpisodesBySeason[nextSeason] == null) {
+                scope.launch {
+                    fetchSeriesSeasonEpisodes(seriesUrl, tvId, nextSeason, w.movieHeaders).onSuccess { eps ->
+                        if (eps.isNotEmpty() && _watch.value?.video?.id == w.video.id) {
+                            _watch.update { cur ->
+                                if (cur?.video?.id != w.video.id) cur else cur.copy(
+                                    movieEpisodesBySeason = cur.movieEpisodesBySeason + (nextSeason to eps),
+                                )
+                            }
+                            watchMovieEpisode(eps.first())
+                        }
+                    }
+                }
+                return
+            }
+            val nextMovie = w.relatedMovies.firstOrNull()
+            if (nextMovie != null) {
+                watchRelatedMovie(nextMovie)
+                return
+            }
+        }
         val inList = w.queue.getOrNull(w.queueIndex + 1)
         val next = inList ?: w.related.firstNotNullOfOrNull { (it as? VideoEntry.Video)?.item } ?: return
         switchTo(next, if (inList != null) w.queue else emptyList(), if (inList != null) w.queueIndex + 1 else 0)
@@ -688,6 +1075,13 @@ class VideosController(
     /** The video before this one in the list it was opened from (false when there is none). */
     fun playPrevious(): Boolean {
         val w = _watch.value ?: return false
+        if (isExternalVideoId(w.video.id)) {
+            val (prevEp, _) = adjacentMovieEpisodes(w)
+            if (prevEp != null) {
+                watchMovieEpisode(prevEp)
+                return true
+            }
+        }
         val before = w.queue.getOrNull(w.queueIndex - 1) ?: return false
         switchTo(before, w.queue, w.queueIndex - 1)
         return true
@@ -708,18 +1102,33 @@ class VideosController(
     }
 
     fun retryStream() {
-        val id = _watch.value?.video?.id ?: return
+        val w = _watch.value ?: return
+        val id = w.video.id
         _watch.update { it?.copy(streamLoading = true, streamError = false) }
-        scope.launch { loadStream(id) }
+        val extUrl = externalUrlOf(id)
+        // A stream kept from before may be the one that stopped working: retrying asks the site again.
+        if (extUrl != null) movies.forgetStream(extUrl)
+        watchJob?.cancel()
+        watchJob = scope.launch {
+            if (extUrl != null) loadExternalStream(id, extUrl, w.video)
+            else loadStream(id)
+        }
+    }
+
+    private fun applyAudioTrackToQuality(quality: VideoQuality, track: VideoAudioTrack?): VideoQuality {
+        if (track == null || quality.isLive) return quality
+        val isHlsTrack = track.id.startsWith("hls:")
+        return when {
+            isHlsTrack && quality.height == 0 -> quality.copy(audioUrl = null)
+            isHlsTrack -> quality.copy(audioUrl = track.url.takeIf { it.isNotBlank() })
+            quality.audioUrl != null -> quality.copy(audioUrl = track.url)
+            else -> quality
+        }
     }
 
     fun selectQuality(quality: VideoQuality) {
         _watch.update { cur ->
-            if (cur == null) null else {
-                val trackUrl = cur.audioTrack?.url
-                val chosen = if (trackUrl != null && !quality.isLive && quality.audioUrl != null) quality.copy(audioUrl = trackUrl) else quality
-                cur.copy(quality = chosen)
-            }
+            if (cur == null) null else cur.copy(quality = applyAudioTrackToQuality(quality, cur.audioTrack))
         }
     }
 
@@ -738,10 +1147,12 @@ class VideosController(
     fun selectAudioTrack(track: VideoAudioTrack) {
         _watch.update { w ->
             if (w == null) null else {
-                val updatedList = w.qualities.map { q -> if (!q.isLive && q.audioUrl != null) q.copy(audioUrl = track.url) else q }
+                val updatedList = w.qualities.map { q -> applyAudioTrackToQuality(q, track) }
                 val cur = w.quality
+                val isHlsTrack = track.id.startsWith("hls:")
                 val updatedCur = when {
                     cur == null || cur.isLive -> cur
+                    isHlsTrack -> applyAudioTrackToQuality(cur, track)
                     cur.audioUrl != null -> cur.copy(audioUrl = track.url)
                     else -> updatedList.firstOrNull { !it.isLive && it.audioUrl != null } ?: cur
                 }
@@ -1412,6 +1823,19 @@ class VideosController(
     private val _playbackSpeed = MutableStateFlow(speedSetting.value.toFloatOrNull()?.coerceIn(0.25f, 2f) ?: 1f)
     val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
 
+    /** Subtitle size: a multiple of the player's own size (1 = as it was). */
+    val captionSize = settings.string(KEY_CAPTION_SIZE, "1.0")
+
+    init {
+        VideoCaptionStyle.scale.value = captionSize.value.toFloatOrNull() ?: 1f
+    }
+
+    fun setCaptionSize(scale: Float) {
+        val clamped = scale.coerceIn(0.6f, 2f)
+        settings.setString(KEY_CAPTION_SIZE, clamped.toString())
+        VideoCaptionStyle.scale.value = clamped
+    }
+
     fun setPlaybackSpeed(speed: Float) {
         val clamped = speed.coerceIn(0.25f, 2f)
         _playbackSpeed.value = clamped
@@ -1428,9 +1852,40 @@ class VideosController(
         if (autoplay.value != "0" && _autoplayCancelled.value != _watch.value?.video?.id) playNext()
     }
 
-    /** What plays when this video ends: the next of the list it was opened from, else YouTube's first suggestion. */
+    /** Returns true when a next queued video, YouTube suggestion, next series episode, or related film exists. */
+    fun hasNextWatchItem(w: WatchState): Boolean {
+        if (w.queue.size > w.queueIndex + 1 || w.related.isNotEmpty()) return true
+        if (!isExternalVideoId(w.video.id)) return false
+        if (adjacentMovieEpisodes(w).second != null || w.relatedMovies.isNotEmpty()) return true
+        val curSeason = w.movieSelectedSeason ?: w.movieSeasons.firstOrNull() ?: return false
+        return w.movieSeasons.any { it > curSeason } && w.movieTvshowId != null && w.movieSeriesUrl != null
+    }
+
+    /** What plays when this video ends: next in queue, next series episode, related film, or YouTube suggestion. */
     fun nextUp(): VideoItem? {
         val w = _watch.value ?: return null
+        if (isExternalVideoId(w.video.id)) {
+            val nextEp = adjacentMovieEpisodes(w).second
+            if (nextEp != null) {
+                val baseTitle = w.movieSeriesTitle?.takeIf { it.isNotBlank() }
+                    ?: w.video.title.substringBefore(" · ").ifBlank { w.video.title }
+                return VideoItem(
+                    id = externalVideoId(nextEp.pageUrl),
+                    title = "$baseTitle · ${nextEp.season}. Sezon ${nextEp.episode}. Bölüm",
+                    channelName = w.details?.channelName ?: w.video.channelName,
+                    thumbnail = nextEp.poster ?: w.video.thumbnail,
+                )
+            }
+            val firstRelated = w.relatedMovies.firstOrNull()
+            if (firstRelated != null) {
+                return VideoItem(
+                    id = externalVideoId(firstRelated.pageUrl),
+                    title = firstRelated.title,
+                    channelName = firstRelated.sourceName.ifBlank { w.video.channelName },
+                    thumbnail = firstRelated.poster,
+                )
+            }
+        }
         return w.queue.getOrNull(w.queueIndex + 1) ?: w.related.firstNotNullOfOrNull { (it as? VideoEntry.Video)?.item }
     }
 
@@ -1533,6 +1988,32 @@ class VideosController(
         if (_watch.value?.video?.id == id) _segments.value = found
     }
 
+    /** Return YouTube Dislike count + like ratio bar: "1" on (default), "0" off. */
+    val showDislikes = settings.string(KEY_DISLIKES, "1")
+
+    fun setShowDislikes(on: Boolean) {
+        settings.setString(KEY_DISLIKES, if (on) "1" else "0")
+        val id = _watch.value?.video?.id
+        if (on && id != null) {
+            scope.launch { loadDislikes(id) }
+        } else if (!on) {
+            _watch.update { it?.copy(dislikeStats = null) }
+        }
+    }
+
+    /** Most replayed intensity graph above the seek bar: "1" on (default), "0" off. */
+    val showHeatmap = settings.string(KEY_HEATMAP, "1")
+
+    fun setShowHeatmap(on: Boolean) {
+        settings.setString(KEY_HEATMAP, if (on) "1" else "0")
+    }
+
+    private suspend fun loadDislikes(id: String) {
+        if (showDislikes.value == "0") return
+        val stats = fetchVideoDislikes(id) ?: return
+        _watch.update { w -> if (w?.video?.id == id) w.copy(dislikeStats = stats) else w }
+    }
+
     private val _downloads = MutableStateFlow<List<DownloadedVideo>>(emptyList())
 
     /** The videos on the device and the ones on their way there. */
@@ -1592,10 +2073,20 @@ class VideosController(
     }
 
     private val resumeSetting = settings.string(KEY_RESUME, "")
+
+    /**
+     * Films are kept apart: their id is a whole address ("url:https://..."), with ':' and ',' in it, which the YouTube
+     * list's "id:ms,id:ms" cannot hold (they were lost on every restart). One "ms<TAB>id" per line instead.
+     */
+    private val movieResumeSetting = settings.string(KEY_MOVIE_RESUME, "")
     private val resume = LinkedHashMap<String, Long>().also { map ->
         resumeSetting.value.split(',').forEach { entry ->
             val parts = entry.split(':')
             if (parts.size == 2) parts[1].toLongOrNull()?.let { map[parts[0]] = it }
+        }
+        movieResumeSetting.value.split('\n').forEach { line ->
+            val tab = line.indexOf('\t')
+            if (tab > 0) line.substring(0, tab).toLongOrNull()?.let { map[line.substring(tab + 1)] = it }
         }
     }
 
@@ -1606,13 +2097,29 @@ class VideosController(
     /** Where this video was left (0 when it was not, or was nearly over). */
     fun resumeFor(id: String): Long = resume[id] ?: 0L
 
+    /** "Start from the beginning": the place kept for [id] is let go, so it opens at 0. */
+    fun forgetResume(id: String) {
+        if (resume.remove(id) == null) return
+        val (films, videos) = resume.entries.partition { isExternalVideoId(it.key) }
+        settings.setString(KEY_RESUME, videos.joinToString(",") { "${it.key}:${it.value}" })
+        settings.setString(KEY_MOVIE_RESUME, films.joinToString("\n") { "${it.value}\t${it.key}" })
+        VideoResume.positions.value = resume.toMap()
+    }
+
     fun savePosition(id: String, positionMs: Long, durationMs: Long) {
         if (durationMs < RESUME_MIN_LENGTH_MS) return
         resume.remove(id)
         if (positionMs > RESUME_MIN_POSITION_MS && positionMs < durationMs - RESUME_END_MARGIN_MS) resume[id] = positionMs
         while (resume.size > RESUME_KEPT) resume.remove(resume.keys.first())
-        settings.setString(KEY_RESUME, resume.entries.joinToString(",") { "${it.key}:${it.value}" })
+        val (films, videos) = resume.entries.partition { isExternalVideoId(it.key) }
+        settings.setString(KEY_RESUME, videos.joinToString(",") { "${it.key}:${it.value}" })
+        settings.setString(KEY_MOVIE_RESUME, films.joinToString("\n") { "${it.value}\t${it.key}" })
         VideoResume.positions.value = resume.toMap()
+        externalUrlOf(id)?.let { url ->
+            // An episode's progress goes on its series' row (the series' address comes from the episode page).
+            val seriesUrl = _watch.value?.takeIf { it.video.id == id }?.movieSeriesUrl
+            movies.updateProgress(url, positionMs, durationMs, seriesUrl)
+        }
     }
 
     /** Tells YouTube this video was watched, so it is in the account's history and the suggestions learn from it. */
@@ -1910,7 +2417,10 @@ class VideosController(
         const val KEY_AUTOPLAY = "video_autoplay"
         const val KEY_SPONSOR = "video_sponsorblock"
         const val KEY_SPONSOR_CATS = "video_sponsor_categories"
+        const val KEY_DISLIKES = "video_show_dislikes"
+        const val KEY_HEATMAP = "video_show_heatmap"
         const val KEY_SPEED = "video_speed"
+        private const val KEY_CAPTION_SIZE = "video_caption_size"
         private const val SEEN_KEPT = 600
         private const val FRESH_MIN = 8
         private const val RECENT_SEARCHES_USED = 6
@@ -1933,6 +2443,7 @@ class VideosController(
         const val KEY_CAPTIONS = "video_captions"
         const val KEY_FEED_PREVIEW = "video_feed_preview"
         const val KEY_RESUME = "video_resume"
+        private const val KEY_MOVIE_RESUME = "movie_resume"
         private const val RESUME_MIN_LENGTH_MS = 120_000L
         private const val RESUME_MIN_POSITION_MS = 10_000L
         private const val RESUME_END_MARGIN_MS = 20_000L

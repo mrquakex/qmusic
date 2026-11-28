@@ -187,6 +187,7 @@ private fun HomeBar(controller: ChatController, s: ChatStrings, tab: ChatTab) {
         val w = ChatMusic.words()
         AppHome.openMusic?.let { open -> QeyfBarItem(w.music, QMusicIcons.Headphones, false, onClick = open) }
         AppHome.openVideos?.let { open -> QeyfBarItem(w.video, QMusicIcons.VideoPlay, false, onClick = open) }
+        AppHome.openFilms?.let { open -> QeyfBarItem("Film", QMusicIcons.Film, false, onClick = open) }
     }
 }
 

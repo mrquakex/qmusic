@@ -299,4 +299,201 @@ class VideoPolishTest {
         assertFalse(com.qmusic.ui.components.isMusicTwoPaneNowPlaying(720f))
         assertTrue(com.qmusic.ui.components.isMusicTwoPaneNowPlaying(1024f))
     }
+
+    @Test
+    fun heatmapParserDislikeStatsAndVideoPowerSettingsWork() = runTest(UnconfinedTestDispatcher()) {
+        // 1. Return YouTube Dislike ratio & compact formatting (Turkish + English)
+        val stats = com.qmusic.ui.videos.VideoDislikeStats(likes = 900L, dislikes = 100L)
+        assertEquals(0.9f, stats.likeRatio)
+        assertNull(com.qmusic.ui.videos.VideoDislikeStats(0L, 0L).likeRatio)
+        assertEquals("842", com.qmusic.ui.videos.formatCompactCount(842L, english = false))
+        assertEquals("12,5 B", com.qmusic.ui.videos.formatCompactCount(12_500L, english = false))
+        assertEquals("12.5K", com.qmusic.ui.videos.formatCompactCount(12_500L, english = true))
+        assertEquals("1,4 Mn", com.qmusic.ui.videos.formatCompactCount(1_400_000L, english = false))
+        assertEquals("1.4M", com.qmusic.ui.videos.formatCompactCount(1_400_000L, english = true))
+
+        // 2. Settings persistence for dislikes and heatmap toggles
+        val settings = InMemoryAppSettings()
+        val c = VideosController(PolishFakeVideos(), backgroundScope, settings, musicSession = { null })
+        assertEquals("1", c.showDislikes.value)
+        assertEquals("1", c.showHeatmap.value)
+        c.setShowDislikes(false)
+        c.setShowHeatmap(false)
+        assertEquals("0", settings.string(VideosController.KEY_DISLIKES, "1").value)
+        assertEquals("0", settings.string(VideosController.KEY_HEATMAP, "1").value)
+    }
+
+    @Test
+    fun movieScraperParserAndExternalUrlHelpersWork() {
+        val p = com.qmusic.ui.videos.MovieHtmlParser
+        // Direct media URL detection
+        assertTrue(p.isDirectMediaUrl("https://cdn.example.com/movie/master.m3u8?token=abc"))
+        assertTrue(p.isDirectMediaUrl("https://cdn.example.com/clip.mp4"))
+        assertFalse(p.isDirectMediaUrl("https://cinema.example.com/watch/matrix"))
+
+        // Source URL building (catalog + search)
+        val src = com.qmusic.ui.chat.MovieSource(
+            id = "cinema",
+            name = "Ev Sineması",
+            baseUrl = "https://cinema.example.com/",
+            searchPath = "/ara?q={query}",
+            catalogPath = "/filmler",
+            headers = "Referer: https://cinema.example.com/\nX-Test: 1",
+        )
+        assertEquals("https://cinema.example.com/filmler", p.buildSourceUrl(src, ""))
+        assertEquals("https://cinema.example.com/ara?q=sci+fi", p.buildSourceUrl(src, "sci fi"))
+        assertEquals(mapOf("Referer" to "https://cinema.example.com/", "X-Test" to "1"), p.parseHeaders(src.headers))
+
+        // HTML stream, iframe, subtitle, title, poster extraction
+        val html = """
+            <html>
+              <head>
+                <meta property="og:title" content="Interstellar &amp; Beyond" />
+                <meta property="og:image" content="/posters/inter.jpg" />
+              </head>
+              <body>
+                <video>
+                  <source src="https://cdn.example.com/video_720p.mp4" />
+                  <track kind="subtitles" srclang="tr" label="Türkçe" src="/subs/tr.vtt" />
+                </video>
+                <script>var cfg = { file: "https:\/\/cdn.example.com\/master_1080p.m3u8?sig=1" };</script>
+                <iframe src="https://embed.example.com/e/123"></iframe>
+              </body>
+            </html>
+        """.trimIndent()
+        val streams = p.extractStreams(html, "https://cinema.example.com/watch/inter")
+        assertEquals(2, streams.size)
+        assertTrue(streams.first().videoUrl.endsWith("master_1080p.m3u8?sig=1"))
+        assertEquals("https://cinema.example.com/", streams.first().headers["Referer"])
+        assertEquals("Interstellar & Beyond", p.extractTitle(html))
+        assertEquals("https://cinema.example.com/posters/inter.jpg", p.extractPoster(html, "https://cinema.example.com/watch/inter"))
+        assertEquals(listOf("https://embed.example.com/e/123"), p.extractEmbedIframes(html, "https://cinema.example.com/watch/inter"))
+        val subs = p.extractCaptions(html, "https://cinema.example.com/watch/inter")
+        assertEquals(1, subs.size)
+        assertEquals("https://cinema.example.com/subs/tr.vtt", subs.first().url)
+
+        // Catalog scraping (full page with badges, pagination & genre links)
+        val catalogHtml = """
+            <html>
+              <body>
+                <nav>
+                  <a href="/tur/aksiyon">Aksiyon</a>
+                  <a href="/tur/bilim-kurgu">Bilim Kurgu</a>
+                </nav>
+                <div class="grid">
+                  <a href="/film/dune" title="Dune: Part Two"><img data-src="/img/dune.jpg" alt="Dune" /><span>8.6</span><span>2024</span><span>1080p</span></a>
+                  <a href="/film/inception"><img src="https://img.example.com/inc.jpg" /><h3>Inception</h3><span>8.8</span><span>2010</span></a>
+                </div>
+                <a rel="next" href="/sayfa/2">Sonraki</a>
+              </body>
+            </html>
+        """.trimIndent()
+        val page = p.extractCatalogPage(catalogHtml, "https://cinema.example.com/", "Ev Sineması")
+        assertEquals(2, page.items.size)
+        assertEquals("Dune: Part Two", page.items[0].title)
+        assertEquals("https://cinema.example.com/img/dune.jpg", page.items[0].poster)
+        assertEquals("8.6", page.items[0].rating)
+        assertEquals("2024", page.items[0].year)
+        assertEquals("1080P", page.items[0].qualityBadge)
+        assertEquals("Inception", page.items[1].title)
+        assertEquals("https://cinema.example.com/sayfa/2", page.nextPageUrl)
+        assertEquals(listOf("Aksiyon", "Bilim Kurgu"), page.genres.map { it.first })
+
+        // Dean Edwards p,a,c,k,e,d JS unpacker + Base64 atob() stream decoder
+        val packedHtml = """
+            <script>
+            eval(function(p,a,c,k,e,d){while(c--)if(k[c])p=p.replace(new RegExp('\\b'+c.toString(a)+'\\b','g'),k[c]);return p}('0 1={2:"3://4.5.6/7/8.9"};',10,10,'var|cfg|file|https|cdn|cinema|org|hls|master|m3u8'.split('|'),0,{}))
+            var backup = atob("aHR0cHM6Ly9jZG4uY2luZW1hLm9yZy9maWxtXzcyMHAubXA0");
+            </script>
+        """.trimIndent()
+        val unpackedStreams = p.extractStreams(packedHtml, "https://cinema.example.com/watch/1")
+        assertEquals(2, unpackedStreams.size)
+        assertEquals("https://cdn.cinema.org/hls/master.m3u8", unpackedStreams[0].videoUrl)
+        assertEquals("https://cdn.cinema.org/film_720p.mp4", unpackedStreams[1].videoUrl)
+
+        // JSON-LD metadata extraction (synopsis, year, rating)
+        val ldHtml = """
+            <script type="application/ld+json">
+            {"@type":"Movie","name":"Dune","datePublished":"2024-03-01","description":"Paul Atreides unites with the Fremen on Arrakis.","aggregateRating":{"ratingValue":"8.6"}}
+            </script>
+        """.trimIndent()
+        assertEquals("2024", p.extractYear(ldHtml))
+        assertEquals("8.6", p.extractRating(ldHtml))
+        assertTrue(p.extractSynopsis(ldHtml)!!.contains("Arrakis"))
+
+        // HLS master playlist quality variant parsing
+        val hlsMaster = """
+            #EXTM3U
+            #EXT-X-STREAM-INF:BANDWIDTH=1200000,RESOLUTION=854x480
+            480p/index.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=4500000,RESOLUTION=1920x1080
+            1080p/index.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=2400000,RESOLUTION=1280x720
+            720p/index.m3u8
+        """.trimIndent()
+        val variants = p.parseHlsVariants(hlsMaster, "https://cdn.cinema.org/hls/master.m3u8", emptyMap())
+        assertEquals(listOf(0, 1080, 720, 480), variants.map { it.height })
+        assertEquals("https://cdn.cinema.org/hls/1080p/index.m3u8", variants[1].videoUrl)
+
+        // YouTube URL helper + external ID prefix + adaptive grid columns
+        assertEquals("dQw4w9WgXcQ", com.qmusic.ui.videos.extractYouTubeIdFromUrl("https://youtu.be/dQw4w9WgXcQ?t=42"))
+        assertEquals("dQw4w9WgXcQ", com.qmusic.ui.videos.extractYouTubeIdFromUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
+        assertNull(com.qmusic.ui.videos.extractYouTubeIdFromUrl("https://cinema.example.com/watch/1"))
+        assertEquals("https://a.com/v.m3u8", com.qmusic.ui.videos.externalUrlOf(com.qmusic.ui.videos.externalVideoId("https://a.com/v.m3u8")))
+        assertEquals(2, com.qmusic.ui.videos.movieGridColumnCount(412f))
+        assertEquals(3, com.qmusic.ui.videos.movieGridColumnCount(720f))
+        assertEquals(5, com.qmusic.ui.videos.movieGridColumnCount(1280f))
+    }
+
+    @Test
+    fun hlsMasterPlaylistExtractsVideoVariantsAndTurkishEnglishAudioTracks() {
+        val p = com.qmusic.ui.videos.MovieHtmlParser
+        val master = """
+            #EXTM3U
+            #EXT-X-VERSION:4
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aac-audio",NAME="Türkçe Dublaj (AAC, 2.0)",LANGUAGE="tr",DEFAULT=YES,AUTOSELECT=YES,URI="audio/tr/index.m3u8?k=1,2"
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aac-audio",NAME="English",LANGUAGE="eng",DEFAULT=NO,AUTOSELECT=YES,URI="audio/en/index.m3u8"
+            #EXT-X-STREAM-INF:BANDWIDTH=4800000,RESOLUTION=1920x1080,FRAME-RATE=24.000,CODECS="avc1.640028,mp4a.40.2",AUDIO="aac-audio"
+            video/1080p/index.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=2400000,RESOLUTION=1280x720,CODECS="avc1.4d401f,mp4a.40.2",AUDIO="aac-audio"
+            video/720p/index.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=128000,CODECS="mp4a.40.2"
+            audio/fallback.m3u8
+        """.trimIndent()
+        val headers = mapOf("Referer" to "https://cdn.cinema.org/")
+        val parsed = p.parseHlsMasterPlaylist(master, "https://cdn.cinema.org/hls/master.m3u8", headers)
+
+        assertTrue(parsed.hasSeparateAudio)
+        assertEquals(listOf(0, 1080, 720), parsed.variants.map { it.height })
+        assertEquals("https://cdn.cinema.org/hls/master.m3u8", parsed.variants[0].videoUrl)
+        assertNull(parsed.variants[0].audioUrl)
+        assertEquals("https://cdn.cinema.org/hls/video/1080p/index.m3u8", parsed.variants[1].videoUrl)
+        assertEquals("https://cdn.cinema.org/hls/audio/tr/index.m3u8?k=1,2", parsed.variants[1].audioUrl)
+        assertEquals(24, parsed.variants[1].fps)
+
+        assertEquals(2, parsed.audioTracks.size)
+        assertEquals("tr", parsed.audioTracks[0].language)
+        assertEquals("Türkçe Dublaj (AAC, 2.0)", parsed.audioTracks[0].label)
+        assertEquals("https://cdn.cinema.org/hls/audio/tr/index.m3u8?k=1,2", parsed.audioTracks[0].url)
+        assertFalse(parsed.audioTracks[0].isOriginal)
+        assertEquals(parsed.audioTracks[0].id, parsed.defaultAudioTrackId)
+
+        assertEquals("en", parsed.audioTracks[1].language)
+        assertEquals("İngilizce", parsed.audioTracks[1].label)
+        assertEquals("https://cdn.cinema.org/hls/audio/en/index.m3u8", parsed.audioTracks[1].url)
+        assertTrue(parsed.audioTracks[1].isOriginal)
+
+        // Filmmodu Live Search JSON parser test
+        val jsonSearch = """
+            {"films":[{"title":"Avatar 2 Suyun Yolu","year":2022,"rating":7.5,"poster":"https:\/\/img.filmmodu.cc\/poster\/avatar2.webp","url":"https:\/\/filmmodu.cc\/film\/avatar-2\/","ilgi":3}],"series":[{"title":"Avatar Son Havabukucu","year":2024,"rating":7.3,"poster":"https:\/\/img.filmmodu.cc\/dizi\/avatar.webp","url":"https:\/\/filmmodu.cc\/dizi\/avatar\/","ilgi":2}]}
+        """.trimIndent()
+        val searchItems = p.parseFilmmoduSearchJson(jsonSearch, "Filmmodu", headers)
+        assertEquals(2, searchItems.size)
+        assertEquals("Avatar 2 Suyun Yolu", searchItems[0].title)
+        assertEquals("2022", searchItems[0].year)
+        assertEquals("7.5", searchItems[0].rating)
+        assertEquals("https://filmmodu.cc/film/avatar-2/", searchItems[0].pageUrl)
+        assertEquals("https://img.filmmodu.cc/poster/avatar2.webp", searchItems[0].poster)
+        assertEquals("Avatar Son Havabukucu", searchItems[1].title)
+    }
 }

@@ -136,11 +136,18 @@ object ChatMusic {
     /** A song or a video to send to conversations (the app shows where to). */
     val sending = MutableStateFlow<SharedItem?>(null)
 
+    /** A video or film to watch together with a friend or group (the app shows whom to invite). */
+    val togetherOffer = MutableStateFlow<SharedItem?>(null)
+
     /** Sends what plays in the music player now (set by the app). */
     var offerNowPlaying: (() -> Unit)? = null
 
     fun offer(item: SharedItem) {
         sending.value = item
+    }
+
+    fun offerTogether(item: SharedItem) {
+        togetherOffer.value = item
     }
 
     // ---------------------------------------------------------------- statuses' songs
@@ -184,6 +191,7 @@ object AppHome {
     var setMessagesFirst: (Boolean) -> Unit = {}
     var openMusic: (() -> Unit)? = null
     var openVideos: (() -> Unit)? = null
+    var openFilms: (() -> Unit)? = null
 }
 
 /** "2:35" (or "1:02:35"). */
@@ -323,6 +331,59 @@ fun ChatSendDialog(controller: ChatController, s: ChatStrings, item: SharedItem,
                 Text(s.send + if (picked.isNotEmpty()) " (${picked.size})" else "", color = if (ready && picked.isNotEmpty()) Ink else TextMuted)
             }
         },
+        dismissButton = { TextButton(onClick = { onDone(null) }) { Text(s.cancel, color = TextSecondary) } },
+    )
+}
+
+/** Picking a friend or group to start watching/listening to [item] together right now. */
+@Composable
+fun ChatTogetherDialog(controller: ChatController, s: ChatStrings, item: SharedItem, onDone: (String?) -> Unit) {
+    val w = ChatMusic.words()
+    val account by controller.account.collectAsState()
+    val targets by controller.forwardTargets.collectAsState()
+    var query by remember { mutableStateOf("") }
+    val ready = account is ChatAccount.Ready
+    val shown = targets.filter { !isAiBot(it.uid) && (query.isBlank() || it.name.contains(query, ignoreCase = true)) }
+    val titleText = if (item.kind == ShareKind.SONG) s.listenTogether else s.watchTogether
+    val inviteText = if (item.kind == ShareKind.SONG) s.togetherInviteSong else s.togetherInviteVideo
+    AlertDialog(
+        onDismissRequest = { onDone(null) },
+        containerColor = DarkSurfaceVariant,
+        title = { Text(titleText, color = TextPrimary) },
+        text = {
+            Column {
+                ShareCard(item, mine = false, s = s)
+                Spacer(Modifier.height(10.dp))
+                if (!ready) {
+                    Text(w.signInFirst, color = TextSecondary, fontSize = 14.sp, modifier = Modifier.padding(vertical = 12.dp))
+                    return@Column
+                }
+                Field(query, { query = it }, s.search, capitalize = false)
+                Spacer(Modifier.height(8.dp))
+                if (shown.isEmpty()) Text(w.noChats, color = TextSecondary, fontSize = 14.sp, modifier = Modifier.padding(vertical = 12.dp))
+                LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                    items(shown, key = { it.uid }) { target ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    controller.startTogether(target, item, inviteText)
+                                    onDone(titleText)
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            ChatAvatar(target, 38.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(target.name, color = TextPrimary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Icon(QMusicIcons.Play, contentDescription = null, tint = Ink, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
         dismissButton = { TextButton(onClick = { onDone(null) }) { Text(s.cancel, color = TextSecondary) } },
     )
 }

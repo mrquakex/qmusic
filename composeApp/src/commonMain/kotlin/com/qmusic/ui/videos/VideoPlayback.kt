@@ -24,7 +24,17 @@ interface VideoPlayback {
     val showingPicture: StateFlow<Boolean> get() = kotlinx.coroutines.flow.MutableStateFlow(true)
 
     /** Plays [quality] from [startMs]; picture and sound are merged when they are separate streams. */
-    fun load(quality: VideoQuality, startMs: Long = 0, autoPlay: Boolean = true, caption: VideoCaption? = null)
+    fun load(
+        quality: VideoQuality,
+        startMs: Long = 0,
+        autoPlay: Boolean = true,
+        caption: VideoCaption? = null,
+        preferredAudioLanguage: String? = null,
+        preferredAudioLabel: String? = null,
+    )
+
+    /** Switches the active audio track on an already-loaded multi-audio stream (e.g. HLS master playlist). */
+    fun selectAudioTrack(language: String?, label: String? = null) {}
     fun togglePlay()
     fun pause()
     fun seekTo(ms: Long)
@@ -45,3 +55,8 @@ expect fun rememberVideoPlayback(): VideoPlayback?
 /** Draws what [playback] plays; [fill] crops the picture to fill the space (upright clips), else it fits inside. */
 @Composable
 expect fun VideoPlaybackSurface(playback: VideoPlayback, modifier: Modifier, fill: Boolean = false)
+
+/** How subtitles are drawn on the picture: their size as a multiple of the player's default (set from the settings). */
+object VideoCaptionStyle {
+    val scale = kotlinx.coroutines.flow.MutableStateFlow(1f)
+}

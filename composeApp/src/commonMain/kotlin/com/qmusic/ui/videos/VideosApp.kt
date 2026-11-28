@@ -101,6 +101,16 @@ fun VideosApp(
     /** Goes to the messages (their bar's button), and how many are unread there. */
     onChat: (() -> Unit)? = null,
     chatUnread: Int = 0,
+    /** Admin-configured film sources (live domain updates from Admin Panel). */
+    movieSources: List<com.qmusic.ui.chat.MovieSource> = emptyList(),
+    /**
+     * The Film section: the same player, video page, small player and watching together, with the film pages as the
+     * whole section and their own bar (home, search, my list) instead of YouTube's tabs.
+     */
+    cinema: Boolean = false,
+    /** Moves between the Film and the Video sections (their bars' buttons). */
+    onFilms: (() -> Unit)? = null,
+    onVideos: (() -> Unit)? = null,
 ) {
     val tab by controller.tab.collectAsState()
     val routes by controller.routes.collectAsState()
@@ -111,6 +121,17 @@ fun VideosApp(
     val watch by controller.watch.collectAsState()
     val fullscreen by controller.fullscreen.collectAsState()
     val pip = rememberInPictureInPicture()
+    var filmPage by controller.movies.tab.page
+    // Entering the other section starts on its own pages (a YouTube channel left open does not show in Film).
+    var lastCinema by remember { mutableStateOf(cinema) }
+    LaunchedEffect(cinema) {
+        if (cinema != lastCinema) {
+            controller.dropPages()
+            lastCinema = cinema
+        }
+    }
+    // The film tab of the Video bar now opens the Film section; a phone left on it goes back to the home.
+    LaunchedEffect(cinema, tab) { if (!cinema && tab == VideoTab.MOVIES && onFilms != null) controller.selectTab(VideoTab.HOME) }
 
     // The player belongs to the section, not to the page of a video: leaving the page leaves the video playing small.
     val playback = rememberVideoPlayback()
@@ -120,22 +141,42 @@ fun VideosApp(
         onDispose { if (com.qmusic.ui.chat.TogetherVideo.playback === playback) com.qmusic.ui.chat.TogetherVideo.playback = null }
     }
     var loadedId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(watch?.video?.id, watch?.quality, watch?.caption, playback) {
+    var loadedQuality by remember { mutableStateOf<com.qmusic.engine.video.VideoQuality?>(null) }
+    var loadedCaption by remember { mutableStateOf<com.qmusic.engine.video.VideoCaption?>(null) }
+    LaunchedEffect(watch?.video?.id, watch?.quality, watch?.caption, watch?.audioTrack, watch?.streamLoading, playback) {
         val w = watch
         val p = playback
         if (w == null) {
             p?.pause()
             loadedId = null
+            loadedQuality = null
+            loadedCaption = null
+            return@LaunchedEffect
+        }
+        if (w.streamLoading) {
+            loadedQuality = null
             return@LaunchedEffect
         }
         val q = w.quality ?: return@LaunchedEffect
         if (p == null) return@LaunchedEffect
+        if (loadedId == w.video.id && loadedQuality == q && loadedCaption == w.caption) {
+            w.audioTrack?.let { p.selectAudioTrack(it.language, it.label) }
+            return@LaunchedEffect
+        }
         // Another quality of the same video carries on from where it was.
         // A video that was left half way starts there again.
         val start = if (loadedId == w.video.id) p.positionMs.value else controller.resumeFor(w.video.id)
         loadedId = w.video.id
+        loadedQuality = q
+        loadedCaption = w.caption
         onPauseMusic()
-        p.load(q, start, caption = w.caption)
+        p.load(
+            quality = q,
+            startMs = start,
+            caption = w.caption,
+            preferredAudioLanguage = w.audioTrack?.language,
+            preferredAudioLabel = w.audioTrack?.label,
+        )
         p.setSpeed(if (w.isLive()) 1f else controller.playbackSpeed.value)
         p.setLooping(!w.isLive() && controller.looping.value)
     }
@@ -229,7 +270,8 @@ fun VideosApp(
             fullscreen -> controller.setFullscreen(false)
             searching -> controller.closeSearchBox()
             controller.pop() -> Unit
-            tab != VideoTab.HOME -> controller.selectTab(VideoTab.HOME)
+            cinema && filmPage != FilmPage.HOME -> filmPage = FilmPage.HOME
+            !cinema && tab != VideoTab.HOME -> controller.selectTab(VideoTab.HOME)
             else -> exit()
         }
     }
@@ -251,16 +293,24 @@ fun VideosApp(
                 }
             }
         }
-        val feedPage = top == null && tab != VideoTab.SHORTS
-        LaunchedEffect(tab, routes.size) { bars.value = true }
-        val miniShown = watch != null && top !is VideoRoute.Watch && top !is VideoRoute.Shorts && !(top == null && tab == VideoTab.SHORTS) && !pip
-        val showRail = tablet && top !is VideoRoute.Watch && !pip
+        val feedPage = top == null && (cinema || tab != VideoTab.SHORTS)
+        LaunchedEffect(tab, routes.size, filmPage) { bars.value = true }
+        val miniShown = watch != null && top !is VideoRoute.Watch && top !is VideoRoute.Shorts && !(top == null && !cinema && tab == VideoTab.SHORTS) && !pip
+        // The Film section has its own bar, on tablets too.
+        val showRail = tablet && !cinema && top !is VideoRoute.Watch && !pip
+        val onVideoTab: (VideoTab) -> Unit = { t ->
+            when {
+                t == VideoTab.MOVIES && onFilms != null -> onFilms()
+                t == tab && routes.isEmpty() -> controller.refreshCurrent()
+                else -> controller.selectTab(t)
+            }
+        }
         Row(modifier = Modifier.fillMaxSize()) {
             if (showRail) {
                 VideoNavRail(
                     tab = tab.takeIf { routes.isEmpty() },
                     s = s,
-                    onTab = { t -> if (t == tab && routes.isEmpty()) controller.refreshCurrent() else controller.selectTab(t) },
+                    onTab = onVideoTab,
                     onMusic = exit,
                     onChat = onChat,
                     chatUnread = chatUnread,
@@ -283,13 +333,19 @@ fun VideosApp(
                         ) { page ->
                             when (page) {
                                 // (Shorts play in the same player: not drawn under a video.)
-                                null -> if (!watching || tab != VideoTab.SHORTS) {
+                                null -> if (cinema) {
+                                    androidx.compose.foundation.layout.Box(
+                                        Modifier.fillMaxSize().background(VideoColors.Background).statusBarsPadding(),
+                                    ) {
+                                        MoviesTab(controller, movieSources, s, tablet, onShare, cinema = true)
+                                    }
+                                } else if (!watching || tab != VideoTab.SHORTS) {
                                     androidx.compose.animation.AnimatedContent(
                                         targetState = tab,
                                         transitionSpec = { fadeThrough() },
                                         label = "videoTab",
                                     ) { shownTab ->
-                                        TabContent(controller, shownTab, s, signedIn, onSignIn, playback, onPauseMusic, onShare, onAccount = { accountDialog = true }, barsVisible = tablet || bars.value || !feedPage, tablet = tablet)
+                                        TabContent(controller, shownTab, s, signedIn, onSignIn, playback, onPauseMusic, onShare, onAccount = { accountDialog = true }, barsVisible = tablet || bars.value || !feedPage, tablet = tablet, movieSources = movieSources)
                                     }
                                 }
                                 is VideoRoute.Search -> SearchResultsPage(controller, s, onSignIn)
@@ -318,14 +374,29 @@ fun VideosApp(
                 }
                 // On phones: while the video floats small the bottom bar is away; closing the video brings it back.
                 // On tablets: navigation lives in the left rail instead of a bottom bar.
-                if (!tablet && top !is VideoRoute.Watch && !pip && !miniShown) {
+                if ((!tablet || cinema) && top !is VideoRoute.Watch && !pip && !miniShown) {
                     AnimatedVisibility(visible = bars.value || !feedPage, enter = expandVertically(expandFrom = Alignment.Top), exit = shrinkVertically(shrinkTowards = Alignment.Top)) {
-                        VideoBottomBar(tab = tab.takeIf { routes.isEmpty() }, s = s, onTab = { t -> if (t == tab && routes.isEmpty()) controller.refreshCurrent() else controller.selectTab(t) }, onMusic = exit, onChat = onChat, chatUnread = chatUnread)
+                        if (cinema) {
+                            FilmBottomBar(
+                                page = filmPage.takeIf { routes.isEmpty() },
+                                s = s,
+                                onPage = { p ->
+                                    controller.dropPages()
+                                    if (p == filmPage) controller.movies.tab.scrollToTop.value++ else filmPage = p
+                                },
+                                onVideos = onVideos,
+                                onMusic = exit,
+                                onChat = onChat,
+                                chatUnread = chatUnread,
+                            )
+                        } else {
+                            VideoBottomBar(tab = tab.takeIf { routes.isEmpty() }, s = s, onTab = onVideoTab, onMusic = exit, onChat = onChat, chatUnread = chatUnread)
+                        }
                     }
                 }
             }
         }
-        if (searching) SearchBox(controller, s, tablet = tablet)
+        if (searching) SearchBox(controller, s, tablet = tablet, tab = tab)
         VideoSheets(controller, playback, s, onShare, onSignIn)
         val toast by controller.toast.collectAsState()
         toast?.let { msg ->
@@ -499,6 +570,7 @@ private fun VideoNavRail(
         ) {
             RailItem(s.tabHome, QMusicIcons.Home, tab == VideoTab.HOME) { onTab(VideoTab.HOME) }
             RailItem(s.shorts, VideoIcons.Shorts, tab == VideoTab.SHORTS) { onTab(VideoTab.SHORTS) }
+            RailItem(s.extras().tabMovies, VideoIcons.Film, tab == VideoTab.MOVIES) { onTab(VideoTab.MOVIES) }
             RailItem(s.tabSubscriptions, QMusicIcons.VideoPlay, tab == VideoTab.SUBSCRIPTIONS) { onTab(VideoTab.SUBSCRIPTIONS) }
             RailItem(s.tabLibrary, QMusicIcons.Library, tab == VideoTab.LIBRARY) { onTab(VideoTab.LIBRARY) }
             Spacer(Modifier.weight(1f))
@@ -574,12 +646,35 @@ private fun RailItem(
     }
 }
 
+/** The Film section's bar: its three pages, then the other sections (the same bar as everywhere in the app). */
+@Composable
+private fun FilmBottomBar(
+    page: FilmPage?,
+    s: VideoStrings,
+    onPage: (FilmPage) -> Unit,
+    onVideos: (() -> Unit)?,
+    onMusic: () -> Unit,
+    onChat: (() -> Unit)?,
+    chatUnread: Int,
+) {
+    val en = s == VideoStrings.English
+    com.qmusic.ui.components.QeyfBar(VideoColors.Background) {
+        QeyfBarItem(if (en) "Home" else "Ana sayfa", QMusicIcons.Home, page == FilmPage.HOME) { onPage(FilmPage.HOME) }
+        QeyfBarItem(if (en) "Search" else "Ara", QMusicIcons.Search, page == FilmPage.SEARCH) { onPage(FilmPage.SEARCH) }
+        QeyfBarItem(if (en) "My list" else "Listem", QMusicIcons.Library, page == FilmPage.LIBRARY) { onPage(FilmPage.LIBRARY) }
+        if (onVideos != null) QeyfBarItem("Video", QMusicIcons.VideoPlay, false, onClick = onVideos)
+        QeyfBarItem(s.backToMusic, QMusicIcons.Headphones, false, onClick = onMusic)
+        if (onChat != null) QeyfBarItem(com.qmusic.ui.chat.ChatMusic.words().messages, QMusicIcons.Chat, false, count = chatUnread, onClick = onChat)
+    }
+}
+
 @Composable
 private fun VideoBottomBar(tab: VideoTab?, s: VideoStrings, onTab: (VideoTab) -> Unit, onMusic: () -> Unit, onChat: (() -> Unit)?, chatUnread: Int) {
     // The same bar as the messages and the music, with both on it.
     com.qmusic.ui.components.QeyfBar(VideoColors.Background) {
         QeyfBarItem(s.tabHome, QMusicIcons.Home, tab == VideoTab.HOME) { onTab(VideoTab.HOME) }
         QeyfBarItem(s.shorts, VideoIcons.Shorts, tab == VideoTab.SHORTS) { onTab(VideoTab.SHORTS) }
+        QeyfBarItem(s.extras().tabMovies, VideoIcons.Film, tab == VideoTab.MOVIES) { onTab(VideoTab.MOVIES) }
         QeyfBarItem(s.tabSubscriptions, QMusicIcons.VideoPlay, tab == VideoTab.SUBSCRIPTIONS) { onTab(VideoTab.SUBSCRIPTIONS) }
         QeyfBarItem(s.tabLibrary, QMusicIcons.Library, tab == VideoTab.LIBRARY) { onTab(VideoTab.LIBRARY) }
         QeyfBarItem(s.backToMusic, QMusicIcons.Headphones, false, onClick = onMusic)
@@ -630,6 +725,7 @@ private fun TabContent(
     onAccount: () -> Unit,
     barsVisible: Boolean = true,
     tablet: Boolean = false,
+    movieSources: List<com.qmusic.ui.chat.MovieSource> = emptyList(),
 ) {
     if (tab == VideoTab.SHORTS) {
         ShortsPage(controller, playback, s, false, onPauseMusic, onShare, onSignIn)
@@ -666,6 +762,7 @@ private fun TabContent(
                 )
             }
             VideoTab.SHORTS -> Unit
+            VideoTab.MOVIES -> MoviesTab(controller, movieSources, s, tablet, onShare)
             VideoTab.SUBSCRIPTIONS -> SubscriptionsTab(controller, s, signedIn, onSignIn)
             VideoTab.LIBRARY -> LibraryTab(controller, s, signedIn, onSignIn)
         }
@@ -802,13 +899,15 @@ private fun DownloadsPage(controller: VideosController, s: VideoStrings, chips: 
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun SearchBox(controller: VideosController, s: VideoStrings, tablet: Boolean = false) {
+private fun SearchBox(controller: VideosController, s: VideoStrings, tablet: Boolean = false, tab: VideoTab? = null) {
     val query by controller.query.collectAsState()
     val suggestions by controller.suggestions.collectAsState()
     val history by controller.searchHistory.collectAsState()
     val pictures by controller.searchPictures.collectAsState()
     val mayLike by controller.mayLike.collectAsState()
     val x = s.extras()
+    val isMovies = tab == VideoTab.MOVIES
+    val movieSearchHint = if (s == VideoStrings.English) "Search movies and series…" else "Film veya dizi ara…"
     var removing by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { controller.fillSearchPictures() }
     val focus = remember { FocusRequester() }
@@ -824,7 +923,7 @@ private fun SearchBox(controller: VideosController, s: VideoStrings, tablet: Boo
                 modifier = Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(50)).background(VideoColors.Chip).padding(horizontal = 16.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
-                if (query.isEmpty()) Text(s.searchHint, color = VideoColors.TextSecondary, fontSize = 16.sp)
+                if (query.isEmpty()) Text(if (isMovies) movieSearchHint else s.searchHint, color = VideoColors.TextSecondary, fontSize = 16.sp)
                 // Opened with words in it, the cursor stands at their end, ready to change them.
                 var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(query, androidx.compose.ui.text.TextRange(query.length))) }
                 if (field.text != query) field = androidx.compose.ui.text.input.TextFieldValue(query, androidx.compose.ui.text.TextRange(query.length))
@@ -838,7 +937,9 @@ private fun SearchBox(controller: VideosController, s: VideoStrings, tablet: Boo
                     textStyle = TextStyle(color = VideoColors.Text, fontSize = 16.sp),
                     cursorBrush = SolidColor(VideoColors.Text),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { controller.submitSearch(query) }),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        if (isMovies) controller.submitMovieSearch(query) else controller.submitSearch(query)
+                    }),
                     modifier = Modifier.fillMaxWidth().focusRequester(focus),
                 )
             }
@@ -854,7 +955,12 @@ private fun SearchBox(controller: VideosController, s: VideoStrings, tablet: Boo
                 items(history, key = { "h$it" }) { text ->
                     Row(
                         modifier = Modifier.fillMaxWidth()
-                            .combinedClickable(onClick = { controller.submitSearch(text) }, onLongClick = { removing = text })
+                            .combinedClickable(
+                                onClick = {
+                                    if (isMovies) controller.submitMovieSearch(text) else controller.submitSearch(text)
+                                },
+                                onLongClick = { removing = text }
+                            )
                             .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -869,7 +975,7 @@ private fun SearchBox(controller: VideosController, s: VideoStrings, tablet: Boo
                 }
             }
             // "You may like": channels watched lately and not searched for yet.
-            if (query.isBlank() && mayLike.isNotEmpty()) {
+            if (!isMovies && query.isBlank() && mayLike.isNotEmpty()) {
                 item(key = "maylike-header") {
                     Text(
                         x.mayLike,
@@ -908,7 +1014,9 @@ private fun SearchBox(controller: VideosController, s: VideoStrings, tablet: Boo
             }
             items(if (query.isBlank()) emptyList() else suggestions) { text ->
                 Row(
-                    modifier = Modifier.fillMaxWidth().clickable { controller.submitSearch(text) }.padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        if (isMovies) controller.submitMovieSearch(text) else controller.submitSearch(text)
+                    }.padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(QMusicIcons.Search, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp))
@@ -1208,10 +1316,14 @@ private fun SettingsBody(controller: VideosController, s: VideoStrings, signedIn
     val mobile by controller.mobileQuality.collectAsState()
     val autoplay by controller.autoplay.collectAsState()
     val sponsor by controller.sponsorBlock.collectAsState()
+    val showDislikes by controller.showDislikes.collectAsState()
+    val showHeatmap by controller.showHeatmap.collectAsState()
     val x = s.extras()
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (!signedIn) Text(s.signInBody, color = VideoColors.TextSecondary, fontSize = 14.sp)
         SwitchRow(x.autoplay, null, autoplay != "0") { controller.setAutoplay(it) }
+        SwitchRow(x.showDislikes, x.showDislikesHint, showDislikes != "0") { controller.setShowDislikes(it) }
+        SwitchRow(x.showHeatmap, x.showHeatmapHint, showHeatmap != "0") { controller.setShowHeatmap(it) }
         SwitchRow(x.sponsorBlock, x.sponsorBlockHint, sponsor != "0") { controller.setSponsorBlock(it) }
         if (sponsor != "0") {
             val sponsorCats by controller.sponsorCategories.collectAsState()
@@ -1285,6 +1397,18 @@ private fun VideoSheets(controller: VideosController, playback: VideoPlayback?, 
                 SheetRow(QMusicIcons.PlaylistAdd, s.menuSave) {
                     controller.closeMenu()
                     if (!controller.openSaveSheet(item.id)) onSignIn()
+                }
+                SheetRow(QMusicIcons.Chat, com.qmusic.ui.chat.ChatMusic.words().sendToChat) {
+                    controller.closeMenu()
+                    com.qmusic.ui.chat.ChatMusic.offer(
+                        com.qmusic.ui.chat.SharedItem(
+                            com.qmusic.ui.chat.ShareKind.VIDEO,
+                            item.id,
+                            item.title,
+                            item.channelName.orEmpty(),
+                            item.thumbnail,
+                        ),
+                    )
                 }
                 SheetRow(QMusicIcons.Share, s.share) {
                     controller.closeMenu()

@@ -1137,6 +1137,215 @@ private fun AdminAnnounce(controller: ChatController, console: AdminConsole, use
     }
 }
 
+// ------------------------------------------------------------------ movie sources (live domain config)
+
+@Composable
+private fun MovieSourcesCard(controller: ChatController, console: AdminConsole) {
+    val sources by console.movieSources.collectAsState()
+    val scope = rememberCoroutineScope()
+    var editing by remember { mutableStateOf<MovieSource?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<MovieSource?>(null) }
+    var testingId by remember { mutableStateOf<String?>(null) }
+    var testNotes by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(DarkSurface)
+            .border(1.dp, Ink.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(t("Film kaynakları (Canlı domain)", "Film sources (Live domain)"), color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    t("Domain değişince buradan güncelle; tüm kullanıcılara APK güncellemeden anında yansır.", "Update domains here; every user gets them instantly without an APK update."),
+                    color = TextSecondary, fontSize = 12.sp,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Pill(t("+ Ekle", "+ Add"), primary = true) { creating = true }
+        }
+        if (sources.isEmpty()) {
+            Text(
+                t("Henüz film kaynağı tanımlı değil.", "No film sources configured yet."),
+                color = TextMuted, fontSize = 13.sp,
+            )
+        } else {
+            sources.forEach { src ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(DarkSurfaceVariant)
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(src.name, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    if (src.enabled) t("Açık", "On") else t("Kapalı", "Off"),
+                                    color = if (src.enabled) InkInverse else TextSecondary,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(if (src.enabled) Ink else DarkSurface)
+                                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                                )
+                            }
+                            Text(src.baseUrl, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Pill(if (testingId == src.id) "…" else t("Test", "Test"), primary = false) {
+                            if (testingId == null) {
+                                testingId = src.id
+                                scope.launch {
+                                    val res = com.qmusic.ui.videos.testMovieSource(src, english = ChatMusic.english)
+                                    val prefix = if (res.ok) "✓ " else "! "
+                                    testNotes = testNotes + (src.id to (prefix + res.summary))
+                                    testingId = null
+                                }
+                            }
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Pill(t("Düzenle", "Edit"), primary = false) { editing = src }
+                        Spacer(Modifier.width(6.dp))
+                        Pill(t("Sil", "Del"), primary = false) { deleting = src }
+                    }
+                    testNotes[src.id]?.let { note ->
+                        Text(note, color = if (note.startsWith("✓")) TextPrimary else TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
+                    }
+                }
+            }
+        }
+    }
+
+    val dialogSource = editing ?: if (creating) {
+        MovieSource(id = "", name = "", baseUrl = "https://", searchPath = "/?s={query}", catalogPath = "/", headers = "", enabled = true, order = sources.size)
+    } else null
+
+    if (dialogSource != null) {
+        val isNew = creating
+        var name by remember(dialogSource) { mutableStateOf(dialogSource.name) }
+        var baseUrl by remember(dialogSource) { mutableStateOf(dialogSource.baseUrl) }
+        var searchPath by remember(dialogSource) { mutableStateOf(dialogSource.searchPath) }
+        var catalogPath by remember(dialogSource) { mutableStateOf(dialogSource.catalogPath) }
+        var headers by remember(dialogSource) { mutableStateOf(dialogSource.headers) }
+        var enabled by remember(dialogSource) { mutableStateOf(dialogSource.enabled) }
+        var dialogTesting by remember(dialogSource) { mutableStateOf(false) }
+        var dialogTestNote by remember(dialogSource) { mutableStateOf<String?>(null) }
+        AlertDialog(
+            onDismissRequest = { editing = null; creating = false },
+            containerColor = DarkSurfaceVariant,
+            title = { Text(if (isNew) t("Film kaynağı ekle", "Add film source") else t("Kaynağı güncelle", "Update source"), color = TextPrimary) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Field(name, { name = it.take(60) }, t("Kaynak adı (ör. Ev Sineması)", "Source name"), capitalize = true)
+                    Field(baseUrl, { baseUrl = it.take(200); dialogTestNote = null }, t("Güncel domain (https://...)", "Current domain (https://...)"), capitalize = false)
+                    Field(searchPath, { searchPath = it.take(120) }, t("Arama yolu (ör. /?s={query})", "Search path (e.g. /?s={query})"), capitalize = false)
+                    Field(catalogPath, { catalogPath = it.take(120); dialogTestNote = null }, t("Katalog yolu (ör. / veya /filmler)", "Catalog path (e.g. / or /movies)"), capitalize = false)
+                    Field(headers, { headers = it.take(400); dialogTestNote = null }, t("Özel başlık (isteğe bağlı, Key: Value)", "Custom headers (optional, Key: Value)"), capitalize = false)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { enabled = !enabled }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(t("Kullanıcılara açık", "Visible to users"), color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                        Text(if (enabled) t("Açık", "On") else t("Kapalı", "Off"), color = if (enabled) Ink else TextMuted, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pill(if (dialogTesting) t("Test ediliyor…", "Testing…") else t("Kaynağı Test Et", "Test Source"), primary = false) {
+                            if (!dialogTesting) {
+                                dialogTesting = true
+                                dialogTestNote = null
+                                val probe = MovieSource(
+                                    id = "probe",
+                                    name = name.trim().ifEmpty { "Test" },
+                                    baseUrl = baseUrl.trim(),
+                                    searchPath = searchPath.trim().ifEmpty { "/?s={query}" },
+                                    catalogPath = catalogPath.trim().ifEmpty { "/" },
+                                    headers = headers.trim(),
+                                    enabled = true,
+                                )
+                                scope.launch {
+                                    val res = com.qmusic.ui.videos.testMovieSource(probe, english = ChatMusic.english)
+                                    dialogTestNote = (if (res.ok) "✓ " else "! ") + res.summary
+                                    dialogTesting = false
+                                }
+                            }
+                        }
+                    }
+                    dialogTestNote?.let { note ->
+                        Text(note, color = if (note.startsWith("✓")) TextPrimary else TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val slug = if (isNew) {
+                        val base = name.trim().lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').take(20)
+                        (base.ifEmpty { "src" }) + "-" + (nowMs() % 10_000L)
+                    } else {
+                        dialogSource.id
+                    }
+                    val updated = MovieSource(
+                        id = slug,
+                        name = name.trim(),
+                        baseUrl = baseUrl.trim(),
+                        searchPath = searchPath.trim().ifEmpty { "/?s={query}" },
+                        catalogPath = catalogPath.trim().ifEmpty { "/" },
+                        headers = headers.trim(),
+                        enabled = enabled,
+                        order = dialogSource.order,
+                    )
+                    scope.launch {
+                        console.saveMovieSource(updated)
+                            .onSuccess {
+                                editing = null
+                                creating = false
+                                controller.reportInfo(t("Film kaynağı kaydedildi", "Film source saved"))
+                            }
+                            .onFailure { controller.reportError(it.message ?: t("Kaydedilemedi", "Could not save")) }
+                    }
+                }) { Text(t("Kaydet", "Save"), color = Ink) }
+            },
+            dismissButton = {
+                TextButton(onClick = { editing = null; creating = false }) { Text(t("Vazgeç", "Cancel"), color = TextSecondary) }
+            },
+        )
+    }
+
+    deleting?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            containerColor = DarkSurfaceVariant,
+            title = { Text(t("Kaynak silinsin mi?", "Delete source?"), color = TextPrimary) },
+            text = { Text("${target.name} (${target.baseUrl})", color = TextSecondary) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val id = target.id
+                    deleting = null
+                    scope.launch {
+                        console.deleteMovieSource(id)
+                            .onSuccess { controller.reportInfo(t("Silindi", "Deleted")) }
+                            .onFailure { controller.reportError(it.message ?: "") }
+                    }
+                }) { Text(t("Sil", "Delete"), color = Ink) }
+            },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text(t("Vazgeç", "Cancel"), color = TextSecondary) } },
+        )
+    }
+}
+
 // ------------------------------------------------------------------ settings
 
 @Composable
@@ -1154,6 +1363,7 @@ private fun AdminSettings(controller: ChatController, console: AdminConsole) {
     LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { MaintenanceAndSpam(controller, console) }
         item { FeatureFlagsCard(controller, console) }
+        item { MovieSourcesCard(controller, console) }
         item { AdminSection(t("Zorunlu güncelleme", "Required update")) }
         item {
             Text(
@@ -1266,6 +1476,8 @@ private fun actionLabel(kind: String, value: String): String = when (kind) {
     "minVersion" -> if (value.isEmpty()) t("Zorunlu güncellemeyi kaldırdı", "Removed the required update") else t("En az sürüm: $value", "Least version: $value")
     "recVersion" -> if (value.isEmpty()) t("Önerilen sürümü kaldırdı", "Removed recommended version") else t("Önerilen sürüm: $value", "Recommended version: $value")
     "features" -> t("Özellik anahtarları: ", "Feature switches: ") + value
+    "movieSource" -> t("Film kaynağı güncellendi: ", "Updated film source: ") + value
+    "delMovieSrc" -> t("Film kaynağı silindi", "Deleted a film source")
     "delAnnounce" -> t("Duyuru sildi", "Deleted an announcement")
     "backupNow" -> t("Anlık yedek aldı", "Took a backup")
     "gcMedia" -> t("Artık medyayı temizledi", "Cleaned orphan media")

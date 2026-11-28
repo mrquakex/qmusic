@@ -61,9 +61,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
@@ -78,6 +80,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.qmusic.engine.models.PreviewFrames
+import com.qmusic.engine.video.VideoHeatMarker
 import com.qmusic.ui.theme.QMusicIcons
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -104,7 +107,25 @@ object VideoIcons {
     val Shorts: ImageVector = stroked("Shorts", "M8 3h8a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z", "M10.5 9.5v5l4-2.5z")
     val Lock: ImageVector = stroked("Lock", "M6 11h12v9H6z", "M8.5 11V8a3.5 3.5 0 0 1 7 0v3")
     val Unlock: ImageVector = stroked("Unlock", "M6 11h12v9H6z", "M8.5 11V8a3.5 3.5 0 0 1 6.8-1.2")
+    val ThumbDown: ImageVector = stroked(
+        "ThumbDown",
+        "M17 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-3z",
+        "M17 14l-4 7a1.8 1.8 0 0 1-3-1.4L11 14H5.2a2 2 0 0 1-1.95-2.45l1.35-6A2 2 0 0 1 6.55 4H17",
+    )
+    val Film: ImageVector = stroked(
+        "Film",
+        "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z",
+        "M8 5v14M16 5v14M3 9.5h5M3 14.5h5M16 9.5h5M16 14.5h5",
+    )
 }
+
+/** Subtitle sizes offered in the settings sheet: multiple of the default, Turkish and English names. */
+private val CAPTION_SIZES = listOf(
+    Triple(0.8f, "Küçük", "Small"),
+    Triple(1f, "Orta", "Medium"),
+    Triple(1.3f, "Büyük", "Large"),
+    Triple(1.6f, "Çok büyük", "Extra large"),
+)
 
 private val SPEEDS = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
 private const val HIDE_CONTROLS_MS = 3_000L
@@ -203,6 +224,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
     val x = s.extras()
     val autoplay by controller.autoplay.collectAsState()
     val sleep by controller.sleep.collectAsState()
+    val captionSize by controller.captionSize.collectAsState()
     val skipTick by controller.skipTick.collectAsState()
     val lastSkipped by controller.lastSkipped.collectAsState()
     val preview by controller.preview.collectAsState()
@@ -549,7 +571,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                 ) {
                     Icon(if (isPlaying) QMusicIcons.Pause else QMusicIcons.Play, contentDescription = if (isPlaying) com.qmusic.ui.A11y.pause else com.qmusic.ui.A11y.play, tint = Color.White, modifier = Modifier.size(38.dp))
                 }
-                val hasNext = w.related.isNotEmpty() || w.queue.size > w.queueIndex + 1
+                val hasNext = controller.hasNextWatchItem(w)
                 IconButton(onClick = { controller.playNext() }, enabled = hasNext, modifier = Modifier.size(48.dp)) {
                     Icon(QMusicIcons.Next, contentDescription = com.qmusic.ui.A11y.next, tint = Color.White.copy(alpha = if (hasNext) 1f else 0.35f), modifier = Modifier.size(30.dp))
                 }
@@ -572,6 +594,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                     }
                 }
                 if (!live && !starting) {
+                    val showHeatmap by controller.showHeatmap.collectAsState()
                     SeekBar(
                         position = position,
                         duration = duration,
@@ -580,6 +603,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                         onSeek = { playback.seekTo(it) },
                         chapters = chapters.map { it.timeMs },
                         segments = segments,
+                        heatmap = if (showHeatmap != "0") w.details?.heatmap.orEmpty() else emptyList(),
                         preview = preview,
                         modifier = Modifier.padding(horizontal = 12.dp),
                         accent = accent,
@@ -596,7 +620,14 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
         }
 
         // Ten seconds before the end: the next video, counting down (autoplay), whether the controls show or not.
-        val next = remember(w.video.id, w.related, w.queue) { controller.nextUp() }
+        val next = remember(
+            w.video.id,
+            w.related,
+            w.queue,
+            w.movieEpisodesBySeason,
+            w.movieActiveEpisodeUrl,
+            w.relatedMovies,
+        ) { controller.nextUp() }
         val left = duration - position
         if (next != null && !live && autoplay != "0" && cancelled != w.video.id && sleep.mode != SleepMode.VIDEO_END &&
             duration > UP_NEXT_MS * 2 && left in 1..UP_NEXT_MS && scrubbing == null && swipeTarget == null
@@ -614,7 +645,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
         // that come after it.
         val goesOn = next != null && autoplay != "0" && cancelled != w.video.id && sleep.mode != SleepMode.VIDEO_END
         if (ended && !live && !goesOn && swipeTarget == null) {
-            val after = remember(w.video.id, w.related, w.queue) {
+            val after = remember(w.video.id, w.related, w.queue, next) {
                 (listOfNotNull(next) + w.related.mapNotNull { (it as? com.qmusic.engine.video.VideoEntry.Video)?.item }).distinctBy { it.id }.filter { it.id != w.video.id }.take(4)
             }
             EndScreen(
@@ -624,7 +655,13 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                     playback.seekTo(0)
                     if (!playback.isPlaying.value) playback.togglePlay()
                 },
-                onOpen = { controller.open(it) },
+                onOpen = { picked ->
+                    if (picked.id == next?.id && isExternalVideoId(picked.id)) {
+                        controller.playNext()
+                    } else {
+                        controller.open(picked)
+                    }
+                },
                 compact = !fullscreen,
             )
         }
@@ -680,6 +717,12 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                         }
                         items(manual + auto) { track ->
                             LabelChip(if (track.auto) "${track.label} (auto)" else track.label, track == w.caption) { controller.selectCaption(track) }
+                        }
+                    }
+                    val englishSizes = s == VideoStrings.English
+                    SheetSection(if (englishSizes) "Subtitle size" else "Altyazı boyutu") {
+                        items(CAPTION_SIZES) { (value, tr, en) ->
+                            LabelChip(if (englishSizes) en else tr, captionSize.toFloatOrNull() == value) { controller.setCaptionSize(value) }
                         }
                     }
                 }
@@ -974,6 +1017,7 @@ internal fun SeekBar(
     modifier: Modifier = Modifier,
     chapters: List<Long> = emptyList(),
     segments: List<SkipSegment> = emptyList(),
+    heatmap: List<VideoHeatMarker> = emptyList(),
     preview: PreviewFrames? = null,
     /** The video's own colour for the played part (null: Qeyf's orange to pink). */
     accent: Color? = null,
@@ -981,13 +1025,14 @@ internal fun SeekBar(
     val total = duration.coerceAtLeast(1L).toFloat()
     val fraction = ((scrubbing ?: position.toFloat()) / total).coerceIn(0f, 1f)
     val current by rememberUpdatedState(scrubbing)
+    val hasHeatmap = heatmap.size >= 3 && duration > 0L
     val thickness by animateDpAsState(if (scrubbing != null) 6.dp else 3.dp, label = "seekThickness")
     val knob by animateDpAsState(if (scrubbing != null) 9.dp else 6.dp, label = "seekKnob")
     var widthPx by remember { mutableStateOf(0f) }
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(28.dp)
+            .height(if (hasHeatmap) 42.dp else 28.dp)
             .onSizeChanged { widthPx = it.width.toFloat() }
             .pointerInput(total) { detectTapGestures { o -> onSeek(((o.x / size.width) * total).toLong()) } }
             .pointerInput(total) {
@@ -1009,12 +1054,58 @@ internal fun SeekBar(
             preview.frameAt(scrubbing.toLong())?.let { frame -> SeekPreview(preview, frame, clock(scrubbing.toLong()), fraction, widthPx) }
         }
         Canvas(Modifier.fillMaxSize()) {
-            val y = size.height / 2
             val h = thickness.toPx()
+            val y = if (hasHeatmap) size.height - 11.dp.toPx() else size.height / 2
             val r = CornerRadius(h / 2)
             val gap = 2.dp.toPx()
             val played = size.width * fraction
             val brush = accentBrush(size.width, accent)
+
+            // "Most replayed" intensity wave rising gently above the progress track.
+            if (hasHeatmap) {
+                val baseY = y - h / 2 - 2.dp.toPx()
+                val maxWaveHeight = (baseY - 2.dp.toPx()).coerceAtLeast(6.dp.toPx())
+                val pts = heatmap.map { marker ->
+                    val centerMs = marker.startMs + marker.durationMs / 2L
+                    val x = (centerMs.toFloat() / total * size.width).coerceIn(0f, size.width)
+                    val py = baseY - (marker.intensity.coerceIn(0f, 1f) * maxWaveHeight)
+                    Offset(x, py)
+                }
+                if (pts.size >= 3) {
+                    val strokePath = Path().apply {
+                        moveTo(0f, baseY)
+                        lineTo(pts.first().x, pts.first().y)
+                        for (i in 0 until pts.lastIndex) {
+                            val p0 = pts[i]
+                            val p1 = pts[i + 1]
+                            val midX = (p0.x + p1.x) / 2f
+                            cubicTo(midX, p0.y, midX, p1.y, p1.x, p1.y)
+                        }
+                        lineTo(size.width, baseY)
+                    }
+                    val fillPath = Path().apply {
+                        addPath(strokePath)
+                        close()
+                    }
+                    val fillAlpha = if (scrubbing != null) 0.34f else 0.18f
+                    val lineAlpha = if (scrubbing != null) 0.68f else 0.34f
+                    drawPath(
+                        path = fillPath,
+                        brush = Brush.verticalGradient(
+                            0f to Color.White.copy(alpha = fillAlpha),
+                            1f to Color.White.copy(alpha = 0.03f),
+                            startY = baseY - maxWaveHeight,
+                            endY = baseY,
+                        ),
+                    )
+                    drawPath(
+                        path = strokePath,
+                        color = Color.White.copy(alpha = lineAlpha),
+                        style = Stroke(width = 1.1.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                    )
+                }
+            }
+
             // The track in pieces, one per chapter, with a small gap between them.
             val cuts = chapters.filter { it in 1 until duration }.sorted().map { it / total * size.width }
             var start = 0f

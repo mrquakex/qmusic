@@ -170,6 +170,7 @@ private fun ShortItem(
     // Watching a Short counts too (history, how long): YouTube's suggestions learn from Shorts as well.
     if (active) ReportWatching(controller, item.id, playback)
 
+    val x = s.extras()
     val actionsColumn: @Composable (Modifier) -> Unit = { colMod ->
         Column(
             modifier = colMod,
@@ -180,6 +181,18 @@ private fun ShortItem(
                 if (!controller.toggleLikeId(item.id)) onSignIn()
             }
             ShortAction(VideoIcons.Comment, s.comments) { controller.openShortComments(item) }
+            ShortAction(QMusicIcons.Chat, x.chatShort) {
+                com.qmusic.ui.chat.ChatMusic.offer(
+                    com.qmusic.ui.chat.SharedItem(
+                        com.qmusic.ui.chat.ShareKind.VIDEO,
+                        item.id,
+                        item.title,
+                        item.channelName.orEmpty(),
+                        item.thumbnail,
+                        startMs = if (position > 3_000L) position else 0L,
+                    ),
+                )
+            }
             ShortAction(QMusicIcons.Share, s.share) { onShare("https://youtube.com/shorts/${item.id}") }
         }
     }
