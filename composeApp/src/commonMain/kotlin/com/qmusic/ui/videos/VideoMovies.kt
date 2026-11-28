@@ -302,17 +302,47 @@ internal fun MoviesTab(
         }
     }
 
-    /** Plays [card]: it goes first in the recently watched row, and starts where it was left. */
-    fun watch(card: MovieCard, resolved: ResolvedMovieStream? = null) {
-        val title = resolved?.title?.takeIf { it.isNotBlank() } ?: card.title
+    /** Plays [card] (or a picked [episode] on a series): goes first in history, starts where it was left. */
+    fun watch(
+        card: MovieCard,
+        resolved: ResolvedMovieStream? = null,
+        episode: MovieEpisode? = null,
+        episodesBySeason: Map<Int, List<MovieEpisode>> = emptyMap(),
+        relatedMovies: List<MovieCard> = emptyList(),
+    ) {
+        val baseTitle = MovieHtmlParser.cleanMovieTitle(resolved?.title)?.takeIf { it.isNotBlank() } ?: card.title
+        val picked = episode ?: resolved?.activeEpisodeUrl?.let { activeUrl ->
+            resolved.episodes.firstOrNull { it.pageUrl == activeUrl }
+                ?: episodesBySeason.values.flatten().firstOrNull { it.pageUrl == activeUrl }
+        }
+        val playUrl = picked?.pageUrl ?: resolved?.activeEpisodeUrl ?: card.pageUrl
+        val playTitle = if (picked != null) "$baseTitle · ${picked.season}. Sezon ${picked.episode}. Bölüm" else baseTitle
         val poster = card.poster ?: resolved?.poster
-        library.recordWatched(card.copy(title = title, poster = poster))
+        val mergedBySeason = LinkedHashMap<Int, List<MovieEpisode>>(episodesBySeason)
+        resolved?.episodes?.groupBy { it.season }?.forEach { (sn, list) ->
+            if (list.isNotEmpty() && mergedBySeason[sn].isNullOrEmpty()) mergedBySeason[sn] = list
+        }
+        val seasons = (resolved?.seasons.orEmpty() + mergedBySeason.keys).distinct().sorted()
+        val ctx = MovieWatchContext(
+            seriesUrl = resolved?.seriesUrl ?: card.pageUrl,
+            seriesTitle = baseTitle,
+            tvshowId = resolved?.tvshowId,
+            year = card.year ?: resolved?.year,
+            rating = card.rating ?: resolved?.rating,
+            seasons = seasons,
+            selectedSeason = picked?.season ?: seasons.firstOrNull(),
+            episodesBySeason = mergedBySeason,
+            activeEpisodeUrl = playUrl.takeIf { seasons.isNotEmpty() || mergedBySeason.isNotEmpty() },
+            relatedMovies = relatedMovies.take(12),
+        )
+        library.recordWatched(card.copy(title = baseTitle, poster = poster))
         controller.openExternalUrl(
-            rawUrl = card.pageUrl,
-            title = title,
+            rawUrl = playUrl,
+            title = playTitle,
             sourceName = card.sourceName,
             poster = poster,
             headers = card.headers,
+            context = ctx,
         )
     }
 
@@ -1081,15 +1111,23 @@ internal fun MoviesTab(
             resolve = { library.resolve(card.pageUrl, card.headers) },
             inList = myList.any { it.pageUrl == card.pageUrl },
             onToggleList = { library.toggleFavorite(card) },
-            onRestart = { controller.forgetResume(externalVideoId(card.pageUrl)) },
+            onRestart = { epUrl ->
+                controller.forgetResume(externalVideoId(card.pageUrl))
+                epUrl?.let { controller.forgetResume(externalVideoId(it)) }
+            },
             onDismiss = { selectedCard = null },
-            onWatch = { resolved ->
+            onWatch = { resolved, bySeason ->
                 selectedCard = null
-                watch(card, resolved)
+                watch(card, resolved, episodesBySeason = bySeason, relatedMovies = similar.first)
+            },
+            onWatchEpisode = { episode, resolved, bySeason ->
+                selectedCard = null
+                watch(card, resolved, episode, episodesBySeason = bySeason, relatedMovies = similar.first)
             },
             onWatchTogether = { resolved ->
                 selectedCard = null
-                sharedItemForUrl(card.pageUrl, resolved?.title ?: card.title, card.sourceName, card.poster ?: resolved?.poster)?.let {
+                val targetUrl = resolved?.activeEpisodeUrl ?: card.pageUrl
+                sharedItemForUrl(targetUrl, resolved?.title ?: card.title, card.sourceName, card.poster ?: resolved?.poster)?.let {
                     ChatMusic.offerTogether(it)
                 }
             },
@@ -1118,18 +1156,23 @@ private fun MovieDetailSheet(
     togetherLabel: String,
     shareLabel: String,
     onDismiss: () -> Unit,
-    onWatch: (ResolvedMovieStream?) -> Unit,
+    onWatch: (ResolvedMovieStream?, Map<Int, List<MovieEpisode>>) -> Unit,
+    onWatchEpisode: (MovieEpisode, ResolvedMovieStream?, Map<Int, List<MovieEpisode>>) -> Unit,
     onWatchTogether: (ResolvedMovieStream?) -> Unit,
     onShare: () -> Unit,
     resolve: suspend () -> Result<ResolvedMovieStream>,
     inList: Boolean,
     onToggleList: () -> Unit,
-    onRestart: () -> Unit,
+    onRestart: (String?) -> Unit,
 ) {
     fun tr(en: String, tr: String) = if (english) en else tr
+    val scope = rememberCoroutineScope()
     var resolved by remember(card.pageUrl) { mutableStateOf<ResolvedMovieStream?>(null) }
     var resolving by remember(card.pageUrl) { mutableStateOf(true) }
     var resolveErr by remember(card.pageUrl) { mutableStateOf<String?>(null) }
+    var selectedSeason by remember(card.pageUrl) { mutableStateOf<Int?>(null) }
+    var seasonEpisodes by remember(card.pageUrl) { mutableStateOf<Map<Int, List<MovieEpisode>>>(emptyMap()) }
+    var loadingSeason by remember(card.pageUrl) { mutableStateOf<Int?>(null) }
     LaunchedEffect(card.pageUrl) {
         resolving = true
         resolveErr = null
@@ -1137,6 +1180,13 @@ private fun MovieDetailSheet(
         resolve().fold(
             onSuccess = {
                 resolved = it
+                if (it.episodes.isNotEmpty()) {
+                    val grouped = it.episodes.groupBy { ep -> ep.season }
+                    seasonEpisodes = grouped
+                    selectedSeason = it.seasons.firstOrNull() ?: grouped.keys.minOrNull()
+                } else if (it.seasons.isNotEmpty()) {
+                    selectedSeason = it.seasons.first()
+                }
                 if (it.streams.isEmpty()) {
                     resolveErr = tr("No playable video was found on this page.", "Bu sayfada oynatılabilir video bulunamadı.")
                 }
@@ -1149,8 +1199,8 @@ private fun MovieDetailSheet(
         )
     }
     val positions by VideoResume.positions.collectAsState()
-    val resumeMs = positions[externalVideoId(card.pageUrl)] ?: 0L
     val r = resolved
+    val resumeMs = (r?.activeEpisodeUrl?.let { positions[externalVideoId(it)] } ?: positions[externalVideoId(card.pageUrl)]) ?: 0L
     val title = r?.title?.takeIf { it.isNotBlank() } ?: card.title
     val poster = card.poster ?: r?.poster
     val rating = card.rating ?: r?.rating
@@ -1330,7 +1380,7 @@ private fun MovieDetailSheet(
                         primary = true,
                         height = 52.dp,
                         modifier = Modifier.fillMaxWidth(),
-                    ) { onWatch(r) }
+                    ) { onWatch(r, seasonEpisodes) }
                     if (resumeMs > 0L) {
                         Text(
                             tr("Start from the beginning", "Baştan izle"),
@@ -1342,8 +1392,8 @@ private fun MovieDetailSheet(
                                 .fillMaxWidth()
                                 .clip(QMusicShapes.small)
                                 .clickable {
-                                    onRestart()
-                                    onWatch(r)
+                                    onRestart(r?.activeEpisodeUrl)
+                                    onWatch(r, seasonEpisodes)
                                 }
                                 .padding(vertical = 8.dp),
                         )
@@ -1368,6 +1418,88 @@ private fun MovieDetailSheet(
                         primary = false,
                         modifier = Modifier.fillMaxWidth(),
                     ) { onShare() }
+                }
+
+                val seasons = r?.seasons.orEmpty()
+                val activeSeason = selectedSeason ?: seasons.firstOrNull() ?: r?.episodes?.firstOrNull()?.season ?: 1
+                val activeEpisodes = seasonEpisodes[activeSeason]
+                    ?: r?.episodes?.filter { it.season == activeSeason }.orEmpty()
+                if (seasons.isNotEmpty() || activeEpisodes.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        SectionCaption(tr("EPISODES", "BÖLÜMLER"))
+                        if (seasons.size > 1) {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(seasons, key = { "season-$it" }) { sn ->
+                                    CinemaPill(
+                                        text = tr("Season $sn", "$sn. Sezon"),
+                                        selected = sn == activeSeason,
+                                    ) {
+                                        selectedSeason = sn
+                                        val tvId = r?.tvshowId
+                                        if (tvId != null && seasonEpisodes[sn] == null && loadingSeason != sn) {
+                                            loadingSeason = sn
+                                            scope.launch {
+                                                fetchSeriesSeasonEpisodes(card.pageUrl, tvId, sn, card.headers).onSuccess { eps ->
+                                                    if (eps.isNotEmpty()) seasonEpisodes = seasonEpisodes + (sn to eps)
+                                                }
+                                                if (loadingSeason == sn) loadingSeason = null
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        when {
+                            loadingSeason == activeSeason -> Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.padding(vertical = 8.dp),
+                            ) {
+                                CircularProgressIndicator(color = Ink, strokeWidth = 1.6.dp, modifier = Modifier.size(16.dp))
+                                Text(tr("Loading episodes…", "Bölümler yükleniyor…"), color = VideoColors.TextSecondary, fontSize = 12.sp)
+                            }
+                            activeEpisodes.isNotEmpty() -> LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                items(activeEpisodes, key = { "ep-${it.pageUrl}" }) { ep ->
+                                    val epShape = QMusicShapes.medium
+                                    val isCurrent = r?.activeEpisodeUrl == ep.pageUrl
+                                    Column(
+                                        modifier = Modifier
+                                            .width(156.dp)
+                                            .pressScale(0.97f)
+                                            .clip(epShape)
+                                            .background(VideoColors.Surface)
+                                            .border(0.5.dp, if (isCurrent) BorderHover else BorderSubtle, epShape)
+                                            .clickable { onWatchEpisode(ep, r, seasonEpisodes) }
+                                            .padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Text(
+                                                tr("Ep ${ep.episode}", "${ep.episode}. Bölüm"),
+                                                color = VideoColors.Text,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                            )
+                                            ep.runtime?.let { rt ->
+                                                Text(rt, color = VideoColors.TextSecondary, fontSize = 11.sp, maxLines = 1)
+                                            }
+                                            Spacer(Modifier.weight(1f))
+                                            Icon(QMusicIcons.Play, null, tint = VideoColors.Text, modifier = Modifier.size(14.dp))
+                                        }
+                                        Text(
+                                            ep.title,
+                                            color = VideoColors.TextSecondary,
+                                            fontSize = 12.sp,
+                                            lineHeight = 16.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 if (similar.isNotEmpty()) {

@@ -76,8 +76,35 @@ internal class FirebaseAdminConsole(app: Context, private val root: DatabaseRefe
                     enabled = c.child("enabled").getValue(Boolean::class.java) != false,
                     order = c.child("order").getValue(Long::class.java)?.toInt() ?: 0,
                 )
+            }?.map { src ->
+                val isLegacyHdfc = (src.id.equals("hdfilmcehennemi", ignoreCase = true) ||
+                    src.baseUrl.contains("hdfilmcehennemi", ignoreCase = true)) &&
+                    !src.baseUrl.contains("hdfilmcehennemi.vip", ignoreCase = true)
+                if (isLegacyHdfc) {
+                    val isDeadDomain = listOf(".life", ".nl", ".la", ".io", ".ws", ".rest", ".com", ".net", ".org")
+                        .any { src.baseUrl.contains(it, ignoreCase = true) }
+                    if (isDeadDomain || !src.enabled) {
+                        src.copy(
+                            baseUrl = "https://hdfilmcehennemi.vip",
+                            searchPath = "/api/search?q={query}",
+                            enabled = true,
+                        )
+                    } else {
+                        src
+                    }
+                } else {
+                    src
+                }
             }?.sortedWith(compareBy<MovieSource> { it.order }.thenBy { it.name.lowercase() }).orEmpty()
-            _movieSources.value = if (list.isEmpty()) DEFAULT_MOVIE_SOURCES else list
+            val merged = if (list.isEmpty()) {
+                DEFAULT_MOVIE_SOURCES
+            } else {
+                val extra = DEFAULT_MOVIE_SOURCES.filter { def ->
+                    list.none { it.id.equals(def.id, ignoreCase = true) || it.baseUrl.contains(def.id, ignoreCase = true) }
+                }
+                (list + extra).sortedWith(compareBy<MovieSource> { it.order }.thenBy { it.name.lowercase() })
+            }
+            _movieSources.value = merged
         })
         root.child("appConfig").child("maintenance").addValueEventListener(listener { s ->
             _maintenance.value = Maintenance(

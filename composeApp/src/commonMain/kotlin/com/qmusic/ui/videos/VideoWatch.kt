@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -656,7 +657,16 @@ private fun WatchDetails(
         item(key = "title") {
             Column(modifier = Modifier.fillMaxWidth().clickable { descriptionOpen = !descriptionOpen }.padding(horizontal = sidePad, vertical = 12.dp)) {
                 Text(title, color = VideoColors.Text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, lineHeight = 24.sp, maxLines = if (descriptionOpen) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
-                val meta = listOfNotNull(details?.views ?: w.video.views, details?.date ?: w.video.published).joinToString(" · ")
+                val ytMeta = listOfNotNull(details?.views ?: w.video.views, details?.date ?: w.video.published)
+                val movieMeta = if (isExternalVideoId(w.video.id)) {
+                    val seasonCount = w.movieSeasons.ifEmpty { w.movieEpisodesBySeason.keys.sorted() }.size
+                    listOfNotNull(
+                        w.movieRating?.let { "IMDb $it" },
+                        w.movieYear,
+                        if (seasonCount > 0) if (s == VideoStrings.English) "$seasonCount Seasons" else "$seasonCount Sezon" else null,
+                    )
+                } else emptyList()
+                val meta = (ytMeta.ifEmpty { movieMeta }).joinToString(" · ")
                 Row(modifier = Modifier.padding(top = 4.dp)) {
                     Text(meta, color = VideoColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.weight(1f))
                     Text(if (descriptionOpen) s.showLess else s.showMore, color = VideoColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -891,6 +901,8 @@ private fun WatchDetails(
             }
         } else if (showRelated && !isExternalVideoId(w.video.id)) {
             relatedItems(controller, w, s)
+        } else if (isExternalVideoId(w.video.id)) {
+            movieWatchSections(controller, w, s, sidePad, includeRelated = showRelated)
         }
     }
     if (downloadPicker) {
@@ -1056,6 +1068,12 @@ private fun TabletSidePanel(
         }
     }
 
+    if (isExternalVideoId(w.video.id)) {
+        LazyColumn(modifier = modifier.fillMaxSize()) {
+            movieWatchSections(controller, w, s, sidePad = 12.dp, includeRelated = true)
+        }
+        return
+    }
     Column(modifier = modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
@@ -1148,6 +1166,324 @@ private fun LazyListScope.relatedItems(controller: VideosController, w: WatchSta
             is VideoEntry.Channel -> ChannelResultRow(e.item) { controller.push(VideoRoute.Channel(e.item.id, e.item.name)) }
             is VideoEntry.Playlist -> PlaylistResultRow(e.item, s) { controller.push(VideoRoute.Playlist(e.item.id, e.item.title)) }
         }
+    }
+}
+
+/**
+ * Series seasons, interactive episode list, prev/next episode controls, and related cinema items
+ * shown inside [WatchDetails] and [TabletSidePanel] so watching a TV series or movie never leaves a void.
+ */
+private fun LazyListScope.movieWatchSections(
+    controller: VideosController,
+    w: WatchState,
+    s: VideoStrings,
+    sidePad: androidx.compose.ui.unit.Dp,
+    includeRelated: Boolean,
+) {
+    val english = s == VideoStrings.English
+    fun tr(en: String, tr: String) = if (english) en else tr
+    val seasons = w.movieSeasons.ifEmpty { w.movieEpisodesBySeason.keys.sorted() }
+    val activeSeason = w.movieSelectedSeason ?: seasons.firstOrNull() ?: 1
+    val episodes = w.movieEpisodesBySeason[activeSeason].orEmpty()
+    val (prevEp, nextEp) = controller.adjacentMovieEpisodes(w)
+    val activeEpUrl = w.movieActiveEpisodeUrl ?: externalUrlOf(w.video.id)
+
+    if (prevEp != null || nextEp != null) {
+        item(key = "movie-ep-nav") {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = sidePad, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                @Composable
+                fun NavButton(label: String, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+                    Box(
+                        modifier = modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(VideoColors.Surface)
+                            .border(
+                                0.5.dp,
+                                if (enabled) com.qmusic.ui.theme.BorderHover else com.qmusic.ui.theme.BorderSubtle,
+                                RoundedCornerShape(12.dp),
+                            )
+                            .clickable(enabled = enabled, onClick = onClick)
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            label,
+                            color = if (enabled) VideoColors.Text else VideoColors.TextSecondary.copy(alpha = 0.45f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                NavButton(
+                    label = prevEp?.let { tr("‹ S${it.season}·E${it.episode}", "‹ Önceki (${it.season}S ${it.episode}B)") }
+                        ?: tr("‹ Previous", "‹ Önceki Bölüm"),
+                    enabled = prevEp != null,
+                    modifier = Modifier.weight(1f),
+                    onClick = { prevEp?.let { controller.watchMovieEpisode(it) } },
+                )
+                NavButton(
+                    label = nextEp?.let { tr("S${it.season}·E${it.episode} ›", "Sonraki (${it.season}S ${it.episode}B) ›") }
+                        ?: tr("Next ›", "Sonraki Bölüm ›"),
+                    enabled = nextEp != null,
+                    modifier = Modifier.weight(1f),
+                    onClick = { nextEp?.let { controller.watchMovieEpisode(it) } },
+                )
+            }
+        }
+    }
+
+    if (seasons.isNotEmpty() || episodes.isNotEmpty()) {
+        item(key = "movie-episodes-header") {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = sidePad, end = sidePad, top = 10.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    tr("Episodes", "Bölümler"),
+                    color = VideoColors.Text,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                val countLabel = if (episodes.isNotEmpty()) {
+                    tr("${episodes.size} episodes", "${episodes.size} bölüm")
+                } else {
+                    tr("${seasons.size} seasons", "${seasons.size} sezon")
+                }
+                Text(countLabel, color = VideoColors.TextSecondary, fontSize = 12.sp)
+            }
+        }
+        if (seasons.size > 1) {
+            item(key = "movie-seasons-row") {
+                androidx.compose.foundation.lazy.LazyRow(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = sidePad),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(seasons.size, key = { "watch-season-${seasons[it]}" }) { idx ->
+                        val sn = seasons[idx]
+                        val selected = sn == activeSeason
+                        Text(
+                            text = tr("Season $sn", "$sn. Sezon"),
+                            color = if (selected) VideoColors.OnChipSelected else VideoColors.Text,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(if (selected) VideoColors.ChipSelected else VideoColors.Chip)
+                                .border(
+                                    0.5.dp,
+                                    if (selected) VideoColors.ChipSelected else com.qmusic.ui.theme.BorderSubtle,
+                                    RoundedCornerShape(50),
+                                )
+                                .clickable { controller.selectWatchSeason(sn) }
+                                .padding(horizontal = 14.dp, vertical = 7.dp),
+                        )
+                    }
+                }
+            }
+        }
+        if (w.movieSeasonLoading == activeSeason) {
+            item(key = "movie-season-loading") {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = sidePad, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        color = com.qmusic.ui.theme.Ink,
+                        strokeWidth = 1.6.dp,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text(
+                        tr("Loading episodes…", "Bölümler yükleniyor…"),
+                        color = VideoColors.TextSecondary,
+                        fontSize = 13.sp,
+                    )
+                }
+            }
+        } else if (episodes.isNotEmpty()) {
+            items(episodes.size, key = { idx -> "watch-ep-${episodes[idx].pageUrl}" }) { idx ->
+                val ep = episodes[idx]
+                val isCurrent = activeEpUrl != null && ep.pageUrl.equals(activeEpUrl, ignoreCase = true)
+                val shape = RoundedCornerShape(12.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = sidePad, vertical = 4.dp)
+                        .clip(shape)
+                        .background(if (isCurrent) VideoColors.Chip else VideoColors.Surface)
+                        .border(
+                            width = if (isCurrent) 1.dp else 0.5.dp,
+                            color = if (isCurrent) com.qmusic.ui.theme.BorderHover else com.qmusic.ui.theme.BorderSubtle,
+                            shape = shape,
+                        )
+                        .clickable { controller.watchMovieEpisode(ep) }
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (ep.poster != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(width = 104.dp, height = 58.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(VideoColors.Background),
+                        ) {
+                            AsyncImage(
+                                model = ep.poster,
+                                contentDescription = ep.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                            Text(
+                                "${ep.episode}",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(4.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color.Black.copy(alpha = 0.72f))
+                                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                            )
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(width = 44.dp, height = 44.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isCurrent) VideoColors.ChipSelected else VideoColors.Chip),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "${ep.episode}",
+                                color = if (isCurrent) VideoColors.OnChipSelected else VideoColors.Text,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                tr("Episode ${ep.episode}", "${ep.episode}. Bölüm"),
+                                color = if (isCurrent) VideoColors.Text else VideoColors.TextSecondary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            ep.runtime?.let { rt ->
+                                Text("· $rt", color = VideoColors.TextSecondary, fontSize = 11.sp, maxLines = 1)
+                            }
+                            if (isCurrent) {
+                                Text(
+                                    tr("Now playing", "Oynatılıyor"),
+                                    color = VideoColors.OnChipSelected,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(VideoColors.ChipSelected)
+                                        .padding(horizontal = 6.dp, vertical = 1.dp),
+                                )
+                            }
+                        }
+                        Text(
+                            ep.title,
+                            color = VideoColors.Text,
+                            fontSize = 13.sp,
+                            fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Medium,
+                            lineHeight = 18.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Icon(
+                        QMusicIcons.Play,
+                        contentDescription = null,
+                        tint = if (isCurrent) VideoColors.Text else VideoColors.TextSecondary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+
+    if (includeRelated && w.relatedMovies.isNotEmpty()) {
+        item(key = "movie-related-header") {
+            Text(
+                tr("More like this", "Bunlara da bak"),
+                color = VideoColors.Text,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = sidePad, end = sidePad, top = 14.dp, bottom = 6.dp),
+            )
+        }
+        items(w.relatedMovies.size, key = { idx -> "watch-rel-${w.relatedMovies[idx].pageUrl}" }) { idx ->
+            val card = w.relatedMovies[idx]
+            val shape = RoundedCornerShape(12.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = sidePad, vertical = 4.dp)
+                    .clip(shape)
+                    .background(VideoColors.Surface)
+                    .border(0.5.dp, com.qmusic.ui.theme.BorderSubtle, shape)
+                    .clickable { controller.watchRelatedMovie(card) }
+                    .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 52.dp, height = 74.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(VideoColors.Chip),
+                ) {
+                    if (card.poster != null) {
+                        AsyncImage(
+                            model = card.poster,
+                            contentDescription = card.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(VideoIcons.Film, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        card.title,
+                        color = VideoColors.Text,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val meta = listOfNotNull(
+                        card.rating?.let { "IMDb $it" },
+                        card.year,
+                        card.sourceName.takeIf { it.isNotBlank() },
+                    ).joinToString(" · ")
+                    if (meta.isNotEmpty()) {
+                        Text(meta, color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Icon(QMusicIcons.Play, contentDescription = null, tint = VideoColors.TextSecondary, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+
+    item(key = "movie-bottom-pad") {
+        Spacer(Modifier.height(24.dp))
     }
 }
 

@@ -259,8 +259,13 @@ internal class MovieLibrary(private val settings: AppSettings, private val scope
             scope.async {
                 resolveExternalMovie(url, headers).onSuccess { r ->
                     if (r.streams.isEmpty()) return@onSuccess
+                    val entry = StreamEntry(TimeSource.Monotonic.markNow(), r)
                     streams.remove(url)
-                    streams[url] = StreamEntry(TimeSource.Monotonic.markNow(), r)
+                    streams[url] = entry
+                    r.activeEpisodeUrl?.takeIf { it != url }?.let { epUrl ->
+                        streams.remove(epUrl)
+                        streams[epUrl] = entry
+                    }
                     while (streams.size > STREAMS_KEPT) streams.remove(streams.keys.first())
                 }
             }.also { it.invokeOnCompletion { streamsLoading.remove(url) } }

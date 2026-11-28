@@ -571,7 +571,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                 ) {
                     Icon(if (isPlaying) QMusicIcons.Pause else QMusicIcons.Play, contentDescription = if (isPlaying) com.qmusic.ui.A11y.pause else com.qmusic.ui.A11y.play, tint = Color.White, modifier = Modifier.size(38.dp))
                 }
-                val hasNext = w.related.isNotEmpty() || w.queue.size > w.queueIndex + 1
+                val hasNext = controller.hasNextWatchItem(w)
                 IconButton(onClick = { controller.playNext() }, enabled = hasNext, modifier = Modifier.size(48.dp)) {
                     Icon(QMusicIcons.Next, contentDescription = com.qmusic.ui.A11y.next, tint = Color.White.copy(alpha = if (hasNext) 1f else 0.35f), modifier = Modifier.size(30.dp))
                 }
@@ -620,7 +620,14 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
         }
 
         // Ten seconds before the end: the next video, counting down (autoplay), whether the controls show or not.
-        val next = remember(w.video.id, w.related, w.queue) { controller.nextUp() }
+        val next = remember(
+            w.video.id,
+            w.related,
+            w.queue,
+            w.movieEpisodesBySeason,
+            w.movieActiveEpisodeUrl,
+            w.relatedMovies,
+        ) { controller.nextUp() }
         val left = duration - position
         if (next != null && !live && autoplay != "0" && cancelled != w.video.id && sleep.mode != SleepMode.VIDEO_END &&
             duration > UP_NEXT_MS * 2 && left in 1..UP_NEXT_MS && scrubbing == null && swipeTarget == null
@@ -638,7 +645,7 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
         // that come after it.
         val goesOn = next != null && autoplay != "0" && cancelled != w.video.id && sleep.mode != SleepMode.VIDEO_END
         if (ended && !live && !goesOn && swipeTarget == null) {
-            val after = remember(w.video.id, w.related, w.queue) {
+            val after = remember(w.video.id, w.related, w.queue, next) {
                 (listOfNotNull(next) + w.related.mapNotNull { (it as? com.qmusic.engine.video.VideoEntry.Video)?.item }).distinctBy { it.id }.filter { it.id != w.video.id }.take(4)
             }
             EndScreen(
@@ -648,7 +655,13 @@ internal fun PlayerControls(playback: VideoPlayback, w: WatchState, s: VideoStri
                     playback.seekTo(0)
                     if (!playback.isPlaying.value) playback.togglePlay()
                 },
-                onOpen = { controller.open(it) },
+                onOpen = { picked ->
+                    if (picked.id == next?.id && isExternalVideoId(picked.id)) {
+                        controller.playNext()
+                    } else {
+                        controller.open(picked)
+                    }
+                },
                 compact = !fullscreen,
             )
         }

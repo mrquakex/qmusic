@@ -179,6 +179,11 @@ private val scraperFetch: ScraperFetcher = { url, headers, referer ->
         ?.let { ScraperResponse(it.finalUrl, it.body, it.contentType) }
 }
 
+private val scraperPoster: ScraperFormPoster = { url, formParams, headers ->
+    runCatching { postFormSync(url, formParams, headers) }.getOrNull()
+        ?.let { ScraperResponse(it.finalUrl, it.body, it.contentType) }
+}
+
 private suspend fun expandHlsMaster(streams: List<VideoQuality>): HlsExpansion {
     val r = expandGenericHls(streams, scraperFetch)
     return HlsExpansion(r.streams, r.audioTracks, r.defaultAudioTrackId)
@@ -213,6 +218,27 @@ actual suspend fun fetchMovieCatalog(
 
         val target = pageUrlOverride?.takeIf { it.isNotBlank() } ?: MovieHtmlParser.buildSourceUrl(source, query)
         catalogCache[target]?.takeIf { now - it.at < CATALOG_TTL_MS }?.let { return@runCatching it.value }
+
+        val hdfcPage = fetchHdFilmCehennemiCatalogOrNull(source, query, pageUrlOverride, customHeaders, scraperFetch)
+        if (hdfcPage != null) {
+            if (catalogCache.size > 60) catalogCache.clear()
+            catalogCache[target] = TimedEntry(now, hdfcPage)
+            return@runCatching hdfcPage
+        }
+
+        val diziyouPage = fetchDiziyouCatalogOrNull(source, query, pageUrlOverride, customHeaders, scraperFetch)
+        if (diziyouPage != null) {
+            if (catalogCache.size > 60) catalogCache.clear()
+            catalogCache[target] = TimedEntry(now, diziyouPage)
+            return@runCatching diziyouPage
+        }
+
+        val dizidadPage = fetchDizidadCatalogOrNull(source, query, pageUrlOverride, customHeaders, scraperFetch)
+        if (dizidadPage != null) {
+            if (catalogCache.size > 60) catalogCache.clear()
+            catalogCache[target] = TimedEntry(now, dizidadPage)
+            return@runCatching dizidadPage
+        }
 
         val fetched = fetchTextSync(target, customHeaders, referer = source.normalizedBaseUrl + "/")
             ?: error("Kaynak yanıt vermedi")
@@ -265,6 +291,28 @@ actual suspend fun resolveExternalMovie(url: String, headers: Map<String, String
 
         val html = fetched.body
         val finalUrl = fetched.finalUrl
+
+        resolveDiziyouStreamOrNull(finalUrl, html, headers, scraperFetch)?.let { dz ->
+            if (streamCache.size > 100) streamCache.clear()
+            streamCache[trimmed] = TimedEntry(now, dz)
+            dz.activeEpisodeUrl?.let { epUrl -> streamCache[epUrl] = TimedEntry(now, dz) }
+            return@runCatching dz
+        }
+
+        resolveDizidadStreamOrNull(finalUrl, html, headers, scraperFetch, scraperPoster)?.let { dd ->
+            if (streamCache.size > 100) streamCache.clear()
+            streamCache[trimmed] = TimedEntry(now, dd)
+            dd.activeEpisodeUrl?.let { epUrl -> streamCache[epUrl] = TimedEntry(now, dd) }
+            return@runCatching dd
+        }
+
+        resolveHdFilmCehennemiStreamOrNull(finalUrl, html, headers, scraperFetch)?.let { hdf ->
+            if (streamCache.size > 100) streamCache.clear()
+            streamCache[trimmed] = TimedEntry(now, hdf)
+            hdf.activeEpisodeUrl?.let { epUrl -> streamCache[epUrl] = TimedEntry(now, hdf) }
+            return@runCatching hdf
+        }
+
         val pageTitle = MovieHtmlParser.extractTitle(html)
         val pagePoster = MovieHtmlParser.extractPoster(html, finalUrl)
         val pageSynopsis = MovieHtmlParser.extractSynopsis(html)
@@ -329,39 +377,6 @@ actual suspend fun resolveExternalMovie(url: String, headers: Map<String, String
             }
         }
 
-        // Layer 1.6: Peacemaker (Dizimom / Dizidad) backend API resolution (direct Twitter/CDN 1080p HLS).
-        if (streams.isEmpty()) {
-            var peacemakerHash = MovieHtmlParser.extractPeacemakerHash(html, finalUrl)
-            if (peacemakerHash == null) {
-                val firstEp = MovieHtmlParser.extractDizidadFirstEpisode(html)
-                if (firstEp != null) {
-                    val epFetched = fetchTextSync(firstEp, headers, referer = finalUrl)
-                    if (epFetched != null) {
-                        peacemakerHash = MovieHtmlParser.extractPeacemakerHash(epFetched.body, epFetched.finalUrl)
-                    }
-                }
-            }
-            if (peacemakerHash != null) {
-                val pmApiUrl = "https://peacemakerst.com/tv/video/$peacemakerHash?do=getVideo"
-                val pmHeaders = headers + mapOf(
-                    "Referer" to "https://peacemakerst.com/tv/video/$peacemakerHash",
-                    "X-Requested-With" to "XMLHttpRequest",
-                )
-                val pmRes = postFormSync(pmApiUrl, mapOf("hash" to peacemakerHash, "r" to "https://www.dizidad.com/", "s" to ""), pmHeaders)
-                val streamUrl = pmRes?.body?.let { MovieHtmlParser.extractPeacemakerStreamUrl(it) }
-                if (streamUrl != null) {
-                    streams += VideoQuality(
-                        height = 1080,
-                        fps = 30,
-                        videoUrl = streamUrl,
-                        audioUrl = null,
-                        isLive = false,
-                        headers = headers,
-                    )
-                }
-            }
-        }
-
         // Generic HLS + iframe resolver (any source): parallel multi-hop embeds, then the page's own streams.
         if (streams.isEmpty()) {
             val generic = resolveGenericStreams(finalUrl, html, headers, scraperFetch, expandHls = false)
@@ -386,5 +401,16 @@ actual suspend fun resolveExternalMovie(url: String, headers: Map<String, String
         if (streamCache.size > 100) streamCache.clear()
         streamCache[trimmed] = TimedEntry(now, resolved)
         resolved
+    }
+}
+
+actual suspend fun fetchSeriesSeasonEpisodes(
+    seriesUrl: String,
+    tvshowId: String,
+    season: Int,
+    headers: Map<String, String>,
+): Result<List<MovieEpisode>> = withContext(Dispatchers.IO) {
+    runCatching {
+        fetchDiziyouSeasonEpisodes(seriesUrl, tvshowId, season, headers, scraperFetch)
     }
 }
