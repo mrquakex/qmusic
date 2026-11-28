@@ -42,6 +42,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -62,6 +65,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -169,6 +173,7 @@ internal fun MoviesTab(
     val activeSource = activeSources.firstOrNull { it.id == selectedSourceId } ?: activeSources.firstOrNull()
 
     var linkDialogOpen by remember { mutableStateOf(false) }
+    var topMenu by remember { mutableStateOf(false) }
     var selectedCard by remember { mutableStateOf<MovieCard?>(null) }
 
     var searchQuery by mem.searchQuery
@@ -551,11 +556,12 @@ internal fun MoviesTab(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             // Heading: section title, current source summary and the direct-link button.
+            // A slim top line: the page's name, then search and a menu (which source, open a link). The home has no
+            // counts or source names on it.
             item(key = "cinema-heading") {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(
@@ -565,36 +571,75 @@ internal fun MoviesTab(
                                 FilmPage.LIBRARY -> tr("My list", "Listem")
                             },
                             color = VideoColors.Text,
-                            fontSize = if (tablet) 26.sp else 23.sp,
+                            fontSize = if (tablet) 26.sp else 24.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = (-0.3).sp,
                         )
-                        val summary = when {
-                            page == FilmPage.LIBRARY -> tr(
-                                "${myList.size} in my list · ${movieHistory.size} watched",
-                                "Listende ${myList.size} · İzlediğin ${movieHistory.size}",
+                        if (page == FilmPage.LIBRARY) {
+                            Text(
+                                tr(
+                                    "${myList.size} in my list · ${movieHistory.size} watched",
+                                    "Listende ${myList.size} · İzlediğin ${movieHistory.size}",
+                                ),
+                                color = VideoColors.TextSecondary,
+                                fontSize = 12.sp,
+                                maxLines = 1,
                             )
-                            activeSource == null -> tr("Paste any link to start", "Bir bağlantıyla hemen başla")
-                            loading -> sourceLabel(activeSource).ifEmpty { tr("Loading…", "Yükleniyor…") }
-                            refreshing -> listOf(sourceLabel(activeSource), tr("updating…", "güncelleniyor…")).filter { it.isNotEmpty() }.joinToString(" · ")
-                            else -> listOf(sourceLabel(activeSource), "${countLabel(cards.size, nextPageUrl != null)} ${tr("titles", "yapım")}")
-                                .filter { it.isNotEmpty() }.joinToString(" · ")
+                        } else if (refreshing || loading) {
+                            Text(
+                                if (loading) tr("Loading…", "Yükleniyor…") else tr("Updating…", "Güncelleniyor…"),
+                                color = VideoColors.TextSecondary,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                            )
                         }
-                        Text(summary, color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    if (showHomeUi) Row(
-                        modifier = Modifier
-                            .pressScale(0.95f)
-                            .clip(RoundedCornerShape(50))
-                            .background(VideoColors.Surface)
-                            .border(0.5.dp, BorderHover, RoundedCornerShape(50))
-                            .clickable { linkDialogOpen = true }
-                            .padding(horizontal = 14.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    ) {
-                        Icon(VideoIcons.Film, null, tint = VideoColors.Text, modifier = Modifier.size(15.dp))
-                        Text(x.movieLinkTitle, color = VideoColors.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    if (cinema && page == FilmPage.HOME) {
+                        TopIconButton(QMusicIcons.Search, tr("Search", "Ara")) { mem.page.value = FilmPage.SEARCH }
+                    }
+                    if (page != FilmPage.LIBRARY) {
+                        Box {
+                            TopIconButton(QMusicIcons.More, tr("More", "Diğer")) { topMenu = true }
+                            DropdownMenu(
+                                expanded = topMenu,
+                                onDismissRequest = { topMenu = false },
+                                modifier = Modifier.background(VideoColors.Surface),
+                            ) {
+                                if (activeSources.size > 1) {
+                                    activeSources.forEach { src ->
+                                        DropdownMenuItem(
+                                            text = { Text(sourceLabel(src), color = VideoColors.Text, fontSize = 14.sp) },
+                                            trailingIcon = {
+                                                if (src.id == activeSource?.id) {
+                                                    Icon(QMusicIcons.Check, null, tint = VideoColors.Text, modifier = Modifier.size(16.dp))
+                                                }
+                                            },
+                                            onClick = {
+                                                topMenu = false
+                                                if (src.id != activeSource?.id) {
+                                                    selectedSourceId = src.id
+                                                    selectedGenreUrl = null
+                                                    // On the search page the same words are searched in the other source.
+                                                    if (page != FilmPage.SEARCH) {
+                                                        submittedQuery = ""
+                                                        searchQuery = ""
+                                                        controller.clearMovieSearch()
+                                                    }
+                                                }
+                                            },
+                                        )
+                                    }
+                                }
+                                DropdownMenuItem(
+                                    text = { Text(x.movieLinkTitle, color = VideoColors.Text, fontSize = 14.sp) },
+                                    leadingIcon = { Icon(VideoIcons.Film, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(16.dp)) },
+                                    onClick = {
+                                        topMenu = false
+                                        linkDialogOpen = true
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -669,41 +714,6 @@ internal fun MoviesTab(
                     )
                 }
             } else {
-                // Source picker as one segmented track.
-                if (activeSources.size > 1) {
-                    item(key = "cinema-sources") {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SectionCaption(tr("SOURCE", "KAYNAK"))
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(50))
-                                    .background(VideoColors.Surface)
-                                    .border(0.5.dp, BorderSubtle, RoundedCornerShape(50))
-                                    .padding(4.dp),
-                            ) {
-                                LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    items(activeSources, key = { it.id }) { src ->
-                                        CinemaPill(
-                                            text = sourceLabel(src),
-                                            selected = src.id == activeSource?.id,
-                                            quiet = true,
-                                        ) {
-                                            if (src.id != activeSource?.id) {
-                                                selectedSourceId = src.id
-                                                selectedGenreUrl = null
-                                                submittedQuery = ""
-                                                searchQuery = ""
-                                                controller.clearMovieSearch()
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
                 // Search, genre pills and a one-line result status.
                 item(key = "cinema-search") {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2150,9 +2160,11 @@ private fun FadeInPoster(url: String?, contentDescription: String?, iconSize: Dp
 // ------------------------------------------------------------------ hero, tiles, skeleton
 
 /**
- * Home showcase, Netflix style: a tall poster that changes by itself every few seconds (crossfade), the title in the
- * middle, and My list / Watch / Details under it. Dots show which one is up; tapping a dot jumps to it.
+ * Home showcase: big posters side by side, whole (not cropped), the one in the middle larger and bright; under it its
+ * title, rating and My list / Watch / Details. It moves on by itself every few seconds; a swipe, a dot or a tap on a
+ * side poster chooses another.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CinemaHeroCarousel(
     cards: List<MovieCard>,
@@ -2165,126 +2177,118 @@ private fun CinemaHeroCarousel(
     onWatch: (MovieCard) -> Unit,
 ) {
     fun tr(en: String, tr: String) = if (english) en else tr
-    var index by remember(cards) { mutableStateOf(0) }
-    var tick by remember { mutableStateOf(0) }
-    LaunchedEffect(cards, tick) {
-        if (cards.size < 2) return@LaunchedEffect
-        while (true) {
-            delay(HERO_ROTATE_MS)
-            index = (index + 1) % cards.size
+    val state = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    // The poster nearest the middle is the chosen one.
+    val current by remember(cards) {
+        derivedStateOf {
+            val info = state.layoutInfo
+            val middle = (info.viewportStartOffset + info.viewportEndOffset) / 2
+            info.visibleItemsInfo.minByOrNull { kotlin.math.abs(it.offset + it.size / 2 - middle) }?.index ?: 0
         }
     }
-    val card = cards[index.coerceIn(0, cards.lastIndex)]
-    val shape = QMusicShapes.extraLarge
+    LaunchedEffect(cards, current) {
+        if (cards.size < 2) return@LaunchedEffect
+        delay(HERO_ROTATE_MS)
+        if (!state.isScrollInProgress) state.animateScrollToItem((current + 1) % cards.size)
+    }
+    val card = cards[current.coerceIn(0, cards.lastIndex)]
 
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(if (tablet) 440.dp else 470.dp)
-                .clip(shape)
-                .background(VideoColors.Surface)
-                .border(0.5.dp, BorderSubtle, shape)
-                .clickable { onOpenDetails(card) },
-        ) {
-            Crossfade(targetState = card, animationSpec = tween(Motion.LONG * 2), label = "heroPoster") { c ->
-                FadeInPoster(url = c.poster, contentDescription = c.title, iconSize = 48.dp)
-            }
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            0f to Color.Black.copy(alpha = 0.15f),
-                            0.45f to Color.Black.copy(alpha = 0.10f),
-                            0.72f to Color.Black.copy(alpha = 0.65f),
-                            1f to Color.Black.copy(alpha = 0.95f),
-                        ),
-                    ),
-            )
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 22.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val itemWidth = minOf(maxWidth * 0.58f, if (tablet) 300.dp else 250.dp)
+            val side = (maxWidth - itemWidth) / 2
+            LazyRow(
+                state = state,
+                contentPadding = PaddingValues(horizontal = side),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                flingBehavior = rememberSnapFlingBehavior(state),
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(
-                    tr("FEATURED", "ÖNE ÇIKAN"),
-                    color = Color.White.copy(alpha = 0.80f),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.sp,
-                )
-                Spacer(Modifier.height(8.dp))
-                Crossfade(targetState = card, animationSpec = tween(Motion.LONG), label = "heroTitle") { c ->
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            c.title,
-                            color = Color.White,
-                            fontSize = if (tablet) 30.sp else 26.sp,
-                            lineHeight = if (tablet) 35.sp else 31.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = (-0.4).sp,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        val meta = listOfNotNull(
-                            c.rating?.let { "★ $it" },
-                            c.year,
-                            c.qualityBadge,
-                        ).joinToString("  •  ")
-                        if (meta.isNotEmpty()) {
-                            Spacer(Modifier.height(6.dp))
-                            Text(meta, color = Color.White.copy(alpha = 0.72f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+                itemsIndexed(cards, key = { _, c -> "hero-${c.pageUrl}" }) { i, c ->
+                    val selected = i == current
+                    val scale by animateFloatAsState(
+                        if (selected) 1f else 0.88f,
+                        tween(Motion.MEDIUM, easing = Motion.Emphasized),
+                        label = "heroScale",
+                    )
+                    val shape = QMusicShapes.large
+                    Box(
+                        modifier = Modifier
+                            .width(itemWidth)
+                            .aspectRatio(2f / 3f)
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                alpha = if (selected) 1f else 0.55f
+                            }
+                            .clip(shape)
+                            .background(VideoColors.Surface)
+                            .border(0.5.dp, BorderSubtle, shape)
+                            .clickable {
+                                if (selected) onOpenDetails(c) else scope.launch { state.animateScrollToItem(i) }
+                            },
+                    ) {
+                        FadeInPoster(url = c.poster, contentDescription = c.title, iconSize = 44.dp)
                     }
                 }
-                Spacer(Modifier.height(18.dp))
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(22.dp)) {
-                    val inList = isInList(card)
-                    HeroSideButton(label = tr("My list", "Listem"), onClick = { onToggleList(card) }) {
-                        Icon(if (inList) QMusicIcons.Check else QMusicIcons.Add, null, tint = Color.White, modifier = Modifier.size(22.dp))
-                    }
-                    Row(
-                        modifier = Modifier
-                            .pressScale(0.95f)
-                            .clip(QMusicShapes.small)
-                            .background(Color.White)
-                            .clickable { onWatch(card) }
-                            .padding(horizontal = 26.dp, vertical = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Icon(QMusicIcons.Play, null, tint = Color.Black, modifier = Modifier.size(17.dp))
-                        Text(watchLabel, color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    }
-                    HeroSideButton(label = tr("Details", "Detay"), onClick = { onOpenDetails(card) }) {
-                        Box(
-                            Modifier.size(22.dp).border(1.6.dp, Color.White, CircleShape),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text("i", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
+            }
+        }
+        Crossfade(targetState = card, animationSpec = tween(Motion.MEDIUM), label = "heroInfo") { c ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Text(
+                    c.title,
+                    color = VideoColors.Text,
+                    fontSize = if (tablet) 22.sp else 20.sp,
+                    lineHeight = if (tablet) 27.sp else 25.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.3).sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val meta = listOfNotNull(c.rating?.let { "★ $it" }, c.year, c.qualityBadge).joinToString("  ·  ")
+                if (meta.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(meta, color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 1)
+                }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            val inList = isInList(card)
+            HeroAction(label = tr("My list", "Listem"), onClick = { onToggleList(card) }) {
+                Icon(if (inList) QMusicIcons.Check else QMusicIcons.Add, null, tint = VideoColors.Text, modifier = Modifier.size(22.dp))
+            }
+            Row(
+                modifier = Modifier
+                    .pressScale(0.95f)
+                    .clip(QMusicShapes.small)
+                    .background(Ink)
+                    .clickable { onWatch(card) }
+                    .padding(horizontal = 28.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(QMusicIcons.Play, null, tint = InkInverse, modifier = Modifier.size(17.dp))
+                Text(watchLabel, color = InkInverse, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            }
+            HeroAction(label = tr("Details", "Detay"), onClick = { onOpenDetails(card) }) {
+                Box(Modifier.size(22.dp).border(1.6.dp, VideoColors.Text, CircleShape), contentAlignment = Alignment.Center) {
+                    Text("i", color = VideoColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
         if (cards.size > 1) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 cards.indices.forEach { i ->
-                    val selected = i == index
+                    val selected = i == current
                     val w by animateDpAsState(if (selected) 18.dp else 6.dp, tween(Motion.MEDIUM, easing = Motion.Emphasized), label = "heroDot")
                     Box(
                         Modifier
                             .size(width = w, height = 6.dp)
                             .clip(RoundedCornerShape(50))
                             .background(if (selected) Ink else BorderHover)
-                            .clickable {
-                                index = i
-                                tick++ // the timer starts again, so the chosen one stays its full time
-                            },
+                            .clickable { scope.launch { state.animateScrollToItem(i) } },
                     )
                 }
             }
@@ -2292,8 +2296,9 @@ private fun CinemaHeroCarousel(
     }
 }
 
+/** A small action under the showcase: an icon over its name. */
 @Composable
-private fun HeroSideButton(label: String, onClick: () -> Unit, icon: @Composable () -> Unit) {
+private fun HeroAction(label: String, onClick: () -> Unit, icon: @Composable () -> Unit) {
     Column(
         modifier = Modifier
             .pressScale(0.92f)
@@ -2304,7 +2309,18 @@ private fun HeroSideButton(label: String, onClick: () -> Unit, icon: @Composable
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         icon()
-        Text(label, color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = VideoColors.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** A round icon button on the film pages' top line. */
+@Composable
+private fun TopIconButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier.size(40.dp).pressScale(0.9f).clip(CircleShape).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, label, tint = VideoColors.Text, modifier = Modifier.size(22.dp))
     }
 }
 
@@ -2445,7 +2461,7 @@ private const val SIMILAR_COUNT = 12
 private const val PRE_RESOLVE_COUNT = 2
 private const val PRE_RESOLVE_DELAY_MS = 1_500L
 private const val SUGGESTION_COUNT = 6
-private const val HERO_COUNT = 5
+private const val HERO_COUNT = 8
 private const val HERO_ROTATE_MS = 7_000L
 private const val ROW_SIZE = 20
 private const val GENRE_ROWS = 4
