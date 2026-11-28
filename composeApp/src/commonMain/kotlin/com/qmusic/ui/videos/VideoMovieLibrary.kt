@@ -1,5 +1,7 @@
 package com.qmusic.ui.videos
 
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.mutableStateOf
 import com.qmusic.settings.AppSettings
 import com.qmusic.ui.chat.MovieSource
 import kotlinx.coroutines.CoroutineScope
@@ -77,6 +79,9 @@ private data class StoredCatalog(
  * sheet's lookup is the one the player uses, instead of resolving the same page twice).
  */
 internal class MovieLibrary(private val settings: AppSettings, private val scope: CoroutineScope) {
+
+    /** What the film tab is showing; kept here so a film opened from it does not reset it. */
+    val tab = MovieTabMemory()
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
     private val listSerializer = ListSerializer(SavedMovie.serializer())
@@ -316,4 +321,33 @@ internal fun friendlyMovieError(e: Throwable?, english: Boolean): String {
             tr("Couldn't connect to the source.", "Kaynağa bağlanılamadı.")
         else -> tr("The source isn't answering right now. Try again or switch source.", "Kaynak şu an yanıt vermiyor. Tekrar dene ya da başka bir kaynağa geç.")
     }
+}
+
+/**
+ * The film tab's state, held by the controller: the tab itself is taken down while a film plays full screen, and
+ * coming back should find the same source, search, genre, loaded pages, filters and scroll position.
+ */
+internal class MovieTabMemory {
+    val selectedSourceId = mutableStateOf<String?>(null)
+    val searchQuery = mutableStateOf("")
+    val submittedQuery = mutableStateOf("")
+    val selectedGenreUrl = mutableStateOf<String?>(null)
+    val cards = mutableStateOf<List<MovieCard>>(emptyList())
+    val genres = mutableStateOf<List<Pair<String, String>>>(emptyList())
+    val nextPageUrl = mutableStateOf<String?>(null)
+    val searchAll = mutableStateOf(false)
+    val sort = mutableStateOf(MovieSort.SITE)
+    val minRating = mutableStateOf<Float?>(null)
+    val minYear = mutableStateOf<Int?>(null)
+    val kind = mutableStateOf<Boolean?>(null)
+    val list = LazyListState()
+
+    /** Which page the shown cards belong to (source, search, genre); the same one is not loaded again. */
+    var loadedKey: String? = null
+
+    /** Which page the scroll position belongs to; a different one starts at the top. */
+    var scrollKey: String? = null
+
+    /** The last search asked from outside the tab (controller.movieQuery) that was already applied. */
+    var handledExternalQuery: String = ""
 }

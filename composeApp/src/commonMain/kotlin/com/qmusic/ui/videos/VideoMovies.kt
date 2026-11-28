@@ -158,26 +158,32 @@ internal fun MoviesTab(
         val enabled = sources.filter { it.enabled }
         if (enabled.isEmpty()) com.qmusic.ui.chat.DEFAULT_MOVIE_SOURCES else enabled
     }
-    var selectedSourceId by remember(activeSources) { mutableStateOf(activeSources.firstOrNull()?.id) }
+    // What the tab shows lives in the controller: the tab is taken down while a film plays, and coming back finds the
+    // same source, search, genre, loaded pages, filters and scroll position.
+    val mem = controller.movies.tab
+    var selectedSourceId by mem.selectedSourceId
     val activeSource = activeSources.firstOrNull { it.id == selectedSourceId } ?: activeSources.firstOrNull()
 
     var linkDialogOpen by remember { mutableStateOf(false) }
     var selectedCard by remember { mutableStateOf<MovieCard?>(null) }
 
-    var searchQuery by remember { mutableStateOf("") }
-    var submittedQuery by remember { mutableStateOf("") }
-    var selectedGenreUrl by remember { mutableStateOf<String?>(null) }
+    var searchQuery by mem.searchQuery
+    var submittedQuery by mem.submittedQuery
+    var selectedGenreUrl by mem.selectedGenreUrl
     val externalMovieQuery by controller.movieQuery.collectAsState()
     LaunchedEffect(externalMovieQuery) {
+        // Each search asked from outside is taken once; coming back from a film does not bring an old one back.
+        if (externalMovieQuery == mem.handledExternalQuery) return@LaunchedEffect
+        mem.handledExternalQuery = externalMovieQuery
         if (externalMovieQuery.isNotBlank() && externalMovieQuery != submittedQuery) {
             searchQuery = externalMovieQuery
             submittedQuery = externalMovieQuery
             selectedGenreUrl = null
         }
     }
-    var cards by remember { mutableStateOf<List<MovieCard>>(emptyList()) }
-    var genres by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
-    var nextPageUrl by remember { mutableStateOf<String?>(null) }
+    var cards by mem.cards
+    var genres by mem.genres
+    var nextPageUrl by mem.nextPageUrl
     var loading by remember { mutableStateOf(false) }
     var loadingMore by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
@@ -189,12 +195,12 @@ internal fun MoviesTab(
     val movieHistory by library.history.collectAsState()
     val myList by library.favorites.collectAsState()
     val recentSearches by library.searches.collectAsState()
-    var searchAll by remember { mutableStateOf(false) }   // search every source at once
+    var searchAll by mem.searchAll   // search every source at once
     var searchFocused by remember { mutableStateOf(false) }
-    var sort by remember { mutableStateOf(MovieSort.SITE) }
-    var minRating by remember { mutableStateOf<Float?>(null) }   // "Puan 7+"
-    var minYear by remember { mutableStateOf<Int?>(null) }       // "2020+"
-    var kind by remember { mutableStateOf<Boolean?>(null) }      // true: dizi, false: film, null: hepsi
+    var sort by mem.sort
+    var minRating by mem.minRating   // "Puan 7+"
+    var minYear by mem.minYear       // "2020+"
+    var kind by mem.kind             // true: dizi, false: film, null: hepsi
     // What the person already has with a film: how far it was watched, and whether it is in their list.
     val progressOf = remember(movieHistory) { movieHistory.associate { it.pageUrl to it.progress } }
     val listUrls = remember(myList) { myList.mapTo(HashSet()) { it.pageUrl } }
@@ -216,6 +222,14 @@ internal fun MoviesTab(
         val forced = reloadTick != handledTick[0]
         handledTick[0] = reloadTick
         val query = submittedQuery
+        val loadKey = "${src.id}|${src.baseUrl}|$query|${if (query.isBlank()) selectedGenreUrl else null}|" +
+            "${searchAll && query.isNotBlank() && activeSources.size > 1}"
+        // Back from a film: the same page with what was loaded under it (more pages too) is still here.
+        if (!forced && mem.loadedKey == loadKey && cards.isNotEmpty()) {
+            loading = false
+            loadError = null
+            return@LaunchedEffect
+        }
         if (searchAll && query.isNotBlank() && activeSources.size > 1) {
             // Every source is asked at the same time; their results are dealt in turn, so each source shows near the top.
             loading = true
@@ -228,6 +242,7 @@ internal fun MoviesTab(
                 for (i in 0 until (lists.maxOfOrNull { it.size } ?: 0)) lists.forEach { l -> l.getOrNull(i)?.let(::add) }
             }.distinctBy { it.pageUrl }
             cards = merged
+            mem.loadedKey = loadKey
             nextPageUrl = null
             loading = false
             if (merged.isEmpty() && results.all { it.isFailure }) {
@@ -242,6 +257,7 @@ internal fun MoviesTab(
         val cached = library.cachedCatalog(src, query, pageUrl)
         if (cached != null) {
             cards = cached.items
+            mem.loadedKey = loadKey
             nextPageUrl = cached.nextPageUrl
             if (cached.genres.isNotEmpty() && showGenres) genres = cached.genres
             loading = false
@@ -260,6 +276,7 @@ internal fun MoviesTab(
                 val keepShown = cached != null && (page.items.isEmpty() || cards.size > cached.items.size)
                 if (!keepShown) {
                     cards = page.items
+                    mem.loadedKey = loadKey
                     nextPageUrl = page.nextPageUrl
                 }
                 if (page.genres.isNotEmpty() && showGenres) genres = page.genres
@@ -380,6 +397,21 @@ internal fun MoviesTab(
         }
     }
 
+    // Back closes the search or the genre first, instead of leaving the tab.
+    com.qmusic.ui.PlatformBackHandler(enabled = searchQuery.isNotEmpty() || submittedQuery.isNotBlank() || selectedGenreUrl != null) {
+        focusManager.clearFocus()
+        if (searchQuery.isNotEmpty() || submittedQuery.isNotBlank()) clearSearch() else selectedGenreUrl = null
+    }
+
+    // A new source, search or genre starts at the top, so its results are what shows; coming back from a film keeps
+    // the place.
+    val listState = mem.list
+    LaunchedEffect(activeSource?.id, submittedQuery, selectedGenreUrl, searchAll) {
+        val key = "${activeSource?.id}|$submittedQuery|$selectedGenreUrl|$searchAll"
+        if (mem.scrollKey != null && mem.scrollKey != key) listState.scrollToItem(0)
+        mem.scrollKey = key
+    }
+
     val sidePad = if (tablet) 18.dp else 12.dp
     // Instant, local filter over what is already loaded while the user is typing (no network until they submit).
     val localQuery = searchQuery.trim().takeIf { it.isNotEmpty() && it != submittedQuery }
@@ -450,6 +482,7 @@ internal fun MoviesTab(
         val cols = movieGridColumnCount(maxWidth.value)
 
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = sidePad, end = sidePad, top = 6.dp, bottom = 104.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -2244,7 +2277,7 @@ private fun RecentSearchChip(text: String, removeLabel: String, onClick: () -> U
 }
 
 /** How the "all titles" grid is ordered. */
-private enum class MovieSort(val tr: String, val en: String) {
+internal enum class MovieSort(val tr: String, val en: String) {
     SITE("Önerilen", "Suggested"),
     RATING("Puan", "Rating"),
     YEAR("En yeni", "Newest"),
