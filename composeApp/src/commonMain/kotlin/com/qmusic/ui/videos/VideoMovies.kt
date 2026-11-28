@@ -58,6 +58,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -1290,10 +1291,11 @@ internal fun MoviesTab(
             english = english,
             watchLabel = x.moviePlaySolo,
             togetherLabel = x.watchTogether,
-            shareLabel = s.share,
+            shareLabel = ChatMusic.words().sendToChat,
             resolve = { library.resolve(card.pageUrl, card.headers) },
             onResolved = { controller.warmUpFilm(card.pageUrl, it) },
             inList = myList.any { it.pageUrl == card.pageUrl },
+            watchedFraction = progressOf[card.pageUrl] ?: 0f,
             onToggleList = { library.toggleFavorite(card) },
             onRestart = { epUrl ->
                 controller.forgetResume(externalVideoId(card.pageUrl))
@@ -1315,7 +1317,10 @@ internal fun MoviesTab(
                     ChatMusic.offerTogether(it)
                 }
             },
-            onShare = { onShare(card.pageUrl) },
+            // Sent inside Nuvelo (a friend opens it in the app), not the site's address.
+            onShare = {
+                sharedItemForUrl(card.pageUrl, card.title, card.sourceName, card.poster)?.let { ChatMusic.offer(it) }
+            },
         )
     }
 }
@@ -1348,6 +1353,8 @@ private fun MovieDetailSheet(
     /** The stream is known: the player can load it already (see VideosController.warmUpFilm). */
     onResolved: (ResolvedMovieStream) -> Unit = {},
     inList: Boolean,
+    /** How much of it was watched (0-1), shown as a line under Watch. */
+    watchedFraction: Float = 0f,
     onToggleList: () -> Unit,
     onRestart: (String?) -> Unit,
 ) {
@@ -1518,13 +1525,31 @@ private fun MovieDetailSheet(
                     }
                 }
 
-                StreamStatus(
-                    resolving = resolving,
-                    resolved = r?.takeIf { it.streams.isNotEmpty() },
-                    error = resolveErr,
-                    pageUrl = card.pageUrl,
-                    english = english,
-                )
+                // What it plays in, as small tags (quality, sound, subtitles); the technical box only when it failed.
+                val ready = r?.takeIf { it.streams.isNotEmpty() }
+                if (ready != null) {
+                    val streamTags = buildList {
+                        ready.streams.map { it.label }.filter { it.isNotBlank() }.distinct().take(2).forEach(::add)
+                        if (ready.audioTracks.any { it.language?.lowercase()?.startsWith("tr") == true || it.label.contains("Türkçe", ignoreCase = true) }) {
+                            add(tr("Turkish audio", "Türkçe ses"))
+                        }
+                        if (ready.audioTracks.size > 1) add(tr("${ready.audioTracks.size} audio", "${ready.audioTracks.size} ses"))
+                        if (ready.captions.isNotEmpty()) add(tr("Subtitles", "Altyazı"))
+                    }
+                    if (streamTags.isNotEmpty()) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            streamTags.forEach { MetaChip(it) }
+                        }
+                    }
+                } else if (!resolving) {
+                    StreamStatus(
+                        resolving = false,
+                        resolved = null,
+                        error = resolveErr,
+                        pageUrl = card.pageUrl,
+                        english = english,
+                    )
+                }
 
                 // Synopsis (tap to expand); shimmer lines while it is still being fetched.
                 when {
@@ -1568,6 +1593,19 @@ private fun MovieDetailSheet(
                         height = 52.dp,
                         modifier = Modifier.fillMaxWidth(),
                     ) { onWatch(r, seasonEpisodes) }
+                    // Under Watch: a moving line while the film is being prepared, then how much of it was watched.
+                    when {
+                        resolving -> LinearProgressIndicator(
+                            color = Ink,
+                            trackColor = BorderSubtle,
+                            modifier = Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(50)),
+                        )
+                        resumeMs > 0L && watchedFraction > 0f -> Box(
+                            Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(50)).background(BorderSubtle),
+                        ) {
+                            Box(Modifier.fillMaxWidth(watchedFraction).height(3.dp).background(Ink))
+                        }
+                    }
                     if (resumeMs > 0L) {
                         Text(
                             tr("Start from the beginning", "Baştan izle"),
@@ -1585,26 +1623,22 @@ private fun MovieDetailSheet(
                                 .padding(vertical = 8.dp),
                         )
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                        CinemaButton(
-                            label = togetherLabel,
-                            icon = QMusicIcons.Group,
-                            primary = false,
-                            modifier = Modifier.weight(1f),
-                        ) { onWatchTogether(r) }
-                        CinemaButton(
-                            label = if (inList) tr("In my list", "Listemde") else tr("My list", "Listeme ekle"),
-                            icon = if (inList) QMusicIcons.Check else QMusicIcons.Add,
-                            primary = false,
-                            modifier = Modifier.weight(1f),
-                        ) { onToggleList() }
+                    // The other things to do with it, as three small buttons side by side.
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    ) {
+                        HeroAction(label = if (inList) tr("In my list", "Listemde") else tr("My list", "Listem"), onClick = onToggleList) {
+                            Icon(if (inList) QMusicIcons.Check else QMusicIcons.Add, null, tint = VideoColors.Text, modifier = Modifier.size(22.dp))
+                        }
+                        HeroAction(label = togetherLabel, onClick = { onWatchTogether(r) }) {
+                            Icon(QMusicIcons.Group, null, tint = VideoColors.Text, modifier = Modifier.size(22.dp))
+                        }
+                        HeroAction(label = shareLabel, onClick = onShare) {
+                            Icon(QMusicIcons.Chat, null, tint = VideoColors.Text, modifier = Modifier.size(22.dp))
+                        }
                     }
-                    CinemaButton(
-                        label = shareLabel,
-                        icon = QMusicIcons.Share,
-                        primary = false,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { onShare() }
                 }
 
                 val seasons = r?.seasons.orEmpty()

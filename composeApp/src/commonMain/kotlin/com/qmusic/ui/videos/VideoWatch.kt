@@ -673,7 +673,8 @@ private fun WatchDetails(
                 }
             }
         }
-        if (descriptionOpen && !details?.description.isNullOrBlank()) {
+        // A film's synopsis is in its card below (opened there), not as a YouTube description.
+        if (descriptionOpen && !details?.description.isNullOrBlank() && !isExternalVideoId(w.video.id)) {
             item(key = "description") {
                 val description = details!!.description!!
                 Column(modifier = Modifier.fillMaxWidth().padding(start = sidePad, end = sidePad, bottom = 8.dp)) {
@@ -700,7 +701,15 @@ private fun WatchDetails(
         }
         item(key = "channel") {
             val isExternal = isExternalVideoId(w.video.id)
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = sidePad, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            // A film has no channel: its poster and synopsis instead (tap to read it all).
+            if (isExternal) FilmInfoCard(
+                poster = w.video.thumbnail,
+                synopsis = details?.description,
+                english = s == VideoStrings.English,
+                expanded = descriptionOpen,
+                onToggle = { descriptionOpen = !descriptionOpen },
+                sidePad = sidePad,
+            ) else Row(modifier = Modifier.fillMaxWidth().padding(horizontal = sidePad, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Row(
                     modifier = Modifier.weight(1f).clickable(enabled = !isExternal && (details?.channelId ?: w.video.channelId) != null) {
                         (details?.channelId ?: w.video.channelId)?.let { controller.push(VideoRoute.Channel(it, details?.channelName ?: w.video.channelName)) }
@@ -765,6 +774,32 @@ private fun WatchDetails(
                         if (!controller.openSaveSheet(w.video.id)) onSignIn()
                     }
                 }
+                // A film (or the series of an episode) goes into My list from here too.
+                if (isExternal) {
+                    val favorites by controller.movies.favorites.collectAsState()
+                    val filmUrl = w.movieSeriesUrl ?: externalUrlOf(w.video.id)
+                    if (filmUrl != null) {
+                        val inList = favorites.any { it.pageUrl == filmUrl }
+                        val en = s == VideoStrings.English
+                        ActionPill(
+                            label = if (inList) (if (en) "In my list" else "Listemde") else (if (en) "My list" else "Listem"),
+                            icon = if (inList) QMusicIcons.Check else QMusicIcons.Add,
+                            active = inList,
+                        ) {
+                            controller.movies.toggleFavorite(
+                                MovieCard(
+                                    title = w.movieSeriesTitle ?: title,
+                                    pageUrl = filmUrl,
+                                    poster = w.video.thumbnail,
+                                    year = w.movieYear,
+                                    rating = w.movieRating,
+                                    sourceName = FILM_LABEL,
+                                    headers = w.movieHeaders,
+                                ),
+                            )
+                        }
+                    }
+                }
                 // 1-tap Watch Together (invites a friend or group over Firebase TogetherController).
                 ActionPill(label = x.watchTogether, icon = QMusicIcons.Group, active = false) {
                     val at = com.qmusic.ui.chat.TogetherVideo.playback?.positionMs?.value ?: 0L
@@ -779,7 +814,8 @@ private fun WatchDetails(
                         ),
                     )
                 }
-                ActionPill(label = s.share, icon = QMusicIcons.Share, active = false) {
+                // A film is not shared out of the app (that would be the site's address): "send to chat" shares it inside.
+                if (!isExternal) ActionPill(label = s.share, icon = QMusicIcons.Share, active = false) {
                     val extUrl = externalUrlOf(w.video.id)
                     if (extUrl != null) {
                         onShare(extUrl)
@@ -1560,6 +1596,57 @@ private fun CommentRow(c: VideoComment, w: WatchState, controller: VideosControl
             color = VideoColors.Link, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 56.dp, bottom = 8.dp).clickable { controller.loadReplies(c) },
         )
+    }
+}
+
+/** A film's card on its page, in place of a channel: the poster and the synopsis (four lines, all of it when opened). */
+@Composable
+private fun FilmInfoCard(
+    poster: String?,
+    synopsis: String?,
+    english: Boolean,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    sidePad: androidx.compose.ui.unit.Dp,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(horizontal = sidePad, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(60.dp)
+                .height(90.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(VideoColors.Chip),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (poster != null) {
+                AsyncImage(model = poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            } else {
+                Icon(VideoIcons.Film, null, tint = VideoColors.TextSecondary, modifier = Modifier.size(20.dp))
+            }
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                if (english) "SYNOPSIS" else "ÖZET",
+                color = VideoColors.TextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 1.2.sp,
+            )
+            Text(
+                synopsis?.takeIf { it.isNotBlank() } ?: if (english) "No synopsis for this film." else "Bu film için özet yok.",
+                color = VideoColors.Text.copy(alpha = 0.85f),
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+                maxLines = if (expanded) Int.MAX_VALUE else 4,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
