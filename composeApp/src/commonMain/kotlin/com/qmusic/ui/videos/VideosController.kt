@@ -753,19 +753,10 @@ class VideosController(
                 val rawTitle = cleanedResolvedTitle ?: video.title
                 val host = MovieHtmlParser.originOf(url).removePrefix("https://").removePrefix("http://")
                 movies.refine(url, cleanedResolvedTitle ?: resolved.title, resolved.poster)
-                val initialAudio = resolved.defaultAudioTrackId?.let { defId ->
-                    resolved.audioTracks.firstOrNull { it.id == defId }
-                } ?: resolved.audioTracks.firstOrNull { it.language == "tr" }
-                    ?: resolved.audioTracks.firstOrNull()
-                val turkishCaption = resolved.captions.firstOrNull { it.language.lowercase().let { l -> l.startsWith("tr") || l == "tur" } }
-                val audioLanguage = initialAudio?.let { MovieHtmlParser.normalizeHlsLanguage(it.language, it.label) }
-                val caption = when {
-                    captionsSetting.value == "1" -> turkishCaption ?: resolved.captions.firstOrNull()
-                    // A film whose sound is known not to be Turkish starts with its Turkish subtitles on.
-                    audioLanguage != null && audioLanguage != "tr" -> turkishCaption
-                    else -> null
-                }
-                val streams = resolved.streams.map { applyAudioTrackToQuality(it, initialAudio) }
+                val start = filmStart(resolved)
+                val initialAudio = start.audio
+                val caption = start.caption
+                val streams = start.streams
                 _watch.update { w ->
                     if (w?.video?.id != id) w else {
                         val mergedGrouped = LinkedHashMap<Int, List<MovieEpisode>>(w.movieEpisodesBySeason)
@@ -948,6 +939,44 @@ class VideosController(
         val idx = ordered.indexOfFirst { it.pageUrl.equals(activeUrl, ignoreCase = true) }
         if (idx < 0) return null to null
         return ordered.getOrNull(idx - 1) to ordered.getOrNull(idx + 1)
+    }
+
+    /** How a resolved film starts: its sound, its subtitles, its streams (with that sound) and the quality to start at. */
+    private data class FilmStart(
+        val audio: VideoAudioTrack?,
+        val caption: VideoCaption?,
+        val streams: List<VideoQuality>,
+        val quality: VideoQuality?,
+    )
+
+    /** The same choice for the warm-up on the film's page and for the real start, so the warmed-up player is reused. */
+    private fun filmStart(resolved: ResolvedMovieStream): FilmStart {
+        val initialAudio = resolved.defaultAudioTrackId?.let { defId ->
+            resolved.audioTracks.firstOrNull { it.id == defId }
+        } ?: resolved.audioTracks.firstOrNull { it.language == "tr" }
+            ?: resolved.audioTracks.firstOrNull()
+        val turkishCaption = resolved.captions.firstOrNull { it.language.lowercase().let { l -> l.startsWith("tr") || l == "tur" } }
+        val audioLanguage = initialAudio?.let { MovieHtmlParser.normalizeHlsLanguage(it.language, it.label) }
+        val caption = when {
+            captionsSetting.value == "1" -> turkishCaption ?: resolved.captions.firstOrNull()
+            // A film whose sound is known not to be Turkish starts with its Turkish subtitles on.
+            audioLanguage != null && audioLanguage != "tr" -> turkishCaption
+            else -> null
+        }
+        val streams = resolved.streams.map { applyAudioTrackToQuality(it, initialAudio) }
+        return FilmStart(initialAudio, caption, streams, streams.pickDefault(maxHeight()))
+    }
+
+    /**
+     * A film's page is open and its stream is known: when nothing is playing, the player loads it already (still and
+     * silent, where it was left), so Watch starts at once. Series are left alone: Watch opens an episode, not this page.
+     */
+    fun warmUpFilm(pageUrl: String, resolved: ResolvedMovieStream) {
+        if (_watch.value != null) return
+        if (resolved.episodes.isNotEmpty() || resolved.activeEpisodeUrl != null) return
+        val start = filmStart(resolved)
+        val quality = start.quality ?: return
+        VideoWarm.prepareFilm(quality, resumeFor(externalVideoId(pageUrl)), start.caption, start.audio?.language, start.audio?.label)
     }
 
     /** The ways to play recent videos: working them out takes seconds, so a video asked for twice (or ahead) is instant. */

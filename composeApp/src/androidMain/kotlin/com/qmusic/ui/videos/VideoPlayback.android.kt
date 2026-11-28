@@ -114,14 +114,27 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
         // The first seconds of a video about to be opened go into the cache this player reads.
         VideoWarm.bytes = { quality -> VideoStreaming.preload(appContext, quality) }
         VideoWarm.prepare = { quality -> prepareAhead(quality) }
+        VideoWarm.prepareFilm = { quality, startMs, caption, language, label -> prepareFilmAhead(quality, startMs, caption, language, label) }
         FeedPreviewPlayer.install(appContext)
     }
 
     /** Loaded ahead (a card touched, nothing open): the stream it holds, until opened or let go. */
     private var ahead: VideoQuality? = null
+    /** A film loaded ahead from its page: exactly how it was loaded, so Watch can tell it is the same start. */
+    private data class FilmAhead(
+        val quality: VideoQuality,
+        val startMs: Long,
+        val caption: VideoCaption?,
+        val language: String?,
+        val label: String?,
+    )
+
+    private var filmAhead: FilmAhead? = null
+
     private val dropAhead = Runnable {
-        if (ahead != null) {
+        if (ahead != null || filmAhead != null) {
             ahead = null
+            filmAhead = null
             lastLoad = null
             player.stop()
             player.clearMediaItems()
@@ -136,6 +149,19 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
         // Touched but not opened (a scroll, a slip): the decoders and the buffer are let go again.
         handler.postDelayed(dropAhead, AHEAD_KEEP_MS)
     }
+
+    private fun prepareFilmAhead(quality: VideoQuality, startMs: Long, caption: VideoCaption?, language: String?, label: String?) {
+        if (quality.isLive || player.playWhenReady && player.mediaItemCount > 0) return
+        val request = FilmAhead(quality, startMs, caption, language, label)
+        if (request != filmAhead || player.mediaItemCount == 0 || player.playerError != null) {
+            load(quality, startMs, autoPlay = false, caption = caption, preferredAudioLanguage = language, preferredAudioLabel = label)
+            filmAhead = request
+        }
+        handler.removeCallbacks(dropAhead)
+        // The page was closed without watching: the film's buffer is let go after a while (no data spent for nothing).
+        handler.postDelayed(dropAhead, FILM_AHEAD_KEEP_MS)
+    }
+
     private val liveSources = VideoStreaming.network()
 
     /**
@@ -215,10 +241,19 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
         handler.removeCallbacks(dropAhead)
         val wasAhead = ahead
         ahead = null
+        val wasFilmAhead = filmAhead
+        filmAhead = null
         pendingAudioLanguage = preferredAudioLanguage
         pendingAudioLabel = preferredAudioLabel
         // Opened what was loaded ahead: it only has to start.
         if (wasAhead == quality && startMs == 0L && caption == null && preferredAudioLanguage == null && player.mediaItemCount > 0 && player.playerError == null) {
+            player.playWhenReady = autoPlay
+            return
+        }
+        // Watch on a film whose page had it loaded already, the same way: it only has to start.
+        if (wasFilmAhead == FilmAhead(quality, startMs, caption, preferredAudioLanguage, preferredAudioLabel) &&
+            player.mediaItemCount > 0 && player.playerError == null
+        ) {
             player.playWhenReady = autoPlay
             return
         }
@@ -400,6 +435,7 @@ internal class ExoVideoPlayback(context: Context) : VideoPlayback {
         const val TICK_MS = 400L
         const val SEEK_GRACE_MS = 2_500L
         const val AHEAD_KEEP_MS = 8_000L
+        const val FILM_AHEAD_KEEP_MS = 30_000L
         const val LOAD_RETRIES = 6
     }
 }

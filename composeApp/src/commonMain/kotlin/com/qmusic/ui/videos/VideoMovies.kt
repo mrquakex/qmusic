@@ -453,6 +453,15 @@ internal fun MoviesTab(
         runCatching { searchFocus.requestFocus() }
     }
 
+    // The first films of "continue watching" are looked up in the background once the home has settled, so their page
+    // (and Watch) is ready at once; the answer is kept for a few minutes.
+    val resumeCandidates = remember(movieHistory) { movieHistory.filter { it.progress > 0f }.take(PRE_RESOLVE_COUNT) }
+    LaunchedEffect(resumeCandidates.map { it.pageUrl }, page) {
+        if (page != FilmPage.HOME || resumeCandidates.isEmpty()) return@LaunchedEffect
+        delay(PRE_RESOLVE_DELAY_MS)
+        resumeCandidates.forEach { library.resolve(it.pageUrl, it.headers) }
+    }
+
     // A new source, search or genre starts at the top, so its results are what shows; coming back from a film keeps
     // the place.
     val listState = mem.list
@@ -1273,6 +1282,7 @@ internal fun MoviesTab(
             togetherLabel = x.watchTogether,
             shareLabel = s.share,
             resolve = { library.resolve(card.pageUrl, card.headers) },
+            onResolved = { controller.warmUpFilm(card.pageUrl, it) },
             inList = myList.any { it.pageUrl == card.pageUrl },
             onToggleList = { library.toggleFavorite(card) },
             onRestart = { epUrl ->
@@ -1325,6 +1335,8 @@ private fun MovieDetailSheet(
     onWatchTogether: (ResolvedMovieStream?) -> Unit,
     onShare: () -> Unit,
     resolve: suspend () -> Result<ResolvedMovieStream>,
+    /** The stream is known: the player can load it already (see VideosController.warmUpFilm). */
+    onResolved: (ResolvedMovieStream) -> Unit = {},
     inList: Boolean,
     onToggleList: () -> Unit,
     onRestart: (String?) -> Unit,
@@ -1353,6 +1365,8 @@ private fun MovieDetailSheet(
                 }
                 if (it.streams.isEmpty()) {
                     resolveErr = tr("No playable video was found on this page.", "Bu sayfada oynatılabilir video bulunamadı.")
+                } else {
+                    onResolved(it)
                 }
                 resolving = false
             },
@@ -2428,6 +2442,8 @@ private fun sortedMovies(cards: List<MovieCard>, sort: MovieSort): List<MovieCar
 internal const val FILM_LABEL = "Film"
 
 private const val SIMILAR_COUNT = 12
+private const val PRE_RESOLVE_COUNT = 2
+private const val PRE_RESOLVE_DELAY_MS = 1_500L
 private const val SUGGESTION_COUNT = 6
 private const val HERO_COUNT = 5
 private const val HERO_ROTATE_MS = 7_000L
