@@ -72,6 +72,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -150,6 +152,8 @@ internal fun MoviesTab(
     s: VideoStrings,
     tablet: Boolean,
     onShare: (String) -> Unit = {},
+    /** The Film section: the tab is split into its pages (home, search, my list), chosen from the section's bar. */
+    cinema: Boolean = false,
 ) {
     val x = s.extras()
     val english = s == VideoStrings.English
@@ -403,11 +407,50 @@ internal fun MoviesTab(
         if (searchQuery.isNotEmpty() || submittedQuery.isNotBlank()) clearSearch() else selectedGenreUrl = null
     }
 
+    // The Film section's pages share one catalog state: leaving the search page keeps its words for later and shows
+    // the home again; leaving the home keeps its genre. Each move happens once (coming back from a film is not one).
+    val page = if (cinema) mem.page.value else FilmPage.HOME
+    val searchFocus = remember { FocusRequester() }
+    var focusTick by remember { mutableStateOf(0) }
+    LaunchedEffect(cinema, page) {
+        if (!cinema || page == mem.appliedPage) return@LaunchedEffect
+        val from = mem.appliedPage
+        mem.appliedPage = page
+        if (from == FilmPage.HOME) mem.savedGenre = selectedGenreUrl
+        if (from == FilmPage.SEARCH) {
+            mem.savedSearch = submittedQuery
+            if (searchQuery.isNotEmpty() || submittedQuery.isNotEmpty()) clearSearch()
+        }
+        when (page) {
+            FilmPage.HOME -> selectedGenreUrl = mem.savedGenre
+            FilmPage.SEARCH -> {
+                selectedGenreUrl = null
+                if (mem.savedSearch.isNotBlank()) {
+                    searchQuery = mem.savedSearch
+                    submittedQuery = mem.savedSearch
+                } else {
+                    focusTick++
+                }
+            }
+            FilmPage.LIBRARY -> selectedGenreUrl = null
+        }
+    }
+    LaunchedEffect(mem.scrollToTop.value) {
+        if (mem.scrollToTop.value == mem.handledScrollToTop) return@LaunchedEffect
+        mem.handledScrollToTop = mem.scrollToTop.value
+        mem.list.animateScrollToItem(0)
+    }
+    LaunchedEffect(focusTick) {
+        if (focusTick == 0) return@LaunchedEffect
+        delay(150)
+        runCatching { searchFocus.requestFocus() }
+    }
+
     // A new source, search or genre starts at the top, so its results are what shows; coming back from a film keeps
     // the place.
     val listState = mem.list
-    LaunchedEffect(activeSource?.id, submittedQuery, selectedGenreUrl, searchAll) {
-        val key = "${activeSource?.id}|$submittedQuery|$selectedGenreUrl|$searchAll"
+    LaunchedEffect(activeSource?.id, submittedQuery, selectedGenreUrl, searchAll, page) {
+        val key = "${activeSource?.id}|$submittedQuery|$selectedGenreUrl|$searchAll|$page"
         if (mem.scrollKey != null && mem.scrollKey != key) listState.scrollToItem(0)
         mem.scrollKey = key
     }
@@ -478,6 +521,10 @@ internal fun MoviesTab(
         }
     }
 
+    val showSearchUi = !cinema || page == FilmPage.SEARCH
+    val showHomeUi = !cinema || page == FilmPage.HOME
+    val searchIdle = cinema && page == FilmPage.SEARCH && submittedQuery.isBlank() && localQuery == null && selectedGenreUrl == null
+
     BoxWithConstraints(Modifier.fillMaxSize().background(VideoColors.Background)) {
         val cols = movieGridColumnCount(maxWidth.value)
 
@@ -496,13 +543,21 @@ internal fun MoviesTab(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            x.tabMovies,
+                            when (page) {
+                                FilmPage.HOME -> x.tabMovies
+                                FilmPage.SEARCH -> tr("Search", "Ara")
+                                FilmPage.LIBRARY -> tr("My list", "Listem")
+                            },
                             color = VideoColors.Text,
                             fontSize = if (tablet) 26.sp else 23.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = (-0.3).sp,
                         )
                         val summary = when {
+                            page == FilmPage.LIBRARY -> tr(
+                                "${myList.size} in my list · ${movieHistory.size} watched",
+                                "Listende ${myList.size} · İzlediğin ${movieHistory.size}",
+                            )
                             activeSource == null -> tr("Paste any link to start", "Bir bağlantıyla hemen başla")
                             loading -> activeSource.name
                             refreshing -> "${activeSource.name} · ${tr("updating…", "güncelleniyor…")}"
@@ -510,7 +565,7 @@ internal fun MoviesTab(
                         }
                         Text(summary, color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    Row(
+                    if (showHomeUi) Row(
                         modifier = Modifier
                             .pressScale(0.95f)
                             .clip(RoundedCornerShape(50))
@@ -527,7 +582,65 @@ internal fun MoviesTab(
                 }
             }
 
-            if (activeSources.isEmpty()) {
+            if (cinema && page == FilmPage.LIBRARY) {
+                if (movieHistory.isEmpty() && myList.isEmpty()) {
+                    item(key = "lib-empty") {
+                        CinemaEmptyState(
+                            icon = QMusicIcons.Library,
+                            title = tr("Nothing here yet", "Burası henüz boş"),
+                            body = tr(
+                                "Films you add to My list and films you watch show up here.",
+                                "Listene eklediğin ve izlediğin filmler burada görünür.",
+                            ),
+                            primaryLabel = tr("Browse films", "Filmlere göz at"),
+                            primaryIcon = VideoIcons.Film,
+                            onPrimary = { mem.page.value = FilmPage.HOME },
+                        )
+                    }
+                }
+                if (movieHistory.isNotEmpty()) {
+                    item(key = "lib-history") {
+                        SavedMovieRow(
+                            caption = tr("CONTINUE WATCHING", "İZLEMEYE DEVAM ET"),
+                            action = tr("Clear", "Temizle"),
+                            onAction = { library.clearHistory() },
+                            movies = movieHistory,
+                            onOpen = { selectedCard = it.toCard() },
+                            removeLabel = tr("Remove from history", "Geçmişten kaldır"),
+                            onRemove = { library.forget(it.pageUrl) },
+                        )
+                    }
+                }
+                if (myList.isNotEmpty()) {
+                    item(key = "lib-list-caption") {
+                        SectionCaption(
+                            "${tr("MY LIST", "LİSTEM")} · ${myList.size}",
+                            modifier = Modifier.padding(top = 6.dp, start = 2.dp),
+                        )
+                    }
+                    val listRows = myList.map { it.toCard() }.chunked(cols)
+                    items(listRows.size, key = { "lrow-$it-${listRows[it].first().pageUrl}" }) { rIdx ->
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            listRows[rIdx].forEach { card ->
+                                MoviePosterTile(
+                                    card = card,
+                                    watchTogetherLabel = x.watchTogether,
+                                    onOpenDetails = { selectedCard = card },
+                                    onWatchTogether = {
+                                        sharedItemForUrl(card.pageUrl, card.title, card.sourceName, card.poster)?.let {
+                                            ChatMusic.offerTogether(it)
+                                        }
+                                    },
+                                    progress = progressOf[card.pageUrl] ?: 0f,
+                                    inList = true,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            repeat(cols - listRows[rIdx].size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                }
+            } else if (activeSources.isEmpty()) {
                 item(key = "no-sources") {
                     CinemaEmptyState(
                         icon = VideoIcons.Film,
@@ -577,7 +690,7 @@ internal fun MoviesTab(
                 // Search, genre pills and a one-line result status.
                 item(key = "cinema-search") {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        CinemaSearchBar(
+                        if (showSearchUi) CinemaSearchBar(
                             query = searchQuery,
                             hint = activeSource?.let { tr("Search ${it.name}…", "${it.name} içinde ara…") } ?: x.movieSearchHint,
                             pending = searchQuery.trim() != submittedQuery && searchQuery.isNotBlank(),
@@ -590,10 +703,11 @@ internal fun MoviesTab(
                             onFocusChange = { searchFocused = it },
                             onVoice = voiceSearch,
                             voiceLabel = tr("Search by voice", "Sesle ara"),
+                            focusRequester = searchFocus,
                         )
 
                         AnimatedVisibility(
-                            visible = searchFocused && suggestions.isNotEmpty(),
+                            visible = showSearchUi && searchFocused && suggestions.isNotEmpty(),
                             enter = fadeIn(tween(Motion.SHORT)),
                             exit = fadeOut(tween(Motion.SHORT)),
                         ) {
@@ -648,7 +762,7 @@ internal fun MoviesTab(
 
                         // Recent film searches while the empty field is focused: one tap searches again.
                         AnimatedVisibility(
-                            visible = searchFocused && searchQuery.isEmpty() && recentSearches.isNotEmpty(),
+                            visible = showSearchUi && (searchFocused || searchIdle) && searchQuery.isEmpty() && recentSearches.isNotEmpty(),
                             enter = fadeIn(tween(Motion.SHORT)),
                             exit = fadeOut(tween(Motion.SHORT)),
                         ) {
@@ -684,14 +798,14 @@ internal fun MoviesTab(
                         }
 
                         // Where to search: this source, or all of them at once.
-                        if (activeSources.size > 1 && (searchQuery.isNotBlank() || submittedQuery.isNotBlank())) {
+                        if (showSearchUi && activeSources.size > 1 && (searchQuery.isNotBlank() || submittedQuery.isNotBlank())) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 CinemaPill(activeSource?.name ?: tr("This source", "Bu kaynak"), selected = !searchAll) { searchAll = false }
                                 CinemaPill(tr("All sources", "Tüm kaynaklar"), selected = searchAll) { searchAll = true }
                             }
                         }
 
-                        if (genres.isNotEmpty()) {
+                        if (showHomeUi && genres.isNotEmpty()) {
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 item(key = "genre-all") {
                                     CinemaPill(s.filterAll, selected = selectedGenreUrl == null && submittedQuery.isBlank()) {
@@ -756,7 +870,7 @@ internal fun MoviesTab(
 
                 // Recently watched (with how far) and the person's own list: on the device, so they show even when the
                 // source is slow or down.
-                val browsing = localQuery == null && submittedQuery.isBlank() && selectedGenreUrl == null
+                val browsing = showHomeUi && localQuery == null && submittedQuery.isBlank() && selectedGenreUrl == null
                 if (browsing && !loading && loadError == null && heroPicks.isNotEmpty()) {
                     item(key = "cinema-hero") {
                         CinemaHeroCarousel(
@@ -798,7 +912,21 @@ internal fun MoviesTab(
                     }
                 }
 
-                when {
+                if (searchIdle) {
+                    item(key = "search-idle") {
+                        CinemaEmptyState(
+                            icon = QMusicIcons.Search,
+                            title = tr("Find a film", "Film ara"),
+                            body = tr(
+                                "Type a title above, or tap the mic and say it.",
+                                "Yukarıya bir film adı yaz ya da mikrofona dokunup söyle.",
+                            ),
+                            primaryLabel = tr("Browse genres", "Türlere göz at"),
+                            primaryIcon = VideoIcons.Film,
+                            onPrimary = { mem.page.value = FilmPage.HOME },
+                        )
+                    }
+                } else when {
                     loading -> item(key = "movies-loading") {
                         CinemaSkeleton(cols = cols, tablet = tablet, withHero = submittedQuery.isBlank() && selectedGenreUrl == null)
                     }
@@ -1775,6 +1903,7 @@ private fun CinemaSearchBar(
     onFocusChange: (Boolean) -> Unit = {},
     onVoice: (() -> Unit)? = null,
     voiceLabel: String = "",
+    focusRequester: FocusRequester? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -1807,10 +1936,13 @@ private fun CinemaSearchBar(
                     keyboard?.hide()
                     onSubmit()
                 }),
-                modifier = Modifier.fillMaxWidth().onFocusChanged {
-                    focused = it.isFocused
-                    onFocusChange(it.isFocused)
-                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                    .onFocusChanged {
+                        focused = it.isFocused
+                        onFocusChange(it.isFocused)
+                    },
             )
         }
         AnimatedVisibility(

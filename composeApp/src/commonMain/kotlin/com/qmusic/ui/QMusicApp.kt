@@ -207,6 +207,8 @@ fun QMusicApp(
             // The Videos section (YouTube itself) is entered from the navigation bar and takes the whole screen, like
             // another app; the music keeps playing underneath (or is paused by the first video).
             var videosOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+            // The Film section is the same player and pages with the film pages as the whole section (see VideosApp).
+            var filmMode by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
             var videoLogin by remember { mutableStateOf(false) }
             val videoScope = rememberCoroutineScope()
             val videosController = remember {
@@ -246,6 +248,12 @@ fun QMusicApp(
                 home.openVideos = {
                     chatOpen = false
                     videoFromChat = true
+                    filmMode = false; videosOpen = true
+                }
+                home.openFilms = {
+                    chatOpen = false
+                    videoFromChat = true
+                    filmMode = true
                     videosOpen = true
                 }
             }
@@ -324,7 +332,7 @@ fun QMusicApp(
                     override fun open(item: com.qmusic.ui.chat.SharedItem, positionMs: Long, play: Boolean) {
                         waiting = Triple(item.id, positionMs, play)
                         chatOpen = false
-                        videosOpen = true
+                        filmMode = false; videosOpen = true
                         videosController.open(
                             com.qmusic.engine.video.VideoItem(id = item.id, title = item.title, channelName = item.subtitle.ifBlank { null }, thumbnail = item.thumbnail),
                         )
@@ -709,7 +717,7 @@ fun QMusicApp(
                             }
                             com.qmusic.ui.chat.ShareKind.VIDEO -> {
                                 chatOpen = false
-                                videosOpen = true
+                                filmMode = false; videosOpen = true
                                 videosController.openAt(
                                     com.qmusic.engine.video.VideoItem(
                                         id = item.id,
@@ -753,6 +761,9 @@ fun QMusicApp(
                         }) else null,
                         chatUnread = chatUnread,
                         movieSources = movieSources,
+                        cinema = filmMode,
+                        onFilms = { filmMode = true },
+                        onVideos = { filmMode = false },
                         onExit = {
                             videosOpen = false
                             if (videoFromChat) {
@@ -1339,7 +1350,7 @@ fun QMusicApp(
                             }
                         },
                         dominantTint = desktopDominant,
-                        onOpenVideos = { videosOpen = true },
+                        onOpenVideos = { filmMode = false; videosOpen = true },
                         onOpenChat = if (chatAvailable) ({ chatOpen = true }) else null,
                         chatUnread = chatUnread,
                         sidebarExpanded = sidebarExpanded,
@@ -1379,7 +1390,7 @@ fun QMusicApp(
                                 },
                                 onCreatePlaylist = { viewModel.createPlaylist(it) },
                                 dominantTint = desktopDominant,
-                                onOpenVideos = { videosOpen = true },
+                                onOpenVideos = { filmMode = false; videosOpen = true },
                                 onOpenChat = if (chatAvailable) ({ chatOpen = true }) else null,
                                 chatUnread = chatUnread,
                             )
@@ -1576,7 +1587,8 @@ fun QMusicApp(
                                     navTabs.forEachIndexed { index, item ->
                                         if (item.tab != ScreenTab.SETTINGS) QeyfBarItem(item.title, item.icon, item.tab == currentTab) { selectTab(index) }
                                     }
-                                    QeyfBarItem("Video", QMusicIcons.VideoPlay, false) { videosOpen = true }
+                                    QeyfBarItem("Video", QMusicIcons.VideoPlay, false) { filmMode = false; videosOpen = true }
+                                    QeyfBarItem("Film", QMusicIcons.Film, false) { filmMode = true; videosOpen = true }
                                     if (chatAvailable) {
                                         QeyfBarItem(com.qmusic.ui.chat.ChatMusic.words().messages, QMusicIcons.Chat, false, count = chatUnread) { chatOpen = true }
                                     }

@@ -103,6 +103,14 @@ fun VideosApp(
     chatUnread: Int = 0,
     /** Admin-configured film sources (live domain updates from Admin Panel). */
     movieSources: List<com.qmusic.ui.chat.MovieSource> = emptyList(),
+    /**
+     * The Film section: the same player, video page, small player and watching together, with the film pages as the
+     * whole section and their own bar (home, search, my list) instead of YouTube's tabs.
+     */
+    cinema: Boolean = false,
+    /** Moves between the Film and the Video sections (their bars' buttons). */
+    onFilms: (() -> Unit)? = null,
+    onVideos: (() -> Unit)? = null,
 ) {
     val tab by controller.tab.collectAsState()
     val routes by controller.routes.collectAsState()
@@ -113,6 +121,17 @@ fun VideosApp(
     val watch by controller.watch.collectAsState()
     val fullscreen by controller.fullscreen.collectAsState()
     val pip = rememberInPictureInPicture()
+    var filmPage by controller.movies.tab.page
+    // Entering the other section starts on its own pages (a YouTube channel left open does not show in Film).
+    var lastCinema by remember { mutableStateOf(cinema) }
+    LaunchedEffect(cinema) {
+        if (cinema != lastCinema) {
+            controller.dropPages()
+            lastCinema = cinema
+        }
+    }
+    // The film tab of the Video bar now opens the Film section; a phone left on it goes back to the home.
+    LaunchedEffect(cinema, tab) { if (!cinema && tab == VideoTab.MOVIES && onFilms != null) controller.selectTab(VideoTab.HOME) }
 
     // The player belongs to the section, not to the page of a video: leaving the page leaves the video playing small.
     val playback = rememberVideoPlayback()
@@ -251,7 +270,8 @@ fun VideosApp(
             fullscreen -> controller.setFullscreen(false)
             searching -> controller.closeSearchBox()
             controller.pop() -> Unit
-            tab != VideoTab.HOME -> controller.selectTab(VideoTab.HOME)
+            cinema && filmPage != FilmPage.HOME -> filmPage = FilmPage.HOME
+            !cinema && tab != VideoTab.HOME -> controller.selectTab(VideoTab.HOME)
             else -> exit()
         }
     }
@@ -273,16 +293,24 @@ fun VideosApp(
                 }
             }
         }
-        val feedPage = top == null && tab != VideoTab.SHORTS
-        LaunchedEffect(tab, routes.size) { bars.value = true }
-        val miniShown = watch != null && top !is VideoRoute.Watch && top !is VideoRoute.Shorts && !(top == null && tab == VideoTab.SHORTS) && !pip
-        val showRail = tablet && top !is VideoRoute.Watch && !pip
+        val feedPage = top == null && (cinema || tab != VideoTab.SHORTS)
+        LaunchedEffect(tab, routes.size, filmPage) { bars.value = true }
+        val miniShown = watch != null && top !is VideoRoute.Watch && top !is VideoRoute.Shorts && !(top == null && !cinema && tab == VideoTab.SHORTS) && !pip
+        // The Film section has its own bar, on tablets too.
+        val showRail = tablet && !cinema && top !is VideoRoute.Watch && !pip
+        val onVideoTab: (VideoTab) -> Unit = { t ->
+            when {
+                t == VideoTab.MOVIES && onFilms != null -> onFilms()
+                t == tab && routes.isEmpty() -> controller.refreshCurrent()
+                else -> controller.selectTab(t)
+            }
+        }
         Row(modifier = Modifier.fillMaxSize()) {
             if (showRail) {
                 VideoNavRail(
                     tab = tab.takeIf { routes.isEmpty() },
                     s = s,
-                    onTab = { t -> if (t == tab && routes.isEmpty()) controller.refreshCurrent() else controller.selectTab(t) },
+                    onTab = onVideoTab,
                     onMusic = exit,
                     onChat = onChat,
                     chatUnread = chatUnread,
@@ -305,7 +333,13 @@ fun VideosApp(
                         ) { page ->
                             when (page) {
                                 // (Shorts play in the same player: not drawn under a video.)
-                                null -> if (!watching || tab != VideoTab.SHORTS) {
+                                null -> if (cinema) {
+                                    androidx.compose.foundation.layout.Box(
+                                        Modifier.fillMaxSize().background(VideoColors.Background).statusBarsPadding(),
+                                    ) {
+                                        MoviesTab(controller, movieSources, s, tablet, onShare, cinema = true)
+                                    }
+                                } else if (!watching || tab != VideoTab.SHORTS) {
                                     androidx.compose.animation.AnimatedContent(
                                         targetState = tab,
                                         transitionSpec = { fadeThrough() },
@@ -340,9 +374,24 @@ fun VideosApp(
                 }
                 // On phones: while the video floats small the bottom bar is away; closing the video brings it back.
                 // On tablets: navigation lives in the left rail instead of a bottom bar.
-                if (!tablet && top !is VideoRoute.Watch && !pip && !miniShown) {
+                if ((!tablet || cinema) && top !is VideoRoute.Watch && !pip && !miniShown) {
                     AnimatedVisibility(visible = bars.value || !feedPage, enter = expandVertically(expandFrom = Alignment.Top), exit = shrinkVertically(shrinkTowards = Alignment.Top)) {
-                        VideoBottomBar(tab = tab.takeIf { routes.isEmpty() }, s = s, onTab = { t -> if (t == tab && routes.isEmpty()) controller.refreshCurrent() else controller.selectTab(t) }, onMusic = exit, onChat = onChat, chatUnread = chatUnread)
+                        if (cinema) {
+                            FilmBottomBar(
+                                page = filmPage.takeIf { routes.isEmpty() },
+                                s = s,
+                                onPage = { p ->
+                                    controller.dropPages()
+                                    if (p == filmPage) controller.movies.tab.scrollToTop.value++ else filmPage = p
+                                },
+                                onVideos = onVideos,
+                                onMusic = exit,
+                                onChat = onChat,
+                                chatUnread = chatUnread,
+                            )
+                        } else {
+                            VideoBottomBar(tab = tab.takeIf { routes.isEmpty() }, s = s, onTab = onVideoTab, onMusic = exit, onChat = onChat, chatUnread = chatUnread)
+                        }
                     }
                 }
             }
@@ -594,6 +643,28 @@ private fun RailItem(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+/** The Film section's bar: its three pages, then the other sections (the same bar as everywhere in the app). */
+@Composable
+private fun FilmBottomBar(
+    page: FilmPage?,
+    s: VideoStrings,
+    onPage: (FilmPage) -> Unit,
+    onVideos: (() -> Unit)?,
+    onMusic: () -> Unit,
+    onChat: (() -> Unit)?,
+    chatUnread: Int,
+) {
+    val en = s == VideoStrings.English
+    com.qmusic.ui.components.QeyfBar(VideoColors.Background) {
+        QeyfBarItem(if (en) "Home" else "Ana sayfa", QMusicIcons.Home, page == FilmPage.HOME) { onPage(FilmPage.HOME) }
+        QeyfBarItem(if (en) "Search" else "Ara", QMusicIcons.Search, page == FilmPage.SEARCH) { onPage(FilmPage.SEARCH) }
+        QeyfBarItem(if (en) "My list" else "Listem", QMusicIcons.Library, page == FilmPage.LIBRARY) { onPage(FilmPage.LIBRARY) }
+        if (onVideos != null) QeyfBarItem("Video", QMusicIcons.VideoPlay, false, onClick = onVideos)
+        QeyfBarItem(s.backToMusic, QMusicIcons.Headphones, false, onClick = onMusic)
+        if (onChat != null) QeyfBarItem(com.qmusic.ui.chat.ChatMusic.words().messages, QMusicIcons.Chat, false, count = chatUnread, onClick = onChat)
     }
 }
 

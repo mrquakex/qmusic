@@ -350,4 +350,19 @@ internal class MovieTabMemory {
 
     /** The last search asked from outside the tab (controller.movieQuery) that was already applied. */
     var handledExternalQuery: String = ""
+
+    /** The Film section's page (its bar), and the one whose state was last set up. */
+    val page = mutableStateOf(FilmPage.HOME)
+    var appliedPage: FilmPage = FilmPage.HOME
+
+    /** Tapping the open page's button again scrolls it to the top (counted; [handledScrollToTop] is the last done). */
+    val scrollToTop = mutableStateOf(0)
+    var handledScrollToTop = 0
+
+    /** Kept while another page is open: the search page's words and the home's genre. */
+    var savedSearch: String = ""
+    var savedGenre: String? = null
 }
+
+/** The pages of the Film section, one per button on its bar. */
+internal enum class FilmPage { HOME, SEARCH, LIBRARY }

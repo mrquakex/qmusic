@@ -191,6 +191,7 @@ object AppHome {
     var setMessagesFirst: (Boolean) -> Unit = {}
     var openMusic: (() -> Unit)? = null
     var openVideos: (() -> Unit)? = null
+    var openFilms: (() -> Unit)? = null
 }
 
 /** "2:35" (or "1:02:35"). */

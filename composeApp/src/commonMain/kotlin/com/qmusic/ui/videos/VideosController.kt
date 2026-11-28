@@ -490,6 +490,11 @@ class VideosController(
         }
     }
 
+    /** Every page goes except an open video (moving between the Video and Film sections, or their bar's pages). */
+    fun dropPages() {
+        _routes.value = _routes.value.filter { it is VideoRoute.Watch }
+    }
+
     /** Back: the topmost page goes; true when there was one. */
     fun pop(): Boolean {
         val stack = _routes.value
