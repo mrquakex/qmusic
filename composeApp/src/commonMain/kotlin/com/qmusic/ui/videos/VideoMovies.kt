@@ -360,7 +360,7 @@ internal fun MoviesTab(
         controller.openExternalUrl(
             rawUrl = playUrl,
             title = playTitle,
-            sourceName = card.sourceName,
+            sourceName = FILM_LABEL, // under the title on the video page: never the site's name
             poster = poster,
             headers = card.headers,
             context = ctx,
@@ -374,12 +374,19 @@ internal fun MoviesTab(
         val id = ytId ?: externalVideoId(clean)
         val label = title?.takeIf { it.isNotBlank() }
             ?: clean.substringBefore('?').substringAfterLast('/').ifBlank { MovieHtmlParser.originOf(clean).removePrefix("https://").removePrefix("http://") }
-        val sub = sourceName.ifBlank { if (ytId != null) "YouTube" else MovieHtmlParser.originOf(clean).removePrefix("https://").removePrefix("http://") }
+        // Shared films say "Film", not the site they come from.
+        val sub = if (ytId != null) "YouTube" else FILM_LABEL
         return SharedItem(ShareKind.VIDEO, id, label, sub, poster)
     }
 
 
     fun tr(en: String, tr: String) = if (english) en else tr
+
+    /** "Kaynak 2": the sources are numbered, their sites are not named (empty when there is only one). */
+    fun sourceLabel(src: com.qmusic.ui.chat.MovieSource?): String {
+        val i = activeSources.indexOfFirst { it.id == src?.id }
+        return if (activeSources.size < 2 || i < 0) "" else tr("Source ${i + 1}", "Kaynak ${i + 1}")
+    }
 
     fun submitSearch() {
         val q = searchQuery.trim()
@@ -559,9 +566,10 @@ internal fun MoviesTab(
                                 "Listende ${myList.size} · İzlediğin ${movieHistory.size}",
                             )
                             activeSource == null -> tr("Paste any link to start", "Bir bağlantıyla hemen başla")
-                            loading -> activeSource.name
-                            refreshing -> "${activeSource.name} · ${tr("updating…", "güncelleniyor…")}"
-                            else -> "${activeSource.name} · ${countLabel(cards.size, nextPageUrl != null)} ${tr("titles", "yapım")}"
+                            loading -> sourceLabel(activeSource).ifEmpty { tr("Loading…", "Yükleniyor…") }
+                            refreshing -> listOf(sourceLabel(activeSource), tr("updating…", "güncelleniyor…")).filter { it.isNotEmpty() }.joinToString(" · ")
+                            else -> listOf(sourceLabel(activeSource), "${countLabel(cards.size, nextPageUrl != null)} ${tr("titles", "yapım")}")
+                                .filter { it.isNotEmpty() }.joinToString(" · ")
                         }
                         Text(summary, color = VideoColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
@@ -668,7 +676,7 @@ internal fun MoviesTab(
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     items(activeSources, key = { it.id }) { src ->
                                         CinemaPill(
-                                            text = src.name,
+                                            text = sourceLabel(src),
                                             selected = src.id == activeSource?.id,
                                             quiet = true,
                                         ) {
@@ -692,7 +700,7 @@ internal fun MoviesTab(
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (showSearchUi) CinemaSearchBar(
                             query = searchQuery,
-                            hint = activeSource?.let { tr("Search ${it.name}…", "${it.name} içinde ara…") } ?: x.movieSearchHint,
+                            hint = tr("Search films…", "Film ara…"),
                             pending = searchQuery.trim() != submittedQuery && searchQuery.isNotBlank(),
                             clearLabel = tr("Clear", "Temizle"),
                             searchLabel = tr("Search", "Ara"),
@@ -750,7 +758,7 @@ internal fun MoviesTab(
                                         }
                                         Column(Modifier.weight(1f)) {
                                             Text(sug.text, color = VideoColors.Text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                            val meta = sug.card?.let { c -> listOfNotNull(c.year, c.sourceName.takeIf { it.isNotBlank() }).joinToString(" · ") }
+                                            val meta = sug.card?.year
                                             if (!meta.isNullOrEmpty()) {
                                                 Text(meta, color = VideoColors.TextSecondary, fontSize = 11.sp, maxLines = 1)
                                             }
@@ -800,7 +808,7 @@ internal fun MoviesTab(
                         // Where to search: this source, or all of them at once.
                         if (showSearchUi && activeSources.size > 1 && (searchQuery.isNotBlank() || submittedQuery.isNotBlank())) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                CinemaPill(activeSource?.name ?: tr("This source", "Bu kaynak"), selected = !searchAll) { searchAll = false }
+                                CinemaPill(tr("This source", "Bu kaynak"), selected = !searchAll) { searchAll = false }
                                 CinemaPill(tr("All sources", "Tüm kaynaklar"), selected = searchAll) { searchAll = true }
                             }
                         }
@@ -1080,14 +1088,9 @@ internal fun MoviesTab(
                             }
                         }
 
-                        // Responsive 2..5-column cinema poster grid; searching every source, one titled group per source.
+                        // Responsive 2..5-column cinema poster grid (one list: which site a film comes from is not shown).
                         val shown = sortedMovies(filteredCards, sort)
-                        val groups: List<Pair<String?, List<MovieCard>>> =
-                            if (searchAll && submittedQuery.isNotBlank() && activeSources.size > 1) {
-                                shown.groupBy { it.sourceName }.toList()
-                            } else {
-                                listOf(null to shown)
-                            }
+                        val groups: List<Pair<String?, List<MovieCard>>> = listOf(null to shown)
                         groups.forEach { (groupName, groupCards) ->
                             if (groupName != null) {
                                 item(key = "group-$groupName") {
@@ -1447,7 +1450,6 @@ private fun MovieDetailSheet(
                         modifier = Modifier.weight(1f).padding(bottom = 4.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        if (card.sourceName.isNotBlank()) SectionCaption(card.sourceName.uppercase())
                         Text(
                             title,
                             color = VideoColors.Text,
@@ -2218,7 +2220,6 @@ private fun CinemaHeroCarousel(
                             c.rating?.let { "★ $it" },
                             c.year,
                             c.qualityBadge,
-                            c.sourceName.takeIf { it.isNotBlank() },
                         ).joinToString("  •  ")
                         if (meta.isNotEmpty()) {
                             Spacer(Modifier.height(6.dp))
@@ -2422,6 +2423,9 @@ private fun sortedMovies(cards: List<MovieCard>, sort: MovieSort): List<MovieCar
     MovieSort.YEAR -> cards.sortedByDescending { it.year?.toIntOrNull() ?: 0 }
     MovieSort.TITLE -> cards.sortedBy { it.title.lowercase() }
 }
+
+/** What a film's page says under its title, and a shared film's line: never the site it comes from. */
+internal const val FILM_LABEL = "Film"
 
 private const val SIMILAR_COUNT = 12
 private const val SUGGESTION_COUNT = 6
@@ -2636,7 +2640,7 @@ private fun MoviePosterTile(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 2.dp),
         )
-        val meta = listOfNotNull(card.year, card.sourceName.takeIf { it.isNotBlank() }).joinToString(" · ")
+        val meta = card.year.orEmpty()
         Text(
             text = meta.ifEmpty { " " },
             color = VideoColors.TextSecondary,

@@ -507,7 +507,8 @@ class VideosController(
     }
 
     fun open(item: VideoItem) {
-        rememberChannel(item)
+        // A film is not a YouTube channel to suggest later.
+        if (!isExternalVideoId(item.id)) rememberChannel(item)
         // It was playing in the list: the video goes on from there, as on YouTube.
         if (FeedPreview.playing.value == item.id) {
             val at = FeedPreview.position()
@@ -803,7 +804,8 @@ class VideosController(
                                 id = id,
                                 title = displayTitle,
                                 channelName = video.channelName ?: host,
-                                description = resolved.synopsis ?: url,
+                                // A film without a synopsis shows nothing there, not the site's address.
+                                description = resolved.synopsis.orEmpty(),
                             ),
                             qualities = streams,
                             quality = streams.pickDefault(maxHeight()),
@@ -830,7 +832,7 @@ class VideosController(
                 if (e is CancellationException) throw e
                 _watch.update { w ->
                     if (w?.video?.id != id) w else w.copy(
-                        details = VideoDetails(id = id, title = video.title, channelName = video.channelName, description = url),
+                        details = VideoDetails(id = id, title = video.title, channelName = video.channelName, description = ""),
                         streamLoading = false,
                         streamError = true,
                     )
